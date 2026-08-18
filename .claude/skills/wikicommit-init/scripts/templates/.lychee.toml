@@ -1,0 +1,14 @@
+# lychee 外部リンク検証設定
+# WikiCommit: sources[].url および本文中 https:// リンクを検証する
+
+timeout = 10          # リクエストタイムアウト（秒）
+max_retries = 2       # リトライ回数（ネットワーク一時エラー対策）
+accept = [200, 206, 429]  # 200 OK, 206 Partial, 429 Too Many Requests（レート制限は警告扱い）
+
+# GitHub レート制限を避けるため GITHUB_TOKEN 環境変数を設定すること
+# lychee は GITHUB_TOKEN 環境変数を自動的に読み込む（設定ファイルへの記述は不要）
+# GitHub Actions では secrets.GITHUB_TOKEN が自動的に設定される
+
+# 内部リンク（[[WikiLink]]・相対パス）はlycheeのスコープ外
+# WikiLink 検証は check_wikilinks.py が担う
+# ※ 検証対象ファイルのスコープ制御は CLI 引数で行う: lychee --config .lychee.toml .wikicommit/entity/**/*.md

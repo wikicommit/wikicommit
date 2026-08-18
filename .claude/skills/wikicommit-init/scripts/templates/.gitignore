@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Node.js
+node_modules/
+
+# Environment variables
+.env
+.env.local
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# WikiCommit search index (derived data, rebuilt from .wikicommit/entity/)
+.wikicommit/.cache/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+node_modules/
+
+# Quartz v5 transformer plugins ship pre-built dist/
+!dist/
+!dist/**

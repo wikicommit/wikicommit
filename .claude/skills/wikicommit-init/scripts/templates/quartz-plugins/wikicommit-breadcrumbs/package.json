@@ -1,0 +1,78 @@
+{
+  "name": "@wikicommit/wikicommit-breadcrumbs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fork of github:quartz-community/breadcrumbs that hides the .wikicommit/entity/<lang>/ segment from the breadcrumb trail",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "preact": "^10.0.0"
+  },
+  "peerDependenciesMeta": {
+    "preact": {
+      "optional": false
+    }
+  },
+  "dependencies": {
+    "@quartz-community/types": "^0.2.1",
+    "@quartz-community/utils": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "eslint": "^10.6.0",
+    "github-slugger": "^2.0.0",
+    "preact": "^10.28.2",
+    "preact-render-to-string": "^6.7.0",
+    "sass": "^1.97.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10.9.2"
+  },
+  "quartz": {
+    "name": "wikicommit-breadcrumbs",
+    "displayName": "WikiCommit Breadcrumbs",
+    "category": "component",
+    "version": "1.0.0",
+    "quartzVersion": ">=5.0.0",
+    "dependencies": [],
+    "defaultOrder": 78,
+    "defaultEnabled": true,
+    "components": {
+      "WikiCommitBreadcrumbs": {
+        "displayName": "WikiCommit Breadcrumbs",
+        "description": "Same as github:quartz-community/breadcrumbs, but omits the .wikicommit/entity/<lang>/ directory segment (use WikiCommitLanguageSwitcher for actual language switching)",
+        "defaultPosition": "beforeBody",
+        "defaultPriority": 5
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+.wikicommit-language-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.wikicommit-language-switcher__label {
+  color: var(--darkgray);
+}
+
+.wikicommit-language-switcher__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wikicommit-language-switcher__item {
+  display: inline-flex;
+}
+
+.wikicommit-language-switcher__link {
+  color: var(--secondary);
+}
+
+.wikicommit-language-switcher__current {
+  color: var(--dark);
+  font-weight: 600;
+}

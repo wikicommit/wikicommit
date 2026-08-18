@@ -1,0 +1,63 @@
+{
+  "name": "@wikicommit/wikicommit-jsonld",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Injects Schema.org JSON-LD into each page's <head> based on WikiCommit frontmatter",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "preact": "^10.0.0"
+  },
+  "peerDependenciesMeta": {
+    "preact": {
+      "optional": false
+    }
+  },
+  "dependencies": {
+    "@quartz-community/types": "^0.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "eslint": "^10.6.0",
+    "preact": "^10.28.2",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10.9.2"
+  },
+  "quartz": {
+    "name": "wikicommit-jsonld",
+    "displayName": "WikiCommit JSON-LD",
+    "description": "Injects Schema.org JSON-LD into each page's <head> based on WikiCommit frontmatter",
+    "category": "transformer",
+    "version": "1.0.0",
+    "quartzVersion": ">=5.0.0",
+    "dependencies": [],
+    "defaultOrder": 75,
+    "defaultEnabled": true
+  }
+}

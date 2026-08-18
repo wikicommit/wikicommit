@@ -1,0 +1,35 @@
+.wikicommit-sources {
+  border-top: 1px solid var(--lightgray);
+  margin-top: 2rem;
+  padding-top: 1rem;
+}
+
+.wikicommit-sources__title {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.wikicommit-sources__inherited {
+  font-size: 0.8rem;
+  color: var(--darkgray);
+  margin: 0 0 0.5rem;
+}
+
+.wikicommit-sources__list {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.wikicommit-sources__item {
+  margin-bottom: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.wikicommit-sources__link {
+  color: var(--secondary);
+}
+
+.wikicommit-sources__text {
+  color: var(--darkgray);
+}

@@ -1,0 +1,34 @@
+import { execFileSync } from "node:child_process"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { describe, expect, it } from "vitest"
+
+// Regression test for Issue #379 (ships the wikicommit-jsonld build.test.ts
+// pattern from Issue #186 to this plugin): this plugin directory ships
+// standalone (no node_modules of its own once copied into a user's wiki
+// repo), so a bare `import ... from "preact"` in dist/index.js cannot be
+// resolved at Quartz build time. tsup's automatic JSX runtime must inline the
+// vnode helpers instead. This plugin previously set `noExternal: [/.*/]`,
+// which bundled everything indiscriminately and happened to avoid a bare
+// import only because it has no value import besides JSX; a component added
+// later that value-imports something in SINGLETON_EXTERNALS (e.g. `unified`)
+// would silently get bundled too, diverging from Quartz core's own copy.
+// Runs the real tsup build to catch that class of regression, which unit
+// tests against the pre-JSX-transform source cannot see.
+describe("built dist/index.js (Issue #379)", () => {
+  it("does not bare-import preact and still emits the sources component's own markup", () => {
+    const outDir = mkdtempSync(join(tmpdir(), "wikicommit-sources-build-"))
+    try {
+      execFileSync("npx", ["tsup", "--config", "tsup.config.ts", "--out-dir", outDir], {
+        cwd: process.cwd(),
+        stdio: "pipe",
+      })
+      const built = readFileSync(join(outDir, "index.js"), "utf-8")
+      expect(built).not.toMatch(/from\s+["']preact(\/[^"']*)?["']/)
+      expect(built).toContain("wikicommit-sources__list")
+    } finally {
+      rmSync(outDir, { recursive: true, force: true })
+    }
+  }, 30000)
+})

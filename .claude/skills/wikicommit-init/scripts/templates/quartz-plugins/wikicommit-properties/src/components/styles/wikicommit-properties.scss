@@ -1,0 +1,141 @@
+.wikicommit-properties {
+  margin: 0.5rem 0 1rem;
+  border: 1px solid var(--lightgray);
+  border-radius: 5px;
+  font-size: 0.9rem;
+
+  &[open] > .wikicommit-properties-header {
+    border-bottom: 1px solid var(--lightgray);
+  }
+
+  .wikicommit-properties-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    color: var(--darkgray);
+    font-weight: 600;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    &::before {
+      content: "";
+      display: inline-block;
+      width: 0.5em;
+      height: 0.5em;
+      border-right: 2px solid var(--darkgray);
+      border-bottom: 2px solid var(--darkgray);
+      transform: rotate(-45deg);
+      transition: transform 0.2s ease;
+    }
+  }
+
+  &[open] > .wikicommit-properties-header::before {
+    transform: rotate(45deg);
+  }
+
+  .wikicommit-properties-count {
+    margin-left: auto;
+    font-size: 0.75rem;
+    color: var(--gray);
+    font-weight: 400;
+  }
+
+  .wikicommit-properties-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .wikicommit-properties-row {
+    border-bottom: 1px solid var(--lightgray);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .wikicommit-properties-key {
+    width: 35%;
+    padding: 0.35rem 0.8rem;
+    color: var(--gray);
+    font-size: 0.85rem;
+    vertical-align: top;
+    word-break: break-word;
+  }
+
+  .wikicommit-properties-value {
+    padding: 0.35rem 0.8rem;
+    vertical-align: top;
+    word-break: break-word;
+  }
+
+  .wikicommit-properties-empty {
+    color: var(--gray);
+    font-style: italic;
+  }
+
+  .wikicommit-properties-boolean {
+    input[type="checkbox"] {
+      pointer-events: none;
+      margin: 0;
+      vertical-align: middle;
+    }
+  }
+
+  .wikicommit-properties-number {
+    font-family: var(--codeFont);
+    font-size: 0.85em;
+  }
+
+  .wikicommit-properties-link {
+    text-decoration: none;
+    color: var(--secondary);
+
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+
+  .wikicommit-properties-separator {
+    color: var(--gray);
+  }
+
+  .wikicommit-properties-list {
+    display: inline;
+  }
+
+  .wikicommit-properties-tags {
+    display: inline-flex;
+
+    .tag-link {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 3px;
+      background: var(--highlight);
+      color: var(--secondary);
+      font-size: 0.85em;
+      text-decoration: none;
+
+      &:hover {
+        background: var(--secondary);
+        color: var(--light);
+      }
+    }
+  }
+
+  .wikicommit-properties-object {
+    code {
+      font-size: 0.85em;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      background: var(--highlight);
+      word-break: break-all;
+    }
+  }
+}

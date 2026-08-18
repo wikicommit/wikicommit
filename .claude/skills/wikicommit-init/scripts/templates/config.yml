@@ -1,0 +1,15 @@
+translation:
+  targets: {TARGETS}
+  primary_lang: {PRIMARY_LANG}
+
+theme: {THEME}
+
+generate:
+  max_retries: 2
+
+review:
+  auto_merge: true
+  chain_of_thought: false
+
+schema:
+  base_types: [Person, Place, Organization, Event, HowTo, DefinedTerm, ScholarlyArticle, NewsArticle, BlogPosting, ShortStory, Book]

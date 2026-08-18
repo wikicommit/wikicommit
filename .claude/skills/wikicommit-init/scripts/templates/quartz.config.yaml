@@ -1,0 +1,341 @@
+# yaml-language-server: $schema=./quartz/quartz/plugins/quartz-plugins.schema.json
+#
+# Quartz v5 設定ファイル。/wikicommit-init が生成した初期値です。
+# Quartz v5 本体は npm パッケージとして配布されていないため、
+# git submodule として quartz/ に取り込む必要があります:
+#   git submodule add https://github.com/jackyzha0/quartz.git quartz
+# 詳細は README または .github/workflows/deploy.yml を参照してください。
+configuration:
+  pageTitle: {PAGE_TITLE}
+  pageTitleSuffix: ""
+  enableSPA: true
+  enablePopovers: true
+  analytics: null
+  locale: en-US
+  baseUrl: localhost:8080
+  ignorePatterns:
+    - private
+    - templates
+    - .obsidian
+  theme:
+    fontOrigin: googleFonts
+    cdnCaching: true
+    typography:
+      header: Schibsted Grotesk
+      body: Source Sans Pro
+      code: IBM Plex Mono
+    colors:
+      lightMode:
+        light: "#faf8f8"
+        lightgray: "#e5e5e5"
+        gray: "#b8b8b8"
+        darkgray: "#4e4e4e"
+        dark: "#2b2b2b"
+        secondary: "#284b63"
+        tertiary: "#84a59d"
+        highlight: rgba(143, 159, 169, 0.15)
+        textHighlight: "#fff23688"
+      darkMode:
+        light: "#161618"
+        lightgray: "#393639"
+        gray: "#646464"
+        darkgray: "#d4d4d4"
+        dark: "#ebebec"
+        secondary: "#7b97aa"
+        tertiary: "#84a59d"
+        highlight: rgba(143, 159, 169, 0.15)
+        textHighlight: "#b3aa0288"
+plugins:
+  - source: github:quartz-community/created-modified-date
+    enabled: true
+    options:
+      defaultDateType: modified
+      priority:
+        - frontmatter
+        - git
+        - filesystem
+    order: 10
+  - source: github:quartz-community/obsidian-flavored-markdown
+    enabled: true
+    options:
+      enableInHtmlEmbed: false
+      enableCheckbox: true
+    order: 30
+  - source: github:quartz-community/github-flavored-markdown
+    enabled: true
+    order: 40
+  - source: github:quartz-community/table-of-contents
+    enabled: true
+    order: 50
+    layout:
+      position: right
+      priority: 30
+  - source: github:quartz-community/crawl-links
+    enabled: true
+    options:
+      markdownLinkResolution: relative
+    order: 60
+  - source: github:quartz-community/description
+    enabled: true
+    order: 70
+  - source: ../quartz-plugins/wikicommit-jsonld
+    enabled: true
+    order: 75
+  - source: github:quartz-community/latex
+    enabled: true
+    options:
+      renderEngine: katex
+    order: 80
+  - source: github:quartz-community/citations
+    enabled: false
+    order: 85
+  - source: github:quartz-community/hard-line-breaks
+    enabled: false
+    order: 90
+  - source: github:quartz-community/ox-hugo
+    enabled: false
+    order: 91
+  - source: github:quartz-community/roam
+    enabled: false
+    order: 92
+  - source: github:quartz-community/fonts
+    enabled: true
+  - source: github:quartz-community/remove-draft
+    enabled: true
+  - source: github:quartz-community/explicit-publish
+    enabled: false
+  - source: github:quartz-community/alias-redirects
+    enabled: true
+  - source: github:quartz-community/content-index
+    enabled: true
+    options:
+      enableSiteMap: true
+      enableRSS: true
+  - source: github:quartz-community/favicon
+    enabled: true
+  - source: github:quartz-community/og-image
+    enabled: true
+  - source: github:quartz-community/cname
+    # デフォルトは無効: baseUrl は <owner>.github.io/<repo> 形式（GitHub Pages のプロジェクトページ）で
+    # 運用するため、ここでカスタムドメイン用の CNAME ファイルを発行すると
+    # baseUrl のホスト名（<owner>.github.io）がカスタムドメインとして誤登録され、
+    # プロジェクトページの URL（/<repo> 配下）が壊れる。カスタムドメインを使う場合のみ有効化すること。
+    enabled: false
+  - source: github:quartz-community/canvas-page
+    enabled: true
+  - source: github:quartz-community/content-page
+    enabled: true
+  - source: github:quartz-community/folder-page
+    enabled: true
+  - source: github:quartz-community/tag-page
+    enabled: true
+  # 素の explorer（github:quartz-community/explorer）は breadcrumbs と同じ理由
+  # （filterFn/mapFn 相当のカスタマイズは quartz.ts の TypeScript override 必須。
+  # 本プロジェクトは quartz.config.yaml のみを設定面として使う設計のため導入しない）で、
+  # `<lang>` セグメントを展開しないと Type ディレクトリが見えない問題を YAML からは
+  # 解決できない（Issue #196）。Issue #196 時点では、explorer は状態を持つ大規模な
+  # 対話コンポーネント（フォルダ折りたたみ・localStorage 永続化・インラインスクリプト・
+  # 30+ ロケール i18n）でフォークのリスクが高いとしてスコープ外にしていたが（p3-055 /
+  # Issue #209）、調査の結果 filterFn/mapFn の枠組みでは「あるフォルダの子を親に
+  # 繰り上げる」操作自体を表現できない（filter は部分木ごと削除、map はノード単体の
+  # 変更のみ）ことが判明し、そもそもフォーク以外に選択肢がないと確定した。フォーク自体は
+  # breadcrumbs と同じくアップストリームの折りたたみ状態・localStorage キー
+  # （node.slug 由来。畳み込み後も変更なし）・インラインスクリプトの契約を保ったまま、
+  # ツリー構築後に現在ページの `<lang>` フォルダの子だけを親へ繰り上げる処理
+  # （wikicommit-explorer.inline.ts の foldCurrentLangSegment。他言語のフォルダは
+  # 従来どおり畳まれた状態で残り、展開すればブラウズできる）を1箇所追加するだけで
+  # 済んだため、`wikicommit-explorer` としてフォークした。
+  - source: ../quartz-plugins/wikicommit-explorer
+    enabled: true
+    layout:
+      position: left
+      priority: 50
+  - source: github:quartz-community/graph
+    enabled: true
+    layout:
+      position: right
+      priority: 10
+  # 素の search（github:quartz-community/search）は #tag 構文のヒントを検索ボックスの
+  # プレースホルダーに追加する YAML オプションを持たない（SearchOptions は
+  # enablePreview/fieldPriority のみ。Issue #312）。#tag によるAND絞り込み自体は
+  # 標準機能で動作するが、既存の tagFilterHint ロケール文字列（タグ自動補完ドロップダウン用に
+  # 全30ロケールへ既に定義済み）をプレースホルダーにも再利用する1行の差分のみで済むため、
+  # 957行超の search.inline.ts（FlexSearch インデックス・検索UI本体）には一切手を入れず
+  # Search.tsx のプレースホルダー組み立て処理のみをフォークした。
+  - source: ../quartz-plugins/wikicommit-search
+    enabled: true
+    layout:
+      position: left
+      priority: 20
+      group: toolbar
+      groupOptions:
+        grow: true
+  - source: github:quartz-community/backlinks
+    enabled: true
+    layout:
+      position: right
+      priority: 50
+  - source: github:quartz-community/article-title
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 10
+  - source: ../quartz-plugins/wikicommit-banner
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 12
+  - source: github:quartz-community/content-meta
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 20
+  - source: github:quartz-community/tag-list
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 30
+  - source: ../quartz-plugins/wikicommit-language-switcher
+    enabled: true
+    layout:
+      position: left
+      priority: 8
+  - source: github:quartz-community/page-title
+    enabled: true
+    layout:
+      position: left
+      priority: 10
+  - source: github:quartz-community/darkmode
+    enabled: true
+    layout:
+      position: left
+      priority: 30
+      group: toolbar
+  - source: github:quartz-community/reader-mode
+    enabled: true
+    layout:
+      position: left
+      priority: 35
+      group: toolbar
+  # 素の explorer/breadcrumbs はどちらも `<lang>` セグメントを非表示にする YAML オプションを
+  # 持たない（filterFn/mapFn 相当のカスタマイズは quartz.ts の TypeScript override 必須。
+  # 本プロジェクトは quartz.config.yaml のみを設定面として使う設計のため導入しない）ため、
+  # どちらも `<lang>` セグメントのみを取り除くフォークに置き換える。breadcrumbs は
+  # wikicommit-breadcrumbs、explorer は wikicommit-explorer（左ナビ側。上の
+  # `../quartz-plugins/wikicommit-explorer` エントリのコメント参照。Issue #196 時点では
+  # 状態を持つ大規模な対話コンポーネントであることを理由にスコープ外にしていたが、
+  # 後に Issue #209 で対応した）。
+  - source: ../quartz-plugins/wikicommit-breadcrumbs
+    enabled: true
+    layout:
+      position: beforeBody
+      priority: 5
+      condition: not-index
+  - source: ../quartz-plugins/wikicommit-sources
+    enabled: true
+    layout:
+      position: afterBody
+      priority: 5
+  - source: github:quartz-community/comments
+    enabled: false
+    options:
+      provider: giscus
+      options: {}
+    layout:
+      position: afterBody
+      priority: 10
+  - source: github:quartz-community/footer
+    enabled: true
+    options:
+      links:
+        GitHub: https://github.com/jackyzha0/quartz
+        Discord Community: https://discord.gg/cRFFHYye7t
+  - source: github:quartz-community/recent-notes
+    enabled: false
+  - source: github:quartz-community/spacer
+    enabled: true
+    options: {}
+    order: 25
+    layout:
+      position: left
+      priority: 25
+      display: mobile-only
+  - source: github:quartz-community/bases-page
+    enabled: true
+    options: {}
+    order: 50
+  # Forked from github:quartz-community/note-properties as wikicommit-properties
+  # (Issue #509), same as wikicommit-explorer/wikicommit-search/wikicommit-banner/
+  # wikicommit-sources above — self-vendored instead of resolved from the
+  # external quartz-community org at build time. This plugin is Quartz's
+  # actual frontmatter parser (not just the properties panel display), so it
+  # must not be disabled. The only behavioral change from upstream is that
+  # `properties`, WikiCommit's nested Schema.org property block
+  # (docs/DesignDoc-data.md §4.1, Issue #495), is now flattened into
+  # individual rows instead of rendering as one raw JSON dump — see
+  # getVisibleProperties() in wikicommit-properties/src/transformer.ts.
+  - source: ../quartz-plugins/wikicommit-properties
+    enabled: true
+    options:
+      includeAll: false
+      includedProperties:
+        - description
+        - tags
+        - aliases
+        - properties
+      excludedProperties: []
+      hidePropertiesView: false
+      delimiters: ---
+      language: yaml
+    order: 5
+    layout:
+      position: beforeBody
+      priority: 15
+      display: all
+  - source: github:quartz-community/unlisted-pages
+    enabled: true
+    options: {}
+    order: 45
+  - source: github:quartz-community/encrypted-pages
+    enabled: true
+    options:
+      iterations: 600000
+      passwordField: password
+      unlistWhenEncrypted: false
+      outputPath: static/encryptedContentIndex.json
+    order: 900
+    layout:
+      position: body
+      priority: 100
+      display: all
+  - source: github:quartz-community/stacked-pages
+    enabled: false
+    layout:
+      position: afterBody
+      priority: 50
+      display: all
+layout:
+  groups:
+    toolbar:
+      priority: 35
+      direction: row
+      gap: 0.5rem
+  byPageType:
+    "404":
+      positions:
+        beforeBody: []
+        left: []
+        right: []
+    content: {}
+    folder:
+      exclude:
+        - reader-mode
+      positions:
+        right: []
+    tag:
+      exclude:
+        - reader-mode
+      positions:
+        right: []
+    canvas: {}
+    bases: {}

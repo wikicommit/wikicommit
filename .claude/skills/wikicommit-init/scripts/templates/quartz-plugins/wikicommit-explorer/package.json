@@ -1,0 +1,105 @@
+{
+  "name": "@wikicommit/wikicommit-explorer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fork of github:quartz-community/explorer that folds the .wikicommit/entity/<lang>/ segment of the currently viewed page out of the left nav tree",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./components": {
+      "types": "./dist/components/index.d.ts",
+      "import": "./dist/components/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "preact": "^10.0.0"
+  },
+  "peerDependenciesMeta": {
+    "preact": {
+      "optional": false
+    }
+  },
+  "dependencies": {
+    "@quartz-community/types": "^0.2.1",
+    "@quartz-community/utils": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "eslint": "^10.6.0",
+    "github-slugger": "^2.0.0",
+    "preact": "^10.28.2",
+    "preact-render-to-string": "^6.7.0",
+    "sass": "^1.97.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.63.0",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22",
+    "npm": ">=10.9.2"
+  },
+  "quartz": {
+    "name": "wikicommit-explorer",
+    "displayName": "WikiCommit Explorer",
+    "category": "component",
+    "version": "1.0.0",
+    "quartzVersion": ">=5.0.0",
+    "dependencies": [],
+    "defaultOrder": 50,
+    "defaultEnabled": true,
+    "defaultOptions": {
+      "folderDefaultState": "collapsed",
+      "folderClickBehavior": "link",
+      "useSavedState": true
+    },
+    "components": {
+      "WikiCommitExplorer": {
+        "displayName": "WikiCommit Explorer",
+        "description": "Same as github:quartz-community/explorer, but folds the .wikicommit/entity/<lang>/ directory of the currently viewed page out of the tree (use WikiCommitLanguageSwitcher for actual language switching)",
+        "defaultPosition": "left",
+        "defaultPriority": 50
+      }
+    },
+    "optionSchema": {
+      "title": {
+        "type": "string"
+      },
+      "folderDefaultState": {
+        "type": "enum",
+        "values": [
+          "collapsed",
+          "open"
+        ]
+      },
+      "folderClickBehavior": {
+        "type": "enum",
+        "values": [
+          "collapse",
+          "link"
+        ]
+      },
+      "useSavedState": {
+        "type": "boolean"
+      }
+    }
+  }
+}

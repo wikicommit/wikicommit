@@ -1,0 +1,15 @@
+{
+  "name": "wikicommit-wiki",
+  "private": true,
+  "scripts": {
+    "postinstall": "git submodule update --init --recursive && node -e \"if (require('fs').existsSync('quartz')) { require('child_process').execSync('npm install', {cwd: 'quartz', stdio: 'inherit'}); }\" && node install-local-plugins.cjs",
+    "prebuild": "mkdir -p content && node prebuild-symlinks.cjs",
+    "convert": "python .wikicommit/scripts/convert_wikilinks.py --source .wikicommit/entity/ --output content/",
+    "install-plugins": "cd quartz && npx quartz plugin install --from-config && cd .. && node repair-plugin-builds.cjs",
+    "build": "npm run convert && npm run prebuild && (npm run install-plugins || echo WARNING: one or more Quartz community plugins failed to install/build - see errors above. Continuing the build with the plugins that installed successfully.) && cd quartz && npx quartz build",
+    "preview": "npm run convert && npm run prebuild && (npm run install-plugins || echo WARNING: one or more Quartz community plugins failed to install/build - see errors above. Continuing the build with the plugins that installed successfully.) && cd quartz && npx quartz build --serve"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "^0.17.0"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "wikicommit",
+  "description": "Git-based knowledge management: generate, review, and publish wiki pages from source documents via a CI/CD-style pipeline for knowledge.",
+  "author": {
+    "name": "WikiCommit Project",
+    "url": "https://github.com/wikicommit/wikicommit"
+  },
+  "homepage": "https://github.com/wikicommit/wikicommit",
+  "repository": "https://github.com/wikicommit/wikicommit",
+  "license": "Apache-2.0",
+  "keywords": ["wiki", "knowledge-management", "git", "llm", "documentation", "wikilink"],
+  "skills": [
+    "./.claude/skills/wikicommit-init",
+    "./.claude/skills/wikicommit-generate",
+    "./.claude/skills/wikicommit-merge",
+    "./.claude/skills/wikicommit-review",
+    "./.claude/skills/wikicommit-remove",
+    "./.claude/skills/wikicommit-fix",
+    "./.claude/skills/wikicommit-status",
+    "./.claude/skills/wikicommit-collect",
+    "./.claude/skills/wikicommit-search",
+    "./.claude/skills/wikicommit-ask",
+    "./.claude/skills/wikicommit-quiz",
+    "./.claude/skills/wikicommit-synthesize",
+    "./.claude/skills/wikicommit-serve",
+    "./.claude/skills/wikicommit-translate",
+    "./.claude/skills/wikicommit-schema-propose"
+  ]
+}

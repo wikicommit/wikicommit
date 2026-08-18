@@ -1,0 +1,4 @@
+# Quartz build artifacts
+content/
+.quartz-cache/
+quartz/public/

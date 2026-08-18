@@ -1,0 +1,5 @@
+node_modules/
+
+# Quartz v5 component plugins ship pre-built dist/ (see quartz/docs/advanced/making plugins.md)
+!dist/
+!dist/**

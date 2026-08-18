@@ -1,0 +1,342 @@
+name: Sync review_status on tracking-issue close
+
+# Issue #313: replaces review-pr-auto-merge.yml (Issue #281). That workflow
+# auto-merged a per-page post-review PR on Approve, but GitHub does not let a
+# PR author approve their own PR — and wikicommit-merge always opens
+# post-review PRs under the wiki operator's own account, so for a solo
+# operator (one of WikiCommit's primary user profiles) the Approve button
+# was never selectable. Closing a per-page tracking Issue instead carries no
+# such self-approval restriction (closing an Issue you didn't open just
+# requires repo write access), and additionally lets a reader mark a page
+# reviewed straight from GitHub without a Claude Code session.
+#
+# Scope: only Issues carrying the `wikicommit-review` label (created by
+# wikicommit-merge Step 8, one per page with review_status: pending). This
+# must never fire for reader-reported issues (the wikicommit-banner "Report
+# an issue" link) or any other Issue in the repository.
+#
+# Every step below passes github.event.* values through `env:` rather than
+# splicing them into `run:` with ${{ }} directly — same script-injection
+# mitigation as review-pr-auto-merge.yml. This matters most for the issue
+# body (free text) and the closer's display name (a free-text GitHub profile
+# field), but is applied uniformly so no future edit reintroduces the hole.
+#
+# Known gap (left open intentionally, Issue #313): if the tracking Issue is
+# reopened after this workflow already flipped review_status to reviewed and
+# merged, there is no automation to flip it back to pending. Reopening only
+# un-closes the Issue; a human must manually edit the page's review_status
+# if a "reviewed" page needs re-review.
+#
+# Issue #403: `github.event.issue.closed_by.login` (the issues-webhook payload
+# snapshot) was found to always come back empty in practice, which made the
+# "Resolve closer identity" step's `gh api "users/"` call 404 and fail the
+# whole run — this workflow had never once completed successfully as a
+# result. A live re-fetch of the issue via `gh api repos/{owner}/{repo}/issues/{number}`
+# immediately after close reliably has `closed_by` populated, so that step now
+# re-resolves the closer's login that way instead of trusting the payload.
+# That re-fetch needs `issues: read`, added to the permissions block below —
+# without it the call fails with "Resource not accessible by integration"
+# (HTTP 403). A third, separate failure mode (the repository setting
+# "Allow GitHub Actions to create and approve pull requests" being disabled,
+# which fails the later "Commit and open PR" step) is outside this workflow
+# file's control and is instead handled by wikicommit-init (see SKILL.md).
+#
+# Issue #456: the "Auto-merge on quality pass" step used to call
+# `gh pr merge --squash --auto` directly. `--auto` only merges immediately
+# when the PR's mergeStateStatus has already settled to CLEAN; otherwise it
+# falls back to the enablePullRequestAutoMerge mutation, which requires the
+# repository's `allow_auto_merge` setting — unavailable on GitHub Free
+# private repositories via any CLI/API/UI path (a plan restriction, not a
+# misconfiguration). Because this job opens the PR and attempts the merge in
+# the same run, often within a second or two, mergeStateStatus is reliably
+# still UNKNOWN at that point, so the step failed unconditionally on that
+# plan tier. It now polls mergeStateStatus until CLEAN (or a terminal DIRTY
+# / BLOCKED state, or a 300s timeout) and then merges without `--auto` —
+# same fix applied to `wikicommit-merge` Step 7 (`.claude/skills/wikicommit-merge/SKILL.md`).
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: write
+
+jobs:
+  sync:
+    if: contains(github.event.issue.labels.*.name, 'wikicommit-review')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: pip install pyyaml
+
+      - name: Resolve target page
+        id: resolve
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import sys
+
+          def emit(**kv):
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  for k, v in kv.items():
+                      f.write(f"{k}={v}\n")
+
+          body = os.environ.get("ISSUE_BODY") or ""
+          m = re.search(r"<!--\s*wikicommit-page:\s*(\S+)\s*-->", body)
+          if not m:
+              print("No wikicommit-page marker found in issue body; skipping.")
+              emit(proceed="false")
+              sys.exit(0)
+          path = m.group(1)
+
+          # A tracking Issue opened before the Issue #477 .wikicommit/wiki/ ->
+          # entity/ rename still carries the old prefix verbatim in its marker
+          # (GitHub Issues are external state untouched by `git mv`; no
+          # auto-migration, docs/DesignDoc-data.md §4.3's coexistence
+          # precedent). Fall back to the current prefix before concluding the
+          # page was removed, mirroring convert_wikilinks.py's
+          # normalize_wiki_rel()/WikiCommitSources.tsx's
+          # translatedFromToRelativePath() handling of the same class of
+          # stored path.
+          if not os.path.isfile(path) and path.startswith(".wikicommit/wiki/"):
+              migrated = ".wikicommit/entity/" + path[len(".wikicommit/wiki/"):]
+              if os.path.isfile(migrated):
+                  path = migrated
+
+          if not os.path.isfile(path):
+              print(f"{path} no longer exists; skipping (page already removed).")
+              emit(proceed="false")
+              sys.exit(0)
+
+          # Page paths always take the form .wikicommit/entity/<lang>/<Type>/<slug>.md
+          # (<Type> may itself contain a "/" for custom types, e.g. custom/Decision).
+          rel = re.match(r"^\.wikicommit/entity/([^/]+)/(.+)/([^/]+)\.md$", path)
+          if not rel:
+              print(f"{path}: does not match .wikicommit/entity/<lang>/<Type>/<slug>.md; skipping.")
+              emit(proceed="false")
+              sys.exit(0)
+          lang, type_, slug = rel.group(1), rel.group(2), rel.group(3)
+          # Branch names may not contain "/" the way custom type paths do
+          # (e.g. custom/Decision) — flatten it, same as wikicommit-merge Step 8.
+          type_slug = type_.replace("/", "-")
+
+          emit(proceed="true", path=path, lang=lang, type=type_, type_slug=type_slug, slug=slug)
+          PY
+
+      - name: Rewrite review_status
+        id: rewrite
+        if: steps.resolve.outputs.proceed == 'true'
+        env:
+          PAGE_PATH: ${{ steps.resolve.outputs.path }}
+        run: |
+          # Shared with wikicommit-review SKILL.md Step 5 (Issue #371) — both
+          # callers previously carried independent copies of this regex-based
+          # frontmatter rewrite, which had already drifted once (this
+          # workflow guarded on the current value being exactly "pending"
+          # before Issue #370's review surfaced that wikicommit-review did
+          # not).
+          set +e
+          output=$(python .wikicommit/scripts/set_frontmatter_field.py "${PAGE_PATH}" \
+            --set review_status=reviewed --require review_status=pending)
+          status=$?
+          set -e
+          echo "${output}"
+          if [ "${status}" -ne 0 ]; then
+            exit "${status}"
+          fi
+          if echo "${output}" | grep -q '^SKIP:'; then
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for an existing open PR for this page
+        id: existing_pr
+        if: steps.rewrite.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: wikicommit/review-${{ steps.resolve.outputs.lang }}-${{ steps.resolve.outputs.type_slug }}-${{ steps.resolve.outputs.slug }}
+        run: |
+          count=$(gh pr list --head "${BRANCH}" --state open --json number --jq 'length')
+          if [ "${count}" -gt 0 ]; then
+            echo "An open PR already exists for ${BRANCH}; skipping (already in progress)."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve closer identity
+        id: closer
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # github.event.issue.closed_by.login (the issues-webhook payload snapshot)
+          # was found to always come back empty on this event in practice (Issue
+          # #403) — re-resolve it via a live API call instead of trusting the
+          # payload. Requires the `issues: read` permission declared above.
+          CLOSER_LOGIN=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '.closed_by.login // empty')
+          if [ -z "${CLOSER_LOGIN}" ]; then
+            echo "::error::Could not resolve the closer's login via the GitHub API (closed_by was empty)."
+            exit 1
+          fi
+          # issue.closed_by is a minimal "simple user" object (login/id/avatar_url
+          # only), same shape as pull_request_review's review.user — a separate
+          # lookup is needed for a human-readable Reviewed-by name.
+          name=$(gh api "users/${CLOSER_LOGIN}" --jq '.name // empty')
+          if [ -z "${name}" ]; then
+            name="${CLOSER_LOGIN}"
+          fi
+          echo "login=${CLOSER_LOGIN}" >> "$GITHUB_OUTPUT"
+          # name is free text from the closer's own GitHub profile, so it is
+          # written with a random multiline delimiter (GitHub's recommended
+          # pattern for untrusted multiline output values) rather than a fixed
+          # one, which the content itself could collide with.
+          delimiter="ghadelim_$(openssl rand -hex 8)"
+          {
+            echo "name<<${delimiter}"
+            echo "${name}"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit and open PR
+        id: pr
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAGE_PATH: ${{ steps.resolve.outputs.path }}
+          BRANCH: wikicommit/review-${{ steps.resolve.outputs.lang }}-${{ steps.resolve.outputs.type_slug }}-${{ steps.resolve.outputs.slug }}
+          LANG: ${{ steps.resolve.outputs.lang }}
+          TYPE: ${{ steps.resolve.outputs.type }}
+          SLUG: ${{ steps.resolve.outputs.slug }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REVIEWER_NAME: ${{ steps.closer.outputs.name }}
+          REVIEWER_LOGIN: ${{ steps.closer.outputs.login }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Drop any stale remote branch left over from a previous failed run
+          # (no open PR exists for it, confirmed by the previous step) before
+          # recreating it fresh from the default branch's HEAD (checked out above).
+          git push origin --delete "${BRANCH}" 2>/dev/null || true
+          git checkout -B "${BRANCH}"
+          git add "${PAGE_PATH}"
+          # Each -m becomes its own paragraph (git joins them with a blank
+          # line), avoiding an embedded-newline string that would fight the
+          # YAML block scalar's indentation rules.
+          git commit \
+            -m "review: mark ${TYPE}/${SLUG} (${LANG}) as reviewed" \
+            -m "Refs #${ISSUE_NUMBER}" \
+            -m "Reviewed-by: ${REVIEWER_NAME} <${REVIEWER_LOGIN}@users.noreply.github.com>"
+          git push origin "${BRANCH}"
+          pr_url=$(gh pr create \
+            --title "review: ${TYPE}/${SLUG} (${LANG})" \
+            --body "Closes the tracking issue #${ISSUE_NUMBER} by marking \`${PAGE_PATH}\` as reviewed." \
+            --base "${DEFAULT_BRANCH}" \
+            --head "${BRANCH}")
+          echo "pr_url=${pr_url}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$(gh pr view "${pr_url}" --json number -q .number)" >> "$GITHUB_OUTPUT"
+
+      - name: Quality gate
+        id: quality
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
+        env:
+          PAGE_PATH: ${{ steps.resolve.outputs.path }}
+        run: |
+          set +e
+          python .wikicommit/scripts/validate_frontmatter.py "${PAGE_PATH}"
+          v=$?
+          python .wikicommit/scripts/check_wikilinks.py --changed "${PAGE_PATH}"
+          w=$?
+          set -e
+          if [ "$v" -ne 0 ] || [ "$w" -ne 0 ]; then
+            echo "pass=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "pass=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Auto-merge on quality pass
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          LANG: ${{ steps.resolve.outputs.lang }}
+          TYPE: ${{ steps.resolve.outputs.type }}
+          SLUG: ${{ steps.resolve.outputs.slug }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REVIEWER_NAME: ${{ steps.closer.outputs.name }}
+          REVIEWER_LOGIN: ${{ steps.closer.outputs.login }}
+        run: |
+          # Issue #456: this step used to call `gh pr merge --squash --auto`
+          # directly. `--auto` only merges immediately when GitHub's
+          # mergeStateStatus computation for the PR has already settled to
+          # CLEAN by the time this step runs; otherwise it falls back to the
+          # enablePullRequestAutoMerge mutation, which requires the
+          # repository's `allow_auto_merge` setting — a setting that GitHub
+          # Free private repositories cannot enable via any CLI/API/UI path
+          # (a plan restriction, not a misconfiguration). Because this job
+          # opens the PR and attempts the merge within the same run (often
+          # within a second or two), mergeStateStatus is reliably still
+          # UNKNOWN at that point, so this step failed unconditionally on
+          # that plan tier. The quality gate above already re-validated the
+          # page before this step runs, so there is nothing left for
+          # auto-merge's "wait for checks" behavior to add here — only the
+          # few seconds GitHub needs to finish computing mergeability, which
+          # is plan-independent. Poll for that instead of relying on --auto.
+          state="UNKNOWN"
+          merge_state="UNKNOWN"
+          for i in $(seq 1 30); do
+            read -r state merge_state <<< "$(gh pr view "${PR_NUMBER}" --json state,mergeStateStatus -q '.state + " " + .mergeStateStatus')"
+            if [ "${state}" = "CLOSED" ]; then
+              echo "::error::PR #${PR_NUMBER} was closed before it became mergeable."
+              exit 1
+            fi
+            if [ "${merge_state}" = "CLEAN" ]; then
+              break
+            fi
+            if [ "${merge_state}" = "DIRTY" ] || [ "${merge_state}" = "BLOCKED" ]; then
+              echo "::error::PR #${PR_NUMBER} reached a terminal non-mergeable state (mergeStateStatus=${merge_state}) that will not resolve by waiting."
+              exit 1
+            fi
+            if [ "${i}" -lt 30 ]; then
+              sleep 10
+            fi
+          done
+          if [ "${merge_state}" != "CLEAN" ]; then
+            echo "::error::Timed out after 300s waiting for PR #${PR_NUMBER} to become mergeable (last mergeStateStatus=${merge_state})."
+            exit 1
+          fi
+          # Pin --subject/--body explicitly rather than relying on GitHub's
+          # default squash-message behavior for a single-commit PR: the
+          # Reviewed-by trailer is the entire point of this workflow (Issue
+          # #313, carrying over the same reliability guarantee review-pr-
+          # auto-merge.yml made explicit for Signed-off-by), so it must not
+          # depend on an unstated platform default.
+          gh pr merge "${PR_NUMBER}" --squash \
+            --subject "review: mark ${TYPE}/${SLUG} (${LANG}) as reviewed" \
+            --body "$(printf 'Refs #%s\n\nReviewed-by: %s <%s@users.noreply.github.com>' "${ISSUE_NUMBER}" "${REVIEWER_NAME}" "${REVIEWER_LOGIN}")"
+
+      - name: Flag quality-check failure for manual attention
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: gh pr comment "${PR_NUMBER}" --body "Quality checks (validate_frontmatter.py / check_wikilinks.py) failed. This PR needs manual review before merging — see the workflow run log for details."
