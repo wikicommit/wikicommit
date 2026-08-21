@@ -20,10 +20,18 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 **ユースケース**: 社内技術ドキュメント・製品ナレッジベース・研究ノート・コミュニティ Wiki など、散在したソース（PDF・URL・既存リポジトリのファイル）から構造化された Wiki を継続的に生成・維持したい場合に向いています。
 
+## 実例
+
+実際に運用している Wiki です。
+
+- **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — Claude Code や GitHub Copilot など AI 駆動開発ツールに関するナレッジベース。
+- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — ジョヴァンニ・ボッカッチョ『デカメロン』（14世紀のイタリア語原文）を英語・日本語に翻訳した多言語 Wiki。
+
 ## 目次
 
 - [WikiCommit](#wikicommit)
   - [できること](#できること)
+  - [実例](#実例)
   - [目次](#目次)
   - [基本フロー](#基本フロー)
     - [Step 1: ソース登録 + Wiki ページ生成](#step-1-ソース登録--wiki-ページ生成)

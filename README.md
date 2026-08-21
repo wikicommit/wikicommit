@@ -20,10 +20,18 @@ A Git-based knowledge management platform. An LLM generates wiki pages from your
 
 **Use cases**: Well suited for internal technical documentation, product knowledge bases, research notes, community wikis, and other situations where you want to continuously generate and maintain a structured wiki from scattered sources (PDFs, URLs, files in an existing repository).
 
+## Examples
+
+Wikis that are actually running in production:
+
+- **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — A knowledge base about AI-driven development tools such as Claude Code and GitHub Copilot.
+- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A multilingual wiki translating Giovanni Boccaccio's *The Decameron* (14th-century Italian original) into English and Japanese.
+
 ## Table of Contents
 
 - [WikiCommit](#wikicommit)
   - [What You Can Do](#what-you-can-do)
+  - [Examples](#examples)
   - [Table of Contents](#table-of-contents)
   - [Basic Flow](#basic-flow)
     - [Step 1: Register a source + generate wiki pages](#step-1-register-a-source--generate-wiki-pages)
