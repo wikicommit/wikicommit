@@ -25,17 +25,12 @@ from collections import defaultdict
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter_or_warn
-from _wikilink import ENTITY_DIR
+from _wikilink import ENTITY_DIR, collect_entity_pages
 SCHEMA_DIR = Path(".wikicommit/schema")
 
 
 def collect_pages() -> list[Path]:
-    if not ENTITY_DIR.exists():
-        return []
-    return sorted(
-        p for p in ENTITY_DIR.rglob("*.md")
-        if "assets" not in p.parts and p.name != "index.md"
-    )
+    return collect_entity_pages(ENTITY_DIR)
 
 
 def has_dedicated_schema_file(type_value: str) -> bool:

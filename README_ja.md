@@ -1,16 +1,17 @@
 # WikiCommit
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/wikicommit/wikicommit/actions/workflows/test.yml/badge.svg)](https://github.com/wikicommit/wikicommit/actions/workflows/test.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/wikicommit/wikicommit?style=social)](https://github.com/wikicommit/wikicommit)
 
 Git ベースの知識管理プラットフォーム。ソースドキュメントから LLM が Wiki ページを生成し、自動・人間によるレビューを経て静的 Wiki として公開します。SKILL.md 群として実装されており、Claude Code などユーザー自身が契約している LLM 環境上でそのまま動作します。
+
+**LLM は 1 人が読める速さを超えてページを書くため、レビューは分割できなければなりません。** WikiCommit はレビューの単位をページ 1 枚に固定します — 1 ページが 1 つの追跡 Issue で、それだけを Close すれば完了です。レビューする人はそのページだけを読めばよく、知識ベース全体を読む必要も、他の人のレビューを待つ必要もありません。増えていく Wiki が 1 人の読み手の前で詰まらないのは、この単位によります。
 
 > **Status**: パイロットリポジトリでの実運用検証を進めており、破壊的変更が入ることがあります。
 
 ## できること
 
-- **複数人・非同期レビュー**: 品質チェック通過後に自動マージ・公開し、レビューはページごとに分担して行う。各自が Issue をClose するだけで完了
+- **複数人・非同期レビュー**: 品質チェックを通過した時点で自動マージ・公開するため、レビューが公開のボトルネックにならない。各自が担当ページの Issue を Close するだけで完了
 - **ソース探索から Wiki ページ生成まで自動化**: 未取り込みの関連ソースをローカル・Web から自動探索。PDF・URL・リポジトリ内ファイルを登録すれば Wiki ページを生成
 - **GitOps**: すべての変更をコミット・PR として記録。監査・ロールバック・バックアップは `git log` で完結
 - **Wiki への質問応答（RAG）**: Wikiページを起点として質問に対して回答。必要なら一次ソースまで遡って引用も可能
@@ -110,16 +111,20 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 ```bash
 # 方法 1: npx skills add（推奨。agentskills.io 標準準拠。Node.js が必要）
 # 引数なしで実行すると対話的な選択画面が開く（黙って全部入るわけではない）
-npx skills add wikicommit/wikicommit
+# --copy を付けることを推奨します（理由は下の注記を参照）
+npx skills add wikicommit/wikicommit --copy
 
 # 個別 Skill のみインストールする場合
-npx skills add wikicommit/wikicommit --skill wikicommit-generate
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --copy
 
 # 複数 Skill をまとめて指定する場合（--skill を繰り返す）
-npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge --copy
 
 # 全 Skill を確認なしで一括インストールする場合（迷ったらこれで問題ありません）
-npx skills add wikicommit/wikicommit --all
+# 注意: --copy と素の --all を組み合わせないこと。--all は --skill '*' --agent '*' -y の
+# 短縮形のため、--copy と併用すると対応する約 50 個すべてのエージェントディレクトリに
+# 全 Skill の実体コピーが作られる。エージェントを明示的に指定する。
+npx skills add wikicommit/wikicommit --skill '*' --agent claude-code -y --copy
 
 # 方法 2: install.sh（シンプル・Node.js 不要。wikicommit を任意の場所に clone してから、
 # 対象の wiki リポジトリのルートで実行する）
@@ -127,6 +132,20 @@ git clone --depth 1 https://github.com/wikicommit/wikicommit.git /tmp/wikicommit
 cd /path/to/your-wiki-repo
 bash /tmp/wikicommit/install.sh
 ```
+
+> **`--copy` を推奨する理由**: 2 つ以上のエージェントへ同時にインストールする場合、`npx skills add` は Skill の実体を
+> `.agents/skills/<name>/` に置き、各エージェントのエントリ（`.claude/skills/<name>` を含む）をそこへの相対シンボリック
+> リンクにします。これは WikiCommit では 2 点で問題になります。
+> (1) ホスト → コンテナのファイルシステム境界を越えられません（ホスト側でインストールしてから devcontainer を作成したところ、
+> コンテナ内から Skills が認識されない事象を確認しています）。(2) WikiCommit は `.claude/skills/` を wiki リポジトリに
+> コミットする前提ですが、シンボリックリンクのままコミットすると、`.agents/skills/` も併せてコミットしない限り
+> clone 先でリンク切れになります。`--copy` を付けると `.claude/skills/` 配下が実体ファイルになり、
+> 方法 2（`install.sh`）と同じ配置になります（選択画面で Claude Code のみを選んだ場合は既定でも実体コピーになるため
+> `--copy` は無害な明示指定になります。どちらの場合も付けたままで構いません）。
+>
+> **devcontainer / GitHub Codespaces を使う場合**: ホスト側で先にインストールするのではなく、**コンテナに入ってから**
+> インストールしてください。シンボリックリンクが越えられない境界そのものが無くなります。`--copy` を付ける場合でも、
+> CLI 側の既定が将来変わりうるため、この手順を守っておくことを推奨します。
 
 インストール後、Wiki を初期化するリポジトリで実行：
 
@@ -155,6 +174,10 @@ bash /tmp/wikicommit/install.sh
 | 15 | 運用・プレビュー | `/wikicommit-serve [--build]` | Wiki をローカルでビルド・プレビュー |
 
 ---
+
+## Contributing
+
+開発フロー（テスト・Lint の実行方法、`Issues/` 草案 → 登録の流れ、PR の出し方）は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
 
 ## License
 

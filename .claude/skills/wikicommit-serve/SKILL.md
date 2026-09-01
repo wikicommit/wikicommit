@@ -5,7 +5,7 @@ description: Build and locally preview the published wiki via Quartz v5, without
 
 # wikicommit-serve
 
-A thin wrapper around the Quartz v5 build/dev-server commands (`npm run build` / `npm run preview`) that `/wikicommit-init --quartz` sets up. Previewing the wiki was previously surfaced to users as a bare `npm run preview`, which doesn't read as a WikiCommit-specific command and is easy to miss among the `/wikicommit-*` Skills that are otherwise the tool's primary interface (`CLAUDE.md`, Issue #276). This Skill has no dedicated script of its own — it is a thin sequence of a prerequisite check and an `npm` invocation (`docs/DesignDoc-skills.md` §11.5).
+A thin wrapper around the Quartz v5 build/dev-server commands (`npm run build` / `npm run preview`) that `/wikicommit-init --quartz` sets up. Previewing the wiki was previously surfaced to users as a bare `npm run preview`, which doesn't read as a WikiCommit-specific command and is easy to miss among the `/wikicommit-*` Skills that are otherwise the tool's primary interface (`CLAUDE.md`, Issue #276). This Skill has no dedicated script of its own — it is a thin sequence of a prerequisite check and an `npm` invocation.
 
 ## Usage
 
@@ -20,7 +20,7 @@ A thin wrapper around the Quartz v5 build/dev-server commands (`npm run build` /
 
 ### Step 1: Prerequisite Check
 
-Confirm `quartz.config.yaml` exists at the repository root. `init.py` only ever creates this file when `/wikicommit-init --quartz` runs, and it always skips writing it if it already exists (`docs/DesignDoc-data.md` §3.1) — so its presence reliably means Quartz publishing was actually set up for this repository, unlike `package.json`, which may instead be the repository's own pre-existing file that `/wikicommit-init --quartz` left untouched (see the second check below).
+Confirm `quartz.config.yaml` exists at the repository root. `init.py` only ever creates this file when `/wikicommit-init --quartz` runs, and it always skips writing it if it already exists — so its presence reliably means Quartz publishing was actually set up for this repository, unlike `package.json`, which may instead be the repository's own pre-existing file that `/wikicommit-init --quartz` left untouched (see the second check below).
 
 If `quartz.config.yaml` is missing, report and stop:
 

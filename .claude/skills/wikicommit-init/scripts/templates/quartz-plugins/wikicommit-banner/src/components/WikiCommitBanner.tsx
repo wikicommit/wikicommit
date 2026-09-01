@@ -7,18 +7,28 @@ import { i18n, resolveLocale } from "../i18n"
 import style from "./styles/wikicommit-banner.scss"
 
 // Kept in sync by hand with the identically-named function in
-// WikiCommitSources.tsx (Issue #528, following the same pattern as Issue
-// #528's own translatedFromToRelativePath()) — each quartz-plugins/ package
-// builds independently (its own package.json/dist), so this small pure
-// function is duplicated rather than imported across packages. See
-// WikiCommitSources.tsx's comment on this function for the full rationale
-// (relativePath vs. slug vs. filePath, the leading "./" and pre-Issue-#477
-// ".wikicommit/wiki/" prefix tolerance).
-function translatedFromToRelativePath(translatedFrom: string): string {
-  return translatedFrom
+// WikiCommitSources.tsx (Issue #528) — each quartz-plugins/ package builds
+// independently (its own package.json/dist), so this small pure function is
+// duplicated rather than imported across packages. See WikiCommitSources.tsx's
+// comment on this function for the full rationale (relativePath vs. slug vs.
+// filePath, the leading "./" and pre-Issue-#477 ".wikicommit/wiki/" prefix
+// tolerance). Named for the transformation rather than for `translated_from`
+// because the Sources copy now runs it over `derived_from[].path` too (Issue
+// #587); this copy still only has `translated_from` to feed it, and the shared
+// name is what keeps the two findable as a pair.
+function entityPathToRelativePath(entityPath: string): string {
+  return entityPath
     .trim()
     .replace(/^\.\//, "")
     .replace(/^\.wikicommit\/(entity|wiki)\//, "")
+    // Drop a custom type's `custom/` segment: convert_wikilinks.py publishes
+    // .wikicommit/entity/<lang>/custom/<Type>/<slug>.md to
+    // content/<lang>/<Type>/<slug>.md (Issue #576), and `relativePath` is
+    // content-relative. Without this the lookup below finds nothing for a
+    // translated custom-type page — silently, since a miss is indistinguishable
+    // from "no parent page", so source inheritance and the original-page link
+    // would just stop working rather than error.
+    .replace(/^([^/]+)\/custom\//, "$1/")
 }
 
 function buildPageUrl(baseUrl: string | undefined, slug: string | undefined): string | undefined {
@@ -52,11 +62,61 @@ function resolveOriginalPageInfo(
   const translatedFrom = frontmatter?.translated_from
   if (typeof translatedFrom !== "string") return undefined
 
-  const parentRelativePath = translatedFromToRelativePath(translatedFrom)
+  const parentRelativePath = entityPathToRelativePath(translatedFrom)
   const parent = allFiles.find((f) => f.relativePath === parentRelativePath)
   if (parent?.frontmatter?.status === "removed") return translatedFrom
 
   return buildPageUrl(cfg?.baseUrl, parent?.slug as string | undefined) ?? translatedFrom
+}
+
+// A page's review tracking Issue (Issue #313) is created by wikicommit-merge
+// Step 8 *after* the PR merges, while the Quartz build runs off that same
+// merge — so at build time the Issue number does not exist yet, and it is not
+// stored in frontmatter either. What can be assembled statically is the Issue
+// title `Review: <Type>/<slug> (<lang>)` and the label `wikicommit-review`,
+// which is enough for a GitHub Issue *search* URL (Issue #579).
+//
+// Three deliberate properties of the query:
+//
+//   - It searches `<Type>/<slug> (<lang>)`, never the page's `title`
+//     frontmatter. The Issue title does not contain the page title, and a
+//     regeneration can change that title while type/slug/lang stay fixed
+//     (regeneration is page-scoped, so it takes both as given) — keying on the
+//     title would make the link go stale on every regeneration.
+//   - The `Review:` prefix is left out. It carries no discriminating power
+//     (`label:wikicommit-review` already restricts the set, and every such
+//     Issue starts with it) and it is the only colon in the phrase, so
+//     dropping it removes the one part whose behaviour inside a quoted search
+//     phrase would be worth arguing about.
+//   - `is:open` matters most. A regenerated page returns to `pending` and gets
+//     a *new* tracking Issue, so one page can accumulate several same-titled
+//     Issues over time; without the filter the link could offer an
+//     already-closed Issue as the current place to review, which is worse than
+//     offering nothing. `is:open` is used rather than `state:open` because it
+//     is the form GitHub's own issue list emits (`?q=is%3Aissue+is%3Aopen`).
+//
+// GitHub matches title text by token, so a search can also surface a
+// neighbouring page whose slug extends this one (`.../yamada-taro` alongside
+// `.../yamada-taro-jr`). That is accepted: the link lands on a filtered search
+// results page rather than claiming to open one specific Issue, and the label
+// and state filters keep the list short. It is also why the link text does not
+// promise a particular Issue.
+function buildReviewSearchUrl(
+  repo: string | undefined,
+  type: string | undefined,
+  lang: string | undefined,
+  relativePath: string | undefined,
+): string | undefined {
+  // Anything missing means the search key cannot be built, so no link is
+  // rendered at all — better than a link that is guaranteed to find nothing.
+  // This also keeps the link off the folder and tag pages Quartz generates
+  // itself, which have no frontmatter (and therefore no type/lang) and no
+  // tracking Issue to find.
+  if (!repo || !type || !lang || !relativePath) return undefined
+  const slug = relativePath.split("/").pop()?.replace(/\.md$/, "")
+  if (!slug) return undefined
+  const q = `is:issue is:open label:wikicommit-review in:title "${type}/${slug} (${lang})"`
+  return `https://github.com/${repo}/issues?q=${encodeURIComponent(q)}`
 }
 
 const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzComponentProps) => {
@@ -71,14 +131,19 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
 
   const t = i18n(resolveLocale(frontmatter?.lang, cfg?.locale)).components.wikicommitBanner
 
-  // Site-wide summary (total page count, reviewed count, theme): convert_wikilinks.py's
+  // Site-wide summary (total page count, reviewed count): convert_wikilinks.py's
   // generate_root_index() embeds these as frontmatter on the build-generated
   // content/index.md only (Issue #407). Gating on field presence rather than on
   // fileData.slug === "index" avoids coupling this component to Quartz's slug naming
   // convention for the root page.
+  //
+  // A `wikicommit_theme` line was rendered here until Issue #670. config.yml's
+  // `theme` is an LLM-facing scope instruction, not reader-facing copy: it is a
+  // single string in one language, so on a multilingual wiki it was unreadable
+  // for most readers, and it often carried source-selection prose written for
+  // the generator.
   const pageCount = frontmatter?.wikicommit_page_count as number | undefined
   const reviewedCount = frontmatter?.wikicommit_reviewed_count as number | undefined
-  const theme = frontmatter?.wikicommit_theme as string | undefined
   const siteSummary =
     typeof pageCount === "number" && typeof reviewedCount === "number" ? (
       <div class="wikicommit-site-summary">
@@ -87,11 +152,14 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
           &nbsp;&nbsp;
           {t.siteSummaryReviewed} <strong>{reviewedCount}</strong>
         </p>
-        {theme ? (
-          <p class="wikicommit-site-summary__theme">
-            {t.siteSummaryTheme} {theme}
-          </p>
-        ) : null}
+        {/* Issue #664: the count alone reads as "nobody cares about this
+            project" to a first-time reader — the opposite of the honesty it was
+            added for. The number stays (hiding it would give that up) and this
+            line says what it counts: pages go live the moment they are
+            generated, so this is how many have since been read by a person,
+            not how far along the wiki is. Deliberately not an invitation to
+            review — this wiki does not take outside reviewers. */}
+        <p class="wikicommit-site-summary__note">{t.siteSummaryReviewNote}</p>
       </div>
     ) : null
 
@@ -138,11 +206,34 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
       }`
     : "#"
 
+  // Who the `reviewed` badge belongs to (Issue #663). review-issue-close-sync.yml
+  // writes this login into frontmatter in the same commit that flips
+  // review_status, so the value is here for the same reason generated_by is —
+  // this component reads frontmatter and nothing else. Absent on any page
+  // reviewed before that field existed, and on every page in a wiki that does
+  // not run the workflow, so it is rendered only when present: without it the
+  // reviewed branch falls back to exactly the markup it had before, rather than
+  // showing an empty label or the "unknown" placeholder the pending branch uses
+  // for generated_at/generated_by. Those two differ on purpose — a generated
+  // page always went through generation, so a missing value there is a gap worth
+  // naming, whereas a missing reviewer is the normal state of a page reviewed
+  // any other way.
+  const reviewedBy =
+    typeof frontmatter?.reviewed_by === "string" && frontmatter.reviewed_by.trim() !== ""
+      ? frontmatter.reviewed_by.trim()
+      : undefined
+
   if (!isPending) {
     return (
       <>
         {siteSummary}
         <div class="wikicommit-banner__report">
+          {reviewedBy ? (
+            <span class="wikicommit-banner__reviewer">
+              {t.reviewedBy}{" "}
+              <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
+            </span>
+          ) : null}
           <a href={reportUrl} class="wikicommit-banner__link">
             {t.reportLink}
           </a>
@@ -150,6 +241,19 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
       </>
     )
   }
+
+  // Only on a pending page: while a page is pending its tracking Issue is
+  // open, and closing that Issue is what flips the page to reviewed and
+  // rebuilds the site (review-issue-close-sync.yml), so the banner carrying
+  // this link and the Issue being open begin and end together. A reviewed
+  // page's tracking Issue is closed and not worth pointing at; the report
+  // link above already covers reporting an error there (Issue #245).
+  const reviewSearchUrl = buildReviewSearchUrl(
+    repo,
+    type,
+    lang,
+    fileData.relativePath as string | undefined,
+  )
 
   return (
     <>
@@ -163,6 +267,11 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
             {generatedAtLabel} {generatedAt}&nbsp;&nbsp;{generatedByLabel} {generatedBy}
           </p>
           <div class="wikicommit-banner__actions">
+            {reviewSearchUrl ? (
+              <a href={reviewSearchUrl} class="wikicommit-banner__link">
+                {t.reviewStatusLink}
+              </a>
+            ) : null}
             <a href={reportUrl} class="wikicommit-banner__link">
               {t.reportLink}
             </a>

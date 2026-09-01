@@ -32,7 +32,7 @@ a page's properties: keys actually belong to its `type:`, per the same
 domainIncludes + rdfs:subClassOf ancestry logic) can reuse the identical
 vocabulary-loading and ancestry-walking logic instead of a second, divergence-
 prone copy — the same "one implementation every script imports" precedent as
-_frontmatter.py/_wikilink.py (docs/DesignDoc-skills.md §11.5).
+_frontmatter.py/_wikilink.py.
 """
 
 import json
@@ -40,6 +40,8 @@ import os
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from _frontmatter import parse_frontmatter
 
 VOCAB_PATH = Path(".wikicommit/schemaorg-vocab.json")
 VOCAB_URL = "https://schema.org/version/latest/schemaorg-current-https.jsonld"
@@ -262,7 +264,7 @@ def properties_available_to(type_name: str, types: dict, properties: dict) -> di
     the vocabulary whose `schema:domainIncludes` intersects type_name's
     ancestry (type_name itself or any rdfs:subClassOf ancestor) — i.e. every
     property a page of this type could plausibly declare under
-    `properties:` (docs/DesignDoc-data.md §4.1). declaring_type(s) are the
+    `properties:`. declaring_type(s) are the
     specific ancestry members that appear in that property's own
     domainIncludes, sorted — usually exactly one, but a property's
     domainIncludes can name more than one ancestor of type_name at once
@@ -285,7 +287,7 @@ def entity_range_candidates(prop_name: str, properties: dict, types: dict) -> tu
     """Split prop_name's `schema:rangeIncludes` candidates into (entity_types,
     datatype_types), or return None if prop_name isn't in the vocabulary at
     all. entity_types are candidates a property's value could reasonably be
-    written as a `[[Type/slug]]` WikiLink to (docs/DesignDoc-data.md §4.1);
+    written as a `[[Type/slug]]` WikiLink to;
     datatype_types are plain scalar values that never should be. Either list
     may be empty — some properties have exactly one kind or the other
     (`affiliation` -> `Organization` only, entity; `sameAs` -> `URL` only,
@@ -299,3 +301,53 @@ def entity_range_candidates(prop_name: str, properties: dict, types: dict) -> tu
     entity_types = [t for t in info.get("range", []) if not is_in_datatype_lineage(t, types)]
     datatype_types = [t for t in info.get("range", []) if is_in_datatype_lineage(t, types)]
     return entity_types, datatype_types
+
+
+SCHEMA_DIR = Path(".wikicommit/schema")
+
+
+def installed_standard_types(schema_dir: Path = SCHEMA_DIR) -> dict[str, Path]:
+    """Map each Schema.org standard type installed in .wikicommit/schema/ to its file.
+
+    The key is the type name as `type:` spells it minus the `schema:` prefix, so it
+    can be looked up in the vocabulary directly. Custom types (`schema:custom/...`)
+    are left out: they have no vocabulary entry, so nothing here can place them in a
+    subClassOf chain — the same exclusion check_schema_coverage.py and
+    check_property_wikilink_reinforcement.py already make. `default.md` carries no
+    `type:` at all and drops out for the same reason.
+
+    Reads `type:` rather than the filename. The two normally agree, but the filename
+    is not what resolves a type — the path is derived from `type:` — and a file whose
+    two disagree should be counted under what it declares.
+    """
+    if not schema_dir.exists():
+        return {}
+    installed: dict[str, Path] = {}
+    for path in sorted(schema_dir.rglob("*.md")):
+        frontmatter, _error = parse_frontmatter(path)
+        if not isinstance(frontmatter, dict):
+            continue
+        type_value = frontmatter.get("type")
+        if not isinstance(type_value, str) or not type_value.startswith("schema:"):
+            continue
+        type_name = strip_prefix(type_value)
+        if not type_name or type_name.startswith("custom/"):
+            continue
+        installed.setdefault(type_name, path)
+    return installed
+
+
+def installed_descendants(
+    type_name: str, installed: dict[str, Path], types: dict
+) -> list[str]:
+    """Installed types that are strict descendants of `type_name`, sorted.
+
+    A descendant type is always *also* a correct answer's ancestor away from being
+    wrong — writing a park as a Place is not an error, only coarser — which is why
+    an installed descendant has to be surfaced rather than inferred (Issue #565).
+    """
+    return sorted(
+        name
+        for name in installed
+        if name != type_name and type_name in ancestors(name, types)
+    )

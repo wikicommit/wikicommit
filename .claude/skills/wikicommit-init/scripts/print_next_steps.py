@@ -4,11 +4,10 @@
 Before this script existed, SKILL.md hardcoded three near-identical copies of this
 guidance (one per --quartz / --quartz-pages combination), differing only in a handful
 of lines (the git add file list, the commit message, a couple of sentences). That
-duplication pushed SKILL.md past the 500-line recommended limit
-(dev/scripts/check_skill_md_lines.py) even though the choice of which lines to print
-is fully deterministic given the flags the agent already computed in steps 2-3
-(docs/DesignDoc-skills.md section 11.5 — deterministic, repetitive text belongs in a
-script, not duplicated prose). The agent computes the flags (variant chosen in
+duplication pushed SKILL.md past its recommended line limit even though the choice
+of which lines to print is fully deterministic given the flags the agent already
+computed in steps 2-3 (deterministic, repetitive text belongs in a script, not
+duplicated prose). The agent computes the flags (variant chosen in
 Prerequisites, install-check results, GitHub Pages activation outcome) and passes them
 here; this script owns the branching and renders the final text to print verbatim to
 the user.
@@ -27,6 +26,8 @@ Exit code: always 0. Argument errors (e.g. missing --variant) exit 2 via argpars
 
 import argparse
 import sys
+
+import _root_outputs
 
 QUARTZ_STATUSES = [
     "fully_set_up",
@@ -130,31 +131,55 @@ _NONE_EXTRA_FILES = (
     "   review flow), and the quality gate configuration files "
 )
 
-_VOCAB_CACHE_FILE = ".wikicommit/schemaorg-vocab.json"
+# package-lock.json は上の `git add` 行に含めず、別コマンドとして案内する（Issue #556 の
+# 対応方針3の結論）。init.py の生成物ではなく Quartz セットアップ手順の `npm install` の
+# 副産物であり、npm install が失敗した場合・ユーザーがその手順を飛ばした場合には存在しない。
+# `git add` は存在しない pathspec を渡されるとコマンド全体が異常終了するため（_root_outputs.py が
+# .wikicommit/schemaorg-vocab.json を condition="vocab_cache" にしているのと同じ理由）、同じ行に
+# 足すと基盤ファイルのコミットそのものが丸ごと失敗しうる。deploy.yml は `npm ci`
+# ではなく `npm install` を使うため lock file は必須ではなく（Issue #556 が扱う CI 失敗の
+# 原因でもない）、CI とローカルで解決される依存バージョンを揃えるための任意の推奨に留める。
+# 案内文からは手順番号（「step 1 の npm install」等）を参照しない: build_quartz_setup_step が
+# None / _INSTALL_PLUGINS_STEP を返す分岐では npm install 手順そのものが番号付きリストから
+# 消え、番号がずれる。--quartz 単体（deploy.yml なし）でも成り立つ書き方にしておく。
+_PACKAGE_LOCK_NOTE = (
+    "\n\n"
+    "   Also commit the root `package-lock.json` once `npm install` has created one — it pins the\n"
+    "   dependency versions a fresh clone resolves, including the GitHub Pages build workflow if\n"
+    "   this repository has (or later enables) one. It is deliberately kept out of the command\n"
+    "   above because `git add` aborts on a pathspec that does not exist, which would take the\n"
+    "   whole foundational commit down with it if `npm install` had not run yet:\n"
+    "   git add package-lock.json && git commit -m \"chore: add package-lock.json\" && git push"
+)
 
-_GIT_ADD_NONE = (
-    "git add .claude .gitignore .wikicommit/config.yml .wikicommit/schema .wikicommit/scripts \\\n"
-    "     .wikicommit/entity .wikicommit/source \\\n"
-    "     .lychee.toml .markdownlint.json .github/workflows/review-issue-close-sync.yml"
-)
-_GIT_ADD_QUARTZ_ONLY = (
-    "git add .claude .gitignore .wikicommit/config.yml .wikicommit/schema .wikicommit/scripts \\\n"
-    "     .wikicommit/entity .wikicommit/source \\\n"
-    "     .lychee.toml .markdownlint.json quartz.config.yaml package.json prebuild-symlinks.cjs \\\n"
-    "     repair-plugin-builds.cjs \\\n"
-    "     .github/workflows/review-issue-close-sync.yml \\\n"
-    "     .github/ISSUE_TEMPLATE/report.md \\\n"
-    "     quartz-plugins .gitmodules quartz"
-)
-_GIT_ADD_QUARTZ_PAGES = (
-    "git add .claude .gitignore .wikicommit/config.yml .wikicommit/schema .wikicommit/scripts \\\n"
-    "     .wikicommit/entity .wikicommit/source \\\n"
-    "     .lychee.toml .markdownlint.json quartz.config.yaml package.json prebuild-symlinks.cjs \\\n"
-    "     repair-plugin-builds.cjs \\\n"
-    "     .github/workflows/deploy.yml .github/workflows/review-issue-close-sync.yml \\\n"
-    "     .github/ISSUE_TEMPLATE/report.md \\\n"
-    "     quartz-plugins .gitmodules quartz"
-)
+# The `git add` line is built from _root_outputs.py rather than written out per
+# variant (Issue #642): the paths it lists and the paths init.py produces used to
+# be two hand-maintained lists, and an addition to one of them silently missing
+# from the other is what broke every --quartz-pages repository's first Pages
+# build (Issue #556).
+_GIT_ADD_INDENT = "     "
+_GIT_ADD_WIDTH = 96
+
+
+def build_git_add(variant: str, vocab_cache_created: bool) -> str:
+    """Render `git add <paths>`, wrapping with backslash continuations.
+
+    The wrapping is cosmetic; `_root_outputs.git_add_paths()` owns which paths
+    appear and in what order.
+    """
+    lines: list[str] = []
+    current = "git add"
+    for path in _root_outputs.git_add_paths(variant, vocab_cache_created=vocab_cache_created):
+        candidate = f"{current} {path}"
+        # `current == "git add"` is the only state that must never be flushed on its own:
+        # a path longer than the width would otherwise produce a line holding just the prefix.
+        if len(candidate) > _GIT_ADD_WIDTH and current != "git add":
+            lines.append(current)
+            current = _GIT_ADD_INDENT + path
+        else:
+            current = candidate
+    lines.append(current)
+    return " \\\n".join(lines)
 
 _MERGE_STEP_PLAIN = "Merge to the main branch with /wikicommit-merge."
 _MERGE_STEP_PAGES = (
@@ -164,13 +189,51 @@ _MERGE_STEP_PAGES = (
 
 _README_STEP_WITH_URL = (
     "Consider adding a link to the published wiki in README.md (this is not done automatically —\n"
-    "   README.md may already have its own structure that an automatic edit could disrupt, see\n"
-    "   docs/DesignDoc-data.md §3.1):\n"
+    "   README.md may already have its own structure that an automatic edit could disrupt):\n"
     "   📖 [View the wiki]({html_url})"
 )
 _README_STEP_NO_URL = (
     "Once you enable GitHub Pages manually (see the note above), consider adding a link to the\n"
     "   published wiki in README.md."
+)
+
+# Issue #558: init.py deliberately does not write a LICENSE file. A WikiCommit
+# repository holds two different things — code (scripts, plugins) and content
+# derived from third-party sources — and the content half has no single license
+# to declare: one page can be CC BY-SA (a Wikipedia-derived page), another
+# bound by a municipal site's own terms, another an ordinary all-rights-reserved
+# paper that cannot be relicensed at all. Generating a single root LICENSE would
+# purport to grant rights the operator does not hold. The per-page attribution
+# (sources[].license, shown by the WikiCommitSources component) is what carries
+# the legal weight; this step just makes sure the operator knows the decision is
+# theirs to make. WikiCommit does not decide it for them.
+#
+# The README bullet is licensing layer 4 (Issue #645). Issue #282 settled that
+# README.md is display-only — the agent never edits it — so the landing point for
+# that layer can only be advice, and it is deliberately concrete (suggested wording
+# the operator can paste) rather than a bare "consider documenting this". It mirrors
+# _README_STEP_WITH_URL above, which already asks rather than writes, for the same
+# reason. Layer 2 (site-wide) is not here: convert_wikilinks.py puts it on the
+# generated root index and sources index, which need no operator action.
+_LICENSING_STEP = (
+    "Decide how this repository is licensed — nothing was generated for you (a WikiCommit repo\n"
+    "   mixes code with content derived from third-party sources, and those sources' terms can\n"
+    "   differ page by page, so no single LICENSE file would be correct). Two separate questions,\n"
+    "   and one place to write the answer down:\n"
+    "   • Code (`.wikicommit/scripts/`, `quartz-plugins/`, config): pick a license and add a\n"
+    "     LICENSE file if you want one — this is the ordinary open-source choice.\n"
+    "   • Content (`.wikicommit/entity/`): each page's terms follow the sources it was generated\n"
+    "     from. Record each source's terms in the management file's `source.license` field; that\n"
+    "     value is copied onto every page generated from it and shown next to that source on the\n"
+    "     published site, together with a standing notice that the page adapts its sources.\n"
+    "   • README.md: consider adding a short section saying the same two things, so that someone\n"
+    "     who clones or browses the repository sees it before reaching a page. Nothing is written\n"
+    "     for you here either — README.md is yours to edit. Something like: \"Code in this\n"
+    "     repository and the wiki content it publishes are licensed separately. Page content is\n"
+    "     derived from the sources listed on each page; terms differ per source and no single\n"
+    "     license covers the wiki as a whole. See each page's sources for its terms.\"\n"
+    "   WikiCommit records and displays what you tell it — it does not determine what a source's\n"
+    "   terms are, nor whether they permit republishing. That judgment is yours."
 )
 
 _QUARTZ_ONLY_TRAILING_NOTE = (
@@ -185,7 +248,7 @@ _QUARTZ_ONLY_TRAILING_NOTE = (
 _PACKAGE_JSON_SKIPPED_WARNING = (
     "⚠️ package.json already existed in this repository, so WikiCommit's Quartz build scripts\n"
     '   ("build" / "preview") and devDependencies were not added to it (init.py never overwrites an\n'
-    "   existing package.json — see docs/DesignDoc-data.md §3.1). Merge the \"scripts\" and\n"
+    '   existing package.json). Merge the "scripts" and\n'
     '   "devDependencies" from .claude/skills/wikicommit-init/scripts/templates/package.json into\n'
     "   your package.json by hand before running /wikicommit-serve."
 )
@@ -234,36 +297,32 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _with_vocab_cache(git_add: str, vocab_cache_created: bool) -> str:
+def build_commit_step(variant: str, vocab_cache_created: bool) -> str:
     # .wikicommit/schemaorg-vocab.json (Issue #319) is committed like any other WikiCommit
     # output, but it is only ever created when a type-proposal step actually ran and hit the
-    # network — appending it unconditionally would make this printed `git add` fail outright
+    # network — listing it unconditionally would make this printed `git add` fail outright
     # on a pathspec that doesn't exist (Issue #490's obvious-type judgment is the first
     # wikicommit-init step able to create this file; wikicommit-generate/wikicommit-collect
     # created it before, but their output is committed later via wikicommit-merge, not here).
-    if not vocab_cache_created:
-        return git_add
-    return git_add + f" \\\n     {_VOCAB_CACHE_FILE}"
-
-
-def build_commit_step(variant: str, vocab_cache_created: bool) -> str:
+    # _root_outputs.py carries that condition, so it is passed through rather than handled here.
+    git_add = build_git_add(variant, vocab_cache_created)
     if variant == "none":
         return _COMMIT_STEP_INTRO.format(
             extra_files=_NONE_EXTRA_FILES,
-            git_add=_with_vocab_cache(_GIT_ADD_NONE, vocab_cache_created),
+            git_add=git_add,
             commit_msg="chore: add WikiCommit foundational files",
         )
     if variant == "quartz_only":
         return _COMMIT_STEP_INTRO.format(
             extra_files=_QUARTZ_ONLY_EXTRA_FILES,
-            git_add=_with_vocab_cache(_GIT_ADD_QUARTZ_ONLY, vocab_cache_created),
+            git_add=git_add,
             commit_msg="chore: add WikiCommit foundational files and Quartz v5 local build config",
-        )
+        ) + _PACKAGE_LOCK_NOTE
     return _COMMIT_STEP_INTRO.format(
         extra_files=_QUARTZ_PAGES_EXTRA_FILES,
-        git_add=_with_vocab_cache(_GIT_ADD_QUARTZ_PAGES, vocab_cache_created),
+        git_add=git_add,
         commit_msg="chore: add WikiCommit foundational files and Quartz v5 publishing config",
-    )
+    ) + _PACKAGE_LOCK_NOTE
 
 
 def build_quartz_setup_step(args: argparse.Namespace) -> str | None:
@@ -332,6 +391,7 @@ def build_steps(args: argparse.Namespace) -> list[str]:
             steps.append(_README_STEP_WITH_URL.format(html_url=args.pages_html_url))
         else:
             steps.append(_README_STEP_NO_URL)
+    steps.append(_LICENSING_STEP)
     return steps
 
 

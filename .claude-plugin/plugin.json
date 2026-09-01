@@ -2,6 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "wikicommit",
   "description": "Git-based knowledge management: generate, review, and publish wiki pages from source documents via a CI/CD-style pipeline for knowledge.",
+  "version": "0.2.0",
   "author": {
     "name": "WikiCommit Project",
     "url": "https://github.com/wikicommit/wikicommit"

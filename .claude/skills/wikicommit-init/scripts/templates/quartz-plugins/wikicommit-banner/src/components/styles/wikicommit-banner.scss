@@ -28,6 +28,12 @@
 
 .wikicommit-banner__actions {
   margin-top: 0.5rem;
+  // Two links live here once a pending page also offers its review-status
+  // search (Issue #579); flex + gap keeps them apart and lets them wrap on a
+  // narrow viewport instead of running together.
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .wikicommit-banner__link {
@@ -39,6 +45,16 @@
 .wikicommit-banner__report {
   margin-bottom: 1.5rem;
   font-size: 0.875rem;
+  // A reviewed page can now carry the reviewer alongside the report link
+  // (Issue #663); same flex + gap + wrap treatment the pending page's action
+  // row already uses for its two links.
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.wikicommit-banner__reviewer {
+  color: var(--darkgray);
 }
 
 .wikicommit-site-summary {
@@ -50,12 +66,15 @@
 }
 
 .wikicommit-site-summary__counts,
-.wikicommit-site-summary__theme {
+.wikicommit-site-summary__note {
   margin: 0;
   font-size: 0.875rem;
   color: var(--darkgray);
 }
 
-.wikicommit-site-summary__theme {
+// Sits under the counts it explains (Issue #664), so it reads as a caption
+// rather than a second fact of the same weight.
+.wikicommit-site-summary__note {
   margin-top: 0.375rem;
+  font-size: 0.8125rem;
 }

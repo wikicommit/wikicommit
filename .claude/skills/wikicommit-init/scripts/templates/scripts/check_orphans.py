@@ -13,7 +13,14 @@ import unicodedata
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter_text
-from _wikilink import ENTITY_DIR, WIKILINK_RE, parse_wiki_path
+from _wikilink import (
+    ENTITY_DIR,
+    VIEW_DIR,
+    WIKILINK_RE,
+    collect_entity_pages,
+    collect_view_pages,
+    parse_wiki_path,
+)
 
 IN_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
@@ -57,9 +64,46 @@ def _path_to_wikilink_key(path: Path) -> str:
 
 
 def collect_pages() -> list[Path]:
-    if not ENTITY_DIR.exists():
+    return collect_entity_pages(ENTITY_DIR)
+
+
+def collect_link_sources() -> list[Path]:
+    """Pages whose outbound WikiLinks count as backlinks, which is a wider set
+    than the pages this script can *report* on.
+
+    View pages (Issue #675) are excluded from the orphan report itself — one is
+    unlinked the moment it is written, so every one of them would be a finding
+    nobody can act on — but their links are ordinary links. Leaving them out of
+    the backlink set would mean moving a synthesized page from
+    `.wikicommit/entity/` into `.wikicommit/view/` silently turns each page it
+    references back into an orphan, and `check_wanted_pages.py` (which walks
+    both trees) would disagree with this script about the same repository.
+    """
+    return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
+
+
+def source_labels(frontmatter: dict) -> list[str]:
+    """Short identifiers for a page's `sources`, for the ORPHAN line (Issue #570).
+
+    An orphan is a page nothing links to, and the useful next question is which
+    source produced it — a `wikicommit/saitama-city-wiki` audit found all six of
+    its orphans came from sources that had produced no other page, while pages
+    from the two sources covering the subject's overall structure were reachable
+    throughout. That is one repository and partly self-fulfilling (a structural
+    source links to everything by definition), so it is a hypothesis rather than
+    a finding; printing the provenance is what makes it checkable at all.
+    """
+    sources = frontmatter.get("sources")
+    if not isinstance(sources, list):
         return []
-    return sorted(p for p in ENTITY_DIR.rglob("*.md") if "assets" not in p.parts)
+    labels = []
+    for entry in sources:
+        if not isinstance(entry, dict):
+            continue
+        value = entry.get("path") or entry.get("url") or entry.get("author")
+        if isinstance(value, str) and value.strip():
+            labels.append(value.strip())
+    return labels
 
 
 def main() -> int:
@@ -71,10 +115,13 @@ def main() -> int:
         page_data[page] = {"fm": fm, "wikilinks": wikilinks, "key": _path_to_wikilink_key(page)}
 
     referenced: set[str] = set()
-    for path, data in page_data.items():
-        if path.name == "index.md":
-            continue
-        referenced.update(data["wikilinks"])
+    for page in collect_link_sources():
+        data = page_data.get(page)
+        if data is None:
+            _, wikilinks = _parse_page(page)
+        else:
+            wikilinks = data["wikilinks"]
+        referenced.update(wikilinks)
 
     orphan_count = 0
     duplicate_count = 0
@@ -83,13 +130,13 @@ def main() -> int:
         fm = data["fm"]
         if fm.get("status") == "removed":
             continue
-        if path.name == "index.md":
-            continue
         key = data["key"]
         if not key:
             continue
         if key not in referenced:
-            print(f"ORPHAN: {path}")
+            labels = source_labels(fm)
+            origin = f" (sources: {', '.join(labels)})" if labels else " (no sources)"
+            print(f"ORPHAN: {path}{origin}")
             _emit_annotation("warning", "orphan", f"orphan page: {path}", str(path))
             orphan_count += 1
 

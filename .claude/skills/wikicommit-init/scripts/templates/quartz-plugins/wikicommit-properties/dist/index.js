@@ -10722,7 +10722,7 @@ var defaultOptions = {
   includeAll: false,
   // "properties" added to the upstream default (Issue #509) — this is the
   // nested Schema.org property block WikiCommit's own frontmatter design
-  // adds (docs/DesignDoc-data.md §4.1, Issue #495). See getVisibleProperties()
+  // adds (Issue #495). See getVisibleProperties()
   // below for how a nested-object value like this one gets flattened.
   includedProperties: ["description", "tags", "aliases", "properties"],
   excludedProperties: [],

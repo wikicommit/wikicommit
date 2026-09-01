@@ -64,8 +64,8 @@ export const explorerSortFn = (a: FileTrieNode, b: FileTrieNode): number => {
     // Root-level only (slugSegments.length === 1): a Type/custom-type schema could in
     // principle define a page or folder also named "sources" nested deeper in the tree
     // (e.g. under a Type folder), which must sort as an ordinary tier-0 entry, not get
-    // swept to the bottom alongside the real content/sources/ tree (docs/DesignDoc-data.md
-    // §4.3) that only ever exists at the root.
+    // swept to the bottom alongside the real content/sources/ tree that only ever
+    // exists at the root.
     if (n.isFolder && n.slugSegment === "sources" && (n.slugSegments?.length ?? 0) === 1) {
       return 2
     }

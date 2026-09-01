@@ -21,7 +21,13 @@ import sys
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter_or_warn as _parse_frontmatter
-from _wikilink import ENTITY_DIR, resolve_stored_entity_path
+from _wikilink import (
+    ENTITY_DIR,
+    VIEW_DIR,
+    collect_entity_pages,
+    collect_view_pages,
+    resolve_stored_entity_path,
+)
 
 
 def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
@@ -48,9 +54,12 @@ def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
 
 
 def collect_pages() -> list[Path]:
-    if not ENTITY_DIR.exists():
-        return []
-    return sorted(p for p in ENTITY_DIR.rglob("*.md") if "assets" not in p.parts)
+    # The view tree is where `derived_from` pages are written from Issue #675
+    # on, so it is this script's main subject. The entity tree is still walked:
+    # synthesized pages written before the view tree existed stay where they
+    # are (migration is manual, old and new coexist), and dropping them here
+    # would silently stop checking the very pages this script was written for.
+    return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 
 def main() -> int:

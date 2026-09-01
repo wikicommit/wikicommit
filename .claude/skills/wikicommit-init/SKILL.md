@@ -13,10 +13,13 @@ Generates WikiCommit's `.wikicommit/` directory structure, schema, and configura
 Confirm the following with the user (use the default value if there is no answer):
 
 1. **Primary language** (primary_lang): `en` (default). This is the source language of the wiki the user is creating (not the language of the WikiCommit tool itself). Users who want a Japanese-language wiki (e.g. the `world-kids-play-wiki` pilot) should explicitly answer `ja`.
-2. **Wiki theme** (theme): free text, empty (default, skip with a blank Enter). Used by `wikicommit-generate`'s exclude judgment to automatically skip entities unrelated to the wiki's topic; leaving it empty disables that judgment (all entities are generated as before). Example prompt:
+2. **Wiki theme** (theme): free text, empty (default, skip with a blank Enter). Used by `wikicommit-generate`'s exclude judgment to automatically skip entities unrelated to the wiki's topic; leaving it empty disables that judgment (all entities are generated as before). **It answers "what is this wiki about" — and only that.** Two neighbouring questions have their own files, both of which `init.py` writes a template for in Processing Flow step 2: "which sources do we take in" is `.wikicommit/source-policy.md` (Issue #564), and "granted a subject is relevant, may we write about it at all" is `.wikicommit/entity-policy.md` (Issue #667). Neither exists yet at this point, so name them as the place to write those policies *after* init finishes rather than telling the user to open one now. Say so when prompting, without spelling out all three axes — the prompt only has to keep the answer to this one: a source-selection rule written here is read only when deciding whether an already-ingested entity gets a page, where it is pure noise, and is never read at the point it would matter; a "do not write about X" rule written here is read at the right moment but gets weighed as relevance, which is a different question and gives a different answer for a subject that is squarely on-topic and still off-limits. Example prompt:
 
    ```
    What is this wiki's theme? (free text, optional — leave blank to skip)
+   Describe the subject matter only. Which sources to take in, and which subjects
+   are off-limits even when relevant, each have their own file alongside it
+   (.wikicommit/source-policy.md and .wikicommit/entity-policy.md).
    e.g. "Knowledge base for an internal engineering org. Personal-blog-style topics are out of scope."
    ```
 
@@ -62,7 +65,12 @@ Confirm the following with the user (use the default value if there is no answer
 
 1. Check whether `.wikicommit/` already exists:
    - Does not exist → run `init.py` without `--no-overwrite`
-   - Exists → add `--no-overwrite` and run. Notify the user that existing configuration will be preserved
+   - Exists → add `--no-overwrite` and run. Notify the user that existing configuration will be
+     preserved, and that `.wikicommit/scripts/` is the one exception — it is refreshed to the
+     installed Skills' version even under `--no-overwrite` (Issue #647), because it is WikiCommit's
+     own distribution payload rather than the user's content. Leaving it stale made `_version.py`
+     report the version of the *first* init, stamping pages built under the new Skills with the old
+     version in `generated_with` / `translated_with`
 
 2. Run the following command with the confirmed values:
 
@@ -72,7 +80,8 @@ Confirm the following with the user (use the default value if there is no answer
    python .claude/skills/wikicommit-init/scripts/init.py \
      --primary-lang <primary_lang> \
      [--quartz] \
-     [--quartz-pages]
+     [--quartz-pages] \
+     [--repo-url="$(gh repo view --json url -q .url)"]
    ```
 
    **Adding to an existing repository (when `.wikicommit/` already exists):**
@@ -82,7 +91,8 @@ Confirm the following with the user (use the default value if there is no answer
      --primary-lang <primary_lang> \
      --no-overwrite \
      [--quartz] \
-     [--quartz-pages]
+     [--quartz-pages] \
+     [--repo-url="$(gh repo view --json url -q .url)"]
    ```
 
    If the user answered the theme prompt with non-blank text, add `--theme` to the **New repository**
@@ -100,8 +110,8 @@ Confirm the following with the user (use the default value if there is no answer
    as a bare double-quoted string (Issue #375 — the theme prompt answer is free-form text the user
    typed, and if it contains shell metacharacters such as `` ` ``, `$(...)`, or `"`, a plain
    `--theme="<theme text>"` embedding could let those characters be interpreted by the shell instead of
-   passed through literally; see `docs/DesignDoc-skills.md` §11.7 for the general rule this follows,
-   already used for `gh pr create --body` elsewhere in these Skills). This form also sidesteps the
+   passed through literally; this is the general rule for free-form text in CLI arguments, already
+   used for `gh pr create --body` elsewhere in these Skills). This form also sidesteps the
    argparse leading-dash misparse that an older revision of this file worked around with the
    `--theme="<text>"` `=`-joined convention — a heredoc-produced value is always a single `--theme=...`
    shell word regardless of what the text starts with:
@@ -121,19 +131,34 @@ Confirm the following with the user (use the default value if there is no answer
    ```
 
    Do not pass `--targets` — it is no longer collected in the Prerequisites step, so `config.yml` is always
-   generated with `targets: []`. The translation pipeline itself is Phase 4 scope and not yet implemented
-   (`docs/DesignDoc-pipeline.md` §6.4); once it lands, users configure `targets` by hand-editing `config.yml`.
+   generated with `targets: []`. The translation pipeline itself is Phase 4 scope and not yet
+   implemented; once it lands, users configure `targets` by hand-editing `config.yml`.
    Only pass `--quartz` if the user answered Y to the Quartz local build/preview confirmation (4a).
    Only pass `--quartz-pages` if the user additionally answered Y to the GitHub Pages confirmation
    (4b) — never pass `--quartz-pages` without `--quartz` (`init.py` rejects that combination with
    exit code 1; sub-step 4b is only ever asked when 4a was already Y, so this should not occur in
    practice, but the check exists as a safety net in `init.py` itself).
+   Always pass `--repo-url` whenever you pass `--quartz`, and only then (it is what fills in the
+   footer's GitHub link in `quartz.config.yaml`; without `--quartz` that file is never generated and
+   the flag does nothing). It is not gated on any user answer — omitting it on a repository that does
+   have a GitHub remote silently ships a footer with no link to the wiki's own repository.
+   Write it exactly as the `$(gh repo view --json url -q .url)` command substitution shown above rather
+   than pasting a URL you resolved yourself — the value then never passes through you, and a repository
+   with no GitHub remote makes `gh` fail and the substitution expand to the empty string, which
+   `init.py` treats the same as omitting the flag. **In that no-remote case, `init.py` drops the footer's
+   GitHub entry entirely** rather than leaving the upstream Quartz URL or a literal placeholder there
+   (Issue #557); the footer still renders, without a links list. `init.py` reports this with a
+   `NOTE: quartz.config.yaml: no --repo-url resolved ...` line — when you see it, tell the user, and
+   that they can add the link by hand in `quartz.config.yaml` once the repository has a remote.
+
    Add `--repo-root <path>` if a non-default repository root was specified.
 
    When `--quartz` is given, in addition to `.lychee.toml` / `.markdownlint.json`, it also generates
    `quartz.config.yaml` / `package.json` / `prebuild-symlinks.cjs` / `repair-plugin-builds.cjs`
    (Issue #382 — retries any Quartz community plugin whose build failed after a successful clone,
    since Quartz's own installer marks that state "installed" and never retries it on its own)
+   / `install-local-plugins.cjs` (Issue #434 — run by `package.json`'s `postinstall`, so leaving it
+   uncommitted makes every fresh-clone `npm install` die with MODULE_NOT_FOUND; Issue #556)
    / `quartz-plugins/`
    (a custom plugin providing the review_status banner and JSON-LD embedding, including the pre-built `dist/`)
    / `.github/ISSUE_TEMPLATE/report.md` (backs the banner's "Report an issue" link, Issue #339)
@@ -213,8 +238,7 @@ Confirm the following with the user (use the default value if there is no answer
         ...
       ```
 
-      Each `--property` value goes through its own quote-delimited heredoc (`docs/DesignDoc-skills.md`
-      §11.7) — these are candidate names this step itself just proposed, not values an earlier script
+      Each `--property` value goes through its own quote-delimited heredoc — these are candidate names this step itself just proposed, not values an earlier script
       already verified.
 
       If the script reports `<Type>` itself as `ERROR:`, drop this type silently and move to the next
@@ -222,10 +246,19 @@ Confirm the following with the user (use the default value if there is no answer
       script reports as `ERROR:` — never put an unverified property into the new schema file's `properties:` block.
 
    v. Write `.wikicommit/schema/<Type>.md` directly with the Write tool, in the standard-type format
-      (`docs/DesignDoc-data.md` §5.2, Issue #495's `properties:`-nested layout), using `.wikicommit/schema/default.md` and
+      (Issue #495's `properties:`-nested layout), using `.wikicommit/schema/default.md` and
       `.wikicommit/schema/Person.md` (both just written by `init.py`) as the fixed style references. Set
-      `wikicommit.provenance: init-theme` in the new file's `wikicommit:` block (`docs/DesignDoc-data.md`
-      §5.2, including the "don't copy `Person.md`'s own `provenance: default`" caveat). This
+      `wikicommit.provenance: init-theme` in the new file's `wikicommit:` block (do not copy
+      `Person.md`'s own `provenance: default` value — each write site stamps its own origin). Where
+      another **installed** type — a base type `init.py` just wrote, or one approved earlier in this same
+      step — is the better home for a recognizable class of subject, say so
+      as its own `granularity` rule and name that type — e.g. `Prefer schema:HowTo when the source's
+      substance is an ordered set of steps the resident performs`. `granularity` is where cross-type
+      deference lives (there is no separate field for it) and `wikicommit-generate` Pass 2c follows such a
+      line over its own read of the fit (Issue #569); it is not the same as the `Boundary` rule, which
+      says what the type is *not* rather than who should have it instead. **This exact line, written at
+      this exact step, is the one that went unfollowed in `wikicommit/saitama-city-wiki`** — so write it
+      where it applies, and know that it only works if Pass 2c honors it. Every `granularity` bullet has to survive YAML parsing as a plain **string**: write a boundary rule as `Boundary — …` with an em dash rather than `Boundary: …`, and keep ` #` out of the middle of an unquoted bullet. The two fail differently. A `": "` turns the bullet into a one-key mapping, which consumers that filter on `isinstance(g, str)` skip entirely — `check_property_wikilink_reinforcement.py` at least warns that it did so. A ` #` opens a YAML comment and truncates the rest of the line; the bullet is still a string, so nothing warns at all and the dropped half is simply gone. Nothing validates a schema file and no Skill can edit it afterwards, so either shape is merged and stays broken (Issue #649). Wrap the whole bullet in double quotes if the wording needs either character. This
       is the one narrow exception to the "the agent must not write to `.wikicommit/schema/` directly"
       rule in Notes below — it only ever *adds* a file that isn't there yet (step ii's on-disk re-scan is
       what makes this guarantee actually hold), never edits or overwrites one `init.py` wrote. No PR is
@@ -419,9 +452,8 @@ Confirm the following with the user (use the default value if there is no answer
    from "top-level dependencies only".
 
    e. Otherwise (package.json was not skipped), determine Quartz v5's setup status and run
-      `npm install` if needed by calling the setup-state script (script delegation pattern — see
-      `docs/DesignDoc-skills.md` §11.5; this replaces a multi-branch `test -d` decision that
-      previously had to be walked as prose, see #229):
+      `npm install` if needed by calling the setup-state script (script delegation pattern; this
+      replaces a multi-branch `test -d` decision that previously had to be walked as prose, see #229):
 
       ```bash
       python .claude/skills/wikicommit-init/scripts/check_quartz_setup.py
@@ -448,9 +480,8 @@ Confirm the following with the user (use the default value if there is no answer
       Pages step above and the lychee step earlier in this section, it is unconditionally best-effort.
 
    Finally, render and print the complete "Next steps" guidance by calling the templating script
-   (script delegation pattern — see `docs/DesignDoc-skills.md` §11.5; this is what replaced the
-   three near-duplicate hardcoded guidance blocks that used to live here and pushed this file past
-   the 500-line recommendation, see #350):
+   (script delegation pattern; this is what replaced the three near-duplicate hardcoded guidance
+   blocks that used to live here and pushed this file past the 500-line recommendation, see #350):
 
    ```bash
    python .claude/skills/wikicommit-init/scripts/print_next_steps.py \
@@ -492,15 +523,15 @@ Confirm the following with the user (use the default value if there is no answer
 
 ## Notes
 
-- The README.md link suggestion in the `--quartz-pages` guidance (the final numbered step) is display-only, same as the `git add`/`commit`/`push` commands above it — the agent never edits README.md itself (Issue #282). Unlike `.wikicommit/config.yml` or the schema templates, README.md is very likely a pre-existing file with its own structure (especially when WikiCommit is added to an existing repository, see `docs/DesignDoc-data.md` §3.1), so an automatic insertion risks breaking it
+- The README.md link suggestion in the `--quartz-pages` guidance (the final numbered step) is display-only, same as the `git add`/`commit`/`push` commands above it — the agent never edits README.md itself (Issue #282). Unlike `.wikicommit/config.yml` or the schema templates, README.md is very likely a pre-existing file with its own structure (especially when WikiCommit is added to an existing repository), so an automatic insertion risks breaking it
 - Call `init.py`. Do not manually create directories in the agent itself (script delegation pattern)
-- Writing to `.wikicommit/schema/` is done by `init.py`. The agent must not write to it directly, with one narrow exception: step 3's obvious-type judgment (Issue #490, reviving a narrower version of the Issue #286 step Issue #404 removed) may write a new `.wikicommit/schema/<Type>.md` file the user approved there — it only ever adds a file that isn't already there, never edits or overwrites one `init.py` wrote. See `docs/DesignDoc-data.md` §3.3 for how this entry point's evidence and approval bar differ from `wikicommit-generate` Pass 2b (Issue #315) and `wikicommit-collect`'s Type Proposal step (Issue #489) — the three are not redundant with each other, and that section is the single source of truth for the role split (do not re-derive it here)
+- Writing to `.wikicommit/schema/` is done by `init.py`. The agent must not write to it directly, with one narrow exception: step 3's obvious-type judgment (Issue #490, reviving a narrower version of the Issue #286 step Issue #404 removed) may write a new `.wikicommit/schema/<Type>.md` file the user approved there — it only ever adds a file that isn't already there, never edits or overwrites one `init.py` wrote. This is the first and weakest of three type-proposal entry points — it judges from the `theme` sentence alone, before any source has been read, so its approval bar is the strictest of the three; `wikicommit-collect`'s Type Proposal step (Issue #489) judges from candidate titles and search summaries, and `wikicommit-generate` Pass 2b (Issue #315) judges from the full source text. All three skip types that already have a file under `.wikicommit/schema/`, so they are not redundant with each other
 - `init.py` does not fetch the Quartz v5 core (`quartz/` directory) automatically. Adding the git submodule involves network and git operations, so the user must run it manually per the next-steps guidance above
 - The `git add` / `git commit` / `git push` commands shown in the next-steps guidance above are display commands meant for the user to copy and run themselves. The agent must never run them on the user's behalf (writes to `main` and `.wikicommit/schema/` are prohibited for the LLM)
 - The `gh api repos/{owner}/{repo}/pages` call in step 3 only runs when `--quartz-pages` was specified (Issue #335 — `--quartz` alone sets up local build/preview only and never touches GitHub Pages). It is a GitHub *repository setting* change (enabling Pages), not a write to `main` or to the wiki content, so the agent runs it directly — unlike the `git add`/`commit`/`push` commands above, it does not need to be deferred to the user. It is unconditionally best-effort: any failure (missing remote, unauthenticated `gh`, plan restriction, permissions) falls back to printed manual instructions and never aborts `wikicommit-init`
 - The `gh api repos/{owner}/{repo}/actions/permissions/workflow` calls in step 3 (enabling "Allow GitHub Actions to create and approve pull requests") run unconditionally, regardless of `--quartz`/`--quartz-pages` — unlike the Pages setting immediately above, this one backs `review-issue-close-sync.yml`, which every variant generates (Issue #313). It is the same kind of GitHub *repository setting* change as the Pages call, not a write to `main` or the wiki content, so the agent runs it directly and does not defer it to the user. It is unconditionally best-effort (Issue #403 — discovered via a repository where the review-Issue-close auto-merge flow had never once completed successfully; this was one of three compounding causes, alongside the `closed_by` webhook payload and missing `issues: read` permission fixed directly in the `review-issue-close-sync.yml` template): any failure (missing remote, unauthenticated `gh`, insufficient token scope) falls back to printed manual instructions and never aborts `wikicommit-init`. The GET-before-PUT check exists to make the change idempotent and to avoid silently overwriting the unrelated `default_workflow_permissions` field the same API endpoint also controls
 - The `lychee --version` / `cargo install lychee` calls in step 3 only install a local dev tool — they touch neither Git nor `main` — so the agent runs them directly and unconditionally (no prior user confirmation needed, unlike the Quartz Y/n prerequisite). Like the GitHub Pages step, this is best-effort: any failure (`cargo` missing, network unreachable) falls back to the printed manual instructions and never aborts `wikicommit-init`
-- The `markitdown --version` / `pip install 'markitdown[pdf]'` calls in step 3 mirror the lychee handling above — a local Python package install that touches neither Git nor `main`, so the agent runs them directly and unconditionally, independently of the lychee outcome. `pip` (not `cargo`) is used because `markitdown` is a Python package and this project assumes a Python environment throughout (`docs/DesignDoc-ScriptSpec.md`). It is best-effort: any failure (`pip` missing, network unreachable) falls back to the printed manual instructions and never aborts `wikicommit-init` (Issue #208 — `markitdown` became a required dependency for `wikicommit-generate`'s `type: url` / `type: wikicommit` extraction path in Issue #189, but `wikicommit-init` had no corresponding install-assist step, unlike lychee; the `[pdf]` extra was added in Issue #242 once `.pdf` (text-based) extraction started using `markitdown` as its own fallback when the `pdf` skill is unavailable)
+- The `markitdown --version` / `pip install 'markitdown[pdf]'` calls in step 3 mirror the lychee handling above — a local Python package install that touches neither Git nor `main`, so the agent runs them directly and unconditionally, independently of the lychee outcome. `pip` (not `cargo`) is used because `markitdown` is a Python package and this project assumes a Python environment throughout. It is best-effort: any failure (`pip` missing, network unreachable) falls back to the printed manual instructions and never aborts `wikicommit-init` (Issue #208 — `markitdown` became a required dependency for `wikicommit-generate`'s `type: url` / `type: wikicommit` extraction path in Issue #189, but `wikicommit-init` had no corresponding install-assist step, unlike lychee; the `[pdf]` extra was added in Issue #242 once `.pdf` (text-based) extraction started using `markitdown` as its own fallback when the `pdf` skill is unavailable)
 - The `check_quartz_setup.py` call in step 3.d (when `--quartz` was specified, and only if `init.py` actually generated `package.json` rather than skipping a pre-existing one — see step 3 above) mirrors the lychee "check first, only act if needed" pattern, now delegated to a script rather than agent-read prose (#229): the script's own `node_modules` / `quartz/node_modules` pre-check avoids re-running a possibly slow `npm install` when a `--no-overwrite` re-init finds Quartz v5 already fully set up, and it runs `npm install` itself when needed. `npm install` is a local, network-only-for-fetching-packages operation — it touches neither Git history nor `main` (git operations it may trigger via `postinstall`, namely `git submodule update`, only affect the working tree, not `main`) — so the agent runs the script directly without prior user confirmation, same as lychee. The `package.json` template's `postinstall` hook guards on `quartz/`'s existence before installing the submodule's own dependencies (Issue #214 — previously it crashed with an uncaught `ENOENT` on every first-time `wikicommit-init --quartz` run, before the user had manually run `git submodule add`), so `npm install` now exits 0 either way; the script distinguishes "fully set up" from "top-level dependencies only" by checking for `quartz/` afterward, not by `npm install`'s exit code, and reports both outcomes as the same top-level JSON contract so the agent no longer needs to branch on exit codes itself. It is still best-effort end to end: any `npm install` failure (`npm`/Node.js not installed, network unreachable, malformed `package.json`) is reported as one of the `npm_install_failed_*` statuses, which map to keeping `npm install` in the printed manual instructions; the script always exits 0 and never aborts `wikicommit-init`
 - `print_next_steps.py` (step 3's final call, Issue #350) owns the "Next steps" guidance text itself — which lines to show/omit/reword is fully determined by the flags the preceding sub-steps already computed (variant, install statuses, GitHub Pages `html_url`, Quartz setup status), so encoding that branching in Python once instead of three hand-maintained near-duplicate prose blocks in this file is the same script delegation trade-off as `check_quartz_setup.py` above. It only ever formats and prints text to stdout — it never touches Git, `main`, or `.wikicommit/schema/`, so the agent runs it directly and prints its output to the user verbatim, same as the other auto-run steps in step 3
 - The "Set up Quartz v5" guidance line (`print_next_steps.py`'s `_QUARTZ_SETUP_FULL`/`_QUARTZ_SETUP_NPM_ONLY`) appends `npm run install-plugins` after `git submodule add` / `npm install`, with a note that the first run commonly takes several minutes (Issue #353). `check_quartz_setup.py` cannot auto-run this itself on a first-time init: at the point it runs, the user has not yet run `git submodule add`, so `quartz/` does not exist and `cd quartz && npx quartz plugin install` has nothing to operate on. Folding it into the same manual guidance block as `git submodule add`/`npm install` instead means the user pays this cost once, right after adding the submodule, rather than it landing silently on whichever `/wikicommit-serve` run happens to call `npm run install-plugins` first (previously this was `/wikicommit-serve --build`, a Skill designed to be a lightweight, Git-free sanity check — see Issue #276 — timing out under Bash's default 5-minute foreground limit)

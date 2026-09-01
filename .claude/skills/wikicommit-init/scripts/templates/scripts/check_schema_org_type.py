@@ -15,11 +15,19 @@ Usage:
     python .wikicommit/scripts/check_schema_org_type.py --type <TypeName> [--property <PropertyName>]... [--show-range]
     python .wikicommit/scripts/check_schema_org_type.py --type <TypeName> --list-properties
     python .wikicommit/scripts/check_schema_org_type.py --list-types
+    python .wikicommit/scripts/check_schema_org_type.py --list-installed-hierarchy
 
 `--list-types` prints every Schema.org type name and its one-line
 description (tab-separated) — this is what wikicommit-generate Pass 2 uses
-to preload the full vocabulary into the LLM's context (docs/DesignDoc-skills.md
-§11.6), rather than a script trying to guess "the right type" itself.
+to preload the full vocabulary into the LLM's context, rather than a script
+trying to guess "the right type" itself.
+
+`--list-installed-hierarchy` (Issue #565) prints one line per Schema.org type
+installed in `.wikicommit/schema/`, tab-separated: the type, then its
+*installed* ancestor types nearest-first (or `-`) — this is what
+wikicommit-generate Pass 2c uses to prefer the most specific installed type,
+since an ancestor type always fits and would otherwise win by familiarity.
+Like `--list-types` it takes no other arguments and ignores them if given.
 
 `--show-range` (Issue #496) adds one `RANGE:` line per verified `--property`,
 reporting whether that property's Schema.org `rangeIncludes` points at
@@ -44,8 +52,9 @@ per-type template file (rejected design, see the Issue's background — that
 would double-manage the same data schemaorg-vocab.json already holds and
 defeats the schema layer's whole point of narrowing the field, not listing
 everything). Takes priority over `--property`/`--show-range` when both
-`--type` and `--list-properties` are given; `--list-types` takes priority
-over everything if given alongside `--type`.
+`--type` and `--list-properties` are given; `--list-types` and then
+`--list-installed-hierarchy` take priority over everything if given
+alongside `--type`.
 
 Vocabulary loading/caching (.wikicommit/schemaorg-vocab.json) and the
 domainIncludes/rangeIncludes/rdfs:subClassOf ancestry logic live in the
@@ -54,10 +63,10 @@ also used by validate_frontmatter.py's `properties:` field validation.
 
 Exit code: 0 = the type (and every given property) exists and, for
 properties, belongs to the type or one of its ancestor types; or --list-types/
---list-properties completed. 1 = the type does not exist, a property does not
-exist or does not belong to the type lineage, the vocabulary could not be
-fetched/parsed, --list-properties was given without --type, or neither
---type nor --list-types was given.
+--list-installed-hierarchy/--list-properties completed. 1 = the type does not
+exist, a property does not exist or does not belong to the type lineage, the
+vocabulary could not be fetched/parsed, --list-properties was given without
+--type, or none of --type/--list-types/--list-installed-hierarchy was given.
 """
 
 import argparse
@@ -66,6 +75,7 @@ import sys
 from _schemaorg_vocab import (
     ancestors,
     entity_range_candidates,
+    installed_standard_types,
     load_or_build_index,
     properties_available_to,
     property_in_domain,
@@ -78,6 +88,34 @@ def _list_types(types: dict[str, dict]) -> int:
         comment = types[name].get("comment", "").strip()
         print(f"{name}\t{comment}")
     print(f"SUMMARY: types={len(types)}")
+    return 0
+
+
+def _list_installed_hierarchy(types: dict[str, dict]) -> int:
+    """Print the subClassOf relations that hold *among the installed types* (Issue #565).
+
+    wikicommit-generate Pass 2c is handed the installed type list and each type's
+    granularity, and nothing in that tells it `Park` is a kind of `Place`. Writing a
+    park as a `Place` is not wrong — an ancestor type always fits — so the coarser,
+    more familiar type wins by default and the installed `Park.md` goes unused
+    (`wikicommit/saitama-city-wiki` generated seven parks as `Place` with `Park.md`
+    installed in the same batch). This relation is derivable from the vocabulary, so
+    it is computed here rather than left to the model to recall.
+
+    One line per installed type, tab-separated: the type, then its installed
+    ancestors (nearest first) or `-`. Types with no installed ancestor are listed
+    too, so the output doubles as the installed-type roster.
+    """
+    installed = installed_standard_types()
+    for name in sorted(installed):
+        chain = [
+            other for other in sorted(installed)
+            if other != name and other in ancestors(name, types)
+        ]
+        # Nearest ancestor first: the deeper a type sits, the more specific it is.
+        chain.sort(key=lambda other: len(ancestors(other, types)), reverse=True)
+        print(f"{name}\t{', '.join(chain) if chain else '-'}")
+    print(f"SUMMARY: installed_types={len(installed)}")
     return 0
 
 
@@ -145,6 +183,11 @@ def main() -> int:
         help="Print every Schema.org type name and description, then exit (ignores --type/--property).",
     )
     parser.add_argument(
+        "--list-installed-hierarchy", action="store_true",
+        help="Print each Schema.org type installed in .wikicommit/schema/ with its "
+        "installed ancestor types, then exit (Issue #565). Takes no other arguments.",
+    )
+    parser.add_argument(
         "--show-range", action="store_true",
         help="For each verified --property, also print a RANGE: line classifying its rangeIncludes "
         "as entity/DataType/mixed (Issue #496). Informational only — never affects the exit code.",
@@ -168,11 +211,14 @@ def main() -> int:
     if args.list_types:
         return _list_types(types)
 
+    if args.list_installed_hierarchy:
+        return _list_installed_hierarchy(types)
+
     if not args.type:
         if args.list_properties:
             print("ERROR: --list-properties には --type の指定が必要です")
             return 1
-        print("ERROR: --type または --list-types のいずれかを指定してください")
+        print("ERROR: --type / --list-types / --list-installed-hierarchy のいずれかを指定してください")
         return 1
 
     type_name = strip_prefix(args.type)

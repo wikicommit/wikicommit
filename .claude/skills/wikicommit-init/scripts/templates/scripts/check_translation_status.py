@@ -21,7 +21,16 @@ from pathlib import Path
 import yaml
 
 from _frontmatter import parse_frontmatter_or_warn as _parse_frontmatter
-from _wikilink import ENTITY_DIR, parse_wiki_path, resolve_stored_entity_path
+from _wikilink import (
+    ENTITY_DIR,
+    VIEW_DIR,
+    collect_entity_pages,
+    collect_view_pages,
+    parse_view_path,
+    parse_wiki_path,
+    resolve_stored_entity_path,
+    view_page_path,
+)
 
 
 def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
@@ -48,9 +57,10 @@ def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
 
 
 def collect_translation_pages() -> list[Path]:
-    if not ENTITY_DIR.exists():
-        return []
-    return sorted(p for p in ENTITY_DIR.rglob("*.md") if "assets" not in p.parts)
+    # View pages (Issue #675) are translated on the same terms as entity
+    # pages — they carry `lang`, and `translated_from` marks a translation
+    # of one the same way — so both trees are walked.
+    return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 
 def load_translation_targets(repo_root: Path = Path(".")) -> list[str]:
@@ -121,12 +131,13 @@ def check_translation_status(targets: list[str]) -> tuple[int, int, int]:
         # Source page (no translated_from): check for UNTRANSLATED targets.
         if not targets:
             continue
-        if page.name == "index.md":
-            continue
         if fm.get("status") == "removed":
             continue
 
         parsed = parse_wiki_path(page, ENTITY_DIR)
+        is_view = parsed is None
+        if is_view:
+            parsed = parse_view_path(page, VIEW_DIR)
         if parsed is None:
             continue
         lang, type_name, slug = parsed
@@ -134,7 +145,13 @@ def check_translation_status(targets: list[str]) -> tuple[int, int, int]:
         for target in targets:
             if target == lang:
                 continue
-            target_page = ENTITY_DIR / target / type_name / f"{slug}.md"
+            # A view page's translation sits at <view>/<target>/<slug>.md —
+            # there is no Type directory to mirror (Issue #675).
+            target_page = (
+                view_page_path(target, slug, VIEW_DIR)
+                if is_view
+                else ENTITY_DIR / target / type_name / f"{slug}.md"
+            )
             if not target_page.exists():
                 print(f"UNTRANSLATED: {page} (target: {target})")
                 print(f"page: {page}")

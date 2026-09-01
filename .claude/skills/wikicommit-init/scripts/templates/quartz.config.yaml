@@ -6,8 +6,15 @@
 #   git submodule add https://github.com/jackyzha0/quartz.git quartz
 # 詳細は README または .github/workflows/deploy.yml を参照してください。
 configuration:
+  # これら 2 つは同じサイト名を持ちます。**片方だけ変えないでください。**
+  # 別々の場所に届くため、どちらか一方では読者に名前が伝わりません:
+  #   pageTitle       → 左サイドバーの見出しと OGP の og:site_name
+  #   pageTitleSuffix → ブラウザのタブ（<title>）・og:title・twitter:title
+  # Quartz 本体の Head.tsx は <title> を「そのページの frontmatter title + この
+  # suffix」だけで組み立てるため、suffix が空だとどのページのタブにも
+  # サイト名が出ません（トップページなら "Wiki" とだけ表示されます）。
   pageTitle: {PAGE_TITLE}
-  pageTitleSuffix: ""
+  pageTitleSuffix: {PAGE_TITLE_SUFFIX}
   enableSPA: true
   enablePopovers: true
   analytics: null
@@ -150,7 +157,21 @@ plugins:
     layout:
       position: left
       priority: 50
-  - source: github:quartz-community/graph
+  # 素の graph（github:quartz-community/graph）の D3Config は
+  # drag / zoom / depth / scale / repelForce / centerForce / linkDistance /
+  # fontSize / opacityScale / removeTags / showTags / focusOnHover / enableRadial が
+  # すべてで、ページ単位の除外・言語フィルタ・型フィルタ・次数フィルタをいずれも
+  # 持たない。しかもこれらはビルド時に data-cfg 属性へ JSON として焼き込まれるため
+  # UI から変えられない。多言語 Wiki では言語ごとに塊ができ、言語中立な tags が
+  # その塊を繋ぐ唯一の橋としてハブ化して他のリンクを埋もれさせる、という症状が
+  # `ai-driven-dev-wiki` パイロットで実際に確認された（Issue #584）。
+  # 808行の graph.inline.ts には D3 force simulation / PixiJS 本体があるが、
+  # 絞り込みのチョークポイント（neighbourhood 確定後・nodes 構築前）が1箇所に
+  # 集約されており、設定も renderGraph() の中で毎回読み直されるため、
+  # そこへフィルタを差し込み data-cfg を書き換えて再レンダーするだけで済む。
+  # グローバルグラフにのみコントロールバーを出す（ローカルグラフは depth >= 0 の
+  # BFS で neighbourhood を組むため、後から要素を削ると経路が切れて孤児が残る）。
+  - source: ../quartz-plugins/wikicommit-graph
     enabled: true
     layout:
       position: right
@@ -247,9 +268,14 @@ plugins:
   - source: github:quartz-community/footer
     enabled: true
     options:
+      # init.py fills the GitHub entry below in with this repository's own URL, so
+      # the footer link lands on the wiki the reader is looking at rather than on
+      # upstream Quartz (Issue #557) — the same treatment pageTitle gets above. When
+      # no GitHub remote can be resolved it drops the entry instead, leaving an empty
+      # mapping. Quartz's own attribution is rendered by the footer plugin itself and
+      # is unaffected either way. Edit the URL here if the remote later changes.
       links:
-        GitHub: https://github.com/jackyzha0/quartz
-        Discord Community: https://discord.gg/cRFFHYye7t
+        GitHub: {REPO_URL}
   - source: github:quartz-community/recent-notes
     enabled: false
   - source: github:quartz-community/spacer
@@ -271,7 +297,7 @@ plugins:
   # actual frontmatter parser (not just the properties panel display), so it
   # must not be disabled. The only behavioral change from upstream is that
   # `properties`, WikiCommit's nested Schema.org property block
-  # (docs/DesignDoc-data.md §4.1, Issue #495), is now flattened into
+  # (Issue #495), is now flattened into
   # individual rows instead of rendering as one raw JSON dump — see
   # getVisibleProperties() in wikicommit-properties/src/transformer.ts.
   - source: ../quartz-plugins/wikicommit-properties
@@ -327,14 +353,28 @@ layout:
         left: []
         right: []
     content: {}
+    # folder / tag は Quartz 自身が content/ のディレクトリ構造とページの tags から
+    # 生成するページで、対応する .md の実体がどこにも書き出されない。WikiCommit が
+    # 書き出すナビゲーションページ（root index・content/sources/・Type 別インデックス）は
+    # 書き出し側で review_status: reviewed をスタンプすることでバナーを抑止しているが
+    # （Issue #407・#476・#580）、この2種にはスタンプする書き出し側が存在しないため、
+    # WikiCommitBanner の review_status フォールバック（未設定なら pending。LLM 生成
+    # ページでの書き漏れを安全側へ倒すための意図的な設計）が効いて「⚠️ このページは
+    # 未レビューです / LLM が自動生成しました」が機械生成の目次に表示される。常時表示の
+    # 報告リンクも同様に、目次に対して「この内容に問題があれば報告」を出してしまう。
+    # コンポーネント側でページ種別を判定する案は採らない — WikiCommitBanner は
+    # fileData.slug === "index" のような Quartz のスラッグ命名規約に依存しない方針で
+    # 書かれており、レイアウト設定だけで完結するこちらが整合する（Issue #648）。
     folder:
       exclude:
         - reader-mode
+        - wikicommit-banner
       positions:
         right: []
     tag:
       exclude:
         - reader-mode
+        - wikicommit-banner
       positions:
         right: []
     canvas: {}

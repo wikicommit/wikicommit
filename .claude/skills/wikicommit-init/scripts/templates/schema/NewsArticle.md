@@ -9,7 +9,7 @@ wikicommit:
     - Prefer creating pages for the underlying entities the article describes (e.g. a company, a product, a person) over the article itself when the article's only content is routine coverage of an entity that already has (or should have) its own page
     - author lists multiple names; link each author who independently qualifies for their own [[Person/slug]] page with a WikiLink, and list others as plain text
     - publisher names a publishing organization; link it with a WikiLink to [[Organization/slug]] the same way author is when it independently qualifies for its own page, and write it as plain text otherwise
-    - Boundary with BlogPosting/ScholarlyArticle: a NewsArticle is journalistic reporting by a news publisher/outlet on an event or development (who/what/when, sourced from reporting) — not a peer-reviewed or preprint academic work (use ScholarlyArticle) and not an individual's or company's own blog/opinion writing (use BlogPosting), even when hosted on a news site's blog section
+    - Boundary with BlogPosting/ScholarlyArticle — a NewsArticle is journalistic reporting by a news publisher/outlet on an event or development (who/what/when, sourced from reporting) — not a peer-reviewed or preprint academic work (use ScholarlyArticle) and not an individual's or company's own blog/opinion writing (use BlogPosting), even when hosted on a news site's blog section
 title: ""
 type: "schema:NewsArticle"
 lang: ""
@@ -26,7 +26,13 @@ properties:
 (2-3 paragraph overview: what the article reports and why it matters)
 
 ## Key Points
-(the article's central facts, figures, or claims, in list or prose form)
+(one claim per bullet, each a single fact, figure, or claim the article itself reports.
+Not prose spanning several sentences: a claim that cannot be lifted out on its own
+cannot be set beside one on another page, which is what this section exists for. Keep
+each bullet to what this article states — something it only attributes to another
+outlet is that outlet's claim, and its dates and details are not established facts
+here. Where the only backing is one named source, or the subject's own statement, say
+so in the same bullet)
 
 ## Context
 (how this relates to other reporting or events; limitations of a single-source account)

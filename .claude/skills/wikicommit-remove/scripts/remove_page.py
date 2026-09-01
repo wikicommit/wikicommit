@@ -3,9 +3,10 @@
 
 対象ページに status: removed / removed_at / removed_reason（/ merged_into）を付与する。
 対象ページを親（translated_from）に持つ翻訳ページも同時に検出して同様に処理する。
-影響を受けた Type ディレクトリの index.md から該当エントリを削除する。
+影響を受けた Type ディレクトリ（view ページの場合は言語ディレクトリ）の index.md から
+該当エントリを削除する。
 
-物理ファイル削除は行わない（DesignDoc-data.md §4.5 のソフト削除設計）。
+物理ファイル削除は行わない（status: removed によるソフト削除設計のため）。
 
 Usage:
     python remove_page.py <page> --reason <obsolete|merged|gdpr> [--merged-into <path>] [--today=YYYY-MM-DD]
@@ -37,8 +38,8 @@ def normalize_entity_prefix(raw_path: str) -> str:
     prefix to the current `.wikicommit/entity/` one, for comparing a
     translation page's `translated_from` against a freshly-computed
     `.wikicommit/entity/...` path regardless of which prefix the stored
-    value happens to use (no auto-migration — docs/DesignDoc-data.md §4.3's
-    coexistence precedent). Mirrors .wikicommit/scripts/_wikilink.py's
+    value happens to use (old and new forms are allowed to coexist rather than
+    being auto-migrated). Mirrors .wikicommit/scripts/_wikilink.py's
     helper of the same name — duplicated here rather than imported because
     this Skill script runs as a subprocess and can't assume
     .wikicommit/scripts/ is resolvable relative to its caller's cwd."""
@@ -128,6 +129,49 @@ def parse_wiki_path(path: Path, entity_dir: Path) -> tuple[str, str, str] | None
     return lang, type_name, slug
 
 
+# view ツリー（Issue #675）。`.wikicommit/scripts/_wikilink.py` の同名の定数・関数の複製で、
+# normalize_entity_prefix() と同じ理由による — このスクリプトはサブプロセスとして実行され、
+# 呼び出し元の cwd から `.wikicommit/scripts/` が解決できるとは限らない。
+VIEW_TYPE_SEGMENT = "View"
+
+
+def parse_view_path(path: Path, view_dir: Path) -> tuple[str, str, str] | None:
+    """`.wikicommit/view/<lang>/<slug>.md` から (lang, "View", slug) を導出する。
+
+    view ページは Type ディレクトリを持たないため、2 セグメント以外は None を返す。
+    """
+    try:
+        rel = path.resolve().relative_to(view_dir.resolve())
+    except (ValueError, OSError, RuntimeError):
+        return None
+    parts = rel.parts
+    if len(parts) != 2 or not parts[1].endswith(".md"):
+        return None
+    return parts[0], VIEW_TYPE_SEGMENT, parts[1].removesuffix(".md")
+
+
+def find_view_translation_pages(view_dir: Path, target_rel: str, exclude: Path) -> list[Path]:
+    """target_rel を translated_from に持つ view ページの翻訳を全言語から探索する。
+
+    view ツリーには Type ディレクトリが無いため、entity 側の
+    `*/<Type>/*.md` に相当する glob は `*/*.md` になる。
+    """
+    if not view_dir.exists():
+        return []
+    results = []
+    for candidate in sorted(view_dir.glob("*/*.md")):
+        if candidate.name == "index.md" or candidate.resolve() == exclude.resolve():
+            continue
+        fm = parse_frontmatter(candidate)
+        translated_from = fm.get("translated_from")
+        if not translated_from:
+            continue
+        stored = normalize_entity_prefix(str(translated_from).strip().replace("\\", "/"))
+        if stored == target_rel:
+            results.append(candidate)
+    return results
+
+
 def find_translation_pages(entity_dir: Path, type_name: str, target_rel: str, exclude: Path) -> list[Path]:
     """target_rel を translated_from に持つ翻訳ページを同一 Type ディレクトリ横断で探索する。"""
     if not entity_dir.exists():
@@ -153,10 +197,16 @@ def find_translation_pages(entity_dir: Path, type_name: str, target_rel: str, ex
 
 
 def remove_index_entry(index_path: Path, type_name: str, slug: str) -> bool:
-    """index.md から `[[<type>/<slug>]] — ...` 行を削除する。削除した場合 True を返す。"""
+    """index.md から `[[<type>/<slug>]]` の行を削除する。削除した場合 True を返す。
+
+    rebuild_index.py が書く現在の書式は `- [[<type>/<slug>]]`（Issue #678。それ以前は
+    リストマーカーなしで、さらに ` — <title>` の接尾辞が付いていた）。ここは3形式すべてを
+    受けるため、先頭のリストマーカーを任意扱いにし、行末までを捨てる — 既存リポジトリの
+    index.md は次回 rebuild_index.py が走るまで旧書式のまま残る（遡及移行を行わない方針）。
+    """
     content = index_path.read_text(encoding="utf-8-sig")
     escaped = re.escape(f"[[{type_name}/{slug}]]")
-    pattern = re.compile(rf"^{escaped}.*\r?\n?", re.MULTILINE)
+    pattern = re.compile(rf"^[ \t]*(?:[-*+][ \t]+)?{escaped}.*\r?\n?", re.MULTILINE)
     new_content, count = pattern.subn("", content)
     if count:
         index_path.write_text(new_content, encoding="utf-8")
@@ -210,6 +260,7 @@ def main() -> int:
         today = datetime.date.today().isoformat()
 
     entity_dir = repo_root / ".wikicommit" / "entity"
+    view_dir = repo_root / ".wikicommit" / "view"
     fields = removed_fields(today, args.reason, merged_into)
 
     try:
@@ -227,6 +278,11 @@ def main() -> int:
         for translation_path in find_translation_pages(entity_dir, type_name, target_rel, exclude=page_path):
             apply_removed_fields_to_file(translation_path, fields)
             removed_paths.append(translation_path)
+    elif parse_view_path(page_path, view_dir) is not None:
+        target_rel = str(page_path.relative_to(repo_root)).replace("\\", "/")
+        for translation_path in find_view_translation_pages(view_dir, target_rel, exclude=page_path):
+            apply_removed_fields_to_file(translation_path, fields)
+            removed_paths.append(translation_path)
 
     for path in removed_paths:
         rel = str(path.relative_to(repo_root)).replace("\\", "/")
@@ -234,10 +290,16 @@ def main() -> int:
 
     for path in removed_paths:
         resolved = parse_wiki_path(path, entity_dir)
-        if resolved is None:
-            continue
-        lang, type_name, slug = resolved
-        index_path = entity_dir / lang / type_name / "index.md"
+        if resolved is not None:
+            lang, type_name, slug = resolved
+            index_path = entity_dir / lang / type_name / "index.md"
+        else:
+            resolved = parse_view_path(path, view_dir)
+            if resolved is None:
+                continue
+            # view ページの index は言語ディレクトリ直下にある（Type ディレクトリを挟まない）。
+            lang, type_name, slug = resolved
+            index_path = view_dir / lang / "index.md"
         if index_path.is_file():
             remove_index_entry(index_path, type_name, slug)
 

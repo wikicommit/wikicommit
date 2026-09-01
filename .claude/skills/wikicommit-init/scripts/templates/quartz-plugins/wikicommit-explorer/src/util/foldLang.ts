@@ -38,8 +38,8 @@ export function detectCurrentLang(slug: string): string | null {
  * Index of the sole language-code folder among `children`, or -1 if there
  * are zero or 2+ such folders. Used as a fallback for pages with no lang
  * segment in their slug (chiefly the root index page, slug "index"): with
- * exactly one language configured (the recommended `targets: []` setup —
- * see DesignDoc-data.md §3.3), that single folder should always be folded
+ * exactly one language configured (the recommended `targets: []` setup),
+ * that single folder should always be folded
  * so first-time visitors landing on the root page see the Type folders
  * directly instead of one extra click into a redundant lang folder (Issue
  * #246). With 2+ language folders this must stay -1: the visitor still has

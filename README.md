@@ -1,16 +1,17 @@
 # WikiCommit
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![CI](https://github.com/wikicommit/wikicommit/actions/workflows/test.yml/badge.svg)](https://github.com/wikicommit/wikicommit/actions/workflows/test.yml)
 [![GitHub Stars](https://img.shields.io/github/stars/wikicommit/wikicommit?style=social)](https://github.com/wikicommit/wikicommit)
 
 A Git-based knowledge management platform. An LLM generates wiki pages from your source documents, and after automated and human review, they're published as a static wiki. It's implemented as a set of SKILL.md files and runs as-is on whatever LLM environment you already subscribe to, such as Claude Code.
+
+**An LLM writes faster than one person can read, so review has to be splittable.** WikiCommit makes a single page the unit of review: one page is one tracking Issue, closed on its own. A reviewer reads that page and nothing else — not the rest of the knowledge base — and never has to wait on anyone else's review. That is what keeps a growing wiki from piling up behind one reader.
 
 > **Status**: Actively being validated through real-world use in pilot repositories; breaking changes may occur.
 
 ## What You Can Do
 
-- **Multi-person, asynchronous review**: After passing quality checks, pages are auto-merged and published, and review is split up per page — each reviewer just closes their Issue to finish.
+- **Multi-person, asynchronous review**: Pages are auto-merged and published once they pass the quality checks, so review never blocks publishing; each reviewer finishes by closing their page's Issue.
 - **Automated from source discovery to page generation**: Automatically discovers un-ingested related sources from local folders and the web. Register a PDF, URL, or file in your repository, and it generates wiki pages.
 - **GitOps**: Every change is recorded as a commit and PR. Auditing, rollback, and backup are all handled by `git log` alone.
 - **Q&A over the wiki (RAG)**: Answers questions using wiki pages as the starting point, and can trace back to the primary sources to cite them when needed.
@@ -49,6 +50,16 @@ Wikis that are actually running in production:
 ### Step 1: Register a source + generate wiki pages
 
 **(Optional) If you haven't decided which sources to ingest yet**: Running `/wikicommit-collect` discovers and lists candidate related sources — not yet ingested — from local folders and the web, based on the `theme` in `config.yml`. In light of copyright and license risks, only the candidates that a human reviews and selects are registered. Selected sources are then treated the same as `/wikicommit-generate`.
+
+**Which sources to take in** is written in `.wikicommit/source-policy.md`, created by `/wikicommit-init`. It holds the rules in prose (`prefer primary sources`, `no promotional material`) plus a few lists: domains never to fetch, sources already turned down, and domains to read but never register.
+
+**Whether a relevant subject may be written about at all** is a separate question, and lives in `.wikicommit/entity-policy.md` (also created by `/wikicommit-init`). `theme` decides relevance; this file decides permissibility — a living person at the centre of your subject scores highest on relevance and may still be someone you do not want a page about. It ships inert, with one switch (`exclude_living_persons`, off by default) and room for prose covering anything else you want kept out (private individuals, minors, matters under dispute, your own unreleased information). It applies when a page is generated and does not reach back; use `/wikicommit-remove` for a page that already exists.
+
+That last one matters when an encyclopedia covers your subject. A page written from one encyclopedia article and nothing else tends to be a shorter version of that article, without its footnotes — and if the article is share-alike licensed, your page inherits that obligation. Listing the domain under `index_only:`, or passing `--index <url>`, makes `/wikicommit-collect` read the article's **citations** and offer those primary sources instead; the article itself is never registered. Take the structural overview from a primary source, use the encyclopedia to find out what exists, and register an encyclopedia article outright only where no primary source does — which keeps the pages carrying a share-alike obligation few and deliberate.
+
+```
+/wikicommit-collect --index https://en.wikipedia.org/wiki/<subject>
+```
 
 ```
 /wikicommit-generate <path|url>
@@ -110,16 +121,20 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 ```bash
 # Method 1: npx skills add (recommended; compliant with the agentskills.io standard; requires Node.js)
 # Running it bare opens an interactive picker; it does not install everything silently.
-npx skills add wikicommit/wikicommit
+# --copy is recommended -- see the note below.
+npx skills add wikicommit/wikicommit --copy
 
 # To install only a specific Skill
-npx skills add wikicommit/wikicommit --skill wikicommit-generate
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --copy
 
 # To install multiple specific Skills at once (repeat --skill)
-npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge --copy
 
 # To install every Skill without prompts (when in doubt, this is a safe choice)
-npx skills add wikicommit/wikicommit --all
+# Note: do not combine bare --all with --copy. --all is shorthand for
+# --skill '*' --agent '*' -y, so with --copy it writes a full copy of every Skill
+# into all ~50 supported agent directories; pin the agent instead.
+npx skills add wikicommit/wikicommit --skill '*' --agent claude-code -y --copy
 
 # Method 2: install.sh (simpler, no Node.js required; clone wikicommit anywhere,
 # then run it from the root of your target wiki repository)
@@ -127,6 +142,20 @@ git clone --depth 1 https://github.com/wikicommit/wikicommit.git /tmp/wikicommit
 cd /path/to/your-wiki-repo
 bash /tmp/wikicommit/install.sh
 ```
+
+> **Why `--copy`?** Whenever you install to two or more agents at once, `npx skills add` writes the real
+> files to `.agents/skills/<name>/` and makes each agent's entry — including `.claude/skills/<name>` — a
+> relative symlink pointing at them. That causes two problems for WikiCommit: (1) the symlinks do not
+> survive being carried across a host → container filesystem boundary (observed with a devcontainer built
+> after installing on the host — the Skills were simply not visible inside the container), and (2)
+> WikiCommit expects `.claude/skills/` to be committed to your wiki repository, and a committed symlink
+> breaks on clone unless you also commit `.agents/skills/`. `--copy` gives you real files under
+> `.claude/skills/`, matching what Method 2 does. (If you pick Claude Code alone in the picker the CLI
+> already copies, so `--copy` simply makes that outcome explicit — keep it either way.)
+>
+> **Devcontainers and GitHub Codespaces**: install from *inside* the container, not on the host before
+> building it. Doing so removes the boundary the symlinks cannot cross, and is worth doing even with
+> `--copy` since the CLI's default placement may change.
 
 After installation, run this in the repository where you want to initialize the wiki:
 
@@ -155,6 +184,10 @@ After installation, run this in the repository where you want to initialize the 
 | 15 | Operations/Preview | `/wikicommit-serve [--build]` | Build and preview the wiki locally |
 
 ---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow (how to run tests and lints, the `Issues/` draft → registration flow, and how to open a PR).
 
 ## License
 

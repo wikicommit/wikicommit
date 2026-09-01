@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # wikicommit-remove
 
-Skill for removing a wiki page. Does not physically delete the file — it only performs a soft delete by setting `status: removed` on the target page (`DesignDoc-data.md §4.5`). This hides the page from the published wiki while preserving Git history and rollback capability.
+Skill for removing a wiki page. Does not physically delete the file — it only performs a soft delete by setting `status: removed` on the target page. This hides the page from the published wiki while preserving Git history and rollback capability.
 
 ## Usage
 

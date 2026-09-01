@@ -27,7 +27,7 @@ const defaultOptions: WikiCommitPropertiesOptions = {
   includeAll: false,
   // "properties" added to the upstream default (Issue #509) — this is the
   // nested Schema.org property block WikiCommit's own frontmatter design
-  // adds (docs/DesignDoc-data.md §4.1, Issue #495). See getVisibleProperties()
+  // adds (Issue #495). See getVisibleProperties()
   // below for how a nested-object value like this one gets flattened.
   includedProperties: ["description", "tags", "aliases", "properties"],
   excludedProperties: [],
@@ -169,7 +169,7 @@ export function getVisibleProperties(
 
   // New logic (not present upstream, Issue #509): WikiCommit nests all
   // Schema.org type-specific properties under a single `properties:` key
-  // (docs/DesignDoc-data.md §4.1, Issue #495) rather than keeping them flat
+  // (Issue #495) rather than keeping them flat
   // at the frontmatter's top level. Upstream renders any object-valued
   // property as a single raw `JSON.stringify()` dump (see renderValue() in
   // WikiCommitProperties.tsx, unchanged from upstream), which would show
@@ -189,8 +189,8 @@ export function getVisibleProperties(
   // overwritten — first write wins, regardless of whether it came from a
   // top-level field or a later-processed nested one. Without this guard, a
   // custom type (exempt from the domainIncludes checks that keep standard
-  // types' `properties:` disjoint from WikiCommit's own structural fields,
-  // docs/DesignDoc-data.md §5.3) could declare a `properties.tags` that
+  // types' `properties:` disjoint from WikiCommit's own structural fields)
+  // could declare a `properties.tags` that
   // silently clobbers the page's real top-level `tags` — since `tags` is
   // processed before `properties` in the default includedProperties order,
   // the guard keeps the real tags and drops the colliding nested one

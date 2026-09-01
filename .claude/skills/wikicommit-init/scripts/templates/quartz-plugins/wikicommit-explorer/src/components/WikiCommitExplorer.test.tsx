@@ -43,7 +43,7 @@ describe("explorerSortFn", () => {
 
   it("does not treat a Type-cased 2-letter folder as a language folder", () => {
     // LANG_SEGMENT_RE only matches lowercase — WikiCommit's Type/custom-type naming
-    // convention (PascalCase, docs/DesignDoc-data.md §5.3) never collides with it in
+    // convention (PascalCase) never collides with it in
     // practice, but this pins the case-sensitivity as intentional.
     const nodes = [folder("en"), folder("Ab")]
 

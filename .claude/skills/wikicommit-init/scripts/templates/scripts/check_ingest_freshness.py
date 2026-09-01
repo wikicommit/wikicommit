@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect ingest management files whose source has changed (hash mismatch).
+"""Detect source management files whose source has changed (hash mismatch).
 
 For each management file with source.type=path and status in {generated, partial,
 outdated}, computes the SHA-256 of the source file and compares it with source.hash.
@@ -65,7 +65,7 @@ def _sha256_of_file(file_path: Path) -> str:
     return h.hexdigest()
 
 
-def collect_ingest_files(args: list[str]) -> list[Path]:
+def collect_mgmt_files(args: list[str]) -> list[Path]:
     if args:
         return [Path(p) for p in args]
     if not SOURCE_DIR.exists():
@@ -75,10 +75,10 @@ def collect_ingest_files(args: list[str]) -> list[Path]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Detect outdated ingest sources.")
-    parser.add_argument("ingest_files", nargs="*", metavar="<ingest-file>")
+    parser.add_argument("mgmt_files", nargs="*", metavar="<ingest-file>")
     parsed = parser.parse_args()
 
-    targets = collect_ingest_files(parsed.ingest_files)
+    targets = collect_mgmt_files(parsed.mgmt_files)
 
     outdated_count = 0
     ok_count = 0

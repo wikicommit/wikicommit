@@ -6,7 +6,7 @@ import WikiCommitBreadcrumbsConstructor from "./WikiCommitBreadcrumbs"
 
 // Mirrors a small .wikicommit/entity/ tree, already mirrored into
 // content/<lang>/<Type>/<slug>.md by scripts/convert_wikilinks.py (see the
-// comment on translatedFromToRelativePath in WikiCommitSources.tsx for the
+// comment on entityPathToRelativePath in WikiCommitSources.tsx for the
 // same convention). `slug` here is already lowercased the way Quartz's
 // build produces it, matching what trieFromAllFiles expects.
 const allFiles = [

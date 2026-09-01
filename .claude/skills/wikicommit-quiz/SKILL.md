@@ -10,11 +10,14 @@ A `wikicommit-ask`-derived skill that generates a difficulty-adjustable quiz fro
 ## Usage
 
 ```
-/wikicommit-quiz [--topic <keyword>] [--difficulty=easy|medium|hard]
+/wikicommit-quiz [--topic <keyword>] [--lang <lang>] [--difficulty=easy|medium|hard]
 ```
 
 - `--topic <keyword>`: if given, generate the quiz from pages related to that keyword (if omitted, sample randomly from the whole wiki)
+- `--lang <lang>`: restrict the `--topic` search to pages in the given language (ISO 639-1), which turns off its fan-out across languages but not the translation of `<topic>` into `<lang>` (optional; ignored without `--topic`, since that branch has no query to translate)
 - `--difficulty`: one of `easy` / `medium` / `hard` (default `medium`)
+
+**The quiz itself is written in the language of `<topic>`, or in `primary_lang` when `--topic` is omitted** — questions, options, explanations and the score summary alike. Do not let the language of a grounding page decide this: with cross-lingual search the grounding set can span several languages, and a quiz that switches language question by question is unusable. (Same rule `wikicommit-ask` applies to its answers.)
 
 ## Processing Flow
 
@@ -24,18 +27,42 @@ Branches depending on whether `--topic` is given.
 
 #### With `--topic`
 
+**First determine which languages to search** (Issue #582). If `--lang <lang>` was given, the list is just `[<lang>]` — the user narrowed the search deliberately, so do not detect a language or add others; `--lang` doubles as the opt-out for the fan-out across languages. It does *not* switch off the translation step below: when `<lang>` is not the language `<topic>` is written in, the keyword groups are still rendered into `<lang>` before being searched, because one language's words cannot match another language's pages (`--topic 認証フロー --lang en` has to look for `Authentication Flow`). Otherwise read `.wikicommit/config.yml` for `translation.primary_lang` and `translation.targets` (if the file doesn't exist, display an error, guide the user to run `/wikicommit-init`, and stop), have the LLM determine the language of `<topic>`, and build the list — the language of `<topic>`, then `primary_lang`, then each language in `targets`, then any remaining language directory that actually exists under `.wikicommit/entity/` (its immediate subdirectories, excluding `assets/`) — **deduplicating repeats**. That last group matters because every query now carries a `--lang`, turning what used to be an unfiltered search into a closed set: `/wikicommit-translate <page> --lang en` writes `.wikicommit/entity/en/` whatever `targets` says, and those pages would otherwise become unreachable rather than merely hard to reach. Configured languages come first so they win the dedup priority below. Without this the search only ever reaches pages that happen to share the topic's own wording: `認証フロー` never matches a page titled `Authentication Flow`, even though `search_index.py`'s `--lang` filter is optional and those pages were in scope all along.
+
+Then split `<topic>` into the distinct keywords it names, and **expand each into a group of alternative wordings** (Issue #581). FTS5 matches literal text, so a topic phrased differently from the wiki's own wording — the user types `子ども手当`, the pages say `児童手当` — yields no pages to build a quiz from even though the wiki covers the subject. Vector search is the usual answer to that and is deferred; expanding with the LLM's own vocabulary knowledge is the lightweight stand-in. Each keyword plus its expansions becomes one `--expand` group. This is an internal step — the quiz itself never mentions it.
+
+**Expansion rules.** trigram search matches *substrings*, so inflected forms and longer compounds containing the term (`エンジニア` → `ソフトウェアエンジニア`) are already reached for free; spending expansion slots there only adds noise. Expand only where the vocabulary genuinely differs:
+
+- **Expand**: synonyms (`児童手当` / `子ども手当`), hypernyms and general terms (`Claude Code` / `AIコーディングツール`), abbreviation–full-form pairs (`LLM` / `大規模言語モデル`), cross-language equivalents (`vibe coding` / `バイブコーディング`), orthographic variants (`サーバ` / `サーバー`).
+- **Do not expand**: inflected forms and word endings, compounds already reachable as a substring, or merely related terms whose meaning sits somewhere else (a term that "gets discussed alongside" the original is not a synonym).
+- **Limits**: at most 2–3 expansions per original term, and roughly 5 expanded terms across the whole search. Left unbounded this widens without end.
+- **Never produce an expansion shorter than 3 characters** — the trigram tokenizer cannot form a token from it, so it can never match (Issue #274).
+
+Render every keyword group in each of the target languages: the language of `<topic>` uses the terms as-is, any other language gets each term translated individually (the LLM translates on the fly — no dedicated translation API or library). Do not translate `<topic>` as one sentence.
+
+Then run **one query per language, sequentially — never in parallel**: `search_index.py query` automatically runs `build` (`DROP` + full rebuild) when the cache hasn't been generated yet, so concurrent calls can race on that "cache not yet built" check and cause a double build or a SQLite lock-contention error (the same reason `wikicommit-synthesize` gives for its own per-language loop). Pass one `--expand` per keyword group, using that language's rendering, each group's terms joined by `|`. Use `--limit 10` per language regardless of how many languages there are (the merge below trims back to 10). Splitting the budget across languages would shrink the candidate pool on a fully translated wiki, where each language returns the same pages and dedup collapses them to one set:
+
 ```bash
-python .wikicommit/scripts/search_index.py query "$(cat <<'EOF'
-<topic>
+python .wikicommit/scripts/search_index.py query \
+  --expand "$(cat <<'EOF'
+<keyword 1 in this language>|<expansion>|<expansion>
 EOF
-)" --limit 10
+)" \
+  --expand "$(cat <<'EOF'
+<keyword 2 in this language>|<expansion>
+EOF
+)" --lang <lang> --limit 10
 ```
 
-Pass the topic through a quote-delimited heredoc (`docs/DesignDoc-skills.md` §11.7), not a plain double-quote embedding — `--topic` is free-form user text with no upstream validation, and a plain `"<topic>"` embedding would let shell metacharacters (`` ` ``, `$(...)`) in it be evaluated by the shell when this command line is assembled, regardless of the downstream script (Issue #398).
+Terms inside a group are OR-ed and the groups are AND-ed, which is why the expansions have to be grouped rather than appended to a single query string: FTS5 AND-s adjacent phrases, so appending a synonym would demand that a page contain every wording at once and would drop the very page the expansion was meant to reach.
 
-On exit code `1` (failure, with an `ERROR:` line printed), display that error message as-is to the user and stop (e.g. SQLite doesn't support trigram, or `.wikicommit/entity/` doesn't exist).
+Pass every term through a quote-delimited heredoc, not a plain double-quote embedding — `--topic` is free-form user text with no upstream validation, the expansions and translations are LLM output derived from it, and a plain `"<term>"` embedding would let shell metacharacters (`` ` ``, `$(...)`) in it be evaluated by the shell when this command line is assembled, regardless of the downstream script (Issue #398).
 
-Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`). If the `hits` value in the `SUMMARY: query="...", hits=<N>` line is `0`, display "No pages related to \"<topic>\" were found" and stop.
+On exit code `1` (failure, with an `ERROR:` line printed), display that error message as-is to the user and stop (e.g. SQLite doesn't support trigram, or `.wikicommit/entity/` doesn't exist). Stop on the first such failure instead of trying the remaining languages — the cause is the environment, not the query.
+
+Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`) from every language, then **merge them into one list**: hits sharing the same `type` and `slug` — `type` from the `MATCH:` line, `slug` being the `<path>`'s file name without `.md` — are the same page in different languages, so keep exactly one — priority "language of `<topic>`" > `primary_lang` > the order the language appears in `targets` — and then keep the top 10 by the per-language bm25 order (a naive cross-language score comparison, the same approximation `wikicommit-ask` documents). **Deduplicating is not cosmetic here**: two language versions of one page would ground two questions about the same fact, so the same item would be asked twice in a quiz that is only 3–5 questions long. Merge even when a page's languages disagree in detail — pick the priority language's version and ignore the other, rather than treating the discrepancy as extra material.
+
+If no hits remain after merging, display "No pages related to \"<topic>\" were found" and stop. A `WARNING: expand group ... has no term of at least 3 character(s)` or `WARNING: no usable --expand term remains` line means a keyword could not match in that language for structural reasons rather than because the wiki lacks the topic (Issue #274); say so, naming the language, instead of reporting a bare "no pages found".
 
 #### Without `--topic`
 
@@ -49,6 +76,8 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
 Read each page gathered in step 1 with the Read tool and add its body (excluding frontmatter) to the LLM's context.
 
 ### Step 3: Generate the Quiz
+
+Write everything in the quiz language fixed in the Usage section above (the language of `<topic>`, or `primary_lang` when `--topic` was omitted) — not in the language of whichever page a given question is grounded in.
 
 Vary the question format based on `--difficulty`. **Do not include claims in the quiz or explanations that aren't in the gathered body content** (hallucination prevention).
 
@@ -75,7 +104,7 @@ Never write to a file.
 
 ### Step 5: Interactive Grading and Progression
 
-When the user answers the current question, grade it and reveal, for the first time, whether it's correct, an explanation (quoting the relevant part of the grounding page), and the grounding page path. If incorrect, also show the correct answer.
+When the user answers the current question, grade it and reveal, for the first time, whether it's correct, an explanation (quoting the relevant part of the grounding page), and the grounding page path. If the grounding page is in a different language from the quiz, translate the quoted passage into the quiz language and show the page's own path unchanged, so the quote stays readable while the citation still points at the real file. If incorrect, also show the correct answer.
 
 ```
 ✅ Correct! (or ❌ Incorrect. Correct answer: <correct answer>)

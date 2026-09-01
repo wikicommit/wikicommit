@@ -13,13 +13,13 @@ import sys
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter_or_warn as _parse_frontmatter
-from _wikilink import ENTITY_DIR
+from _wikilink import ENTITY_DIR, VIEW_DIR, collect_entity_pages, collect_view_pages
 
 
 def collect_pages() -> list[Path]:
-    if not ENTITY_DIR.exists():
-        return []
-    return sorted(p for p in ENTITY_DIR.rglob("*.md") if "assets" not in p.parts)
+    # View pages carry expires_at on the same terms as any other page
+    # (Issue #675), so freshness is checked across both trees.
+    return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 
 def main() -> int:

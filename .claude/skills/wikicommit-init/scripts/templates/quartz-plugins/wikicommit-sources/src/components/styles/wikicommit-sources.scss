@@ -33,3 +33,27 @@
 .wikicommit-sources__text {
   color: var(--darkgray);
 }
+
+.wikicommit-sources__license {
+  color: var(--darkgray);
+}
+
+.wikicommit-sources__license-link {
+  color: var(--darkgray);
+}
+
+.wikicommit-sources__notice {
+  font-size: 0.8rem;
+  color: var(--darkgray);
+  margin: 0.5rem 0 0;
+}
+
+.wikicommit-sources__derived {
+  font-size: 0.8rem;
+  color: var(--darkgray);
+  margin: 0.5rem 0;
+}
+
+.wikicommit-sources__unavailable {
+  color: var(--darkgray);
+}

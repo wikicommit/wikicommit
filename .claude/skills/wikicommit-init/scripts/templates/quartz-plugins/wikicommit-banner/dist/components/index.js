@@ -8,15 +8,17 @@ var en_US_default = {
       generatedBy: "Model:",
       translatedAt: "Translated:",
       translatedBy: "Model:",
+      reviewedBy: "Reviewed by:",
       unknown: "unknown",
+      reviewStatusLink: "Check this page's review status",
       reportLink: "Report an issue",
       reportTitlePrefix: "[Report]",
       reportBodyPage: "Page:",
       reportBodyLanguage: "Language:",
       reportBodyOriginal: "Original page:",
       siteSummaryPages: "Pages:",
-      siteSummaryReviewed: "Reviewed:",
-      siteSummaryTheme: "Theme:"
+      siteSummaryReviewed: "Human-reviewed:",
+      siteSummaryReviewNote: "Every page is published as soon as an LLM generates it. The count above is how many a person has since checked."
     }
   }
 };
@@ -31,15 +33,17 @@ var ja_JP_default = {
       generatedBy: "\u751F\u6210\u30E2\u30C7\u30EB:",
       translatedAt: "\u7FFB\u8A33\u65E5:",
       translatedBy: "\u7FFB\u8A33\u30E2\u30C7\u30EB:",
+      reviewedBy: "\u30EC\u30D3\u30E5\u30FC\u8005:",
       unknown: "\u4E0D\u660E",
+      reviewStatusLink: "\u3053\u306E\u30DA\u30FC\u30B8\u306E\u30EC\u30D3\u30E5\u30FC\u72B6\u6CC1\u3092\u898B\u308B",
       reportLink: "\u8AA4\u308A\u3092\u5831\u544A\u3059\u308B",
       reportTitlePrefix: "[\u5831\u544A]",
       reportBodyPage: "\u30DA\u30FC\u30B8:",
       reportBodyLanguage: "\u8A00\u8A9E:",
       reportBodyOriginal: "\u539F\u6587\u30DA\u30FC\u30B8:",
       siteSummaryPages: "\u7DCF\u30DA\u30FC\u30B8\u6570:",
-      siteSummaryReviewed: "\u30EC\u30D3\u30E5\u30FC\u6E08\u307F:",
-      siteSummaryTheme: "\u30C6\u30FC\u30DE:"
+      siteSummaryReviewed: "\u4EBA\u306B\u3088\u308B\u30EC\u30D3\u30E5\u30FC\u6E08\u307F:",
+      siteSummaryReviewNote: "\u30DA\u30FC\u30B8\u306F LLM \u304C\u751F\u6210\u3057\u305F\u6642\u70B9\u3067\u516C\u958B\u3055\u308C\u307E\u3059\u3002\u4E0A\u306E\u6570\u5B57\u306F\u3001\u305D\u306E\u3046\u3061\u4EBA\u304C\u5185\u5BB9\u3092\u78BA\u8A8D\u3057\u305F\u4EF6\u6570\u3067\u3059\u3002"
     }
   }
 };
@@ -65,7 +69,7 @@ function resolveLocale(frontmatterLang, cfgLocale) {
 }
 
 // src/components/styles/wikicommit-banner.scss
-var wikicommit_banner_default = ".wikicommit-banner {\n  border: 1px solid var(--gray);\n  border-left: 4px solid #f5a623;\n  background: #fffbf0;\n  padding: 1rem 1.25rem;\n  margin-bottom: 1.5rem;\n  border-radius: 4px;\n  display: flex;\n  gap: 0.75rem;\n  align-items: flex-start;\n}\n\n:root[saved-theme=dark] .wikicommit-banner {\n  background: #2a2618;\n  border-color: #6b5a1e;\n}\n\n.wikicommit-banner__icon {\n  font-size: 1.25rem;\n  flex-shrink: 0;\n}\n\n.wikicommit-banner__body p {\n  margin: 0.25rem 0 0;\n  font-size: 0.875rem;\n  color: var(--darkgray);\n}\n\n.wikicommit-banner__actions {\n  margin-top: 0.5rem;\n}\n\n.wikicommit-banner__link {\n  color: var(--secondary);\n  text-decoration: underline;\n  font-size: 0.875rem;\n}\n\n.wikicommit-banner__report {\n  margin-bottom: 1.5rem;\n  font-size: 0.875rem;\n}\n\n.wikicommit-site-summary {\n  border: 1px solid var(--lightgray);\n  background: var(--light);\n  padding: 0.75rem 1rem;\n  margin-bottom: 1.5rem;\n  border-radius: 4px;\n}\n\n.wikicommit-site-summary__counts,\n.wikicommit-site-summary__theme {\n  margin: 0;\n  font-size: 0.875rem;\n  color: var(--darkgray);\n}\n\n.wikicommit-site-summary__theme {\n  margin-top: 0.375rem;\n}";
+var wikicommit_banner_default = ".wikicommit-banner {\n  border: 1px solid var(--gray);\n  border-left: 4px solid #f5a623;\n  background: #fffbf0;\n  padding: 1rem 1.25rem;\n  margin-bottom: 1.5rem;\n  border-radius: 4px;\n  display: flex;\n  gap: 0.75rem;\n  align-items: flex-start;\n}\n\n:root[saved-theme=dark] .wikicommit-banner {\n  background: #2a2618;\n  border-color: #6b5a1e;\n}\n\n.wikicommit-banner__icon {\n  font-size: 1.25rem;\n  flex-shrink: 0;\n}\n\n.wikicommit-banner__body p {\n  margin: 0.25rem 0 0;\n  font-size: 0.875rem;\n  color: var(--darkgray);\n}\n\n.wikicommit-banner__actions {\n  margin-top: 0.5rem;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 0.75rem;\n}\n\n.wikicommit-banner__link {\n  color: var(--secondary);\n  text-decoration: underline;\n  font-size: 0.875rem;\n}\n\n.wikicommit-banner__report {\n  margin-bottom: 1.5rem;\n  font-size: 0.875rem;\n  display: flex;\n  flex-wrap: wrap;\n  gap: 0.75rem;\n}\n\n.wikicommit-banner__reviewer {\n  color: var(--darkgray);\n}\n\n.wikicommit-site-summary {\n  border: 1px solid var(--lightgray);\n  background: var(--light);\n  padding: 0.75rem 1rem;\n  margin-bottom: 1.5rem;\n  border-radius: 4px;\n}\n\n.wikicommit-site-summary__counts,\n.wikicommit-site-summary__note {\n  margin: 0;\n  font-size: 0.875rem;\n  color: var(--darkgray);\n}\n\n.wikicommit-site-summary__note {\n  margin-top: 0.375rem;\n  font-size: 0.8125rem;\n}";
 var l;
 function S(n2) {
   return n2.children;
@@ -91,8 +95,8 @@ function u2(e2, t2, n2, o2, i2, u3) {
 }
 
 // src/components/WikiCommitBanner.tsx
-function translatedFromToRelativePath(translatedFrom) {
-  return translatedFrom.trim().replace(/^\.\//, "").replace(/^\.wikicommit\/(entity|wiki)\//, "");
+function entityPathToRelativePath(entityPath) {
+  return entityPath.trim().replace(/^\.\//, "").replace(/^\.wikicommit\/(entity|wiki)\//, "").replace(/^([^/]+)\/custom\//, "$1/");
 }
 function buildPageUrl(baseUrl, slug) {
   return baseUrl && slug ? `https://${baseUrl.replace(/\/+$/, "")}/${slug}` : void 0;
@@ -100,10 +104,17 @@ function buildPageUrl(baseUrl, slug) {
 function resolveOriginalPageInfo(frontmatter, allFiles, cfg) {
   const translatedFrom = frontmatter?.translated_from;
   if (typeof translatedFrom !== "string") return void 0;
-  const parentRelativePath = translatedFromToRelativePath(translatedFrom);
+  const parentRelativePath = entityPathToRelativePath(translatedFrom);
   const parent = allFiles.find((f3) => f3.relativePath === parentRelativePath);
   if (parent?.frontmatter?.status === "removed") return translatedFrom;
   return buildPageUrl(cfg?.baseUrl, parent?.slug) ?? translatedFrom;
+}
+function buildReviewSearchUrl(repo, type, lang, relativePath) {
+  if (!repo || !type || !lang || !relativePath) return void 0;
+  const slug = relativePath.split("/").pop()?.replace(/\.md$/, "");
+  if (!slug) return void 0;
+  const q2 = `is:issue is:open label:wikicommit-review in:title "${type}/${slug} (${lang})"`;
+  return `https://github.com/${repo}/issues?q=${encodeURIComponent(q2)}`;
 }
 var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
   const frontmatter = fileData.frontmatter;
@@ -113,7 +124,6 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
   const t2 = i18n(resolveLocale(frontmatter?.lang, cfg?.locale)).components.wikicommitBanner;
   const pageCount = frontmatter?.wikicommit_page_count;
   const reviewedCount = frontmatter?.wikicommit_reviewed_count;
-  const theme = frontmatter?.wikicommit_theme;
   const siteSummary = typeof pageCount === "number" && typeof reviewedCount === "number" ? /* @__PURE__ */ u2("div", { class: "wikicommit-site-summary", children: [
     /* @__PURE__ */ u2("p", { class: "wikicommit-site-summary__counts", children: [
       t2.siteSummaryPages,
@@ -124,11 +134,7 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
       " ",
       /* @__PURE__ */ u2("strong", { children: reviewedCount })
     ] }),
-    theme ? /* @__PURE__ */ u2("p", { class: "wikicommit-site-summary__theme", children: [
-      t2.siteSummaryTheme,
-      " ",
-      theme
-    ] }) : null
+    /* @__PURE__ */ u2("p", { class: "wikicommit-site-summary__note", children: t2.siteSummaryReviewNote })
   ] }) : null;
   const isTranslation = typeof frontmatter?.translated_from === "string";
   const generatedAt = isTranslation ? frontmatter?.translated_at ?? t2.unknown : frontmatter?.generated_at ?? t2.unknown;
@@ -148,12 +154,26 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
     originalPageInfo ? `${t2.reportBodyOriginal} ${originalPageInfo}` : null
   ].filter((line) => line !== null).join("\n");
   const reportUrl = repo ? `https://github.com/${repo}/issues/new?template=report.md&title=${encodeURIComponent(reportTitle)}${reportBody ? `&body=${encodeURIComponent(reportBody)}` : ""}` : "#";
+  const reviewedBy = typeof frontmatter?.reviewed_by === "string" && frontmatter.reviewed_by.trim() !== "" ? frontmatter.reviewed_by.trim() : void 0;
   if (!isPending) {
     return /* @__PURE__ */ u2(S, { children: [
       siteSummary,
-      /* @__PURE__ */ u2("div", { class: "wikicommit-banner__report", children: /* @__PURE__ */ u2("a", { href: reportUrl, class: "wikicommit-banner__link", children: t2.reportLink }) })
+      /* @__PURE__ */ u2("div", { class: "wikicommit-banner__report", children: [
+        reviewedBy ? /* @__PURE__ */ u2("span", { class: "wikicommit-banner__reviewer", children: [
+          t2.reviewedBy,
+          " ",
+          /* @__PURE__ */ u2("a", { href: `https://github.com/${encodeURIComponent(reviewedBy)}`, children: reviewedBy })
+        ] }) : null,
+        /* @__PURE__ */ u2("a", { href: reportUrl, class: "wikicommit-banner__link", children: t2.reportLink })
+      ] })
     ] });
   }
+  const reviewSearchUrl = buildReviewSearchUrl(
+    repo,
+    type,
+    lang,
+    fileData.relativePath
+  );
   return /* @__PURE__ */ u2(S, { children: [
     siteSummary,
     /* @__PURE__ */ u2("div", { class: "wikicommit-banner wikicommit-banner--pending", children: [
@@ -170,7 +190,10 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
           " ",
           generatedBy
         ] }),
-        /* @__PURE__ */ u2("div", { class: "wikicommit-banner__actions", children: /* @__PURE__ */ u2("a", { href: reportUrl, class: "wikicommit-banner__link", children: t2.reportLink }) })
+        /* @__PURE__ */ u2("div", { class: "wikicommit-banner__actions", children: [
+          reviewSearchUrl ? /* @__PURE__ */ u2("a", { href: reviewSearchUrl, class: "wikicommit-banner__link", children: t2.reviewStatusLink }) : null,
+          /* @__PURE__ */ u2("a", { href: reportUrl, class: "wikicommit-banner__link", children: t2.reportLink })
+        ] })
       ] })
     ] })
   ] });

@@ -16,7 +16,14 @@ from pathlib import Path
 
 from _frontmatter import parse_frontmatter
 from _schemaorg_vocab import ancestors, load_or_build_index, property_in_domain
-from _wikilink import ENTITY_DIR, resolve_stored_entity_path
+from _wikilink import (
+    ENTITY_DIR,
+    VIEW_DIR,
+    VIEW_KINDS,
+    parse_view_path,
+    parse_wiki_path,
+    resolve_stored_entity_path,
+)
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LANG_RE = re.compile(r"^[a-z]{2}$")
@@ -27,13 +34,15 @@ VALID_REMOVED_REASONS = {"obsolete", "merged", "gdpr"}
 VALID_SOURCE_TYPES = {"path", "url", "wikicommit", "manual"}
 
 # Top-level fields with a defined structural/bookkeeping/common-identifier
-# role in the frontmatter split (docs/DesignDoc-data.md §4.1, Issue #495).
+# role in the frontmatter split (Issue #495).
 # Never treated as a possible misplaced Schema.org property by
 # validate_schema_properties()'s flat-field scan below.
 COMMON_TOP_LEVEL_FIELDS = {
     "title", "lang", "type", "sources", "tags", "review_status", "expires_at",
-    "generated_at", "generated_by", "wikidata", "sameAs", "aliases", "properties",
+    "generated_at", "generated_by", "generated_with", "reviewed_by", "wikidata", "sameAs",
+    "aliases", "properties",
     "translated_from", "source_commit", "translated_at", "translated_by",
+    "translated_with",
     "derived_from", "status", "removed_at", "removed_reason", "merged_into",
 }
 
@@ -130,6 +139,17 @@ def validate_source_item(src: object, idx: int, repo_root: Path) -> list[tuple[s
         elif not DATE_RE.match(str(src["created_at"])):
             errors.append((f"sources[{idx}].created_at", "`YYYY-MM-DD` 形式でなければなりません"))
 
+    # license は全 source.type 共通の任意フィールド（Issue #558）。値の中身は
+    # 検証しない — WikiCommit はライセンスの当否を判断せず、記録する場所を
+    # 用意して記録された内容を表示するだけ。
+    # 空文字列だけは弾く（「不明」はフィールドを書かないことで表す。空文字列を
+    # 許すと公開サイト側で「ライセンスあり」と「不明」を区別できなくなる）。
+    if "license" in src:
+        if not isinstance(src["license"], str) or not src["license"].strip():
+            errors.append(
+                (f"sources[{idx}].license", "空でない文字列でなければなりません（不明な場合はフィールドごと省略します）")
+            )
+
     return errors
 
 
@@ -156,8 +176,8 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
     """The machine-checkable half of the frontmatter split introduced by
     Issue #495 (`properties:` nests Schema.org-vocabulary-backed fields;
     everything else — structural fields, WikiCommit bookkeeping, common
-    cross-type identifiers — stays flat at the top level,
-    docs/DesignDoc-data.md §4.1). Three checks, all keyed off the same
+    cross-type identifiers — stays flat at the top level). Three checks, all
+    keyed off the same
     type/vocabulary resolution so a page pays for it at most once:
 
     1. `type:` itself resolves to a real Schema.org type (Issue #512) — a
@@ -178,7 +198,7 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
 
     Custom types (`schema:custom/...`) have no corresponding Schema.org
     vocabulary entry — their properties are documented in prose in the
-    schema file itself instead (docs/DesignDoc-data.md §5.3) and reviewed by
+    schema file itself instead, and reviewed by
     a human via wikicommit-schema-propose, not machine-verified here.
 
     Returns (errors, warnings), following validate_file()'s own convention
@@ -187,7 +207,7 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
     WARNING rather than silently skipped or escalated to an ERROR: it's a
     real, visible degradation of this specific check, but not reason enough
     to block the quality gate over a network hiccup or a deleted-but-not-
-    yet-rebuilt schemaorg-vocab.json (docs/DesignDoc-ScriptSpec.md).
+    yet-rebuilt schemaorg-vocab.json.
     """
     errors: list[tuple[str, str]] = []
     warnings: list[tuple[str, str]] = []
@@ -248,6 +268,112 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
     return errors, warnings
 
 
+def validate_type_matches_path(
+    path: Path, type_value: object
+) -> list[tuple[str, str]]:
+    """Check that a page's directory location agrees with its `type:` value.
+
+    A page under `.wikicommit/entity/<lang>/<Type>/<slug>.md` must carry
+    `type: "schema:<Type>"` with exactly that `<Type>`, including the
+    `custom/` sub-path for custom types (`schema:custom/Decision` lives in
+    `.wikicommit/entity/<lang>/custom/Decision/`, not `.../Decision/`).
+
+    Nothing enforced this before Issue #545, so `/wikicommit-synthesize`
+    non-deterministically wrote custom-type pages to either location: the
+    frontmatter said `schema:custom/Practice` while the file sat in
+    `<lang>/Practice/`. That mismatch makes the WikiLink matching the page's
+    own `type:` (`[[custom/Practice/<slug>]]`) unresolvable, and none of the
+    existing gates caught it — `validate_frontmatter.py` never compared path
+    against `type:`, `check_wikilinks.py` only sees links that already exist,
+    and `check_schema_coverage.py` only asks whether the `type:` value has a
+    schema file (it does).
+
+    Skipped — not reported — for any file that does not resolve to the
+    `<lang>/<Type>/<slug>.md` shape under `.wikicommit/entity/` (a page kept
+    directly under `entity/`, or one still under the pre-Issue #477
+    `.wikicommit/wiki/` prefix): those predate this layout and the
+    old/new-coexistence policy applies. Also skipped when `type:` is absent
+    or lacks the `schema:` prefix, both of which are already reported
+    separately.
+    """
+    if type_value is None:
+        return []
+    type_str = str(type_value)
+    if not type_str.startswith("schema:"):
+        return []
+    parsed = parse_wiki_path(path)
+    if parsed is None:
+        return []
+    lang, path_type, slug = parsed
+    declared_type = type_str[len("schema:"):]
+    if declared_type == path_type:
+        return []
+    return [
+        (
+            "type",
+            f"`{type_str}` はディレクトリ `{path_type}/` と一致しません "
+            f"（`schema:{path_type}` に直すか、ページを "
+            f"`{ENTITY_DIR}/{lang}/{declared_type}/{slug}.md` へ移動してください）",
+        )
+    ]
+
+
+# Required fields for a view page (Issue #675). Not read from
+# .wikicommit/schema/default.md, whose list ends in `type` and `sources` —
+# the two fields a view page is defined by *not* having.
+VIEW_REQUIRED_FIELDS = ("title", "lang", "derived_from")
+
+
+def is_view_page(path: Path, repo_root: Path) -> bool:
+    """Whether `path` is in the view tree (Issue #675).
+
+    Membership is by location, not by frontmatter: `derived_from` alone does
+    not make a page a view page, because a synthesized page written before the
+    view tree existed still lives under `.wikicommit/entity/` and is still
+    validated by the entity rules (migration is manual, and old and new are
+    allowed to coexist).
+    """
+    view_dir = repo_root / VIEW_DIR
+    try:
+        path.resolve().relative_to(view_dir.resolve())
+    except (ValueError, OSError, RuntimeError):
+        return False
+    return True
+
+
+def validate_view_page(path: Path, fm: dict, repo_root: Path) -> list[tuple[str, str]]:
+    """View-page-only rules (Issue #675): the shape of the path, the two fields
+    a view page must not carry, and `kind`.
+
+    `derived_from` itself is validated by the shared branch further down —
+    a view page and a pre-view-tree synthesized page carry the identical field,
+    and duplicating its checks here would let the two drift apart.
+    """
+    errors: list[tuple[str, str]] = []
+
+    if parse_view_path(path, repo_root / VIEW_DIR) is None:
+        errors.append(
+            (
+                "path",
+                f"view ページは `{VIEW_DIR}/<lang>/<slug>.md` に置きます"
+                "（Type ディレクトリを挟みません）",
+            )
+        )
+
+    if "sources" in fm:
+        errors.append(
+            ("sources", "view ページは `sources:` を持ちません（出自は `derived_from` が表します）")
+        )
+
+    kind = fm.get("kind")
+    if kind is not None and kind not in VIEW_KINDS:
+        errors.append(
+            ("kind", f"`{'` / `'.join(VIEW_KINDS)}` のいずれかでなければなりません")
+        )
+
+    return errors
+
+
 def validate_file(
     path: Path,
     repo_root: Path,
@@ -265,25 +391,50 @@ def validate_file(
     is_translation = "translated_from" in fm
     is_derived = "derived_from" in fm
     is_index = path.name == "index.md"
-    exempt_sources = is_translation or is_derived or is_index
+    is_view = is_view_page(path, repo_root)
+    exempt_sources = is_translation or is_derived or is_index or is_view
 
     # Resolve type schema
     type_value = fm.get("type")
     type_schema: dict = {}
-    if type_value is not None:
-        if not str(type_value).startswith("schema:"):
-            errors.append(("type", "`schema:` プレフィックスで始まっていません"))
-        else:
-            type_schema, fallback_warn = resolve_type_schema(str(type_value), schema_dir)
-            if fallback_warn:
-                warnings.append(("type", fallback_warn))
+    if is_view:
+        # A view page carries no `type:` at all (Issue #675), so there is no
+        # schema to resolve and no path/type agreement to check. Its own rules
+        # are applied below.
+        if type_value is not None:
+            errors.append(
+                ("type", "view ページは `type:` を持ちません（Schema.org 型ではなく `kind:` を使います）")
+            )
+    else:
+        if type_value is not None:
+            if not str(type_value).startswith("schema:"):
+                errors.append(("type", "`schema:` プレフィックスで始まっていません"))
+            else:
+                type_schema, fallback_warn = resolve_type_schema(str(type_value), schema_dir)
+                if fallback_warn:
+                    warnings.append(("type", fallback_warn))
+        errors.extend(validate_type_matches_path(path, type_value))
 
     # Required fields check
-    for field in build_required_fields(default_schema, type_schema):
+    required = VIEW_REQUIRED_FIELDS if is_view else build_required_fields(default_schema, type_schema)
+    for field in required:
         if field == "sources" and exempt_sources:
+            continue
+        # Two view pages have nothing of their own to be derived from, and both
+        # mirror an exemption `sources` already grants one directory over:
+        # a view tree's index.md is generated navigation rather than a synthesis,
+        # and a *translation* of a view page inherits its provenance through
+        # `translated_from` exactly as a translated entity page inherits
+        # `sources`. Without the second, `/wikicommit-translate` produces a page
+        # `check_translation_status.py` asked for and this gate then refuses,
+        # with no field the author can legitimately supply to satisfy it.
+        if field == "derived_from" and (is_index or is_translation):
             continue
         if field not in fm:
             errors.append((field, "必須フィールドがありません"))
+
+    if is_view:
+        errors.extend(validate_view_page(path, fm, repo_root))
 
     # --- Format validation (only when field is present) ---
 
@@ -308,7 +459,9 @@ def validate_file(
             errors.append(
                 ("review_status", "`pending` / `reviewed` のいずれかでなければなりません")
             )
-    elif type_value:
+    elif type_value or is_view:
+        # A view page has no `type:` to gate on, but it is generated content
+        # with the same pending/reviewed lifecycle, so the warning applies.
         warnings.append(("review_status", "未設定（pending として扱います）"))
 
     if "expires_at" in fm and not DATE_RE.match(str(fm["expires_at"])):
@@ -331,6 +484,26 @@ def validate_file(
 
     if "generated_by" in fm and not str(fm["generated_by"]).strip():
         errors.append(("generated_by", "空文字列は使用できません"))
+
+    # WikiCommit's own version at generation time (Issue #577). Optional: its
+    # absence means "generated before this field existed", and existing pages
+    # are not back-filled. Only the same emptiness check `generated_by` gets —
+    # the value is not matched against a semver pattern, for the same reason
+    # model IDs are not validated against a registry (§6.7): a format check
+    # here would only ever reject a future spelling of the truth.
+    if "generated_with" in fm and not str(fm["generated_with"]).strip():
+        errors.append(("generated_with", "空文字列は使用できません"))
+
+    # The GitHub login of whoever closed the review tracking Issue (Issue #663).
+    # Written by review-issue-close-sync.yml in the same commit that flips
+    # review_status, so the published banner can say whose judgment `reviewed`
+    # represents. Optional in both directions: pages reviewed before this field
+    # existed do not have it and are not back-filled, and a wiki that never runs
+    # that workflow never gets one. Only the emptiness check `generated_by` gets
+    # — the value is a GitHub login, and validating its shape here would reject a
+    # future spelling of the truth for no gain (§6.7's reasoning about model IDs).
+    if "reviewed_by" in fm and not str(fm["reviewed_by"]).strip():
+        errors.append(("reviewed_by", "空文字列は使用できません"))
 
     prop_errors, prop_warnings = validate_schema_properties(fm, type_value)
     errors.extend(prop_errors)
@@ -362,6 +535,10 @@ def validate_file(
 
         if "translated_by" in fm and not str(fm["translated_by"]).strip():
             errors.append(("translated_by", "空文字列は使用できません"))
+
+        # Translation-page counterpart of generated_with (Issue #577).
+        if "translated_with" in fm and not str(fm["translated_with"]).strip():
+            errors.append(("translated_with", "空文字列は使用できません"))
 
     # Synthesized page fields (wikicommit-synthesize output; derived_from is the
     # multi-source analog of translated_from/source_commit)
@@ -441,10 +618,12 @@ def main() -> int:
     if len(sys.argv) > 1:
         target_files: list[Path] = [Path(a) for a in sys.argv[1:]]
     else:
-        if not entity_dir.exists():
-            print("OK: 0 files validated, 0 errors, 0 warnings")
-            return 0
-        target_files = sorted(entity_dir.rglob("*.md"))
+        # Both trees: entity pages and view pages (Issue #675) are validated by
+        # the same command, under different rules chosen per file.
+        target_files = sorted(entity_dir.rglob("*.md")) if entity_dir.exists() else []
+        view_dir = repo_root / VIEW_DIR
+        if view_dir.exists():
+            target_files += sorted(view_dir.rglob("*.md"))
 
     if not target_files:
         print("OK: 0 files validated, 0 errors, 0 warnings")

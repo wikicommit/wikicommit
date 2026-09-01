@@ -1,15 +1,39 @@
+wikicommit_version: "{VERSION}"
+
 translation:
   targets: {TARGETS}
   primary_lang: {PRIMARY_LANG}
 
+# What this wiki is about — used to skip entities unrelated to the subject when a
+# source has already been taken in. This decides relevance only; two neighbouring
+# questions have their own files, and writing either one here does not work:
+#   - which sources to take in  -> .wikicommit/source-policy.md  (Issue #564)
+#   - whether a relevant subject may be written about at all
+#     ("no pages about living individuals") -> .wikicommit/entity-policy.md (#667)
+# A rule of the second kind put here is read at the right moment but weighed as
+# relevance, which is a different question and gives a different answer for a
+# subject that is squarely on-topic and still off-limits.
 theme: {THEME}
+
+# How this wiki introduces itself to its readers, one entry per language (1-3
+# sentences each). Written by hand — nothing generates or translates it.
+#
+# This is NOT `theme` above. `theme` is addressed to the LLM and is read only by
+# wikicommit-generate and wikicommit-collect; it is a single string, so on a
+# multilingual wiki it reaches most readers in a language they cannot read
+# (Issue #670). Different audience, different requirement: no rule keeps the two
+# in sync, and either may be left unset.
+#
+# Shown on the published site's top page, under the link for that language. A
+# language with no entry simply gets no description.
+#
+# site_description:
+#   it: "Una base di conoscenza dedicata al Decameron di Giovanni Boccaccio."
+#   en: "A knowledge base on Giovanni Boccaccio's Decameron."
+#   ja: "ジョヴァンニ・ボッカッチョ『デカメロン』の知識ベース。"
 
 generate:
   max_retries: 2
-
-review:
-  auto_merge: true
-  chain_of_thought: false
 
 schema:
   base_types: [Person, Place, Organization, Event, HowTo, DefinedTerm, ScholarlyArticle, NewsArticle, BlogPosting, ShortStory, Book]

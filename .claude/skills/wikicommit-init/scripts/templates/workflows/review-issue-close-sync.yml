@@ -53,12 +53,27 @@ name: Sync review_status on tracking-issue close
 # plan tier. It now polls mergeStateStatus until CLEAN (or a terminal DIRTY
 # / BLOCKED state, or a 300s timeout) and then merges without `--auto` —
 # same fix applied to `wikicommit-merge` Step 7 (`.claude/skills/wikicommit-merge/SKILL.md`).
+#
+# Issue #544: GitHub deliberately does not let a push made with the default
+# GITHUB_TOKEN fire another workflow's standard `push` / `pull_request`
+# trigger (an infinite-loop guard). The squash merge below is exactly such a
+# push, so deploy.yml — which builds and publishes the Quartz site `on: push`
+# — never ran on its own after a reviewer closed a tracking Issue: the
+# repository's default branch said `review_status: reviewed` while the
+# published site kept showing the "This page is unreviewed" banner, with
+# nothing to signal the divergence until some unrelated human push happened
+# to rebuild the site (confirmed on wikicommit/ai-driven-dev-wiki). The
+# "Trigger GitHub Pages rebuild" step below closes that gap by dispatching
+# deploy.yml explicitly — `workflow_dispatch` is the documented exception to
+# that guard, and deploy.yml already declares it. Dispatching needs
+# `actions: write`, added to the permissions block below.
 
 on:
   issues:
     types: [closed]
 
 permissions:
+  actions: write
   contents: write
   issues: read
   pull-requests: write
@@ -108,11 +123,11 @@ jobs:
           # A tracking Issue opened before the Issue #477 .wikicommit/wiki/ ->
           # entity/ rename still carries the old prefix verbatim in its marker
           # (GitHub Issues are external state untouched by `git mv`; no
-          # auto-migration, docs/DesignDoc-data.md §4.3's coexistence
-          # precedent). Fall back to the current prefix before concluding the
+          # auto-migration — old and new forms are allowed to coexist).
+          # Fall back to the current prefix before concluding the
           # page was removed, mirroring convert_wikilinks.py's
           # normalize_wiki_rel()/WikiCommitSources.tsx's
-          # translatedFromToRelativePath() handling of the same class of
+          # entityPathToRelativePath() handling of the same class of
           # stored path.
           if not os.path.isfile(path) and path.startswith(".wikicommit/wiki/"):
               migrated = ".wikicommit/entity/" + path[len(".wikicommit/wiki/"):]
@@ -124,14 +139,27 @@ jobs:
               emit(proceed="false")
               sys.exit(0)
 
-          # Page paths always take the form .wikicommit/entity/<lang>/<Type>/<slug>.md
+          # An entity page's path is .wikicommit/entity/<lang>/<Type>/<slug>.md
           # (<Type> may itself contain a "/" for custom types, e.g. custom/Decision).
+          # A view page's is .wikicommit/view/<lang>/<slug>.md with no Type segment at
+          # all (Issue #675); its reserved Type is the constant "View", which is what a
+          # [[View/<slug>]] link and the published content/<lang>/View/ path both use.
+          # Without this branch a view page's tracking Issue could be closed but never
+          # take effect: the marker would fail to parse and the run would exit quietly,
+          # leaving the page pending forever with no sign that anything went wrong.
           rel = re.match(r"^\.wikicommit/entity/([^/]+)/(.+)/([^/]+)\.md$", path)
-          if not rel:
-              print(f"{path}: does not match .wikicommit/entity/<lang>/<Type>/<slug>.md; skipping.")
+          view_rel = re.match(r"^\.wikicommit/view/([^/]+)/([^/]+)\.md$", path)
+          if rel:
+              lang, type_, slug = rel.group(1), rel.group(2), rel.group(3)
+          elif view_rel:
+              lang, type_, slug = view_rel.group(1), "View", view_rel.group(2)
+          else:
+              print(
+                  f"{path}: matches neither .wikicommit/entity/<lang>/<Type>/<slug>.md "
+                  "nor .wikicommit/view/<lang>/<slug>.md; skipping."
+              )
               emit(proceed="false")
               sys.exit(0)
-          lang, type_, slug = rel.group(1), rel.group(2), rel.group(3)
           # Branch names may not contain "/" the way custom type paths do
           # (e.g. custom/Decision) — flatten it, same as wikicommit-merge Step 8.
           type_slug = type_.replace("/", "-")
@@ -215,6 +243,35 @@ jobs:
             echo "${name}"
             echo "${delimiter}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Record the reviewer on the page
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
+        env:
+          PAGE_PATH: ${{ steps.resolve.outputs.path }}
+          REVIEWER_LOGIN: ${{ steps.closer.outputs.login }}
+        run: |
+          # Issue #663: the Reviewed-by trailer added below records who reviewed
+          # the page in git history, where no reader of the published site can
+          # see it — so a `reviewed` badge says a review happened without saying
+          # whose judgment it was, and the trust ladder's upper rung reads as a
+          # bare flag. Write the login into the page's own frontmatter, in the
+          # same commit as review_status, so WikiCommitBanner can render it from
+          # frontmatter alone (the banner reads nothing else, and pulling this
+          # out of git history at build time would put a git read into
+          # convert_wikilinks.py for one label).
+          #
+          # A separate step rather than a second --set on the rewrite above:
+          # that step runs before the closer is resolved, and it doubles as this
+          # workflow's idempotency guard (--require review_status=pending), which
+          # is worth leaving exactly as it is. Unconditional --set here, with no
+          # --require: review_status has already been flipped by this run, so
+          # requiring anything of the old value would never match.
+          #
+          # The login is written quoted so it stays a YAML string. GitHub logins
+          # are [A-Za-z0-9-] and cannot break out of it, but nothing downstream
+          # should have to know that.
+          python .wikicommit/scripts/set_frontmatter_field.py "${PAGE_PATH}" \
+            --set "reviewed_by=\"${REVIEWER_LOGIN}\""
 
       - name: Commit and open PR
         id: pr
@@ -333,6 +390,35 @@ jobs:
           gh pr merge "${PR_NUMBER}" --squash \
             --subject "review: mark ${TYPE}/${SLUG} (${LANG}) as reviewed" \
             --body "$(printf 'Refs #%s\n\nReviewed-by: %s <%s@users.noreply.github.com>' "${ISSUE_NUMBER}" "${REVIEWER_NAME}" "${REVIEWER_LOGIN}")"
+
+      - name: Trigger GitHub Pages rebuild
+        # Same guard as the merge step above, and step-level `if:` still
+        # implies "only when every earlier step succeeded" — so this never
+        # dispatches a build for a merge that did not actually happen.
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          # See the Issue #544 note in this file's header for why the merge
+          # above cannot trigger deploy.yml on its own.
+          #
+          # deploy.yml is only generated by `wikicommit-init --quartz-pages`,
+          # whereas this workflow ships unconditionally (Issue #335 — the
+          # tracking-Issue review flow does not depend on the publish method).
+          # A repository that opted out of automatic publishing simply has
+          # nothing to rebuild.
+          if [ ! -f .github/workflows/deploy.yml ]; then
+            echo "No .github/workflows/deploy.yml in this repository; nothing to rebuild."
+            exit 0
+          fi
+          # Fail loudly rather than warn: a silent miss here reproduces exactly
+          # the failure mode this step exists to remove (default branch says
+          # reviewed, published site still says unreviewed, nothing signals it).
+          if ! gh workflow run deploy.yml --ref "${DEFAULT_BRANCH}"; then
+            echo "::error::Could not dispatch deploy.yml. The review_status change was merged successfully, but the published site will keep showing the stale banner until the next build. Check that this workflow's permissions include 'actions: write' and that deploy.yml declares a workflow_dispatch trigger."
+            exit 1
+          fi
 
       - name: Flag quality-check failure for manual attention
         if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'false'

@@ -106,7 +106,7 @@ describe("getVisibleProperties (Issue #509 flattening)", () => {
     expect(result.description).toBeNull()
   })
 
-  // Custom types (docs/DesignDoc-data.md §5.3) are exempt from the
+  // Custom types are exempt from the
   // domainIncludes validation that keeps a standard type's properties:
   // disjoint from WikiCommit's own structural fields, so a custom type's
   // schema could declare a properties.tags that collides with the page's

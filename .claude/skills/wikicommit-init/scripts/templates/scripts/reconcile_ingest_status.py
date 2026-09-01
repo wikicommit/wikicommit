@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Reconcile ingest management files left at status: pending despite their
+"""Reconcile source management files left at status: pending despite their
 content already being in use by a published wiki page.
 
 Background (Issue #474): in a long, multi-source wikicommit-generate batch,
 an `action: update` entity's page may end up citing a *different*, already-
-registered ingest management file's `source.hash` in its `sources[]` list
+registered source management file's `source.hash` in its `sources[]` list
 (e.g. several related sources about the same entity, processed in the same
 run) without that other management file's own `status`/`generated_pages`
 ever being written back — it is left at `status: pending`, indefinitely,
@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter
-from _wikilink import ENTITY_DIR
+from _wikilink import ENTITY_DIR, collect_entity_pages
 SOURCE_DIR = Path(".wikicommit/source")
 
 FRONTMATTER_RE = re.compile(r"^(---\r?\n)(.*?)(\r?\n---\r?\n?)", re.DOTALL)
@@ -60,11 +60,7 @@ def build_hash_to_pages() -> dict[str, list[str]]:
     """Map each hex hash used by any on-disk wiki page's sources[] to the
     page path(s) that cite it."""
     mapping: dict[str, list[str]] = {}
-    if not ENTITY_DIR.exists():
-        return mapping
-    for page in sorted(ENTITY_DIR.rglob("*.md")):
-        if page.name == "index.md":
-            continue
+    for page in collect_entity_pages(ENTITY_DIR):
         fm, err = parse_frontmatter(page)
         if err or not fm:
             continue
@@ -107,7 +103,7 @@ def _reconcile_file(mgmt_file: Path, content: str, matched_pages: list[str], tod
     mgmt_file.write_text(content[: m.start(2)] + yaml_block + m.group(3) + body, encoding="utf-8")
 
 
-def collect_ingest_files() -> list[Path]:
+def collect_mgmt_files() -> list[Path]:
     if not SOURCE_DIR.exists():
         return []
     return sorted(SOURCE_DIR.rglob("*.md"))
@@ -115,7 +111,7 @@ def collect_ingest_files() -> list[Path]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Reconcile ingest management files stuck at status: pending "
+        description="Reconcile source management files stuck at status: pending "
                      "whose content is already cited by a published wiki page."
     )
     parser.add_argument("--today", default=None, metavar="YYYY-MM-DD")
@@ -125,7 +121,7 @@ def main() -> int:
     hash_to_pages = build_hash_to_pages()
 
     reconciled = 0
-    for mgmt_file in collect_ingest_files():
+    for mgmt_file in collect_mgmt_files():
         content = mgmt_file.read_text(encoding="utf-8-sig")
         fm, err = parse_frontmatter(mgmt_file)
         if err:

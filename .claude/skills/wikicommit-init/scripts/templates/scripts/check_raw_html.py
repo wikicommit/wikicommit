@@ -2,8 +2,8 @@
 """Detect raw HTML tags in wiki page body content.
 
 WikiCommit's design commits to embedding local/external images, video files,
-and YouTube via standard Markdown image syntax only (`![alt](path-or-url)`;
-see CLAUDE.md and docs/DesignDoc-publish.md §8.6) — there is no legitimate
+and YouTube via standard Markdown image syntax only (`![alt](path-or-url)`,
+which Quartz handles natively) — there is no legitimate
 need for a wiki page body to contain a raw HTML tag. Quartz's Markdown-to-
 HTML pipeline passes raw HTML straight through regardless of
 `enableInHtmlEmbed` (`remarkRehype(..., { allowDangerousHtml: true })` is
@@ -52,7 +52,7 @@ import sys
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter_and_body_text
-from _wikilink import ENTITY_DIR
+from _wikilink import ENTITY_DIR, VIEW_DIR
 
 IN_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
@@ -91,10 +91,14 @@ def main() -> int:
     if len(sys.argv) > 1:
         target_files: list[Path] = [Path(a) for a in sys.argv[1:]]
     else:
-        if not entity_dir.exists():
-            print("OK: 0 files checked, 0 errors")
-            return 0
-        target_files = sorted(entity_dir.rglob("*.md"))
+        # Both trees: a view page's body is published the same way and is
+        # subject to the same raw-HTML ban (Issue #675). As above, every `.md`
+        # on disk is checked — this script's subject is files, not the page
+        # graph.
+        target_files = sorted(entity_dir.rglob("*.md")) if entity_dir.exists() else []
+        view_dir = repo_root / VIEW_DIR
+        if view_dir.exists():
+            target_files += sorted(view_dir.rglob("*.md"))
 
     if not target_files:
         print("OK: 0 files checked, 0 errors")

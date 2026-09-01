@@ -1,0 +1,157 @@
+.graph {
+  & > h3 {
+    font-size: 1rem;
+    margin: 0;
+  }
+
+  & > .graph-outer {
+    border-radius: 5px;
+    border: 1px solid var(--lightgray);
+    box-sizing: border-box;
+    height: 250px;
+    margin: 0.5em 0;
+    position: relative;
+    overflow: hidden;
+
+    & > .global-graph-icon {
+      cursor: pointer;
+      background: none;
+      border: none;
+      color: var(--dark);
+      opacity: 0.5;
+      width: 24px;
+      height: 24px;
+      position: absolute;
+      padding: 0.2rem;
+      margin: 0.3rem;
+      top: 0;
+      right: 0;
+      border-radius: 4px;
+      background-color: transparent;
+      transition: background-color 0.5s ease;
+
+      &:hover {
+        background-color: var(--lightgray);
+      }
+    }
+  }
+
+  & > .global-graph-outer {
+    position: fixed;
+    z-index: 9999;
+    left: 0;
+    top: 0;
+    width: 100vw;
+    height: 100%;
+    backdrop-filter: blur(4px);
+    display: none;
+    overflow: hidden;
+
+    &.active {
+      display: inline-block;
+    }
+
+    // The control bar (Issue #584) cannot live inside .global-graph-container
+    // — renderGraph() calls removeAllChildren() on it every render — so it is
+    // a sibling, and has to be positioned against the same centred rectangle
+    // by hand rather than by flow.
+    & > .global-graph-controls {
+      position: fixed;
+      top: calc(50% - 40vh);
+      left: 50%;
+      transform: translate(-50%, -100%);
+      width: 80vw;
+      box-sizing: border-box;
+      // The bar sits wholly inside the strip above the container, and that
+      // strip is all there is: .global-graph-outer has a backdrop-filter, so
+      // it is the containing block for these fixed children *and* its
+      // overflow: hidden clips them. Without a cap, a bar taller than the
+      // strip (a size="4" multi-select plus its caption is ~90px, more than
+      // 10vh on any viewport shorter than ~900px) has its top row silently
+      // cut off. Capping it at the strip keeps every control reachable.
+      max-height: calc(50% - 40vh);
+      overflow-y: auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 0.75rem;
+      padding: 0 0.2rem 0.4rem;
+      font-size: 0.8rem;
+      color: var(--dark);
+
+      &:empty {
+        display: none;
+      }
+
+      @media all and (max-width: 800px) {
+        width: 90%;
+      }
+
+      .global-graph-controls__field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+
+        &--inline {
+          flex-direction: row;
+          align-items: center;
+          gap: 0.3rem;
+        }
+      }
+
+      .global-graph-controls__range {
+        display: flex;
+        gap: 0.25rem;
+
+        input {
+          width: 4rem;
+        }
+      }
+
+      select,
+      input {
+        font-size: 0.8rem;
+        color: var(--dark);
+        background-color: var(--light);
+        border: 1px solid var(--lightgray);
+        border-radius: 4px;
+      }
+
+      .global-graph-controls__reset {
+        cursor: pointer;
+        font-size: 0.8rem;
+        color: var(--dark);
+        background-color: var(--light);
+        border: 1px solid var(--lightgray);
+        border-radius: 4px;
+        padding: 0.2rem 0.6rem;
+
+        &:hover {
+          background-color: var(--lightgray);
+        }
+      }
+    }
+
+    & > .global-graph-container {
+      border: 1px solid var(--lightgray);
+      background-color: var(--light);
+      border-radius: 5px;
+      box-sizing: border-box;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      height: 80vh;
+      width: 80vw;
+
+      @media all and (max-width: 800px) {
+        width: 90%;
+      }
+    }
+  }
+}
+
+.graph-container {
+  width: 100%;
+  height: 100%;
+}
