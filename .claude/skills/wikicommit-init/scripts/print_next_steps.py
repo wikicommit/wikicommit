@@ -117,13 +117,13 @@ _COMMIT_STEP_INTRO = (
 _QUARTZ_PAGES_EXTRA_FILES = (
     "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"
     "   review flow, regardless of the Quartz choice), `.github/ISSUE_TEMPLATE/report.md`\n"
-    '   (Issue #339 — backs the wikicommit-banner "Report an issue" link, which otherwise silently\n'
+    '   (Issue #339 — backs the wikicommit-banner report link, which otherwise silently\n'
     "   no-ops), and the root-level publishing configuration files "
 )
 _QUARTZ_ONLY_EXTRA_FILES = (
     "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"
     "   review flow, regardless of the Quartz choice), `.github/ISSUE_TEMPLATE/report.md`\n"
-    '   (Issue #339 — backs the wikicommit-banner "Report an issue" link, which otherwise silently\n'
+    '   (Issue #339 — backs the wikicommit-banner report link, which otherwise silently\n'
     "   no-ops), and the root-level local-build configuration files "
 )
 _NONE_EXTRA_FILES = (

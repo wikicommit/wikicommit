@@ -20,7 +20,6 @@ import yaml
 import _root_outputs
 
 _LANG_RE = re.compile(r"^[a-z]{2,3}(-[A-Za-z0-9]+)*$")
-_TEST_ARTIFACT_RE = re.compile(r"\.test\.tsx?$")
 
 
 def _read_template_version(templates_dir: Path) -> str:
@@ -51,16 +50,6 @@ def _read_template_version(templates_dir: Path) -> str:
     finally:
         sys.dont_write_bytecode = previous
     return str(module.VERSION)
-
-
-def _is_quartz_plugin_dev_artifact(rel_path: Path) -> bool:
-    """vitest suites/config (#93) and eslint config (#94) are dev-only tooling
-    for the template's own CI and are not needed by the generated site
-    (dist/ is pre-built)."""
-    return (
-        rel_path.name in ("vitest.config.ts", "eslint.config.js")
-        or _TEST_ARTIFACT_RE.search(rel_path.name) is not None
-    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -101,6 +90,25 @@ def parse_args() -> argparse.Namespace:
         "an existing config.yml wholesale; this is the explicit, single-field alternative). "
         "Runs standalone and ignores every other flag except --repo-root; config.yml must "
         "already exist.",
+    )
+    parser.add_argument(
+        "--update-version",
+        default=None,
+        metavar="VERSION",
+        help="Rewrite only the wikicommit_version field of an already-existing "
+        ".wikicommit/config.yml (Issue #713 — the field records the version this "
+        "repository was last brought in step with, and /wikicommit-update restamps it). "
+        "Runs standalone and ignores every other flag except --repo-root.",
+    )
+    parser.add_argument(
+        "--add-config-keys",
+        nargs="+",
+        default=None,
+        metavar="KEY",
+        help="Append top-level keys the template has and .wikicommit/config.yml lacks, "
+        "carrying each key's commented example across with it (Issue #713). Only appends, "
+        "never rewrites an existing value. Runs standalone and ignores every other flag "
+        "except --repo-root.",
     )
     parser.add_argument(
         "--repo-root",
@@ -170,6 +178,203 @@ def _apply_footer_repo_url(config_content: str, repo_url: str | None) -> str:
 _THEME_LINE_RE = re.compile(r"^theme:.*$", re.MULTILINE)
 
 
+_VERSION_LINE_RE = re.compile(r"^wikicommit_version:.*$", re.MULTILINE)
+
+
+def _read_config(repo_root: Path) -> tuple[Path, str] | None:
+    """The config.yml path and its text, or None after printing why not."""
+    config_path = repo_root / ".wikicommit" / "config.yml"
+    if not config_path.is_file():
+        print(f"ERROR: {config_path} does not exist (run wikicommit-init first)", file=sys.stderr)
+        return None
+    return config_path, config_path.read_text(encoding="utf-8")
+
+
+def _update_version(repo_root: Path, version: str) -> int:
+    """Rewrite only the `wikicommit_version:` line of an existing config.yml (Issue #713).
+
+    The field records the version this repository was last brought in step with, so an
+    update has to restamp it — and it is the only writer that ever does (init stamps it
+    once on creation and then skips config.yml wholesale forever after).
+
+    Text-level, exactly like `_update_theme()` above, and for a reason that outweighs the
+    convenience of a YAML round-trip: config.yml ships commented-out worked examples that
+    are the only documentation for the fields they describe (`site_description`'s per-
+    language example, added by Issue #671, is a key the template deliberately does not
+    ship — only the comment shows the shape). `yaml.safe_load` + `yaml.dump` discards
+    every one of them, so a repository that ran an update would silently lose the
+    instructions for the fields it had not filled in yet.
+    """
+    read = _read_config(repo_root)
+    if read is None:
+        return 1
+    config_path, content = read
+    try:
+        new_line = f'wikicommit_version: "{version}"'
+        if _VERSION_LINE_RE.search(content):
+            # Lambda replacement rather than a raw string, for the same reason
+            # _update_theme() gives: re.sub interprets backslash escapes in a string
+            # replacement.
+            content = _VERSION_LINE_RE.sub(lambda _m: new_line, content, count=1)
+        else:
+            # A config.yml created before Issue #577 has no stamp at all. Prepend rather
+            # than append: the template carries it as the first line, and keeping that
+            # position means a stamped file looks the same however it got stamped.
+            content = new_line + "\n" + content
+        config_path.write_text(content, encoding="utf-8")
+        print(f"UPDATED: {config_path.relative_to(repo_root)} (wikicommit_version)")
+        return 0
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
+# What each `{NAME}` placeholder becomes when a key is *added* to an existing config.yml
+# (Issue #713). These are the values a fresh init with no flags would write, which is
+# exactly right here: a key the template has only just gained is inert until the user
+# fills it in, and that is what "newly introduced" means. `{VERSION}` is resolved from
+# the template rather than listed, since it changes every release.
+#
+# Copying a block across without substituting would be silently wrong rather than
+# merely ugly: `theme: {THEME}` is valid YAML, and it parses as a *mapping* — so
+# wikicommit-generate would read the wiki's theme as `{"THEME": None}` instead of a
+# string, with nothing anywhere reporting a problem.
+_CONFIG_PLACEHOLDER_DEFAULTS = {
+    "{TARGETS}": "[]",
+    "{PRIMARY_LANG}": "en",
+    "{THEME}": '""',
+}
+
+_PLACEHOLDER_TOKEN_RE = re.compile(r"\{[A-Z][A-Z0-9_]*\}")
+
+
+def _substitute_config_placeholders(block: list[str], version: str) -> list[str] | None:
+    """`block` with its placeholders replaced by shipped defaults, or None if one is
+    unknown — a literal placeholder written into a user's config is worse than not
+    adding the key at all, so an unrecognized one refuses rather than guesses."""
+    # `{VERSION}` substitutes *bare*, exactly as the full-init path at the bottom of
+    # main() does, because the template already writes it inside quotes
+    # (`wikicommit_version: "{VERSION}"`). Adding a second pair here produced
+    # `wikicommit_version: ""0.2.0""`, which YAML rejects for the whole document — the
+    # same `""""` trap check_distribution_freshness.py records against its own
+    # placeholder substitute (Issue #712).
+    defaults = dict(_CONFIG_PLACEHOLDER_DEFAULTS, **{"{VERSION}": version})
+    out = []
+    for line in block:
+        for token in set(_PLACEHOLDER_TOKEN_RE.findall(line)):
+            if token not in defaults:
+                return None
+            line = line.replace(token, defaults[token])
+        out.append(line)
+    return out
+
+
+def _add_config_keys(repo_root: Path, templates_dir: Path, keys: list[str]) -> int:
+    """Append top-level keys the template has and this config.yml lacks (Issue #713).
+
+    Takes the block verbatim from the template — the key, and the comment lines directly
+    above it. Those comments are the field's only documentation on the installed side, so
+    carrying the key without them would deliver a setting nobody can use.
+
+    Only ever appends, and only keys that are genuinely absent: an update proposes what
+    the template gained, and a value the user already set is theirs. Nested keys are not
+    handled — a key is added whole or not at all, so a new sub-key under an existing
+    `translation:` is left to the human, who can see it in the diff the update shows.
+    """
+    read = _read_config(repo_root)
+    if read is None:
+        return 1
+    template_path = templates_dir / "config.yml"
+    if not template_path.is_file():
+        print(f"ERROR: {template_path} does not exist", file=sys.stderr)
+        return 1
+    config_path, content = read
+    try:
+        template_lines = template_path.read_text(encoding="utf-8").splitlines()
+        existing = {
+            m.group(1)
+            for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_]*):", content, re.MULTILINE)
+        }
+        added: list[str] = []
+        for key in keys:
+            if key in existing:
+                print(f"SKIPPED: {key} (already present)")
+                continue
+            block = _template_key_block(template_lines, key)
+            if block is None:
+                print(f"SKIPPED: {key} (not a top-level key in the template)")
+                continue
+            block = _substitute_config_placeholders(block, _read_template_version(templates_dir))
+            if block is None:
+                print(f"SKIPPED: {key} (its template block holds a placeholder with no known default)")
+                continue
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += "\n" + "\n".join(block) + "\n"
+            added.append(key)
+            # `existing` is a snapshot of the file as it was read, so a key repeated in
+            # `keys` would otherwise be appended twice. YAML accepts a duplicate mapping
+            # key silently (last one wins) while `_update_theme()` rewrites the *first*,
+            # so the two would disagree with nothing reporting it.
+            existing.add(key)
+        if added:
+            # Refuse to write a config.yml that no longer parses. Every consumer reads
+            # this file with yaml.safe_load, and a document-level parse error takes the
+            # whole file down — `primary_lang`, `theme`, `targets` and all — rather than
+            # just the key being added. Reporting here is the difference between one
+            # setting not arriving and the repository's configuration going dark.
+            try:
+                yaml.safe_load(content)
+            except yaml.YAMLError as e:
+                print(
+                    f"ERROR: adding {', '.join(added)} would leave "
+                    f"{config_path.relative_to(repo_root)} unparseable, so nothing was "
+                    f"written: {e}",
+                    file=sys.stderr,
+                )
+                return 1
+            config_path.write_text(content, encoding="utf-8")
+            print(f"UPDATED: {config_path.relative_to(repo_root)} ({', '.join(added)})")
+        print(f"SUMMARY: added={len(added)}")
+        return 0
+    except Exception as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 1
+
+
+def _template_key_block(template_lines: list[str], key: str) -> list[str] | None:
+    """The template lines defining top-level `key`, with the comments above it.
+
+    Returns None when `key` is not a top-level key there. The block runs from the first
+    comment line of the contiguous comment run immediately above the key, through the
+    key's own indented continuation lines.
+    """
+    start = None
+    for i, line in enumerate(template_lines):
+        if re.match(rf"^{re.escape(key)}:", line):
+            start = i
+            break
+    if start is None:
+        return None
+    end = start + 1
+    while end < len(template_lines):
+        line = template_lines[end]
+        if line.strip() == "" or line.startswith((" ", "\t")) or line.lstrip().startswith("#"):
+            end += 1
+            continue
+        break
+    # Trim trailing blank/comment lines: a comment run at the end belongs to whatever
+    # key comes next, not to this one.
+    while end > start + 1 and (
+        template_lines[end - 1].strip() == "" or template_lines[end - 1].lstrip().startswith("#")
+    ):
+        end -= 1
+    head = start
+    while head > 0 and template_lines[head - 1].lstrip().startswith("#"):
+        head -= 1
+    return template_lines[head:end]
+
+
 def _update_theme(repo_root: Path, theme: str) -> int:
     """Rewrite only the `theme:` line of an already-existing config.yml (#374).
 
@@ -216,6 +421,12 @@ def main() -> int:
     if args.update_theme is not None:
         return _update_theme(repo_root, args.update_theme)
 
+    if args.update_version is not None:
+        return _update_version(repo_root, args.update_version)
+
+    if args.add_config_keys is not None:
+        return _add_config_keys(repo_root, templates_dir, args.add_config_keys)
+
     for lang in [args.primary_lang] + (args.targets or []):
         if not _LANG_RE.match(lang):
             print(f"ERROR: invalid language code {lang!r} (expected ISO 639-1 e.g. 'ja')", file=sys.stderr)
@@ -235,12 +446,40 @@ def main() -> int:
     def rel(path: Path) -> str:
         return str(path.relative_to(repo_root))
 
-    def write_file(dest: Path, content: str, *, always_skip_existing: bool = False) -> None:
-        # always_skip_existing mirrors copy_file's flag of the same name: root-level
-        # files (e.g. quartz.config.yaml) must never be clobbered on repeat
-        # `/wikicommit-init --quartz` runs, regardless of --no-overwrite.
+    def _flags(dest_rel: str) -> dict:
+        """The copy flags declared for this repository-relative path (Issue #712).
+
+        Ownership — "WikiCommit's payload" vs "the user may have edited this" — is
+        recorded once, in _root_outputs.py, next to the variant and `git add` decisions
+        for the same path. Restating it as a literal at each call site is what let
+        `.wikicommit/config.yml` and `.wikicommit/schema/` end up with no flag at all,
+        leaving --no-overwrite as the single thing standing between a re-init and the
+        user's theme, targets and hand-edited type templates.
+
+        An unlisted path falls back to the protective end rather than raising: this is
+        the flag lookup for a copy that is about to happen either way, and refusing to
+        copy is not better than copying without clobbering.
+        """
+        entry = _root_outputs.by_path(dest_rel)
+        if entry is None:
+            return {"always_skip_existing": True}
+        return _root_outputs.copy_flags(entry)
+
+    def write_file(
+        dest: Path,
+        content: str,
+        *,
+        always_skip_existing: bool = False,
+        always_overwrite: bool = False,
+    ) -> None:
+        # Both flags mirror copy_file's of the same name, and for the same reason: the
+        # ownership of each path is declared once in _root_outputs.py and reaches every
+        # writer through _flags(). Accepting both here — even though every path this
+        # function currently writes is `review` — keeps that lookup safe to use at any
+        # call site, rather than leaving one writer that silently cannot express half
+        # the policies.
         dest.parent.mkdir(parents=True, exist_ok=True)
-        if dest.exists() and (always_skip_existing or args.no_overwrite):
+        if dest.exists() and (always_skip_existing or (args.no_overwrite and not always_overwrite)):
             reason = "already exists" if always_skip_existing else "--no-overwrite"
             print(f"SKIPPED: {rel(dest)} ({reason})")
             skipped.append(rel(dest))
@@ -355,13 +594,17 @@ def main() -> int:
             .replace("{PRIMARY_LANG}", args.primary_lang)
             .replace("{THEME}", theme_yaml)
         )
-        write_file(repo_root / ".wikicommit" / "config.yml", config_content)
+        write_file(
+            repo_root / ".wikicommit" / "config.yml",
+            config_content,
+            **_flags(".wikicommit/config.yml"),
+        )
 
         schema_src = templates_dir / "schema"
         if not schema_src.is_dir():
             print(f"ERROR: templates/schema/ not found at {schema_src}", file=sys.stderr)
             return 1
-        copy_tree(schema_src, repo_root / ".wikicommit" / "schema")
+        copy_tree(schema_src, repo_root / ".wikicommit" / "schema", **_flags(".wikicommit/schema"))
 
         dirs = [
             repo_root / ".wikicommit" / "source" / "path",
@@ -369,6 +612,10 @@ def main() -> int:
             repo_root / ".wikicommit" / "entity" / "assets",
             repo_root / ".wikicommit" / "entity" / args.primary_lang,
             repo_root / ".wikicommit" / "view" / args.primary_lang,
+            # Review records (Issue #750). Created empty, with no per-language or
+            # per-tree subdirectory: record_review.py mirrors a page's own path under
+            # here on demand, and which pages exist is not known at init time.
+            repo_root / ".wikicommit" / "review",
         ]
         for d in dirs:
             make_dir_with_gitkeep(d)
@@ -377,7 +624,8 @@ def main() -> int:
         if not scripts_src.is_dir():
             print(f"ERROR: templates/scripts/ not found at {scripts_src}", file=sys.stderr)
             return 1
-        # always_overwrite=True (Issue #647): `.wikicommit/scripts/` is WikiCommit's
+        # update="overwrite" (Issue #647, now declared in _root_outputs.py per Issue
+        # #712): `.wikicommit/scripts/` is WikiCommit's
         # own distribution payload — shared quality-gate scripts the Skills call, not
         # content the user authors — so a re-init refreshes it even under
         # --no-overwrite (which exists to protect the user's own files: config.yml,
@@ -399,7 +647,7 @@ def main() -> int:
         copy_tree(
             scripts_src,
             repo_root / ".wikicommit" / "scripts",
-            always_overwrite=True,
+            **_flags(".wikicommit/scripts"),
         )
 
         # Every root-level output that is a verbatim copy comes from _root_outputs.py,
@@ -407,14 +655,16 @@ def main() -> int:
         # (Issue #642). Which variant each file belongs to, and why, is recorded there
         # rather than here, so adding one is a single edit instead of two lists to keep
         # in step — the drift that shipped install-local-plugins.cjs without telling
-        # anyone to commit it (Issue #556). always_skip_existing throughout: an existing
-        # repository's own files must never be clobbered, regardless of --no-overwrite.
+        # anyone to commit it (Issue #556). The copy flags come from the same list's
+        # `update` column (Issue #712): the user's own files are never clobbered, while
+        # WikiCommit's own payload (the workflows, the *.cjs build scripts) is refreshed
+        # even under --no-overwrite.
         # The rest of the root-level outputs are generated further down and cannot be
         # plain copies: config.yml and quartz.config.yaml substitute placeholders,
         # schema/scripts/quartz-plugins are directory trees, and entity/source are
         # created with a .gitkeep.
         for template_rel, dest_rel in _root_outputs.plain_copies(variant):
-            copy_file(templates_dir / template_rel, repo_root / dest_rel, always_skip_existing=True)
+            copy_file(templates_dir / template_rel, repo_root / dest_rel, **_flags(dest_rel))
 
         if args.quartz:
             quartz_plugins_src = templates_dir / "quartz-plugins"
@@ -449,7 +699,7 @@ def main() -> int:
             write_file(
                 quartz_config_path,
                 quartz_config_content,
-                always_skip_existing=True,
+                **_flags("quartz.config.yaml"),
             )
             if quartz_config_is_new and not args.repo_url:
                 # Without this line, dropping the footer's GitHub entry is completely
@@ -484,8 +734,8 @@ def main() -> int:
             copy_tree(
                 quartz_plugins_src,
                 repo_root / "quartz-plugins",
-                always_skip_existing=True,
-                exclude=_is_quartz_plugin_dev_artifact,
+                exclude=_root_outputs.is_quartz_plugin_dev_artifact,
+                **_flags("quartz-plugins"),
             )
 
         print(f"SUMMARY: created={len(created)}, skipped={len(skipped)}")

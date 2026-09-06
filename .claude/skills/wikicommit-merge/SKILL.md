@@ -27,14 +27,18 @@ Record the result as `<default branch>` and use it everywhere below in place of 
 ### Step 1: Detect Changes
 
 ```bash
-git -c core.quotePath=false status --porcelain -- ".wikicommit/entity/**/*.md" ".wikicommit/view/**/*.md" ".wikicommit/source/**/*.md" ".wikicommit/entity/assets/**" ".wikicommit/source-policy.md" ".wikicommit/entity-policy.md"
+git -c core.quotePath=false status --porcelain -- ".wikicommit/entity/**/*.md" ".wikicommit/view/**/*.md" ".wikicommit/source/**/*.md" ".wikicommit/review/**/*.md" ".wikicommit/entity/assets/**" ".wikicommit/source-policy.md" ".wikicommit/entity-policy.md"
 ```
 
-> The third pathspec covers assets — images and attachments under `.wikicommit/entity/assets/` (Issue #589). Without it, a run that only adds an image stops at "No changes to merge" and the asset is never committed, even though Step 5's `git add` (which takes directories, not `*.md`) would have staged it had some other `.md` change carried the run that far. Note this is detection only: assets must **not** enter `<changed .md files>` in Step 2 item 1, whose pathspec stays `*.md`-only — every quality check it feeds (`validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py`, `markdownlint-cli2`) parses frontmatter and would fail on a PNG. Because of that, an assets-only run reaches Step 3 with an **empty** `<changed .md files>`; see Step 3, which must skip the per-file checks in that case rather than invoking them with no paths.
+> The `.wikicommit/entity/assets/**` pathspec covers assets — images and attachments under `.wikicommit/entity/assets/` (Issue #589). Without it, a run that only adds an image stops at "No changes to merge" and the asset is never committed, even though Step 5's `git add` (which takes directories, not `*.md`) would have staged it had some other `.md` change carried the run that far. Note this is detection only: assets must **not** enter `<changed .md files>` in Step 2 item 1, whose pathspec stays `*.md`-only — every quality check it feeds (`validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py`, `markdownlint-cli2`) parses frontmatter and would fail on a PNG. Because of that, an assets-only run reaches Step 3 with an **empty** `<changed .md files>`; see Step 3, which must skip the per-file checks in that case rather than invoking them with no paths.
 >
-> The second pathspec covers the view tree (Issue #675) — second-order pages grounded in this wiki's own pages (`derived_from`) rather than in an external document, which `/wikicommit-synthesize` writes there. Unlike assets and the policy files below, these **are** wiki pages and do belong in `<changed .md files>`: every per-file check handles them (`validate_frontmatter.py` applies the view-page rules, `check_wikilinks.py` resolves `[[View/<slug>]]`, `check_raw_html.py` and `markdownlint-cli2` are content checks that do not care which tree a page came from). A wiki that has never run `/wikicommit-synthesize` has no such directory, and the pathspec simply matches nothing.
+> The `.wikicommit/view/**/*.md` pathspec covers the view tree (Issue #675) — second-order pages grounded in this wiki's own pages (`derived_from`) rather than in an external document, which `/wikicommit-synthesize` writes there. Unlike assets and the policy files below, these **are** wiki pages and do belong in `<changed .md files>`: every per-file check handles them (`validate_frontmatter.py` applies the view-page rules, `check_wikilinks.py` resolves `[[View/<slug>]]`, `check_raw_html.py` and `markdownlint-cli2` are content checks that do not care which tree a page came from). A wiki that has never run `/wikicommit-synthesize` has no such directory, and the pathspec simply matches nothing.
 >
-> The fourth and fifth pathspecs cover `.wikicommit/source-policy.md` (Issue #564) and `.wikicommit/entity-policy.md` (Issue #667). `wikicommit-collect`'s Step 8 appends a declined candidate to that file's `rejected:` list, and neither `.wikicommit/entity/` nor `.wikicommit/source/` contains it (`.wikicommit/source/` is a directory pathspec and does not match the sibling file `source-policy.md`). Without this pathspec a collect run in which the user declines every candidate stops at "No changes to merge" and the record of that decision is never committed — which defeats the whole point of the list, since the next free exploration re-proposes the source it was meant to remember. Like assets, this is a `.md` file that must **not** enter `<changed .md files>` in Step 2 item 1: it is not a wiki page, and `validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py` would all fail on it. Step 2 item 6 stages them separately. The entity policy is there for the same reason one axis over — it is hand-edited prose deciding whether an entity may be written about at all, and `wikicommit-generate` acts on it, so a run in which the human edits only that file must not stop at "No changes to merge".
+> The two policy-file pathspecs cover `.wikicommit/source-policy.md` (Issue #564) and `.wikicommit/entity-policy.md` (Issue #667). `wikicommit-collect`'s Step 8 appends a declined candidate to that file's `rejected:` list, and neither `.wikicommit/entity/` nor `.wikicommit/source/` contains it (`.wikicommit/source/` is a directory pathspec and does not match the sibling file `source-policy.md`). Without this pathspec a collect run in which the user declines every candidate stops at "No changes to merge" and the record of that decision is never committed — which defeats the whole point of the list, since the next free exploration re-proposes the source it was meant to remember. Like assets, this is a `.md` file that must **not** enter `<changed .md files>` in Step 2 item 1: it is not a wiki page, and `validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py` would all fail on it. Step 2 item 6 stages them separately. The entity policy is there for the same reason one axis over — it is hand-edited prose deciding whether an entity may be written about at all, and `wikicommit-generate` acts on it, so a run in which the human edits only that file must not stop at "No changes to merge".
+>
+> The `.wikicommit/review/**/*.md` pathspec covers the review records (Issue #750) — one immutable file per review, written by `record_review.py` under `.wikicommit/review/`. They are what makes "every page was reviewed" a checkable statement rather than an assertion, so a run whose records are never committed is indistinguishable from one where no review happened. Like assets and the policy files, these are `.md` files that must **not** enter `<changed .md files>` in Step 2 item 1: they are not wiki pages, and `validate_frontmatter.py` / `check_wikilinks.py` would fail on them. Step 5's `git add` takes the directory.
+>
+> Note also that `lychee` is invoked with an explicit path argument (Step 3), so it does not walk this tree — a record's `source_file` can hold a URL, and an unscoped run would re-fetch every one of them on every merge.
 >
 > `git diff --name-only HEAD` does not detect untracked files. Wiki pages and management files newly generated by `wikicommit-generate` are untracked (not yet `git add`-ed), so use `git status --porcelain` instead (it lists untracked files too, in `?? path` form).
 >
@@ -170,7 +174,7 @@ Branch naming rule (exception): use the form `wikicommit/merge-<YYYYMMDD>-<HHMMS
 ### Step 5: Commit
 
 ```bash
-git add -- .wikicommit/entity/ .wikicommit/view/ .wikicommit/source/ <new source files...> <new schema files...> <new vocab file> <policy files...>
+git add -- .wikicommit/entity/ .wikicommit/view/ .wikicommit/source/ .wikicommit/review/ <new source files...> <new schema files...> <new vocab file> <policy files...>
 git commit -m "$(cat <<'EOF'
 wiki: bulk update <YYYY-MM-DD>
 
@@ -183,6 +187,8 @@ EOF
 **The trailer's model fields are placeholders, not literals (Issue #559).** Replace `<current model ID>` with the ID of the model actually running this skill — the same self-reported value `wikicommit-generate` writes into a page's `generated_by`, spelled exactly as the runtime reports it (keep any suffix; do not shorten or normalize it). Replace `<Claude display name>` with that model's human-readable name, or write just `Claude` when the running model's display name is not known with confidence: GitHub links a co-author by the email address, not by the name, so a conservative `Claude` costs nothing while a guessed name misattributes the commit in the GitHub UI. `<noreply@anthropic.com>` is a fixed literal. Never hardcode a model ID here — a commit whose trailer names one model while the page frontmatter it is committing records another is self-contradictory, and defeats the stated purpose of `Generated-By` (precise tracking of which model generated the content).
 
 Replace `<YYYY-MM-DD>` with the output of `date +%Y-%m-%d` (use the same date in both the commit message title and body). Pass each path determined in Step 2 item 3 as a separate argument prefixed with `:(literal)` for `<new source files...>` (e.g. `:(literal)raw/report[2024].pdf`; omit if there are none). For the same reason as Step 2 item 3 (Issue #115), passing a path containing metacharacters to `git add` without the prefix can accidentally stage an unrelated file. Pass each path determined in Step 2 item 4 for `<new schema files...>` the same way (omit if there are none) — these are always plain `.wikicommit/schema/<Type>.md` paths (Schema.org type names contain no glob metacharacters), but using `:(literal)` uniformly costs nothing and avoids re-deriving the rule if a custom type name ever did. Pass the path determined in Step 2 item 5 for `<new vocab file>` verbatim (omit if empty) — it is always the fixed literal path `.wikicommit/schemaorg-vocab.json`, so no `:(literal)` prefix is needed. Pass each path determined in Step 2 item 6 for `<policy files...>` verbatim as well, as its own argument (omit if none) — these too are fixed literal paths, `.wikicommit/source-policy.md` and `.wikicommit/entity-policy.md`.
+
+**Drop any of the four `.wikicommit/` directories that does not exist on disk.** `git add` treats a pathspec matching nothing as fatal and aborts the *whole* invocation — nothing is staged, and the commit that follows has no content — so listing `.wikicommit/review/` (Issue #750) unconditionally would break every merge on a wiki that has one of them missing. That is not a hypothetical: `.wikicommit/review/` is created by `/wikicommit-init`, so a repository that updated its Skills (`npx skills add`) without re-running init does not have it, and neither does one initialized before `.wikicommit/view/` existed (Issue #675). Check each with a plain directory test and pass only the ones present; the ones you drop are, by definition, directories with nothing to stage.
 
 ### Step 6: Create PR
 
@@ -288,6 +294,12 @@ The only real constraint on generating many Issues back-to-back is GitHub's seco
 
 Obtain `<lang>` and `<slug>` from the target page's frontmatter `lang` field and its filename (without extension). `<Type>` is the value of the frontmatter `type` field with the `schema:` prefix stripped (e.g. `schema:Person` → `Person`, `schema:custom/Decision` → `custom/Decision`); always use this `<Type>` (including the `/`) in Issue titles. **A page under `.wikicommit/view/` has no `type:` field at all** (Issue #675), so for one of those `<Type>` is the reserved constant `View` — the same segment `[[View/<slug>]]` and the published `content/<lang>/View/` path use. Do not leave it empty; an Issue titled `Review: /<slug> (<lang>)` names nothing. While reading this frontmatter, also check for `translated_from` and `derived_from` — which one is present (if either) selects the Issue Body Template variant used below.
 
+**Also determine `<Pass-2b type?>` for a `sources`-based page** (Issue #729), once the duplicate check below has confirmed this page still needs an Issue — a page that already has an open tracking Issue is skipped without a body being built, so reading a schema file for it is wasted on every future run. Read `.wikicommit/schema/<Type>.md` (`<Type>` as derived just above, i.e. with the `schema:` prefix already stripped) and check whether its `wikicommit.provenance` is `generate-interactive` or `generate-auto` — the two values `wikicommit-generate` Pass 2b stamps when it adds a type on the fly (Issue #519 / #507). If it is, the `sources` variant's checklist below gains one extra item; otherwise that item is omitted. Treat a missing or unreadable schema file, a missing `provenance`, or any other value (`default`, `init-theme`, `collect`, `schema-propose`, `manual`) as "no" — every one of those means a human either installed the type deliberately or approved it through a path that already had its own confirmation. Skip this read entirely for translation and synthesized pages: neither variant carries the item.
+
+> **Why `provenance` rather than this batch's diff.** The design doc words the condition as "a type newly added in this batch", and Pass 2b's schema file does land in the same batch, so a `git show` against the squash-merge commit could answer it. But this step deliberately scans the whole default branch rather than the batch (Issue #313) precisely so that a page whose Issue creation failed in an earlier run is still picked up — and a batch-scoped condition would give that rescued page a *different* checklist from the one it would have received on its original run, purely as a function of when the API happened to fail. `provenance` is a permanent stamp on the schema file, so it answers the same question identically on every run, from a read this step can make about any page it finds.
+>
+> The cost is that the condition is broader than "this batch": every page of a Pass 2b-added type carries the item from then on, so for that type it is not really conditional any more. That is accepted — Pass 2b adding a type at all is the uncommon case (zero candidates is its normal outcome), and the alternative trades a bounded amount of repetition for a checklist that is not reproducible.
+
 **`<page path>`** is the target page's own repo-relative path, exactly as the scan above printed it — `.wikicommit/entity/<lang>/<Type>/<slug>.md` for an entity page, `.wikicommit/view/<lang>/<slug>.md` for a view page. Use that value verbatim in the "Review Target" line and the marker below; do not rebuild it from `<lang>`/`<Type>`/`<slug>`, because a view page's path contains no Type segment and reconstructing one produces `.wikicommit/entity/<lang>//<slug>.md`, a path nothing on disk matches.
 
 Each tracking Issue embeds an exact machine-readable marker in its body: `<!-- wikicommit-page: <page path> -->`. This is the marker `review-issue-close-sync.yml` resolves on close, and it accepts both tree layouts; a marker naming a path that does not exist makes that workflow exit quietly at its "page already removed" branch, leaving the page `pending` with nothing to show for the close. To check whether a page already has an open tracking Issue, fetch open `wikicommit-review`-labeled issues and scan their `body` for that exact marker locally:
@@ -335,21 +347,113 @@ Three variants exist, selected by which provenance field the target page's front
 
 - **`sources`-based pages** (no `translated_from`, no `derived_from`) — a normal `wikicommit-generate` output.
 - **Translation pages** (`translated_from` present) — a `wikicommit-translate` output (Issue #280). Carries `translated_from`/`translated_at`/`translated_by` instead of `generated_at`/`generated_by`, and its `sources` is inherited from the original page rather than set directly — so "does the content match the source document?" does not translate meaningfully to it, and its checklist below is a distinct set of translation-quality questions rather than a reworded copy of the `sources`-based checklist.
-- **Synthesized pages** (`derived_from` present) — a `wikicommit-synthesize` output (Issue #283). Carries `derived_from` (an array of `{path, source_commit}`) instead of `sources`, but — unlike a translation page — does carry `generated_at`/`generated_by` the same as a `sources`-based page; only its "Review Target"/"Review Checklist" content differs, not the at/by fields.
+- **Synthesized pages** (`derived_from` present) — a `wikicommit-synthesize` output (Issue #283). Carries `derived_from` (an array of `{path, source_commit}`) instead of `sources`, but — unlike a translation page — does carry `generated_at`/`generated_by` the same as a `sources`-based page; only its "Review Target"/"Once You Have Read It" content differs, not the at/by fields.
 
 These three provenance fields are mutually exclusive per page, so exactly one variant applies to any given target page. All three share the same "How to Proceed" text below — it only describes `review-issue-close-sync.yml`'s reaction to the Issue closing, which is identical regardless of page provenance — and the same `wikicommit-review` label / `<!-- wikicommit-page: ... -->` marker format, so no change to that workflow is required for any of the three.
 
+**What these checklists ask for changed (Issue #723).** They used to hold the same three questions
+`wikicommit-review` Step 4 asks, and two of those three — does it match the source, are there
+hallucinations — are exactly what Pass 4 already checks, twice over and with far more machinery
+behind it (evidence binding, per-fact verification, secondary citations, source-vs-source
+disagreement, one-hop cross-page contradiction). A human closing the Issue was walking a third lap
+of a check the machine is better at, and the top rung of the trust ladder was being signed on that
+basis. The `saitama` pilot bears this out: four review agents comparing pages to their originals
+found zero hallucinations, fabrications, misattributions, secondary citations or wrong dates — what
+they did find was three cross-page contradictions. The source-fidelity layer works; the defects left
+are a different kind. Asking the same three questions on every page, and having them pass every
+time, is also what stops a checklist from being read at all (Issue #562's reason for demoting the
+low-density guard).
+
+The split is not arbitrary. **Pass 4's evidence-binding rule (Issue #442) defines it**: that rule
+forbids the machine from judging on anything but the literal source text, so outside knowledge is,
+by construction, the one kind of evidence only a human can bring. A reviewer who happens to know an
+ordinance changed in April holds evidence no automated layer can reach. The second human-only item
+is harm: `.wikicommit/entity-policy.md` (Issue #667) decides whether a page about an entity gets
+written, but nothing anywhere checks whether a sentence inside a page that legitimately exists
+treats a real person or organization unfairly — Pass 4 has no harm check of any kind.
+
+Two rules govern how the new items are worded. **The knowledge item says "tell us if you know", never
+"go and find out"** — turning it into research would reintroduce, on the human side, exactly what
+Issue #722 rules out on the machine side, and would make each review cost an open-ended search;
+reporting what you already know costs nothing. And **the knowledge item goes in the `sources`
+variant only**: on a translation, a stale fact belongs to the original page, and on a synthesized
+page it belongs to whichever grounding page states it — the same redirect `wikicommit-fix` makes
+(Issue #529), and the reason the three variants exist at all (Issue #525). **Harm goes in all
+three**, because a harmful sentence is harmful whatever produced it.
+
+**Issue #740 then changed the shape, not just the contents.** `review_status` is a two-valued
+field, which makes it structurally a container for an *event* — it happened, or it has not. What it
+held was a *claim* about the page, and a claim has content, which is why the content had to be
+bolted on as a checklist in the first place; once that checklist took the form of an attestation,
+closing became a signature. So the checkboxes are gone. What the Issue asks for now is the product
+this field can actually carry: **one line on what the reader took away**, which records that this
+wiki's knowledge reached at least one person who is not the machine that wrote it. Anything they
+noticed goes in the same comment, as prompts rather than as boxes to tick.
+
+That also removes the four-item ceiling this section used to impose: the ceiling existed because
+every item was a claim a closer had to underwrite, and a list of prompts costs nothing to skip. Keep
+the list short anyway — one of these Issues is generated per page.
+
+**"This is not a test" has to be written down.** Without it, a reader takes the request for a line
+as something they will be marked on, and the weight this change removes comes back in another form.
+The line is not asked for as verification — verification is impossible, an LLM can write it — but
+because the product being recorded is an event, and the line is that event's trace. It differs from
+a quiz on every axis that matters: there is no correct answer, so it cannot be marked, so there is
+nothing to fake, and nobody who read the page is unable to write one.
+
+**Do not write "this is not a review" anywhere.** All three products come from one reading, and the
+word covers the whole of it; what differs is which product each is recorded as (Issue #583's line,
+applied here: change the reader-facing strings and the definitions, leave `review_status`,
+`reviewed_by`, the `wikicommit-review` label, the workflow filenames, the Skill names and the commit
+trailers alone).
+
+**Say the machine's half out loud.** Since Issue #751 the banner states that the page was checked
+against its sources, so the prompts here can be introduced as what that check does *not* cover
+without the reader inferring that nothing was checked at all.
+
+**The source itself is a separate thing to ask about (Issue #743).** Nothing in the template used
+to question whether a source is any good; every item measured the page *against* its sources, which
+means a page faithfully repeating a source's error passes all of them. That gap is structural rather
+than an oversight: Pass 4's evidence-binding rule (Issue #442) makes the sources the standard, and
+under that discipline the machine cannot doubt them — so this is the same class of thing as harm and
+outside knowledge, something only a person can say. Issue #737 built the receiving end
+(`status: retracted` plus a `## Retraction Reason`, both written by hand), so there is now somewhere
+for the answer to go; before that, saying it would have led nowhere.
+
+It goes in the **`sources` variant only**, and the two redirect sentences carry it on the other two.
+A translation has no `sources` of its own — it inherits the original's — and a synthesized page has
+`derived_from` instead, so on both the documents in question belong to a different page, exactly the
+split Issue #525 created the three variants for and Issue #529 made `wikicommit-fix` follow. Putting
+the prompt on all three would invite a reviewer to retract a source on the strength of a page one or
+two removes from it.
+
+Because the answer needs a human edit rather than a command, it travels as a comment — which makes
+it the second exception to "a comment does not carry through", alongside Issue #736's URL. Both
+exceptions exist for the same reason and are stated together: `/wikicommit-fix` edits a page's text
+and cannot touch its sources at all.
+
+**Keep this text different from the report link's (Issue #738).** Both point at the same
+machine-blind areas, but the audiences differ: the report link addresses any reader, asking only
+that they say something if they noticed it, while this Issue addresses whoever can close it — the
+side that speaks for what this wiki claims. Copying one into the other makes each look like a worse
+copy of the other and gets both skimmed. The distinct part here is the ask for a line, which the
+report link does not make at all; one sentence naming the difference keeps it legible.
+
 ##### Shared "How to Proceed" section (all variants)
 
-Insert this verbatim into every Issue body, between "## Review Checklist" and the marker line:
+Insert this verbatim into every Issue body, between "## Once You Have Read It" and the marker line:
 
 ```markdown
 ## How to Proceed
 
-Closing this Issue takes write access to this repository (or triage access, if it is owned by an organization) — GitHub only lets you close an Issue you did not open yourself if you have one of those, and hides the button otherwise. If you are reading this without that access, open a new Issue of your own describing what is wrong instead: that needs no special access, and `/wikicommit-fix` reads it. On a published wiki, the report link in the banner at the top of the page does this for you with the page already filled in (that link is worded in the page's own language, so it reads "Report an issue" only on an English page).
+Closing this Issue takes write access to this repository (or triage access, if it is owned by an organization) — GitHub only lets you close an Issue you did not open yourself if you have one of those, and hides the button otherwise. If you are reading this without that access, open a new Issue of your own describing what is wrong instead: that needs no special access, and `/wikicommit-fix` reads it. On a published wiki, the report link in the banner at the top of the page does this for you with the page already filled in (that link is worded in the page's own language, so its exact label differs from page to page).
 Read the page (locally, or on the published wiki once it's live) and, if everything looks good, simply close this Issue — that alone is enough. A GitHub Actions workflow (`.github/workflows/review-issue-close-sync.yml`) detects the close, flips this page's `review_status` from `pending` to `reviewed`, and auto-merges that change once quality checks pass. There is no PR to Approve here — closing this Issue is the entire action, and it works the same whether you use Claude Code or just the GitHub web/mobile UI.
 If changes are needed, edit the page first (e.g. via `/wikicommit-fix`, or a manual edit followed by `/wikicommit-merge`) and close this Issue once the fix has landed.
-**Leaving a comment on this Issue is not enough on its own**: the workflow that runs on close only reads the marker line at the bottom of this Issue's body and flips `review_status` from `pending` to `reviewed` — it never reads comments. Closing after only commenting merges the page with your feedback unaddressed. To have a comment's feedback actually applied, run `/wikicommit-fix <this Issue's URL>` explicitly (it reads both this Issue's body and its comments and proposes a fix), and close this Issue only after that fix has landed.
+**A comment saying what you took away, or what you noticed, is exactly what this Issue is for** — that needs nothing further from you, and nothing else has to happen to it.
+**A comment asking for a change does not make the change**: the workflow that runs on close only reads the marker line at the bottom of this Issue's body and flips `review_status` from `pending` to `reviewed` — it never reads comments. Closing after only asking for a fix merges the page with that fix unmade. To have it applied, run `/wikicommit-fix <this Issue's URL>` explicitly (it reads both this Issue's body and its comments and proposes a fix), and close this Issue only after that fix has landed.
+**Two kinds of comment are the exception, because both are about a page's sources rather than its text, and `/wikicommit-fix` cannot touch sources at all.**
+**A URL naming a document a page should have been written from** needs `/wikicommit-generate <url>` followed by `/wikicommit-merge` — that folds what the document says into the page written from it, which comes back for review once it lands (if this Issue tracks a translated or a synthesized page, that is the page this one derives from, not this one). If you cannot run those, leaving the URL in a comment hands it to someone who can — but leave this Issue open until they have, because closing it still merges this page as reviewed.
+**Saying that one of the sources itself is wrong** is the other. Nothing automated can reach that judgment — every check this wiki runs treats the sources as the standard the page is measured against, so a page faithfully repeating a source's error passes all of them. Name the source and say what is wrong with it in a comment; someone with write access marks it `status: retracted` with the reason in its management file, and `/wikicommit-status` then lists every page still standing on it. Name only a document this page itself was written from — if this Issue tracks a translated or a synthesized page, it has no sources of its own and the documents belong to the page it derives from, so raise it there rather than here. Leave this Issue open until that has happened, for the same reason as above.
 ```
 
 ##### `sources`-based pages (no `translated_from`, no `derived_from`)
@@ -361,16 +465,50 @@ If changes are needed, edit the page first (e.g. via `/wikicommit-fix`, or a man
 - Generated at: <generated_at> (write "unknown" if not set)
 - Generated by: <generated_by> (write "unknown" if not set)
 
-## Review Checklist
+## Once You Have Read It
 
-- [ ] Does the content match the source document?
-- [ ] Are there no factual errors or hallucinations?
-- [ ] Are the WikiLink targets appropriate?
+When you have read this page, put **one line on what you took away from it** in a comment and close
+this Issue (the box you type into when you close is the same one). It does not have to be a summary
+— "that surprised me" or "nothing here was new to me" is enough.
+
+**This is not a test of your understanding.** It is the record that this page's knowledge actually
+reached a person. That, and nothing more, is what closing this Issue states: not that the page is
+correct.
+
+This page was already checked against the documents it was written from, by machine, when it was
+generated — where the published page shows it, the banner at the top names the model and the date. Nothing below was
+checked by any automation, so if you noticed any of it while reading, put that in the same comment.
+**You are not being asked to go looking.**
+
+- Anything about a real person or organization that reads as overstated, or as settled when it is
+  disputed, or as a private detail this page has no reason to hold. Whether this page should exist
+  at all was judged against `.wikicommit/entity-policy.md` when it was generated; the sentences
+  inside it were not.
+- Anything that conflicts with what you already know, or an important fact about this subject that
+  none of its sources carry. **If you have a URL for it, put the URL in the comment** — that one is
+  carried onward even though nothing else in a comment is (see "How to Proceed"). `/wikicommit-generate <url>`
+  folds what it says into this page, and the page comes back here to be read again; run it yourself
+  if you have write access, or leave the URL for someone who does.
+- Anything another page on this wiki says differently. The machine can only compare a page against
+  ones written before it in the same batch, so a contradiction across batches is visible to nobody
+  but a person reading several pages over time.
+- **Anything wrong with a source this page was written from**, rather than with the page. This is a
+  separate thing to say, and saying the page looks fine does not cover it: every automated check
+  measures the page *against* its sources, so a page that faithfully repeats a source's error passes
+  all of them. If you know one of the documents this page lists under `sources:` to be unreliable,
+  say which and why — a comment carries this one onward (see "How to Proceed").
+- Is `<Type>` the right type for this subject, and do the `properties:` keys listed in `.wikicommit/schema/<Type>.md` fit it? This type was added automatically while this page was being written, and no automated check judges whether it *fits* — only that it exists in the Schema.org vocabulary.
+
+On a published wiki, the report link on the page collects the same kinds of thing from any reader
+who happens to notice one. This Issue is the step above it: closing it is how this wiki records that someone
+read the page, which is why it takes write access.
 
 <the shared "How to Proceed" section above, inserted verbatim>
 
 <!-- wikicommit-page: <page path> -->
 ```
+
+**The last bullet is conditional: emit it only when `<Pass-2b type?>` (determined above) is yes, and drop the whole line otherwise**, leaving the bullets that always apply. Do not emit it commented out or with the condition written into it — what a reader sees must contain only what they are actually being asked, and an HTML comment placed inside the body would travel into the Issue verbatim the way the `wikicommit-page` marker does. It appears only on pages whose type was added on the fly, which is the uncommon case, and it is the only place the tracking Issue surfaces a type decision that may have been taken with no human confirmation at all (Issue #729 / #507).
 
 ##### Translation pages (`translated_from` present)
 
@@ -382,11 +520,33 @@ If changes are needed, edit the page first (e.g. via `/wikicommit-fix`, or a man
 - Translated at: <translated_at> (write "unknown" if not set)
 - Translated by: <translated_by> (write "unknown" if not set)
 
-## Review Checklist
+## Once You Have Read It
 
-- [ ] Does the translation accurately reflect the meaning of the source page?
-- [ ] Is terminology consistent with the `DefinedTerm/` glossary?
-- [ ] Does the translation read naturally (not awkward or overly literal)?
+When you have read this page, put **one line on what you took away from it** in a comment and close
+this Issue (the box you type into when you close is the same one). It does not have to be a summary
+— "that surprised me" or "nothing here was new to me" is enough.
+
+**This is not a test of your understanding.** It is the record that this page's knowledge actually
+reached a person. That, and nothing more, is what closing this Issue states: not that the page is
+correct.
+
+This page was already checked against the original it was translated from, by a machine translation-quality
+pass, when it was generated. Nothing
+below was checked by any automation, so if you noticed any of it while reading, put that in the same
+comment. **You are not being asked to go looking.**
+
+- Anywhere the translation does not carry the original's meaning, reads awkwardly or too literally,
+  or uses a term differently from the `DefinedTerm/` glossary.
+- Anything about a real person or organization that reads as overstated, or as settled when it is
+  disputed, or as a private detail this page has no reason to hold. Whether this page should exist
+  at all was judged against `.wikicommit/entity-policy.md` when it was generated; the sentences
+  inside it were not.
+
+If a fact here is out of date or wrong on the substance rather than the wording, the page to fix is the original this was translated from, not this one — a fix written here is overwritten the next time the original changes and the translation is regenerated. The same goes for a source: this page has none of its own, and anything wrong with the documents behind it belongs to the original's own sources.
+
+On a published wiki, the report link on the page collects the same kinds of thing from any reader
+who happens to notice one. This Issue is the step above it: closing it is how this wiki records that someone
+read the page, which is why it takes write access.
 
 <the shared "How to Proceed" section above, inserted verbatim>
 
@@ -403,11 +563,32 @@ If changes are needed, edit the page first (e.g. via `/wikicommit-fix`, or a man
 - Generated at: <generated_at> (write "unknown" if not set)
 - Generated by: <generated_by> (write "unknown" if not set)
 
-## Review Checklist
+## Once You Have Read It
 
-- [ ] Does the content accurately reflect the pages listed under "Derived from"?
-- [ ] Are there no claims not supported by those pages?
-- [ ] Are the WikiLink targets appropriate?
+When you have read this page, put **one line on what you took away from it** in a comment and close
+this Issue (the box you type into when you close is the same one). It does not have to be a summary
+— "that surprised me" or "nothing here was new to me" is enough.
+
+**This is not a test of your understanding.** It is the record that this page's knowledge actually
+reached a person. That, and nothing more, is what closing this Issue states: not that the page is
+correct.
+
+Every claim on this page was already checked, by machine, against the pages listed under "Derived
+from". Nothing below was checked by any automation, so if you noticed any of it while reading, put
+that in the same comment. **You are not being asked to go looking.**
+
+- Anything about a real person or organization that reads as overstated, or as settled when it is
+  disputed, or as a private detail this page has no reason to hold. Whether this page should exist
+  at all was judged against `.wikicommit/entity-policy.md` when it was generated; the sentences
+  inside it were not.
+
+This is the page where that one earns the most. Every automated check here compares a single claim against the pages under "Derived from"; an implication that arises only from putting several of their statements side by side is visible to no check at all — and putting statements side by side is exactly what this page does.
+
+If a fact here is wrong rather than badly combined, the page to fix is the one under "Derived from" that states it, not this one. The same goes for a source: this page has none of its own, and anything wrong with the documents behind it belongs to whichever page under "Derived from" was written from them.
+
+On a published wiki, the report link on the page collects the same kinds of thing from any reader
+who happens to notice one. This Issue is the step above it: closing it is how this wiki records that someone
+read the page, which is why it takes write access.
 
 <the shared "How to Proceed" section above, inserted verbatim>
 
@@ -416,7 +597,7 @@ If changes are needed, edit the page first (e.g. via `/wikicommit-fix`, or a man
 
 The marker line is an HTML comment: GitHub does not render it in the Issue view, so it stays invisible to the human reviewer while still being retrievable via `gh issue view --json body` for the "Checking for Existing Tracking Issues" step above and for `review-issue-close-sync.yml`.
 
-GitHub has no native way to block closing until the checkboxes above are checked ("Require conversation resolution" applies to PRs, not Issues, and neither enforces task-list items). This checklist is guidance for the human reviewer, not an enforced gate.
+GitHub has no native way to require a comment before an Issue is closed ("Require conversation resolution" applies to PRs, not Issues). The ask for a line, and the prompts under it, are guidance for the human reviewer, not an enforced gate — which is why the wording has to earn the line rather than demand it.
 
 ### Step 9: Generate Generation-Failure Tracking Issues
 

@@ -182,6 +182,7 @@ After installation, run this in the repository where you want to initialize the 
 | 13 | Reference/Search | `/wikicommit-quiz [--difficulty=easy\|medium\|hard]` | Generate a quiz from wiki content |
 | 14 | Operations/Preview | `/wikicommit-status` | Health check (orphans, unreviewed, expired) |
 | 15 | Operations/Preview | `/wikicommit-serve [--build]` | Build and preview the wiki locally |
+| 16 | Operations/Preview | `/wikicommit-update` | Bring the repository in step with the installed distribution (PR, not auto-merged) |
 
 ---
 

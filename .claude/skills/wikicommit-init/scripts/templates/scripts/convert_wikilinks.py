@@ -45,6 +45,145 @@ from _wikilink import (
     parse_view_path,
     parse_wiki_path,
 )
+# Issue #751: the AI review record is a second input tree for this build. Both
+# helpers are imported rather than reimplemented — check_review_coverage.py
+# answers "is this verdict still valid?" for the operator and this script asks
+# the same question for the reader, and two copies of that judgement would
+# drift into a banner that contradicts `/wikicommit-status`.
+from check_review_coverage import load_records, stale_reasons, standing_verdict
+from record_review import ACCEPTED_PREFIXES, RecordError, compute_page_content_hash
+
+
+# Stamped onto the published copy of a page, never onto the page itself
+# (Issue #751). Naming them apart from `reviewed_by` is deliberate: that field
+# is the human who closed the tracking Issue (Issue #663), and a reader must
+# not read one as the other.
+AI_REVIEW_MODEL_FIELD = "ai_review_model"
+AI_REVIEW_AT_FIELD = "ai_review_at"
+
+
+def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None) -> dict | None:
+    """The AI review verdict that still stands for `src_path`, or None.
+
+    Returns `{"model", "reviewed_at", "findings"}` for the newest `kind: ai`
+    record whose `page_content_hash` still matches the page on disk.
+
+    Four ways this returns None, and all four must publish the page exactly as
+    it published before this feature existed:
+
+    - **No record.** The page predates Issue #750; a record cannot be made
+      retroactively, so the blank is permanent and honest.
+    - **The verdict is not a pass.** See below.
+    - **The verdict is stale.** `/wikicommit-fix` rewrote the page after the
+      review, or a source it was judged against changed or left the page, so
+      the verdict was made against material that is no longer there. This is
+      the reason Issue #751 stamps at publish time instead of copying the
+      verdict into the page's own frontmatter: a copy cannot notice it has gone
+      stale, which is the failure Issue #705 already cost this repository once.
+    - **The record is unreadable**, or the page's own frontmatter will not
+      parse. A build must not fail over an annotation.
+
+    `standing_verdict()` — not simply the last record — because a
+    `result: discarded` record carries an empty hash and describes a page that
+    was never written, so it says nothing about the file being published here.
+
+    Only a `result: pass` verdict is published. `standing_verdict()` answers
+    "which record is the current one", which is all `/wikicommit-status` needs
+    to measure staleness against — but `wikicommit-review` records
+    `--result fail` when its fact-check found something, against a page that is
+    still on disk. Publishing that as "checked against sources" would put a
+    passing badge on the one page whose latest check failed, and count its
+    unfixed findings among those "raised and fixed before publishing". An older
+    `pass` is not fallen back to either: a later failure does not stop applying
+    because an earlier check once succeeded.
+    """
+    try:
+        page_rel = src_path.resolve().relative_to(repo_root.resolve()).as_posix()
+    except (ValueError, OSError):
+        page_rel = src_path.as_posix()
+
+    # record_dir_for() strips a fixed `.wikicommit/` prefix, so a page reached
+    # through some other --source root would map to a nonsense directory rather
+    # than to no directory. No record can exist for such a page anyway: every
+    # writer of the tree refuses a path outside these prefixes.
+    if not page_rel.startswith(ACCEPTED_PREFIXES):
+        return None
+
+    try:
+        record = standing_verdict(load_records(page_rel))
+    except OSError as e:
+        print(f"WARNING: {src_path}: レビュー記録を読み込めませんでした: {e}")
+        return None
+    if record is None or str(record.get("result") or "") != "pass":
+        return None
+
+    try:
+        current_hash = compute_page_content_hash(src_path)
+    except (RecordError, OSError, ValueError) as e:
+        print(f"WARNING: {src_path}: ページのハッシュを計算できませんでした: {e}")
+        return None
+    if str(record.get("page_content_hash") or "") != current_hash:
+        return None
+    # The other half of staleness, borrowed rather than restated: a source that
+    # changed or left the page moved the evidence out from under the verdict
+    # even though the prose is untouched (`sources` is one of the bookkeeping
+    # fields the hash above ignores). Reimplementing only the hash comparison
+    # here is what would produce the banner that contradicts
+    # `/wikicommit-status`, which is the drift the shared import exists to
+    # avoid. Fails closed: a page whose own frontmatter would not parse reaches
+    # this with an empty mapping, so every reviewed source reads as gone.
+    if stale_reasons(src_path, page_fm or {}, record):
+        return None
+
+    model = str(record.get("model") or "").strip()
+    reviewed_at = str(record.get("reviewed_at") or "").strip()
+    if not model or not reviewed_at:
+        # A record this incomplete cannot produce the line the banner renders,
+        # and half a line ("reviewed on <blank>") is worse than none.
+        return None
+    # _yaml_quote() escapes quotes and backslashes but cannot escape a line
+    # break, so a value containing one would end the frontmatter's own line and
+    # write whatever followed as further keys — on every page that record
+    # covers. Records are written by another process, so this is checked here
+    # rather than assumed.
+    if any(ch in model or ch in reviewed_at for ch in ("\n", "\r")):
+        print(f"WARNING: {src_path}: レビュー記録の値に改行が含まれるため表示しません")
+        return None
+
+    findings = record.get("findings")
+    return {
+        "model": model,
+        "reviewed_at": reviewed_at,
+        "findings": len(findings) if isinstance(findings, list) else 0,
+    }
+
+
+def inject_frontmatter_lines(content: str, lines: list[str]) -> str:
+    """Insert `lines` at the end of `content`'s frontmatter block.
+
+    Textual insertion rather than a YAML round-trip: this runs over every wiki
+    page, and `yaml.safe_load` + `yaml.dump` would reformat quoting, reorder
+    keys and drop comments across the whole published site — the same round-trip
+    that cost this repository a config file's worth of comments (Issue #713).
+
+    A page with no frontmatter, or with an unterminated one, is returned
+    unchanged. Those are `validate_frontmatter.py`'s to report; a publish step
+    inventing a frontmatter block for them would be a bigger change than the
+    annotation is worth.
+    """
+    if not lines or not content.startswith("---"):
+        return content
+    newline = "\r\n" if content.startswith("---\r\n") else "\n"
+    first = content.find(newline)
+    if first == -1:
+        return content
+    if content[:first].strip() != "---":
+        return content
+    closing = content.find(f"{newline}---", first)
+    if closing == -1:
+        return content
+    insertion = "".join(f"{newline}{line}" for line in lines)
+    return content[:closing] + insertion + content[closing:]
 
 
 def load_frontmatter(path: Path) -> dict | None:
@@ -166,6 +305,24 @@ ROOT_INDEX_LABELS = {
         "select": "言語を選択",
         "sources": "情報源一覧",
         "overview": "Wiki 全体の俯瞰",
+        # Issue #730: appended to each language's link. The whole string,
+        # leading separator included, lives in the label because the word order
+        # differs per language and there is no separator that reads right in
+        # both (Japanese wants none before a full-width parenthesis).
+        "counts": "（{pages} ページ / 人が読んだ {reviewed}）",
+        # Japanese does not inflect for number, so this is the same string. It
+        # is spelled out rather than defaulted so that every label set answers
+        # the singular case explicitly.
+        "counts_one": "（{pages} ページ / 人が読んだ {reviewed}）",
+        # Issue #730 carries Issue #664's note across: without the two
+        # frontmatter fields the banner renders nothing, and the note would
+        # vanish with it. A bare "reviewed 0" reads as "nobody cares about this
+        # project", which is the opposite of the honesty the count is there for.
+        # Kept consistent with the overview page's wording, since the root index
+        # links straight to it.
+        "counts_note": "ページは LLM が生成した時点で公開されます。"
+                       "「人が読んだ」はそのうち人が最後まで読んだ件数であり、"
+                       "Wiki の完成度でも、内容の正しさの保証でもありません。",
         "licensing": "各ページの利用条件は、そのページが生成された出典ごとに異なります。"
                      "サイト全体に単一のライセンスはありません。",
     },
@@ -175,14 +332,49 @@ DEFAULT_ROOT_INDEX_LABELS = {
     "select": "Select language",
     "sources": "Sources",
     "overview": "Overview",
+    "counts": " ({pages} pages / {reviewed} read by a person)",
+    "counts_one": " ({pages} page / {reviewed} read by a person)",
+    "counts_note": "Pages are published as soon as an LLM generates them. "
+                   "\"Read by a person\" is how many of them someone has since read "
+                   "all the way through — not how much of the wiki is finished, and "
+                   "not a guarantee that anything is correct.",
     "licensing": "Terms of use differ per page, following the sources each page was "
                  "generated from. There is no single license covering the whole site.",
 }
 
 
-def compute_langs(primary_lang: str, targets: list[str]) -> list[str]:
-    """Return primary_lang followed by targets (deduped), preserving order."""
-    return list(dict.fromkeys([primary_lang] + [t for t in targets if t != primary_lang]))
+def compute_langs(
+    primary_lang: str, targets: list[str], published_langs: list[str] | None = None
+) -> list[str]:
+    """Return primary_lang, then targets, then any other language that actually
+    has published pages (deduped, first occurrence wins).
+
+    `targets` is the set of languages this wiki declared it translates into, and
+    existing_lang_targets() narrows it to those that really have pages (Issue
+    #190). `published_langs` closes the opposite gap (Issue #731): a language
+    can have real pages without appearing in `targets` at all, and the root
+    index is the only entry point that was deriving its language list from
+    `targets` alone, so those pages were published but unreachable from the
+    front door. The pipeline produces this state itself — `/wikicommit-translate
+    <page> --lang <lang>` writes a translation without touching config.yml, and
+    its own error message points at that option as the alternative to editing
+    `targets` — and it also arises from hand-added pages, from changing
+    `primary_lang` later, and from removing a language from `targets` after its
+    translations exist.
+
+    Union rather than replacement: existing_lang_targets() admits a language on
+    the strength of any non-removed `.md` under it, including one whose path
+    never resolves to `<lang>/<Type>/<slug>.md`, whereas `published_langs` is
+    built from resolved, published pages only. Dropping the targets side would
+    therefore remove languages that are linked today. (Both cover the view tree,
+    so that is not the difference between them.)
+
+    Ordering keeps existing sites stable: `targets` is written by a person, so
+    its order is theirs to keep, and discovered languages follow it (the caller
+    sorts them) rather than interleaving.
+    """
+    ordered = [primary_lang] + list(targets) + list(published_langs or [])
+    return list(dict.fromkeys(lang for lang in ordered if lang))
 
 
 def generate_root_index(
@@ -192,6 +384,7 @@ def generate_root_index(
     total_pages: int,
     reviewed_pages: int,
     site_description: dict[str, str] | None = None,
+    lang_counts: dict[str, tuple[int, int]] | None = None,
 ) -> None:
     """Write a root content/index.md that links to the wiki top page(s).
 
@@ -239,6 +432,26 @@ def generate_root_index(
     readers, whereas a caption could not. Languages with no entry simply get no
     description; an absent field reproduces the previous output exactly.
 
+    `lang_counts` (Issue #730) is {lang: (pages, reviewed)} counted from the
+    pages this build published. On a multilingual wiki the two frontmatter
+    fields above are omitted entirely and these per-language counts take their
+    place in the body, one pair per language link. Two reasons the single
+    site-wide total was wrong there. (1) Nobody experiences it: this page exists
+    to choose a language, and the wiki behind each choice is one language's
+    worth of pages — a translation is the same knowledge again, not more of it.
+    (2) It dilutes the reviewed ratio: a fully reviewed original alongside two
+    untouched translations reports one third, and that number was reframed by
+    Issue #664 as a statement about the trust ladder, so translations drag it
+    away from what it means to claim. Splitting pages but not reviewed counts
+    would leave (2) intact, so both are split.
+
+    Omitting the two fields is what suppresses the banner's site summary: it
+    renders only when both are numbers, so no change to WikiCommitBanner.tsx is
+    needed — but Issue #664's note explaining what "reviewed" counts is part of
+    that same block and would disappear with it, so it is re-emitted here under
+    the language list. A single-language wiki has no language list to hang any
+    of this off, so it keeps both fields and the banner as before.
+
     The "sources" entry point links to content/sources/ — a single,
     language-independent tree (the source tree itself has no `lang` concept) built by
     generate_source_pages(), not one link per lang like the old per-language
@@ -250,30 +463,50 @@ def generate_root_index(
     # review_status: reviewed — this is a build-generated navigation page, not
     # LLM-authored wiki content, so it should not show the wikicommit-banner
     # "unreviewed" warning (which defaults to pending when the field is absent).
-    lines = [
-        "---",
-        'title: "Wiki"',
-        "review_status: reviewed",
-        f"wikicommit_page_count: {total_pages}",
-        f"wikicommit_reviewed_count: {reviewed_pages}",
+    counts = lang_counts or {}
+    multilingual = len(langs) > 1
+    lines = ["---", 'title: "Wiki"', "review_status: reviewed", "comments: false"]
+    # Issue #730: on a multilingual wiki these two fields are left out, which is
+    # exactly what stops the banner from drawing a site-wide total nobody is
+    # about to read — it renders that block only when both are numbers. The
+    # per-language counts below replace it.
+    if not multilingual:
+        lines += [
+            f"wikicommit_page_count: {total_pages}",
+            f"wikicommit_reviewed_count: {reviewed_pages}",
+        ]
+    lines += [
         "---",
         "",
         f"[{labels['top']} ({primary_lang})](./{primary_lang}/)",
     ]
     # Issue #671: the reader-facing site description, one line per language,
-    # attached to that language's own link. The translation targets in `langs`
-    # are already filtered by existing_lang_targets() to languages that have at
-    # least one real page (Issue #190), so a description never adds a dead link
-    # there. primary_lang is exempt from that filter (compute_langs() always
-    # prepends it), so on a wiki whose primary_lang has no pages the description
-    # follows the link that is already emitted for it — it does not create one.
+    # attached to that language's own link. Every entry in `langs` other than
+    # primary_lang already stands on a language with at least one real page —
+    # existing_lang_targets() filters the declared targets (Issue #190) and
+    # main() derives the rest from pages this build actually wrote (Issue #731) —
+    # so a description never adds a dead link there. primary_lang is exempt from
+    # that filter (compute_langs() always prepends it), so on a wiki whose
+    # primary_lang has no pages the description follows the link that is already
+    # emitted for it — it does not create one.
     descriptions = site_description or {}
-    if len(langs) > 1:
+    if multilingual:
         lines += ["", f"## {labels['select']}", ""]
-        lines += [
-            f"- [{lang}](./{lang}/) — {descriptions[lang]}" if lang in descriptions else f"- [{lang}](./{lang}/)"
-            for lang in langs
-        ]
+        for lang in langs:
+            # A language with no resolvable page still gets 0/0 rather than a
+            # bare link: existing_lang_targets() admits a language on any
+            # non-removed .md under it, and primary_lang skips that filter
+            # entirely (compute_langs() always prepends it), so both can reach
+            # this list with nothing page_stats could count (Issue #730).
+            pages, reviewed = counts.get(lang, (0, 0))
+            template = labels["counts_one"] if pages == 1 else labels["counts"]
+            entry = f"- [{lang}](./{lang}/)" + template.format(
+                pages=pages, reviewed=reviewed
+            )
+            if lang in descriptions:
+                entry += f" — {descriptions[lang]}"
+            lines.append(entry)
+        lines += ["", labels["counts_note"]]
     elif primary_lang in descriptions:
         # Single-language wiki: there is no language list to hang the
         # description off, so it goes under the top link instead.
@@ -451,6 +684,13 @@ SOURCE_PAGE_LABELS = {
         "summary": "概要",
         "no_summary": "（まだ生成されていません）",
         "license": "ライセンス",
+        "retracted_notice": (
+            "**この情報源は取り下げられました。** この Wiki はこの情報源を内容が信用できない"
+            "と判断し、以後の取り込み対象から外しています。下記の「生成されたページ」は"
+            "この情報源が使われていた当時に生成されたものです。"
+        ),
+        "retraction_reason": "取り下げの理由",
+        "no_retraction_reason": "（理由の記載がありません）",
         "generated_pages": "生成されたページ",
         "no_generated_pages": "生成されたページはまだありません。",
         "empty": "登録されている情報源はありません。",
@@ -472,6 +712,13 @@ DEFAULT_SOURCE_PAGE_LABELS = {
     "summary": "Summary",
     "no_summary": "(not yet generated)",
     "license": "License",
+    "retracted_notice": (
+        "**This source has been retracted.** This wiki judged its content unreliable and "
+        "no longer ingests from it. Any pages listed under \u201cGenerated pages\u201d below were "
+        "written while it was still in use."
+    ),
+    "retraction_reason": "Reason for retraction",
+    "no_retraction_reason": "(no reason recorded)",
     "generated_pages": "Generated pages",
     "no_generated_pages": "No pages generated yet.",
     "empty": "No sources have been registered yet.",
@@ -491,6 +738,26 @@ DEFAULT_SOURCE_PAGE_LABELS = {
 # automatic migration) still renders its
 # Summary body instead of falling back to "not yet generated".
 SUMMARY_HEADING_RE = re.compile(r"^## (?:Summary|サマリ)\r?\n(.*?)(?=\n## |\Z)", re.DOTALL | re.MULTILINE)
+
+
+RETRACTION_REASON_HEADING_RE = re.compile(
+    r"^## Retraction Reason\r?\n(.*?)(?=\n## |\Z)", re.DOTALL | re.MULTILINE
+)
+
+
+def parse_retraction_reason_section(body: str) -> str | None:
+    """Return the management file's `## Retraction Reason` section body, or None
+    if absent/empty (Issue #737).
+
+    Unlike `## Summary`, this heading has no pre-Issue #405 Japanese variant to
+    accept: the section is new, and management-file headings have been fixed
+    English since then.
+    """
+    m = RETRACTION_REASON_HEADING_RE.search(body)
+    if not m:
+        return None
+    text = m.group(1).strip()
+    return text or None
 
 
 def parse_summary_section(body: str) -> str | None:
@@ -636,6 +903,7 @@ def _write_source_page(
         "---",
         f"title: {_yaml_quote(str(title))}",
         "review_status: reviewed",
+        "comments: false",
         "---",
         "",
         f"**{labels['type']}**: {source.get('type', '')}",
@@ -653,6 +921,25 @@ def _write_source_page(
     license_id = source.get("license")
     if isinstance(license_id, str) and license_id.strip():
         lines += [f"**{labels['license']}**: {license_id.strip()}", ""]
+
+    # Issue #737: a retracted source keeps its public page rather than losing it.
+    # "This wiki used this source and then withdrew it" is a record worth
+    # publishing, and keeping it is what GitOps asks for. Note this is the
+    # opposite requirement from a `status: removed` page, which is never written
+    # into content/ at all (Issue #271) precisely so it stops being reachable —
+    # here nothing needs to become unreachable, so what is needed is not deletion
+    # but a statement on the page itself. The bare `status: retracted` line above
+    # is a field value; on its own it does not tell a reader what it means for
+    # the pages this source produced.
+    if status == "retracted":
+        lines += [
+            labels["retracted_notice"],
+            "",
+            f"## {labels['retraction_reason']}",
+            "",
+            parse_retraction_reason_section(body) or labels["no_retraction_reason"],
+            "",
+        ]
 
     lines += [
         f"## {labels['summary']}",
@@ -704,7 +991,8 @@ def _write_sources_index(out_path: Path, entries: list[dict], labels: dict, type
     for entry in entries:
         groups[entry["type"]].append(entry)
 
-    lines = ["---", f'title: "{labels["index_title"]}"', "review_status: reviewed", "---", ""]
+    lines = ["---", f'title: "{labels["index_title"]}"', "review_status: reviewed",
+             "comments: false", "---", ""]
     has_entries = any(groups.values())
     for source_type in SOURCE_TYPE_ORDER:
         items = groups[source_type]
@@ -744,7 +1032,8 @@ def _write_source_dir_index(out_path: Path, title: str, subdirs: list[str], file
     (e.g. content/sources/url/ or content/sources/url/<host>/), listing its
     immediate subdirectories and mirrored source pages as plain relative
     links (Issue #493)."""
-    lines = ["---", f"title: {_yaml_quote(title)}", "review_status: reviewed", "---", ""]
+    lines = ["---", f"title: {_yaml_quote(title)}", "review_status: reviewed",
+             "comments: false", "---", ""]
     for sub in subdirs:
         lines.append(f"- [{_escape_md_link_text(sub)}](./{sub}/)")
     for item in files:
@@ -939,14 +1228,30 @@ OVERVIEW_LABELS = {
         "title": "Wiki 全体の俯瞰",
         "totals": "全体の数字",
         "total_pages": "総ページ数",
-        "reviewed": "人によるレビュー済み",
+        "reviewed": "人が読んだページ",
         # Issue #664: the bare count reads as "nobody cares about this project"
         # to a first-time reader. The number stays — hiding it would give up the
         # honesty it was added for — and this line says what it counts.
         "reviewed_note": (
             "ページは LLM が生成した時点で公開されます。"
-            "上の数字は、そのうち人が内容を確認した件数であり、Wiki の完成度ではありません。"
+            "上の数字は、そのうち人が最後まで読んだ件数です — "
+            "Wiki の完成度でも、内容の正しさの保証でもありません。"
         ),
+        # Issue #751: a separate key from `reviewed`, never a reuse of it.
+        # Issue #664, and then Issue #740, deliberately made that one name the
+        # human reader out loud ("人が読んだページ"); putting
+        # the machine's count behind the same label would put back the ambiguity
+        # it removed. The wording says what was compared, not that the page is
+        # correct — Pass 4 checks fidelity to the sources and nothing else
+        # (Issue #722 on completeness, Issue #723 on harm and on the reader's
+        # own knowledge).
+        "ai_reviewed": "出典と照合済み（AI）",
+        "ai_reviewed_note": (
+            "生成時に、ページの記述をその出典と照合しています。"
+            "照合しているのは出典との一致だけで、"
+            "網羅性・実在の人物や組織への影響・読者自身の知識との食い違いは見ていません。"
+        ),
+        "ai_findings": "うち指摘を受けて書き直された箇所",
         "type_count": "型数",
         "by_lang": "言語別ページ数",
         "translation_coverage": "翻訳カバレッジ",
@@ -958,7 +1263,7 @@ OVERVIEW_LABELS = {
         "by_type": "型別の傾向",
         "col_type": "型",
         "col_pages": "ページ数",
-        "col_reviewed": "レビュー済み",
+        "col_reviewed": "人が読んだ",
         "col_avg_backlinks": "平均被リンク数",
         "col_orphans": "孤立",
         "gaps": "知識の不足",
@@ -986,11 +1291,19 @@ DEFAULT_OVERVIEW_LABELS = {
     "title": "Overview",
     "totals": "At a glance",
     "total_pages": "Total pages",
-    "reviewed": "Human-reviewed",
+    "reviewed": "Read by a person",
     "reviewed_note": (
         "Pages are published as soon as an LLM generates them. The count above is how "
-        "many a person has since checked, not how much of the wiki is finished."
+        "many a person has since read all the way through — not how much of the wiki is "
+        "finished, and not a guarantee that anything is correct."
     ),
+    "ai_reviewed": "Checked against sources (AI)",
+    "ai_reviewed_note": (
+        "Every page is checked against its own sources when it is generated. That check "
+        "covers agreement with those sources and nothing else — not completeness, not "
+        "the effect on real people and organizations, not conflicts with what you know."
+    ),
+    "ai_findings": "Findings raised and fixed before publishing",
     "type_count": "Types in use",
     "by_lang": "Pages per language",
     "translation_coverage": "Translation coverage",
@@ -1002,7 +1315,7 @@ DEFAULT_OVERVIEW_LABELS = {
     "by_type": "By type",
     "col_type": "Type",
     "col_pages": "Pages",
-    "col_reviewed": "Reviewed",
+    "col_reviewed": "Read",
     "col_avg_backlinks": "Avg. backlinks",
     "col_orphans": "Orphans",
     "gaps": "Gaps",
@@ -1136,6 +1449,13 @@ def generate_overview_page(
         # pending when the field is absent) — same as content/index.md and
         # every content/sources/ page.
         "review_status: reviewed",
+        # comments: false — giscus (github:quartz-community/comments) renders into
+        # afterBody on every page, and these navigation and aggregation pages have
+        # nothing for a reader to respond to (Issue #741). The plugin skips a page
+        # whose frontmatter says so, and this is the same place, and the same
+        # reasoning, as the review_status stamp above: decided by the side that
+        # writes the page, not guessed from a slug at render time (Issue #580).
+        "comments: false",
         "---",
         "",
     ]
@@ -1158,11 +1478,36 @@ def generate_overview_page(
         pages_by_type.setdefault(p["type"], []).append(p)
         keys_by_lang.setdefault(p["lang"], set()).add(p["key"])
 
+    # Issue #751: the site-wide numbers live here, never on the page banner.
+    # "2 findings" beside one page reads as "this page is bad" when it means the
+    # opposite — a finding was raised and the page was rewritten until it passed.
+    # Aggregated, the same number says the check has teeth.
+    ai_reviewed = [p for p in content_pages if p.get("ai_review")]
+    ai_models = sorted({p["ai_review"]["model"] for p in ai_reviewed})
+    # The total, not the number of pages carrying one: what this number is for
+    # is showing that the check has teeth, and a page caught three times says
+    # more about that than a page caught once.
+    ai_findings_total = sum(p["ai_review"]["findings"] for p in ai_reviewed)
+
     lang_summary = ", ".join(f"{lang} {len(ps)}" for lang, ps in sorted(pages_by_lang.items()))
     lines += [
         f"## {labels['totals']}",
         "",
         f"- **{labels['total_pages']}**: {total_pages}",
+    ]
+    # Omitted entirely on a wiki whose pages all predate the record tree, rather
+    # than shown as a zero: "0 / 95 checked" reads as a failed check, when the
+    # truth is that the check ran and left no record to count (Issue #750 —
+    # records cannot be made retroactively).
+    if ai_reviewed:
+        model_note = f" ({', '.join(ai_models)})" if ai_models else ""
+        lines.append(
+            f"- **{labels['ai_reviewed']}**: {len(ai_reviewed)} / {total_pages} "
+            f"({_pct(len(ai_reviewed), total_pages)}){model_note}"
+        )
+        if ai_findings_total:
+            lines.append(f"- **{labels['ai_findings']}**: {ai_findings_total}")
+    lines += [
         f"- **{labels['reviewed']}**: {reviewed_pages} / {total_pages} ({_pct(reviewed_pages, total_pages)})",
         f"- **{labels['type_count']}**: {len(pages_by_type)}",
         f"- **{labels['by_lang']}**: {lang_summary}",
@@ -1184,6 +1529,11 @@ def generate_overview_page(
     # with the other totals would split the list on every multi-language wiki and
     # leave the coverage bullet reading as if the caption introduced it.
     lines += ["", labels["reviewed_note"], ""]
+    # Says what the machine check actually compared. Without it "checked against
+    # sources" is read as "verified", which is the same over-claim Issue #740 is
+    # correcting on the human side — made once in each direction is still twice.
+    if ai_reviewed:
+        lines += [labels["ai_reviewed_note"], ""]
 
     # ── 2. Knowledge hubs ─────────────────────────────────────────────────────
     # One row per key, not per page: a key's backlink count is language-neutral
@@ -1391,6 +1741,7 @@ def generate_overview_page(
 def convert_file(
     src_path: Path, rel_path: Path, source_dir: Path, output_dir: Path, primary_lang: str,
     out_rel_path: Path | None = None, view_dir: Path | None = None, is_view: bool = False,
+    ai_review: dict | None = None,
 ) -> tuple[int, int, set[str]]:
     """Convert one file's WikiLinks and write it to output_dir. Return
     (converted, unresolved, link_keys) — the first two counting this file's
@@ -1416,6 +1767,11 @@ def convert_file(
     `is_view` says which tree `src_path` belongs to; `view_dir` is the view
     tree's root, needed either way to resolve `[[View/<slug>]]` links written
     from an ordinary page.
+
+    `ai_review` is what load_ai_review() found for this page, stamped into the
+    published copy's frontmatter and nowhere else (Issue #751). main() looks it
+    up so the overview's site-wide tally and this stamp read one lookup, and so
+    the two can never disagree about which pages carry a standing verdict.
     """
     unresolved = 0
     link_keys: set[str] = set()
@@ -1489,6 +1845,16 @@ def convert_file(
         return f"[{_escape_md_link_text(title)}]({link_path})"
 
     new_content = WIKILINK_RE.sub(replace, content)
+
+    # The published copy carries the verdict; `.wikicommit/entity/` does not.
+    # That asymmetry is the point of Issue #751 — the record tree stays the one
+    # place the verdict lives, so it cannot go stale here, and no new
+    # validate_frontmatter.py rule is needed for a field wiki pages never hold.
+    if ai_review is not None:
+        new_content = inject_frontmatter_lines(new_content, [
+            f"{AI_REVIEW_MODEL_FIELD}: {_yaml_quote(ai_review['model'])}",
+            f"{AI_REVIEW_AT_FIELD}: {_yaml_quote(ai_review['reviewed_at'])}",
+        ])
 
     out_path = output_dir / out_rel_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1783,9 +2149,16 @@ def main() -> int:
             total_pages += 1
             if fm.get("review_status") == "reviewed":
                 reviewed_pages += 1
+        # One lookup per page, shared by the published stamp and the overview's
+        # site-wide tally (Issue #751). Index pages are excluded: they are
+        # build-generated navigation that no model reviewed, and
+        # rebuild_index.py already stamps them `review_status: reviewed` for
+        # exactly that reason (Issue #580).
+        ai_review = None if is_index else load_ai_review(src_path, repo_root, fm)
         file_converted, file_unresolved, link_keys = convert_file(
             src_path, rel_path, source_dir, output_dir, primary_lang,
             out_rel_path=out_rel_path, view_dir=view_dir, is_view=is_view,
+            ai_review=ai_review,
         )
         converted += file_converted
         unresolved_links += file_unresolved
@@ -1823,6 +2196,9 @@ def main() -> int:
                 if isinstance(t, (str, int, float))
             ],
             "is_index": is_index,
+            # None when no verdict stands for this page — no record at all, or
+            # one made against text that has since changed (Issue #751).
+            "ai_review": ai_review,
             # Read by the overview's orphan reporting only: a view page is
             # unlinked at birth, so it is never a meaningful orphan finding
             # (Issue #675).
@@ -1839,12 +2215,53 @@ def main() -> int:
                 referrers.setdefault(link_key, set()).add(key)
 
     targets = existing_lang_targets(source_dir, load_translation_targets(repo_root), view_dir)
-    langs = compute_langs(primary_lang, targets)
+    # Issue #731: languages that actually published pages, taken from page_stats
+    # rather than by listing .wikicommit/entity/*/ — that directory also holds
+    # the language-neutral assets/ tree, and entries whose path never resolved
+    # to <lang>/<Type>/<slug>.md never reach page_stats at all.
+    #
+    # Type index.md pages are excluded for the same reason existing_lang_targets()
+    # excludes them (Issue #190): rebuild_index.py leaves one behind after the
+    # last page of a type is removed, and a language whose only remaining files
+    # are those would get a front-door link into an empty tree. Removed pages
+    # never reach page_stats at all, so they need no exclusion here.
+    #
+    # written_rel_paths is the gate that keeps this list free of dead links, the
+    # same guarantee existing_lang_targets() gives the targets side: a page whose
+    # source could not be read is still keyed into page_stats (the overview
+    # tallies it), but convert_file() wrote nothing for it, so a language whose
+    # only page failed that way would otherwise get a language-list entry
+    # pointing at a content/<lang>/ directory this build never created. At this
+    # point the set holds converted pages only — source pages and the root index
+    # are added below.
+    published_langs = sorted({
+        p["lang"] for p in page_stats
+        if not p["is_index"] and p["out_rel"] in written_rel_paths
+    })
+    langs = compute_langs(primary_lang, targets, published_langs)
     mgmt_dir = repo_root / ".wikicommit" / "source"
     source_written, source_stats = generate_source_pages(output_dir, mgmt_dir, source_dir, primary_lang)
     written_rel_paths |= source_written
+    # Issue #730: per-language (pages, reviewed) from the same page_stats the
+    # overview page tallies, so the two build-generated pages agree. Type index
+    # pages are excluded here as everywhere; view pages are counted, since they
+    # are published pages of that language like any other.
+    # Deliberately not named `pages`/`reviewed`: `pages` above holds this
+    # function's (src_path, rel_path, out_rel_path, is_view) list, and rebinding
+    # it to an int here would leave any later use of it broken in a way neither
+    # ruff nor the tests would catch.
+    lang_counts: dict[str, tuple[int, int]] = {}
+    for stat in page_stats:
+        if stat["is_index"]:
+            continue
+        lang_pages, lang_reviewed = lang_counts.get(stat["lang"], (0, 0))
+        lang_counts[stat["lang"]] = (
+            lang_pages + 1,
+            lang_reviewed + (1 if stat["review_status"] == "reviewed" else 0),
+        )
     generate_root_index(
-        output_dir, primary_lang, langs, total_pages, reviewed_pages, load_site_description(repo_root)
+        output_dir, primary_lang, langs, total_pages, reviewed_pages,
+        load_site_description(repo_root), lang_counts,
     )
     written_rel_paths.add(Path("index.md"))
     written_rel_paths.add(

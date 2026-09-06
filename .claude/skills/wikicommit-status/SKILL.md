@@ -88,7 +88,7 @@ python .wikicommit/scripts/check_schema_coverage.py
 
 Like Step 5, this is about `.wikicommit/schema/` rather than page health as such: it reports each `type:` value in use by pages that has **no dedicated schema file**, so those pages were generated (and are validated) against `default.md` alone — that type's `granularity` rules, `properties:` candidate keys and body template never applied (Issue #575).
 
-Falling back to `default.md` is correct, intended behavior, so this never blocks a merge — the script always exits 0, and `validate_frontmatter.py` keeps this a WARNING rather than an ERROR for the same reason. It does count against the "Wiki is healthy" verdict in Step 13, which is a different thing: a repository whose schema files match the types it uses reaches 0 here, and a repository that does not has a concrete fix available. A repository initialized before Pass 2b (Issue #315) may well start non-zero; that is the finding doing its job, not a reason to exclude it. The reason it belongs in a periodic health check is that nothing else surfaces it once the pages exist: `wikicommit-generate` reports it only in the Completion Notice of the run that generated the page, and `validate_frontmatter.py`'s WARNING reaches only the files a given `wikicommit-merge` batch happens to change — so if a schema file is moved, renamed or deleted after the fact, every page that already existed goes on failing silently and is never re-checked. The trigger that breaks it (editing `.wikicommit/schema/`) and the trigger that would notice (changing a page) are unrelated events.
+Falling back to `default.md` is correct, intended behavior, so this never blocks a merge — the script always exits 0, and `validate_frontmatter.py` keeps this a WARNING rather than an ERROR for the same reason. It does count against the "Wiki is healthy" verdict in Step 16, which is a different thing: a repository whose schema files match the types it uses reaches 0 here, and a repository that does not has a concrete fix available. A repository initialized before Pass 2b (Issue #315) may well start non-zero; that is the finding doing its job, not a reason to exclude it. The reason it belongs in a periodic health check is that nothing else surfaces it once the pages exist: `wikicommit-generate` reports it only in the Completion Notice of the run that generated the page, and `validate_frontmatter.py`'s WARNING reaches only the files a given `wikicommit-merge` batch happens to change — so if a schema file is moved, renamed or deleted after the fact, every page that already existed goes on failing silently and is never re-checked. The trigger that breaks it (editing `.wikicommit/schema/`) and the trigger that would notice (changing a page) are unrelated events.
 
 Get the `SUMMARY: unschemaed_types=N` count and the individual `UNCOVERED: <type> (<N> pages, e.g. <path>)` lines.
 
@@ -106,7 +106,7 @@ Take the `SUMMARY: recurring=N` count and the individual `RECURRING:` lines (no 
 
 A name that *does* already have a page is Step 8's finding, not this one — the two call for opposite work (write a page vs. link to the one that exists), which is why they are separate scripts and separate counts.
 
-This is not blocking, and does not gate the health verdict in Step 13 — the promotion bar is a judgment call belonging to `Person.md`'s `granularity` at generation time, and a wiki can legitimately decide a recurring character stays plain text. Note also what this cannot see: a protagonist appearing in exactly one work never recurs, so a wiki whose characters are all one-work leads reports 0 here while still having the gap this check exists for.
+This is not blocking, and does not gate the health verdict in Step 16 — the promotion bar is a judgment call belonging to `Person.md`'s `granularity` at generation time, and a wiki can legitimately decide a recurring character stays plain text. Note also what this cannot see: a protagonist appearing in exactly one work never recurs, so a wiki whose characters are all one-work leads reports 0 here while still having the gap this check exists for.
 
 ### Step 8: Check Unlinked Entity Mentions
 
@@ -120,7 +120,7 @@ Pass 3 is told in so many words not to let a missing target page stop it from wr
 
 Take the `SUMMARY: unlinked=N` count and the `UNLINKED:` lines with their `page:` lines. Each names the referring page, the property, the value, and the page it resolves to. The fix is `/wikicommit-fix <page-path> "<instruction>"` on the referring page — deliberately not an automatic rewrite, since a value matching a page title is evidence, not proof (two subjects can share a name), and `properties:` is not something a health check should write to.
 
-Not blocking, and does not gate the health verdict in Step 13 for the same reason: the value's shape is a generation-time judgment `validate_frontmatter.py` deliberately does not enforce (Issue #495 checks that a `properties:` *key* belongs to the type, never the *value*'s shape).
+Not blocking, and does not gate the health verdict in Step 16 for the same reason: the value's shape is a generation-time judgment `validate_frontmatter.py` deliberately does not enforce (Issue #495 checks that a `properties:` *key* belongs to the type, never the *value*'s shape).
 
 ### Step 9: Check Installed Type Usage
 
@@ -135,7 +135,7 @@ Take the `SUMMARY: unused=N, ancestor_fallback=N` counts and the individual line
 - `UNUSED:` — a type file with zero pages. Either the type was a misjudgment, or generation is not reaching for it. `provenance: default` types are exempt, since they ship with every wiki whether or not its subject calls for them.
 - `ANCESTOR_FALLBACK:` — pages on a type whose descendant is also installed. **Suggestive, never conclusive**: a wiki with `Park.md` still has legitimate `Place` pages that are not parks. Read it as "worth a look".
 
-Neither is blocking and neither gates the health verdict in Step 13 — which type fits a subject is a judgment call this script cannot make, only point at. When something here does look wrong, note that re-typing an existing page is not something any Skill does today: it means a directory move plus rewriting the Type segment of every WikiLink that points at it. What this check is really for is catching the pattern early, so the next batch generates at the right grain.
+Neither is blocking and neither gates the health verdict in Step 16 — which type fits a subject is a judgment call this script cannot make, only point at. When something here does look wrong, note that re-typing an existing page is not something any Skill does today: it means a directory move plus rewriting the Type segment of every WikiLink that points at it. What this check is really for is catching the pattern early, so the next batch generates at the right grain.
 
 ### Step 10: Check Self-Referential Tags
 
@@ -149,9 +149,60 @@ Take `SUMMARY: title_echo=N, type_echo=N` and the `TITLE_ECHO:` / `TYPE_ECHO:` l
 
 Matching is exact after normalization and never partial: `見沼` on a page titled `見沼田んぼ` is the useful kind of tag and is not reported. One thing it cannot see is a type tag written in the wiki's own language (`博物館` on a `schema:Museum` page), which would need a translation of the Schema.org vocabulary — type names are language-neutral identifiers here and no such table exists. Non-English wikis get the title half only.
 
-Not blocking, and does not gate the health verdict in Step 13: a tag is a judgment call, and a wiki may have a reason for one this check flags.
+Not blocking, and does not gate the health verdict in Step 16: a tag is a judgment call, and a wiki may have a reason for one this check flags.
 
-### Step 11: Tally Unprocessed Source Management Files
+### Step 11: Check Distribution Freshness
+
+```bash
+python .wikicommit/scripts/check_distribution_freshness.py
+```
+
+Like Step 4, this looks at the state of the installation rather than at pages. It compares what is on disk against the templates the installed `wikicommit-init` Skill ships, and reports three things: `OUTDATED:` (present but no longer matching), `MISSING:` (the template has it, this repository does not) and `ORPHAN:` (this repository has a file the template no longer does — `/wikicommit-init` refreshes trees but never deletes from them, so a script renamed upstream leaves its old name behind). Read-only; unlike `check_ingest_freshness.py` in Step 3 it writes nothing.
+
+What each path is compared against, and whether it is compared at all, is declared once in the Skill's own `_root_outputs.py` alongside the variant and `git add` decisions for the same path. Paths WikiCommit owns outright are compared byte for byte, because a re-init refreshes them and any difference is a version gap. Paths the user may have edited are reported only when the **template has gained something this repository lacks** — a new configuration key, a new frontmatter key, a new ignore pattern. Changing a value or rewriting the prose is the user doing their job and is never reported. Do not read a quiet result as "this file is identical to the template"; read it as "nothing has been added upstream that is missing here".
+
+Take the `VERSION:` line and the `SUMMARY: outdated=<N>, missing=<N>, orphan=<N>` counts. `synced=unknown` on the `VERSION:` line means the repository predates the version stamp (Issue #577) — it is reported for the reader and never gates a comparison, so the findings are as reliable as on any other repository. A `WARNING:` line instead of findings means the `wikicommit-init` Skill is not installed here, so there was no template to compare against; that is not a defect in the wiki, and the fix is to install the Skills.
+
+Everything this reports is fixed by re-running `/wikicommit-init` (with `--no-overwrite`, though the update policies protect the user's files either way), **except orphans** — those are deleted by hand, after checking that nothing still calls the file.
+
+### Step 12: Check Pages Resting on a Retracted Source
+
+```bash
+python .wikicommit/scripts/check_retracted_sources.py
+```
+
+`status: retracted` on a source management file records that a human read a registered source, judged its content unreliable, and took it out of use (Issue #737). Setting it stops the source being ingested again, but it does nothing to the pages already written from it — those keep it in their `sources[]`, unchanged and unremarked. This step is what surfaces them.
+
+Take `SUMMARY: retracted_sources=N, affected_pages=N` and the `RETRACTED_SOURCE:` lines with their `page:` lines. Each line names the page, the retracted identity its `sources[]` still carries, the management file that retracted it, and **how many other sources that page still rests on** — which is the number that decides what to do: a page with at least one remaining source can be rebuilt from what is left with `/wikicommit-generate --regenerate <page>`, which drops the retracted source and its `sources[]` entry (Issue #744) and is the route that actually takes it out of the page's evidence base — with one exception the count itself cannot show you: Regeneration Mode excludes any page carrying a `sources[].type: manual` entry, which this count treats as a remaining source, so a page whose only remainder is a manual one is a `/wikicommit-fix` too; a page whose problem is narrower than a rebuild is a `/wikicommit-fix`; and a page down to zero has nothing left holding it up, so it is a `/wikicommit-remove`.
+
+**Reporting is the whole intervention here, deliberately** (Issue #737). Resetting these pages to `review_status: pending` was considered and rejected: Issue #724 delegates "did the content actually change?" to a deterministic script specifically so that a non-deterministic judgment never decides whether a human must re-read a page, and a retraction changes no content at all — it changes the standing of the evidence behind it. Beyond that, `pending` would say "read this again" without saying what is now unsupported.
+
+Only a human can set this status, and only a human can lift it. That is not a gap: under the evidence-binding rule (Issue #442) the machine judges a page *against* its sources, so it cannot judge the sources themselves. The three fetch guards (Issues #425 / #574 / #715) catch sources whose *retrieval* is broken; a source that fetched perfectly and is simply wrong is outside what any of them can see.
+
+Not blocking, and does not gate the health verdict in Step 16: whether a retracted source's pages need rewriting, removing or leaving alone is a judgment call, and `retracted_sources=0` (nothing has ever been retracted here) is reported the same way as no affected pages.
+
+### Step 13: Check Review Coverage
+
+```bash
+python .wikicommit/scripts/check_review_coverage.py
+```
+
+Reads the review records under `.wikicommit/review/` (Issue #750) and reports what has been reviewed, by what, and which verdicts no longer hold:
+
+- `SUMMARY:` — pages, how many carry a **standing** machine review, how many carry a standing human one, total findings, distinct models. "Standing" throughout this step means the newest record that judged the page as it now stands (Issue #766): a `result: discarded` review judged a draft that was thrown away, so it says nothing about the text on disk and is not counted as coverage of it
+- `COVERAGE:` — per model: pages, findings, how many needed more than one attempt — all three from the standing record — and last, how many pages whose **newest AI record** is a discarded one this model wrote. That last number is the one thing here that reads a discarded record, and it is what makes a quiet `RISKY:` legible rather than contradictory: a page can be listed as discarded here and correctly appear in no verdict line at all. It is keyed on the page's newest AI record rather than on each model's own newest, because it exists to explain a missing `RISKY:` line — once a later review has judged the current text there is nothing missing to explain, so a superseded discard is not counted
+- `UNREVIEWED:` — a page with no standing record. Almost always that means no record at all; it also covers a page whose records exist but none of which judged the page as it now stands, and the line says which case it is — every record discarded, or none carrying a `page_content_hash` (Issue #766). All of them want the same response — someone has to look at this page — which is why they are one list
+- `RISKY:` — a page whose **standing** review took more than one attempt or drew findings. **This is the sampling list**: it is the closest thing the wiki has to "which pages are most worth a human reading", and it exists only because the verdicts are now kept. "Standing" is the newest record that judged the page as it now stands, of either kind (Issue #760) — so a page drops off once a later review comes back clean, and a human's own findings put a page on the list. It reads that one record rather than the history, because records are immutable and never deleted: summing over all of them meant a page that was ever retried stayed listed forever, and the list converged on the whole wiki, at which point it selects nothing. The "took two rounds to pass" signal is not lost by this — that review is the standing one and carries its own `attempts`
+- `STALE_REVIEW:` — a recorded verdict that no longer applies, either because the page's text changed after it or because a source under it did
+- `RETRACTED_EVIDENCE:` — a verdict that rested on a source since retracted (Issue #737). Distinct from Step 12: that step reports pages that still *name* a retracted source, while this one reports that a judgment was actually made on the strength of it
+
+Report the counts, and list `UNREVIEWED:` / `RISKY:` / `STALE_REVIEW:` / `RETRACTED_EVIDENCE:` findings if there are any.
+
+Not blocking, and does not gate the health verdict in Step 16. There is deliberately no threshold here — no coverage percentage to hit and no automatic action. A human reads `RISKY:` and decides whether to read the page or re-run `/wikicommit-generate --regenerate`; a number invented before there is data to set it from would only look like a standard.
+
+A wiki initialized before this existed has no `.wikicommit/review/` and reports zeros with a note saying so — the absence of records means "generated before reviews were recorded", not "never reviewed".
+
+### Step 14: Tally Unprocessed Source Management Files
 
 Scan `.wikicommit/source/**/*.md` and read each file's frontmatter `status` field. Count the files with `status: pending` and record their paths.
 
@@ -163,13 +214,13 @@ This is a subset of the `pending` count, not a separate population, and it is th
 
 Unlike `failed_pages`, which `wikicommit-merge` raises as a tracking Issue (Issue #452), this is not a failure — it is work that has not come up yet, so counting it here is the whole intervention.
 
-### Step 12: Tally Unreviewed Pages
+### Step 15: Tally Unreviewed Pages
 
 Scan `.wikicommit/entity/**/*.md` **and `.wikicommit/view/**/*.md`** (excluding `index.md` in both) and read each file's frontmatter `review_status` field. Exclude pages with `status: removed` (as with `check_orphans.py` / `check_expires.py`, removed pages are not review targets). Count files with `review_status: pending`, or where the `review_status` field itself is absent (treated as `pending`, same as `validate_frontmatter.py`'s WARNING behavior), and record their paths.
 
 The view tree is included (Issue #675) because a view page is written `review_status: pending` like any other generated page, and `wikicommit-merge` Step 9 scans both trees and opens a tracking Issue for it. Counting only the entity tree would report a wiki as fully reviewed while open `wikicommit-review` Issues are outstanding — the exact backlog this tally exists to surface. This differs from `check_orphans.py`'s exclusion of the same tree, which rests on a property of view pages themselves (unlinked at birth) rather than on which fields they carry.
 
-### Step 13: Display Results
+### Step 16: Display Results
 
 Display in the following format:
 
@@ -198,15 +249,28 @@ Unlinked entity mentions: <N> (properties: value naming a page that exists — c
 Unused installed types:  <N> (schema file with zero pages — check_installed_type_usage.py)
 Possible ancestor-type fallback: <N> (pages on a type whose installed descendant may fit better — check_installed_type_usage.py)
 Self-referential tags:  <N> title echoes / <N> type echoes (check_self_referential_tags.py)
+Distribution freshness: <N> outdated / <N> missing / <N> orphan (check_distribution_freshness.py)
+Pages on a retracted source: <N> (sources[] names a source a human withdrew — check_retracted_sources.py)
+Review coverage:        <A>/<T> pages with a standing AI review, <H> with a standing human one (check_review_coverage.py)
+Pages with no standing review: <N> (no record judges the page as it stands — check_review_coverage.py)
+Risky pages:            <N> (retried, or findings raised — the sampling list — check_review_coverage.py)
+Stale reviews:          <N> (page text or a source changed after the verdict — check_review_coverage.py)
+Reviews on retracted evidence: <N> (check_review_coverage.py)
 ```
 
 For any category with 1 or more hits, display the list of matching file paths directly below that category — with three exceptions, which have no per-page paths to list: for `Unreinforced property-value WikiLinks` display the `UNREINFORCED:` lines, for `Types with no schema file` display the `UNCOVERED:` lines (`check_schema_coverage.py` emits no `page:` lines at all — each `UNCOVERED:` line carries a page count and one example path for that type), and for `Recurring plain-text characters` display the matching `RECURRING:` lines (each already names the works the name was found in). `Unlinked entity mentions` does have `page:` lines, so it follows the normal rule — list the referring page paths, each with its `UNLINKED:` line. The two Step 9 categories have no `page:` lines either — display the matching `UNUSED:` / `ANCESTOR_FALLBACK:` lines.
 
+For `Distribution freshness`, display the `VERSION:` line and then the matching `OUTDATED:` / `MISSING:` / `ORPHAN:` lines — this check has no `page:` lines either, and each of its lines already names the path and says what is wrong with it.
+
+`Pages on a retracted source` does have `page:` lines, so it follows the normal rule — list the affected page paths, each with its `RETRACTED_SOURCE:` line, since that line carries the two things needed to decide what to do: which retracted source the page still names, and how many sources it has left.
+
+The five review-coverage rows all come from Step 13's single run. `Review coverage` is not a count of problems — take `<A>`, `<T>` and `<H>` from its `SUMMARY:` line (`ai_reviewed`, `pages`, `human_reviewed`) and display the `COVERAGE:` lines underneath it, one per model, since the per-model split is the whole reason the denominator is worth printing. The other four rows are counts of the `UNREVIEWED:` / `RISKY:` / `STALE_REVIEW:` / `RETRACTED_EVIDENCE:` lines; for any of them with 1 or more hits, display those lines directly below the row (each already names its page and, where it applies, what changed). When Step 13 printed the `NOTE: .wikicommit/review/ does not exist yet` line instead, display that note in place of all five rows — the wiki predates review recording, and reporting `0/0` there would read as "nothing to review" rather than "nothing recorded yet".
+
 `GitHub Actions PR permission` is not a count — display Step 4's `OK:`/`WARNING:` line verbatim as `<status>` (e.g. `OK: acme/example-wiki: "Allow GitHub Actions to create and approve pull requests" は有効です`, or the full `WARNING: ...` message including the enable command). Skip this line entirely when `SUMMARY: enabled=n/a` (repository doesn't use `review-issue-close-sync.yml`).
 
-If every category above is 0 **and** `enabled` is `true` or `n/a`, display "Wiki is healthy" instead of the above (a `false`/`unknown` permission state blocks the "healthy" verdict even when every page-level category is clean, since it silently breaks the review-close automation). `Unreinforced property-value WikiLinks` does not gate this verdict either way — it is purely informational (Step 5) and, per that step's `description` caveat, is realistically almost never 0 on any repository using the standard type templates, so requiring it to be 0 would make the "healthy" verdict effectively unreachable. Neither `Recurring plain-text characters` nor `Unlinked entity mentions` gates it: promoting a character is a judgment call `Person.md`'s `granularity` makes at generation time and a wiki may legitimately decide a recurring character stays plain text (Issue #560), and an unlinked mention is likewise a generation-time judgment `validate_frontmatter.py` deliberately does not enforce on `properties:` values (Issue #561) — a standing non-zero count in either is a backlog to look at rather than a defect. The two Step 9 categories do not gate it either (Issue #565): both are judgment prompts rather than defects, and `ANCESTOR_FALLBACK` in particular is expected to be non-zero on any wiki that installs a descendant type at all. `Self-referential tags` does not gate it either (Issue #571) — same reason. `Types with no schema file` **does** gate it (Issue #575): unlike the reinforcement check, a non-zero count here means a type definition is not being applied at all, it is 0 on a repository whose schema files match the types it uses, and the fix is a concrete one (add the file, or move it back out of a subdirectory).
+If every category above is 0 **and** `enabled` is `true` or `n/a`, display "Wiki is healthy" instead of the above (a `false`/`unknown` permission state blocks the "healthy" verdict even when every page-level category is clean, since it silently breaks the review-close automation). `Unreinforced property-value WikiLinks` does not gate this verdict either way — it is purely informational (Step 5) and, per that step's `description` caveat, is realistically almost never 0 on any repository using the standard type templates, so requiring it to be 0 would make the "healthy" verdict effectively unreachable. Neither `Recurring plain-text characters` nor `Unlinked entity mentions` gates it: promoting a character is a judgment call `Person.md`'s `granularity` makes at generation time and a wiki may legitimately decide a recurring character stays plain text (Issue #560), and an unlinked mention is likewise a generation-time judgment `validate_frontmatter.py` deliberately does not enforce on `properties:` values (Issue #561) — a standing non-zero count in either is a backlog to look at rather than a defect. The two Step 9 categories do not gate it either (Issue #565): both are judgment prompts rather than defects, and `ANCESTOR_FALLBACK` in particular is expected to be non-zero on any wiki that installs a descendant type at all. `Self-referential tags` does not gate it either (Issue #571) — same reason. `Pages on a retracted source` does not gate it either (Issue #737): the check reports so a human can choose between removing, regenerating and fixing the page, and none of those is automatically the right answer. `Distribution freshness` does not gate it either (Issue #712): it describes how current the installation is, not whether the wiki's content is sound, and a repository can be entirely healthy while running a version behind. None of the five review-coverage rows gates it either (Issue #750): they measure how much reviewing has been recorded rather than whether the content is sound, there is deliberately no coverage threshold to reach (Step 13), and a wiki that predates the record tree — or one whose pages were all generated before it — would otherwise be permanently barred from the verdict by an absence that means "not recorded", not "not reviewed". `Types with no schema file` **does** gate it (Issue #575): unlike the reinforcement check, a non-zero count here means a type definition is not being applied at all, it is 0 on a repository whose schema files match the types it uses, and the fix is a concrete one (add the file, or move it back out of a subdirectory).
 
-### Step 14: Cleanup Guidance
+### Step 17: Cleanup Guidance
 
 If the `outdated` count in Step 3's `check_ingest_freshness.py` `SUMMARY:` line is 1 or more (whether newly rewritten this run or already `outdated` before), append the following guidance:
 
@@ -220,4 +284,4 @@ Run /wikicommit-merge to commit it.
 
 - Do not commit or create a PR against `main` or any branch
 - Do not write to `.wikicommit/schema/`
-- No script other than `check_ingest_freshness.py`, and no part of the Step 3 / Step 11–12 scans, has side effects (read-only). `check_actions_pr_permission.py` (Step 4), `check_property_wikilink_reinforcement.py` (Step 5), `check_schema_coverage.py` (Step 6), `check_recurring_characters.py` (Step 7) and `check_unlinked_entity_mentions.py` (Step 8) and `check_installed_type_usage.py` (Step 9) and `check_self_referential_tags.py` (Step 10) are read-only too — unlike `wikicommit-init`'s Step 3, `check_actions_pr_permission.py` never attempts to enable the GitHub Actions PR permission setting itself, only reports its current state
+- No script other than `check_ingest_freshness.py`, and no part of the Step 3 / Step 14–15 scans, has side effects (read-only). `check_actions_pr_permission.py` (Step 4), `check_property_wikilink_reinforcement.py` (Step 5), `check_schema_coverage.py` (Step 6), `check_recurring_characters.py` (Step 7) and `check_unlinked_entity_mentions.py` (Step 8) and `check_installed_type_usage.py` (Step 9) and `check_self_referential_tags.py` (Step 10) and `check_distribution_freshness.py` (Step 11) and `check_retracted_sources.py` (Step 12) and `check_review_coverage.py` (Step 13) are read-only too — unlike `wikicommit-init`'s Step 3, `check_actions_pr_permission.py` never attempts to enable the GitHub Actions PR permission setting itself, only reports its current state

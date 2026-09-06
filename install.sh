@@ -25,7 +25,7 @@ for arg in "$@"; do
 done
 
 # Skills to install
-SKILLS=("wikicommit-init" "wikicommit-generate" "wikicommit-merge" "wikicommit-review" "wikicommit-remove" "wikicommit-fix" "wikicommit-status" "wikicommit-collect" "wikicommit-search" "wikicommit-ask" "wikicommit-quiz" "wikicommit-synthesize" "wikicommit-serve" "wikicommit-translate" "wikicommit-schema-propose")
+SKILLS=("wikicommit-init" "wikicommit-generate" "wikicommit-merge" "wikicommit-review" "wikicommit-remove" "wikicommit-fix" "wikicommit-status" "wikicommit-collect" "wikicommit-search" "wikicommit-ask" "wikicommit-quiz" "wikicommit-synthesize" "wikicommit-serve" "wikicommit-translate" "wikicommit-schema-propose" "wikicommit-update")
 
 echo "WikiCommit Skills Installer"
 echo ""

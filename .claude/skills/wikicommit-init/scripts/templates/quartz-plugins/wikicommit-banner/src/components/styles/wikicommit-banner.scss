@@ -1,7 +1,8 @@
+// Shared shell. Both states use it since Issue #739 made the banner state that
+// a page is LLM-written whether or not a person has read it; only the colours
+// below tell them apart, together with the icon and the heading.
 .wikicommit-banner {
   border: 1px solid var(--gray);
-  border-left: 4px solid #f5a623;
-  background: #fffbf0;
   padding: 1rem 1.25rem;
   margin-bottom: 1.5rem;
   border-radius: 4px;
@@ -10,9 +11,24 @@
   align-items: flex-start;
 }
 
-:root[saved-theme="dark"] .wikicommit-banner {
+// The warning colouring belongs to "nobody has read this yet", not to "written
+// by a model" — which is why it moved from the base class onto this modifier
+// once the reviewed state started using the same shell.
+.wikicommit-banner--pending {
+  border-left: 4px solid #f5a623;
+  background: #fffbf0;
+}
+
+:root[saved-theme="dark"] .wikicommit-banner--pending {
   background: #2a2618;
   border-color: #6b5a1e;
+}
+
+// Deliberately quiet: a reviewed page is still stating a caveat, so it must not
+// look like a success notice — and not like a warning either.
+.wikicommit-banner--reviewed {
+  border-left: 4px solid var(--gray);
+  background: var(--light);
 }
 
 .wikicommit-banner__icon {
@@ -53,6 +69,10 @@
   gap: 0.75rem;
 }
 
+// Used twice: as a <span> in the report-link-only row a build-generated index
+// page still gets, and as a <p> inside the banner body on a reviewed content
+// page (Issue #739). The <p> already inherits size and colour from
+// `.wikicommit-banner__body p`; this keeps the <span> matching it.
 .wikicommit-banner__reviewer {
   color: var(--darkgray);
 }
@@ -77,4 +97,33 @@
 .wikicommit-site-summary__note {
   margin-top: 0.375rem;
   font-size: 0.8125rem;
+}
+
+// Issue #742: the report link and its account note have to wrap as one unit.
+// Both rows that hold them are `flex-wrap: wrap` and already carry a second
+// item — the review-status link on a pending page, the reviewer on a reviewed
+// one — so a bare note as a further sibling could wrap onto its own line and
+// read as attached to nothing.
+.wikicommit-banner__report-action {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem;
+}
+
+// Deliberately quieter than the link it annotates: the note states a fact the
+// reader needs before clicking, but the call to action stays the loudest thing
+// in the row (the visual-weight constraint this shares with Issue #738). Same
+// treatment the site-summary note gets under the counts it explains.
+.wikicommit-banner__link-note {
+  color: var(--darkgray);
+  font-size: 0.8125rem;
+}
+
+// Issue #751: sits directly under the generation line it qualifies, and reads
+// as one of the page's facts rather than as a badge. It inherits size and
+// colour from `.wikicommit-banner__body p`; the class exists so the line can be
+// found and styled without reaching for nth-child.
+.wikicommit-banner__ai-review {
+  color: var(--darkgray);
 }

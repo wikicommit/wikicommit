@@ -5,6 +5,8 @@ For each management file with source.type=path and status in {generated, partial
 outdated}, computes the SHA-256 of the source file and compares it with source.hash.
 If they differ, updates the management file's status to 'outdated'.
 
+`status: retracted` is never touched — see CHECKABLE_STATUSES below.
+
 Usage:
     python .wikicommit/scripts/check_ingest_freshness.py [<ingest-file>...]
 
@@ -29,6 +31,11 @@ SOURCE_DIR = Path(".wikicommit/source")
 # covers read-side parsing only; this write-side logic is a separate concern.
 FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 
+# `retracted` (Issue #737) is deliberately absent, the way `outdated` is absent
+# from reconcile_ingest_status.py's targets (Issue #474): a human retracted that
+# source, and rewriting it to `outdated` on a hash mismatch would put it back in
+# Pass 1's collection list — touching the source file by one byte would lift the
+# retraction, silently. Only a human can set or clear this status.
 CHECKABLE_STATUSES = {"generated", "partial", "outdated"}
 
 

@@ -154,6 +154,7 @@ def rebuild_view_index(lang_dir: Path, lang: str) -> tuple[str, int]:
         f"title: {_yaml_quote(VIEW_TYPE_SEGMENT)}\n"
         f"lang: {lang}\n"
         "review_status: reviewed\n"
+        "comments: false\n"
         "---\n"
     )
     body_lines = [f"- [[{VIEW_TYPE_SEGMENT}/{slug}]]" for slug in entries]
@@ -213,12 +214,18 @@ def rebuild_index(type_dir: Path) -> tuple[str, int] | None:
     # which is how it fell outside that convention in the first place. Stamping
     # it at the writing end keeps WikiCommitBanner.tsx free of any "is this an
     # index page?" slug-naming test, which it deliberately avoids.
+    #
+    # comments: false rides along for the same reason (Issue #741): giscus
+    # renders into afterBody on every page, and an index has nothing for a
+    # reader to respond to. The plugin skips a page whose frontmatter says so,
+    # so this is one key in the place that already decides this question.
     frontmatter = (
         "---\n"
         f"title: {_yaml_quote(leaf_title)}\n"
         f"lang: {lang}\n"
         f'type: {_yaml_quote(f"schema:{type_name}")}\n'
         "review_status: reviewed\n"
+        "comments: false\n"
         "---\n"
     )
     # One list item per page, the WikiLink alone (Issue #678). convert_wikilinks.py

@@ -38,6 +38,9 @@ Consumers:
 - `wikicommit-generate` Pass 3 — writes `generated_with` on generated pages
 - `wikicommit-synthesize` — writes `generated_with` on synthesized pages
 - `wikicommit-translate` — writes `translated_with` on translation pages
+- `record_review.py` — stamps `wikicommit_version` on each review record
+  (imports `get_version()` directly rather than shelling out, being a
+  sibling module in the same directory)
 
 Skills read it by running this file directly:
 
@@ -49,7 +52,7 @@ Skills read it by running this file directly:
 # and a new `CHANGELOG.md` entry; the CHANGELOG entry is what tells a user
 # which pages are worth regenerating, since the version alone is coarser than
 # the per-type template changes it stands for.
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 
 def get_version() -> str:

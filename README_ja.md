@@ -172,6 +172,7 @@ bash /tmp/wikicommit/install.sh
 | 13 | 参照・検索 | `/wikicommit-quiz [--difficulty=easy\|medium\|hard]` | Wiki 内容からクイズを生成 |
 | 14 | 運用・プレビュー | `/wikicommit-status` | ヘルスチェック（孤立・未審査・期限切れ） |
 | 15 | 運用・プレビュー | `/wikicommit-serve [--build]` | Wiki をローカルでビルド・プレビュー |
+| 16 | 運用・プレビュー | `/wikicommit-update` | インストール済み配布物と同期（PR・非auto-merge） |
 
 ---
 

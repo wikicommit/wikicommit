@@ -54,6 +54,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 FRONTMATTER_RE = re.compile(r"^(---\r?\n)(.*?)((?:\r?\n)?---\r?\n?)", re.DOTALL)
 
@@ -107,6 +108,84 @@ def _remove_field(yaml_block: str, key: str) -> tuple[str, bool]:
         # 改行を持たない最終行だった。手前の行の改行が宙に浮くので1つだけ詰める。
         removed = re.sub(r"\r?\n\Z", "", removed)
     return removed, True
+
+
+class FrontmatterFileError(Exception):
+    """The page could not be opened, or holds no frontmatter block.
+
+    Raised instead of printing-and-exiting so that in-process callers
+    (`reset_review_on_content_change.py`, Issue #724) can report the failure
+    in their own output vocabulary while `main()` keeps its existing CLI
+    messages and exit code unchanged.
+    """
+
+
+class FieldWriteResult(NamedTuple):
+    """Outcome of one apply_frontmatter_fields() call.
+
+    `applied` is False only for the `require` mismatch — a normal outcome,
+    not an error, which is why it is a return value rather than an
+    exception. `current_value` carries what the field actually held, so the
+    caller can say so in its own message.
+    """
+
+    applied: bool
+    removed_keys: tuple[str, ...] = ()
+    current_value: "str | None" = None
+
+
+def apply_frontmatter_fields(
+    page_path: Path,
+    *,
+    sets: "list[tuple[str, str]] | tuple[()]" = (),
+    unsets: "list[str] | tuple[()]" = (),
+    require: "tuple[str, str] | None" = None,
+) -> FieldWriteResult:
+    """Apply --set/--unset to one page's frontmatter block, in place.
+
+    This is the whole of what the CLI does between argument parsing and
+    printing, factored out so a second script can reuse it in-process
+    (Issue #724). Keeping one implementation matters more here than usual:
+    the delimiter handling below (re-adding the newline the frontmatter
+    regex consumed when the closing `---` has none in front of it) is the
+    kind of detail a copy silently gets wrong.
+    """
+    if not page_path.is_file():
+        raise FrontmatterFileError(f"{page_path}: ファイルが存在しません")
+
+    with page_path.open(encoding="utf-8-sig", newline="") as f:
+        content = f.read()
+
+    m = FRONTMATTER_RE.match(content)
+    if not m:
+        raise FrontmatterFileError(f"{page_path}: frontmatter ブロックが見つかりません")
+
+    yaml_block = m.group(2)
+    delimiter = m.group(3)
+
+    if require is not None:
+        req_key, req_value = require
+        current = _current_value(yaml_block, req_key)
+        if current is None or current != _strip_quotes(req_value):
+            return FieldWriteResult(applied=False, current_value=current)
+
+    for key, value in sets:
+        yaml_block = _upsert_field(yaml_block, key, value)
+
+    removed_keys = []
+    for key in unsets:
+        yaml_block, removed = _remove_field(yaml_block, key)
+        if removed:
+            removed_keys.append(key)
+
+    if not re.match(r"^\r?\n", delimiter):
+        yaml_block += "\n"
+
+    content = content[: m.start(2)] + yaml_block + content[m.end(2):]
+    with page_path.open("w", encoding="utf-8", newline="") as f:
+        f.write(content)
+
+    return FieldWriteResult(applied=True, removed_keys=tuple(removed_keys))
 
 
 def parse_kv(raw: str, flag: str) -> tuple[str, str] | None:
@@ -175,46 +254,23 @@ def main() -> int:
             return 1
 
     page_path = Path(args.page)
-    if not page_path.is_file():
-        print(f"ERROR: {args.page}: ファイルが存在しません", file=sys.stderr)
+    try:
+        result = apply_frontmatter_fields(
+            page_path, sets=set_pairs, unsets=unset_keys, require=require_pair
+        )
+    except FrontmatterFileError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
         return 1
 
-    with page_path.open(encoding="utf-8-sig", newline="") as f:
-        content = f.read()
-
-    m = FRONTMATTER_RE.match(content)
-    if not m:
-        print(f"ERROR: {args.page}: frontmatter ブロックが見つかりません", file=sys.stderr)
-        return 1
-
-    yaml_block = m.group(2)
-    delimiter = m.group(3)
-
-    if require_pair is not None:
+    if not result.applied:
         req_key, req_value = require_pair
-        current = _current_value(yaml_block, req_key)
-        if current is None or current != _strip_quotes(req_value):
-            print(
-                f"SKIP: {args.page}: {req_key} is not {req_value!r} "
-                f"(current: {current!r}); no changes made"
-            )
-            return 0
+        print(
+            f"SKIP: {args.page}: {req_key} is not {req_value!r} "
+            f"(current: {result.current_value!r}); no changes made"
+        )
+        return 0
 
-    for key, value in set_pairs:
-        yaml_block = _upsert_field(yaml_block, key, value)
-
-    removed_keys = []
-    for key in unset_keys:
-        yaml_block, removed = _remove_field(yaml_block, key)
-        if removed:
-            removed_keys.append(key)
-
-    if not re.match(r"^\r?\n", delimiter):
-        yaml_block += "\n"
-
-    content = content[: m.start(2)] + yaml_block + content[m.end(2):]
-    with page_path.open("w", encoding="utf-8", newline="") as f:
-        f.write(content)
+    removed_keys = result.removed_keys
 
     for key, value in set_pairs:
         print(f"OK: {args.page}: {key} -> {value}")

@@ -161,7 +161,7 @@ Confirm the following with the user (use the default value if there is no answer
    uncommitted makes every fresh-clone `npm install` die with MODULE_NOT_FOUND; Issue #556)
    / `quartz-plugins/`
    (a custom plugin providing the review_status banner and JSON-LD embedding, including the pre-built `dist/`)
-   / `.github/ISSUE_TEMPLATE/report.md` (backs the banner's "Report an issue" link, Issue #339)
+   / `.github/ISSUE_TEMPLATE/report.md` (backs the banner's report link, Issue #339)
    at the repository root — everything needed for `/wikicommit-serve` to work locally.
    When `--quartz-pages` is additionally given, it also generates `.github/workflows/deploy.yml`
    (Issue #335 — this is the one file that actually opts the repository into automatic GitHub Pages
@@ -520,6 +520,52 @@ Confirm the following with the user (use the default value if there is no answer
    trailing note about GitHub Pages not being set up, where applicable). It always exits 0.
 
 4. If `init.py` fails (exit code 1), display the stdout and stderr output to the user and stop.
+
+## Enabling comments (giscus)
+
+Off by default, and this is a manual, one-time setup a human performs — not a step `init.py` runs. Nothing below is done on the user's behalf; show it when they ask for it.
+
+It gives a reader somewhere to put a thought they are not yet sure enough about to open an Issue over — "these two pages don't quite agree" being the one that matters most, since a contradiction between pages generated in different batches is out of reach of every automated check by design (Issue #741).
+
+**Existing wikis do not get this by re-initializing.** `quartz.config.yaml` is never overwritten once it exists — it holds this repository's own `pageTitle`, `baseUrl` and links — so the commented block below reaches a repository only on its *first* init. On an older one, copy the block out of `.claude/skills/wikicommit-init/scripts/templates/quartz.config.yaml` by hand — along with the `comments` entry in the `layout.byPageType.folder.exclude` and `layout.byPageType.tag.exclude` lists (see below).
+
+Three prerequisites, all giscus's own. Check them before touching the config, because a missed one fails silently at read time rather than at build time:
+
+1. **The repository is public.** Otherwise visitors cannot see the discussion at all. A wiki published on GitHub Pages under a free plan already satisfies this.
+2. **The giscus GitHub App is installed on it** — <https://github.com/apps/giscus>. Otherwise visitors can see comments but cannot post or react.
+3. **Discussions is turned on** (Settings → General → Features → Discussions), with a category to hold the threads. Use an **Announcements**-type category: giscus recommends it because only maintainers and giscus itself can then open new discussions there.
+
+Then collect four values:
+
+```bash
+gh api "repos/<owner>/<repo>" --jq .node_id          # repoId
+gh api graphql -f query='
+  query { repository(owner: "<owner>", name: "<repo>") {
+    discussionCategories(first: 20) { nodes { id name } } } }'   # categoryId
+```
+
+Set them in `quartz.config.yaml`, and flip `enabled` to `true`:
+
+```yaml
+  - source: github:quartz-community/comments
+    enabled: true
+    options:
+      provider: giscus
+      options:
+        repo: <owner>/<repo>
+        repoId: <node_id from above>
+        category: <the category's name>
+        categoryId: <that category's id from above>
+        lang: <primary_lang>
+```
+
+`lang` is one static value for the whole site and does not follow a page's own `lang` frontmatter, so on a multilingual wiki it will not match every reader; `primary_lang` is the sensible choice.
+
+**Build-generated navigation pages are kept out of the comment box two different ways, and a wiki needs both.** The pages WikiCommit writes — Type indexes, the view-tree index, the root index, `content/sources/`, `content/overview/` — carry `comments: false` in their own frontmatter, and the plugin skips them. The pages *Quartz* synthesises have no `.md` behind them to stamp: no `index.md` is written at `content/<lang>/`, so the language top (`/ja/` and the like) is a folder page Quartz builds itself, and every `/tags/<tag>` page is the same. Those are excluded by listing `comments` in `layout.byPageType.folder.exclude` and `layout.byPageType.tag.exclude`, next to `wikicommit-banner`, which is there for exactly this reason. Check both are in place before enabling — an older `quartz.config.yaml` predates the `comments` entry in those two lists.
+
+**Do not wire reactions or discussions to `review_status`.** A 👍 means "this was good", not "I read this and had nothing to report"; there is no principled threshold on a running count for a two-valued field; `reviewed` is a claim this wiki makes to its readers and closing a tracking Issue needs write access, which reacting does not; and a discussion only comes into existence once someone reacts, so "pages nobody has looked at yet" would stop being listable.
+
+Two costs, both accepted: this adds a dependency on a `github:quartz-community/*` plugin, and an empty comment box looks empty on every page in a way a report link does not.
 
 ## Notes
 

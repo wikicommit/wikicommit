@@ -257,6 +257,60 @@ plugins:
     layout:
       position: afterBody
       priority: 5
+  # giscus — a place for the thought a reader is not yet sure enough about to
+  # open an Issue over (Issue #741). Three layers, and they do not overlap:
+  #
+  #   noticing  → here. Anyone, any number of times, no confidence required.
+  #   reporting → the banner's report link, which opens an Issue. Needs
+  #               confidence that something should be fixed.
+  #   declaring → closing a review-tracking Issue. Needs write access.
+  #
+  # The gap this fills is real and not decorative: cross-page contradictions
+  # between pages generated in different batches are, by design, out of reach of
+  # every automated check — so the only thing in the system holding two pages at
+  # once is a person who read one last week and the other today. That thought
+  # arrives as "these don't quite agree", which is not an Issue.
+  #
+  # DISABLED BY DEFAULT, and turning it on takes four values this template
+  # deliberately does not ship as empty keys — a placeholder nobody fills is
+  # worse than an absent one. See the wikicommit-init SKILL.md section
+  # "Enabling comments (giscus)" for how to obtain them.
+  #
+  # Prerequisites, all three of them giscus's own:
+  #   - the repository is PUBLIC (otherwise visitors cannot see the discussion)
+  #   - the giscus GitHub App is installed on it (otherwise they cannot post)
+  #   - Discussions is turned on
+  # Use an ANNOUNCEMENTS-type Discussion category: giscus recommends it because
+  # only maintainers and giscus itself can then open new discussions there.
+  #
+  # Reactions and discussions are deliberately NOT wired to review_status. A 👍
+  # means "this was good", not "I read this and had nothing to report"; there is
+  # no principled threshold on a running count for a two-valued field; closing a
+  # tracking Issue requires write access and this would not; and a discussion
+  # only exists once someone reacts, so "pages nobody has looked at yet" would
+  # stop being listable. This axis measures how far a page reached, and is kept
+  # apart from whether it reached anyone at all.
+  #
+  # To enable: set enabled to true and fill in the four values below.
+  #
+  #   options:
+  #     provider: giscus
+  #     options:
+  #       repo: <owner>/<repo>
+  #       repoId: <the repository's GraphQL node ID>
+  #       category: <the Discussion category's name>
+  #       categoryId: <that category's GraphQL node ID>
+  #       lang: <the reader-facing UI language>
+  #
+  # `lang` is a single static value (default en) and does not follow a page's
+  # own `lang` frontmatter, so on a multilingual wiki it will not match every
+  # reader. primary_lang is the sensible choice.
+  #
+  # Build-generated navigation pages are already excluded two ways, and both are
+  # needed. The ones WikiCommit writes carry `comments: false` in their own
+  # frontmatter; the ones Quartz synthesises have no .md to stamp, so `comments`
+  # is listed in layout.byPageType.folder/tag.exclude below — that covers the
+  # language tops (/ja/ and the like, which get no index.md) and every tag page.
   - source: github:quartz-community/comments
     enabled: false
     options:
@@ -365,16 +419,27 @@ layout:
     # コンポーネント側でページ種別を判定する案は採らない — WikiCommitBanner は
     # fileData.slug === "index" のような Quartz のスラッグ命名規約に依存しない方針で
     # 書かれており、レイアウト設定だけで完結するこちらが整合する（Issue #648）。
+    #
+    # comments（giscus）も同じ理由でここに置く（Issue #741）。ビルド生成のナビゲーション
+    # ページのうち WikiCommit が .md を書き出すもの（Type 別インデックス・view 別
+    # インデックス・root index・content/sources/・content/overview/）は書き出し側で
+    # frontmatter に comments: false をスタンプして抑止しているが、**この2種には
+    # スタンプする書き出し側が存在しない** — とくに content/<lang>/ には index.md を
+    # 書き出さないため、言語トップ（/ja/ 等）は Quartz が合成する folder ページになり、
+    # frontmatter を持たない。tag ページ（/tags/<tag>）も同様。放置すると、まさに
+    # 除外したかった機械生成の目次にコメント欄が並ぶ。
     folder:
       exclude:
         - reader-mode
         - wikicommit-banner
+        - comments
       positions:
         right: []
     tag:
       exclude:
         - reader-mode
         - wikicommit-banner
+        - comments
       positions:
         right: []
     canvas: {}

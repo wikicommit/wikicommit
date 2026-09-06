@@ -121,10 +121,10 @@ Answer **in the language of the question determined in Step 1** — do not re-de
 
 Before the answer body, insert zero or more of the following notes, each on its own line and in this fixed order (never reorder — "prepend" below means "insert here, above the answer body and above any note listed after it", not "insert at the very front regardless of the other notes' positions"):
 
-1. If any page used as grounding — a Step 3 hit page or a page step 4.2 added via WikiLink hop expansion, treated identically here — has `review_status: pending`, prepend a note formatted like `wikicommit-search`'s `⚠️ Unreviewed` label:
+1. If any page used as grounding — a Step 3 hit page or a page step 4.2 added via WikiLink hop expansion, treated identically here — has `review_status: pending`, prepend a note formatted like `wikicommit-search`'s `⚠️ Unreviewed` label. The wording says what `pending` now means (Issue #740): nobody has read the page yet. It is a fact about reach, not a verdict on the page — the machine's own source check ran on it either way (Issue #750 / #751), so "unreviewed" would overstate what is missing:
 
    ```
-   ⚠️ This answer references unreviewed pages: .wikicommit/entity/ja/Person/yamada-taro.md
+   ⚠️ This answer references pages nobody has read yet: .wikicommit/entity/ja/Person/yamada-taro.md
    ```
 
    If there are multiple, list them comma-separated. Omit if all are `reviewed`.

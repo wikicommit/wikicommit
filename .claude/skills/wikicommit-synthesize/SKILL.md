@@ -199,10 +199,10 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
 
 Read each selected page with the Read tool and add its body (excluding frontmatter) to the LLM's context. Keep the list of selected page paths — this is the grounding set used for `derived_from` in Step 10.
 
-**Say which grounding pages are unreviewed, before writing anything** (Issue #674). Take each page's `review_status` from the frontmatter you just read, **not** from step 2's `MATCH:` line: `search_index.py` rebuilds its cache only when the database file is missing and never checks whether it is stale, so an index built before a page was reset to `pending` (`/wikicommit-generate --regenerate` does exactly that) still reports it as reviewed and the warning is skipped in the one case it exists for. If any selected page is `pending`, list those paths now, in the same words `/wikicommit-ask` uses when its answer rests on unreviewed pages:
+**Say which grounding pages are unreviewed, before writing anything** (Issue #674). Take each page's `review_status` from the frontmatter you just read, **not** from step 2's `MATCH:` line: `search_index.py` rebuilds its cache only when the database file is missing and never checks whether it is stale, so an index built before a page was reset to `pending` (`/wikicommit-generate --regenerate` does exactly that) still reports it as reviewed and the warning is skipped in the one case it exists for. If any selected page is `pending`, list those paths now, in the same words `/wikicommit-ask` uses when its answer rests on pages nobody has read yet (Issue #740 — `pending` states that the page has not reached a person, not that no check ran on it):
 
 ```
-⚠️ This synthesis is grounded on unreviewed pages: .wikicommit/entity/ja/Person/yamada-taro.md
+⚠️ This synthesis is grounded on pages nobody has read yet: .wikicommit/entity/ja/Person/yamada-taro.md
 ```
 
 This is a warning, not a gate — do not stop, and do not ask for confirmation. A wiki whose pages are all `pending` is the normal state right after a batch of generation, and refusing to synthesize there would make the Skill unusable exactly when it is most useful. What the warning buys is that "unreviewed pages went in, and an unreviewed page came out" is stated rather than silent: the output carries `review_status: pending` either way, which on its own does not distinguish a page built on reviewed material from one built on none.
@@ -240,25 +240,24 @@ checks the Boundary as well as the grounding.
 
 Of the three ways a page gets written, this was the only one with no check on the result: `/wikicommit-generate` reconciles a page against its source documents (Pass 4) and `/wikicommit-translate` checks a translation against its original, while this Skill had only the one instruction in step 5 (Issue #674). It is also the path that needs a check most — a synthesized page carries `derived_from` and no `sources`, so a reader's only route to the underlying evidence runs through the grounding pages. If the synthesis misreads them, nothing downstream catches it.
 
-1. Launch a subagent with the generated body from step 5 and the grounding page bodies from step 4, and have it verify that every claim in the document is supported by one of those bodies.
+**The review discipline is not in this file (Issue #752).** It lives in `.wikicommit/review-rules.md`, shared with `wikicommit-generate` Pass 4 and `wikicommit-review` — one copy instead of three that had already drifted apart. What stays here is the choreography, and the fact that `MISSING_SOURCE` means something different on this path is stated there, under this path's own section.
 
-   **Evidence binding**: this is a *grounding-to-claim* check, not a *fact* check. Decide PASS/FAIL solely on whether the literal text of a grounding page states the claim — never on the subagent's own pretrained knowledge of whether it happens to be true. A well-known fact that no grounding page states is still a **FAIL** (`type: MISSING_SOURCE`); an obscure claim that a grounding page does state passes. Instruct the subagent explicitly not to fill gaps from its training data. `MISSING_SOURCE` matters more here than anywhere else in WikiCommit: nothing else in the pipeline looks at whether a synthesized claim has any backing at all.
+**If `.wikicommit/review-rules.md` does not exist, stop and say so.** Do not review without it and do not fall back to a looser check: without those rules this step degrades to a bare "is this supported" pass while still writing a record that a review happened, and its output looks normal. Tell the user to run `/wikicommit-init --no-overwrite`. This is an installation problem, not a defect in the page — nothing about it belongs in a record of this page. **Check for the file at the start of the run, not when this step is reached**: its absence is knowable before Step 1 and does not depend on the topic, so finding out here would discard the whole grounding search and body generation that was never going to be reviewable.
 
-   **Also check the `kind`'s Boundary** (Issue #675), when the page has one. Give the subagent the chosen kind and the one Boundary line from Step 5's table, and have it report a breach as an `issues` entry with `type: "CONTRADICTION"`, `source_file` empty (nothing in the grounding contradicts it — the page contradicts its own declared kind) and an `instruction` saying what to remove or rewrite. A breach makes `result` `"FAIL"`, so the retry below fixes it.
+1. Launch a subagent and give it exactly these four things, and nothing else:
 
-   Without this the kind is a label nobody reads, and it drifts: `granularity` went the same way for a long stretch, written by one step and checked by none. The four worth stating plainly, because they are the ones that go wrong quietly — a `landscape` that states counts, a `pattern` with no case count and no pages named, a `comparison` that ranks, a `practice` that tells the reader what to do.
+   1. **The path label `synthesize-step5.5`**, stated as the path this review is running on. The rules file scopes several checks by path ("a check that does not name your path is not yours to run") and has a section per path — including the one that says `MISSING_SOURCE` means something different here — so a subagent left to guess which one it is on may run the cited-document check that does not apply here, or miss the Boundary check that only applies here.
+   2. **The generated body from step 5.**
+   3. **The full body of each grounding page from step 4**, each wrapped in a block marked `SOURCE`.
+   4. **`.wikicommit/review-rules.md`**, with an instruction to follow it, plus the page's chosen `kind` and the one Boundary line for it from Step 5's table.
 
-   Synthesis is not transcription, so a claim does not have to appear verbatim: drawing a stated connection between two grounding pages is what this Skill is for. The line is whether the claim's **content** is carried by the grounding text — a comparison, ordering, or grouping of facts each grounding page states is supported; a new fact that none of them states (a date, a name, a quantity, a causal claim) is not.
+   **Do not include anything else** — not your reasoning for how the synthesis was assembled, not the search results that selected the grounding set, and not a previous round's findings. You are the agent that wrote this page, and handing over your own reading of the grounding makes the review agree with you exactly where that reading was wrong.
 
-2. The subagent returns its verdict in the agent-to-agent JSON format WikiCommit already uses for this (the same one Pass 4's subagent returns; it is never written to disk or Git): `result: "PASS" | "FAIL"` plus an `issues` array whose entries carry `type` (one of `HALLUCINATION` / `CONTRADICTION` / `MISSING_SOURCE`), `claim`, `source_file`, `source_lines`, `source_quote`, `instruction`, and `page_at_fault` on cross-page entries only.
+   Pass each grounding page's **full body**, not the passages you drew on. Showing the reviewer only the text you wrote from biases it toward PASS by construction.
 
-   **`source_file` holds the grounding page's path** (`.wikicommit/entity/<lang>/<Type>/<slug>.md`). That is not a local convention for this Skill: the format's rule is that a `.wikicommit/entity/` path means the conflict is with a page rather than with a source document, which is exactly the case here — every piece of evidence this review has is a page. **The exception is `MISSING_SOURCE`**, where by definition *no* grounding page states the claim and there is therefore no page to name: leave `source_file` empty on those entries rather than naming the nearest one, which item 5's report would then present as a grounding page "involved" in a defect it has nothing to do with.
+2. **Check that the returned JSON carries `rules_version` matching `.wikicommit/review-rules.md`'s frontmatter.** A missing or mismatched value means the subagent did not read the rules, so its verdict says nothing about the checks they define. Relaunch **once**; if the second attempt is also missing or wrong, **stop and report it** — do not consume `generate.max_retries` and do not record it as a review of this page. This is a problem with the instructions or the environment, not with the synthesis.
 
-3. **Grounding pages that disagree with each other** are reported, not failed. Where two grounding pages state the same fact differently, the subagent sets `page_at_fault: "other"` and the entry **never makes `result` `"FAIL"`** — if that is the only kind of defect found, it returns `result: "PASS"`, lists the entry in `issues`, and the page is written normally.
-
-   **Both pages have to be named inside the one entry.** An entry carries a single `source_file` and a single `source_quote`; in Pass 4 that is enough because the second page is implicitly the page under review, but here the page under review is the synthesized page and *neither* side of the disagreement is it. Put one grounding page in `source_file` with its wording in `source_quote`, and name the counterpart page — its path and its version of the same fact — in `claim`. Without that, step 12 can only report half the pair, and half a pair is not actionable.
-
-   Failing instead would be a trap with no exit: this Skill cannot edit a grounding page, so every retry would produce a correct synthesis, draw the identical unfixable finding, and end at item 5 with the page discarded. This is the same treatment Pass 4 gives a cross-page contradiction it has no mandate over. Carry these pairs to step 12 and report them there.
+3. **Grounding pages that disagree with each other are reported, not failed.** The rules file has the subagent set `page_at_fault: "other"` on those entries and keep `result` at `"PASS"` when they are the only kind of defect found; carry the pairs to step 12 and report them there. Failing instead would be a trap with no exit — this Skill cannot edit a grounding page, so every retry would produce a correct synthesis, draw the identical unfixable finding, and end at item 5 with the page discarded.
 
 4. On **FAIL**, regenerate the body by re-running step 5 — up to `generate.max_retries` times from `.wikicommit/config.yml` (default: 2). The same key `/wikicommit-generate` uses; there is no separate setting for this Skill, because it would mean the same thing.
 
@@ -266,7 +265,28 @@ Of the three ways a page gets written, this was the only one with no check on th
 
 5. **If the retry limit is exceeded, write nothing and stop**, reporting what still failed (the last `issues` array, in the user's own terms) and which grounding pages were involved. There is no partial success to record: this Skill writes one page per run, and unlike `/wikicommit-generate` it has no source management file in which to leave a `failed_pages` entry — a synthesized page has no management file at all, and `/wikicommit-merge`'s generation-failure tracking scans `.wikicommit/source/`, which this run never touches. Stopping and saying so loses nothing, because there is nowhere else the information would have gone.
 
-   Steps 6 onward do not run. Nothing has been written to disk at this point, so there is nothing to clean up.
+   The Skill's **Step 6 onward** do not run. Nothing has been written to disk at this point, so there is nothing to clean up. This does not exempt item 6 of *this* step, which is the record of exactly this outcome — the run that wrote no page is the one whose verdict nothing else survives to describe.
+
+6. **Record the verdict either way (Issue #750).** Run this after the page is written (step 9) when the review passed, and immediately after item 5 when it did not — the failing case is the one worth recording most, since nothing else survives a run that wrote no page:
+
+   ```bash
+   python .wikicommit/scripts/record_review.py "$(cat <<'EOF'
+   <the view page path, .wikicommit/view/<lang>/<slug>.md>
+   EOF
+   )" --kind ai --stage synthesize-step5.5 \
+     --model "<the model ID this run's runtime reports for itself>" \
+     --skill-blob "$(git hash-object .wikicommit/review-rules.md)" \
+     --attempts <how many review rounds this took> --result <pass|discarded> --json - <<'JSON'
+   <the review subagent's JSON, with every round's issues merged into one `issues`
+    array and each entry carrying the `round` it was raised in>
+   JSON
+   ```
+
+   `--result discarded` is the retry-limit case from item 5: the page was never written, and the script records an empty `page_content_hash` to say so. On a pass, `reviewed_sources` is read from the page's own `derived_from` — the grounding pages and the commits they were read at — which is the same slot an entity page's `sources` occupies, and for the same purpose: the evidence versions this verdict was made against.
+
+   Merge every round's findings into the one array rather than keeping only the last. A synthesis that breached its `kind`'s Boundary on the first attempt and was corrected on the second would otherwise record nothing at all, and that is precisely the drift this Skill's own review exists to catch.
+
+   The `page_at_fault: "other"` entries go in as well. They never made this a FAIL, but they are the only durable trace that two grounding pages disagree — item 3 reports them to the user once and the run then ends.
 
 ### Step 6: Determine the New Page's Language
 
@@ -339,6 +359,13 @@ Once the write is complete, tell the user:
 ```
 Written to .wikicommit/view/<lang>/<slug>.md, and rebuilt .wikicommit/view/<lang>/index.md so the page appears in the view index.
 This page is grounded in other wiki pages rather than in an outside document, which is what the separate location records. It is subject to the quality gate and can be committed via /wikicommit-merge like any other page (review_status: pending, so it will get a tracking issue after merge).
+```
+
+Add one line for the grounding review, whatever its outcome (Issue #750) — the denominator is 1 here, but the reason for printing it is the same as in `/wikicommit-generate`: without it, a run in which the review found nothing and a run in which it did not happen read identically:
+
+```
+Reviewed 1 page against its grounding pages: 0 finding(s) raised.
+  → record in .wikicommit/review/
 ```
 
 If the review in step 5.5 reported grounding pages that disagree with each other (`page_at_fault: "other"`), list those pairs here — both page paths, the fact, and each page's version of it (step 5.5 item 3 says where in the entry each half lives: one page in `source_file`/`source_quote`, the counterpart in `claim`). Nothing else surfaces them: they are not a defect in the page just written, so they neither failed the review nor appear anywhere in the file. Say plainly that the page just written is not the thing to fix and that the disagreement is between the two pages named.

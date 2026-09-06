@@ -69,6 +69,16 @@ function resolveOriginalPageInfo(
   return buildPageUrl(cfg?.baseUrl, parent?.slug as string | undefined) ?? translatedFrom
 }
 
+// Shared by the report link (aria-describedby) and its account note (id).
+const REPORT_NOTE_ID = "wikicommit-banner-report-note"
+
+// Stamped onto content/ only, by convert_wikilinks.py (Issue #751). Kept as
+// named constants because the two spellings have to match that script's
+// AI_REVIEW_AT_FIELD / AI_REVIEW_MODEL_FIELD exactly, and a typo would fail
+// silently — the line would just never appear.
+const AI_REVIEW_AT_FIELD = "ai_review_at"
+const AI_REVIEW_MODEL_FIELD = "ai_review_model"
+
 // A page's review tracking Issue (Issue #313) is created by wikicommit-merge
 // Step 8 *after* the PR merges, while the Quartz build runs off that same
 // merge — so at build time the Issue number does not exist yet, and it is not
@@ -180,6 +190,31 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
   const generatedAtLabel = isTranslation ? t.translatedAt : t.generatedAt
   const generatedByLabel = isTranslation ? t.translatedBy : t.generatedBy
 
+  // Issue #751: written onto the published copy by convert_wikilinks.py, which
+  // reads .wikicommit/review/ at build time. No page in .wikicommit/entity/
+  // carries these, so nothing here needs a validate_frontmatter.py rule.
+  //
+  // Absent for three reasons that must all render exactly as this banner
+  // rendered before the feature existed: the page predates the record tree
+  // (Issue #750 — records cannot be made retroactively), the verdict went stale
+  // when /wikicommit-fix rewrote the page, or the record would not parse.
+  // Publishing decides which of those it is; here the field is simply missing.
+  //
+  // Shown in both states for the reason Issue #739 collapsed the two branches
+  // into one: passing the source check is a fact about how the page was made,
+  // and a person later reading the page neither adds to it nor takes it away.
+  const aiReviewAt = frontmatter?.[AI_REVIEW_AT_FIELD]
+  const aiReviewBy = frontmatter?.[AI_REVIEW_MODEL_FIELD]
+  const aiReviewLine =
+    typeof aiReviewAt === "string" &&
+    aiReviewAt.trim() !== "" &&
+    typeof aiReviewBy === "string" &&
+    aiReviewBy.trim() !== "" ? (
+      <p class="wikicommit-banner__ai-review">
+        {t.aiReviewAt} {aiReviewAt}&nbsp;&nbsp;{t.aiReviewBy} {aiReviewBy}
+      </p>
+    ) : null
+
   // Issue報告リンクは reviewed 後もページの誤りを指摘できるよう review_status に
   // 関係なく常時表示する（Issue #245）。後レビュー用 PR の URL は frontmatter に
   // 格納しない（動的に生成しない）。ユーザーが GitHub の PR ページで確認する（Phase 2 スコープ外）。
@@ -192,19 +227,76 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
   const originalPageInfo = isTranslation ? resolveOriginalPageInfo(frontmatter, allFiles, cfg) : undefined
 
   const reportTitle = type ? `${t.reportTitlePrefix} ${type}: ${title}` : `${t.reportTitlePrefix} ${title}`
-  const reportBody = [
+  // The page facts, then what this wiki is actually asking readers to look for
+  // (Issue #738). The guidance is built from i18n strings rather than written
+  // into .github/ISSUE_TEMPLATE/report.md so it follows the page's own
+  // language — report.md is a single file with no language of its own, and a
+  // Japanese reader reaching it through this link would otherwise get English
+  // prompts. report.md carries a short version for whoever opens it directly.
+  //
+  // Deliberately not a checklist and not on the banner itself: `- [ ]` is an
+  // attestation UI, and putting these lines in the banner would show the same
+  // two prompts on every page on every visit, which is how a standing notice
+  // stops being read (the reason Issue #562 demoted the low-density guard).
+  // Here they appear only once someone has already decided to report.
+  const reportFacts = [
     pageUrl ? `${t.reportBodyPage} ${pageUrl}` : null,
     lang ? `${t.reportBodyLanguage} ${lang}` : null,
     originalPageInfo ? `${t.reportBodyOriginal} ${originalPageInfo}` : null,
+  ].filter((line): line is string => line !== null)
+  //
+  // Wrapped in an HTML comment, the way every prompt in
+  // .github/ISSUE_TEMPLATE/report.md is. That file's prompts disappear when the
+  // Issue is submitted; a `body=` prefill is ordinary text and would not, so
+  // these lines would be posted as part of the report itself. That matters
+  // beyond tidiness: `/wikicommit-fix` treats an Issue's whole body as the
+  // feedback and classifies "each distinct point" in it, so three standing
+  // bullets left in every report become three points it tries to act on.
+  const reportGuidance = [
+    t.reportBodyProblemHeading,
+    "",
+    "<!--",
+    t.reportBodyGuidanceHeading,
+    "",
+    t.reportBodyGuidanceHarm,
+    t.reportBodyGuidanceKnowledge,
+    t.reportBodyGuidanceContradiction,
+    "",
+    t.reportBodyGuidanceFooter,
+    "-->",
+    "",
   ]
-    .filter((line): line is string => line !== null)
-    .join("\n")
+  // The blank separator belongs to the facts, not to the guidance: a page with
+  // no resolvable URL, language or original would otherwise open its Issue on
+  // an empty first line.
+  const reportBody = [...reportFacts, ...(reportFacts.length ? [""] : []), ...reportGuidance].join(
+    "\n",
+  )
 
   const reportUrl = repo
     ? `https://github.com/${repo}/issues/new?template=report.md&title=${encodeURIComponent(reportTitle)}${
         reportBody ? `&body=${encodeURIComponent(reportBody)}` : ""
       }`
     : "#"
+
+  // Built once and used by both branches below, the way `siteSummary` is: the
+  // two report rows render an identical link + note pair, and keeping one copy
+  // stops them drifting apart the next time either is touched.
+  //
+  // `aria-describedby` ties the note to the link it annotates. Without it a
+  // reader moving through the page by its link list — one of the groups this
+  // note exists for — hears only the label and still lands on the login wall
+  // unannounced. The banner renders once per page, so the id is unique.
+  const reportAction = (
+    <span class="wikicommit-banner__report-action">
+      <a href={reportUrl} class="wikicommit-banner__link" aria-describedby={REPORT_NOTE_ID}>
+        {t.reportLink}
+      </a>
+      <span class="wikicommit-banner__link-note" id={REPORT_NOTE_ID}>
+        {t.reportLinkAccountNote}
+      </span>
+    </span>
+  )
 
   // Who the `reviewed` badge belongs to (Issue #663). review-issue-close-sync.yml
   // writes this login into frontmatter in the same commit that flips
@@ -223,7 +315,38 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
       ? frontmatter.reviewed_by.trim()
       : undefined
 
-  if (!isPending) {
+  // Does this page record having been generated at all (Issue #739)? Both
+  // states now state that the page is LLM-written, so this has to be decided
+  // from the frontmatter rather than from `review_status`, for one specific
+  // reason: `review_status: reviewed` is also what rebuild_index.py stamps on
+  // build-generated index pages, precisely so this banner stays quiet on them
+  // (Issue #580). Those pages are not LLM-written and carry no generation
+  // stamp, so keying on the stamp keeps them exactly as they were instead of
+  // telling a reader the site's own front page was written by a model.
+  //
+  // A pending page is exempt from the check and keeps the "unknown"
+  // placeholders it has always shown: only wikicommit-generate / -translate /
+  // -synthesize ever write `pending`, so such a page went through generation
+  // by construction and a missing stamp there is a gap worth naming, not an
+  // open question (the same asymmetry Issue #663 records for reviewed_by).
+  //
+  // The fields checked are exactly the pair the banner will render, which is
+  // why isTranslation selects them rather than the union of all four being
+  // checked. A translation page only ever displays translated_at/translated_by
+  // (the labels switch with it, above), so letting generated_at/generated_by
+  // open the gate for one would render the reviewed banner with
+  // "Translated: unknown  Model: unknown" — a generation notice carrying no
+  // generation data, which is the very outcome this gate exists to keep off
+  // stamp-less reviewed pages. The same holds mirrored for an ordinary page
+  // that somehow carries only translated_*.
+  const stampFields = isTranslation
+    ? (["translated_at", "translated_by"] as const)
+    : (["generated_at", "generated_by"] as const)
+  const hasGenerationStamp = stampFields.some(
+    (field) => typeof frontmatter?.[field] === "string" && (frontmatter[field] as string).trim() !== "",
+  )
+
+  if (!isPending && !hasGenerationStamp) {
     return (
       <>
         {siteSummary}
@@ -234,9 +357,7 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
               <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
             </span>
           ) : null}
-          <a href={reportUrl} class="wikicommit-banner__link">
-            {t.reportLink}
-          </a>
+          {reportAction}
         </div>
       </>
     )
@@ -247,34 +368,54 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
   // rebuilds the site (review-issue-close-sync.yml), so the banner carrying
   // this link and the Issue being open begin and end together. A reviewed
   // page's tracking Issue is closed and not worth pointing at; the report
-  // link above already covers reporting an error there (Issue #245).
-  const reviewSearchUrl = buildReviewSearchUrl(
-    repo,
-    type,
-    lang,
-    fileData.relativePath as string | undefined,
-  )
+  // link already covers reporting an error there (Issue #245).
+  const reviewSearchUrl = isPending
+    ? buildReviewSearchUrl(repo, type, lang, fileData.relativePath as string | undefined)
+    : undefined
 
+  // One banner for both states, which is the point of Issue #739. Being
+  // LLM-written is a permanent fact about the page — review-issue-close-sync.yml
+  // rewrites `review_status` and `reviewed_by` and nothing else — so it used to
+  // be the case that the moment someone closed a tracking Issue, the only place
+  // that fact was stated disappeared. Reviewing does not make a page stop being
+  // generated, and a banner that vanishes reads as "a person looked, so the
+  // warning no longer applies" — a guarantee `reviewed` does not carry
+  // (Issue #723's transition table; Issue #722 on completeness).
+  //
+  // So review adds a line rather than removing the warning, and the markup says
+  // that: same body, same generation line, plus a heading and a reviewer.
+  // The ⚠️ stays pending-only — it belongs to "nobody has read this yet", which
+  // is the part that really does end at review — and the two states are still
+  // told apart by icon, heading and border colour.
   return (
     <>
       {siteSummary}
-      <div class="wikicommit-banner wikicommit-banner--pending">
-        <span class="wikicommit-banner__icon">⚠️</span>
+      <div
+        class={`wikicommit-banner ${
+          isPending ? "wikicommit-banner--pending" : "wikicommit-banner--reviewed"
+        }`}
+      >
+        {isPending ? <span class="wikicommit-banner__icon">⚠️</span> : null}
         <div class="wikicommit-banner__body">
-          <strong>{t.title}</strong>
+          <strong>{isPending ? t.title : t.titleReviewed}</strong>
           <p>{t.body}</p>
           <p>
             {generatedAtLabel} {generatedAt}&nbsp;&nbsp;{generatedByLabel} {generatedBy}
           </p>
+          {aiReviewLine}
+          {!isPending && reviewedBy ? (
+            <p class="wikicommit-banner__reviewer">
+              {t.reviewedBy}{" "}
+              <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
+            </p>
+          ) : null}
           <div class="wikicommit-banner__actions">
             {reviewSearchUrl ? (
               <a href={reviewSearchUrl} class="wikicommit-banner__link">
                 {t.reviewStatusLink}
               </a>
             ) : null}
-            <a href={reportUrl} class="wikicommit-banner__link">
-              {t.reportLink}
-            </a>
+            {reportAction}
           </div>
         </div>
       </div>

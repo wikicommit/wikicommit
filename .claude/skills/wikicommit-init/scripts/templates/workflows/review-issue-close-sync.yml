@@ -273,6 +273,146 @@ jobs:
           python .wikicommit/scripts/set_frontmatter_field.py "${PAGE_PATH}" \
             --set "reviewed_by=\"${REVIEWER_LOGIN}\""
 
+      - name: Capture the closing comment
+        id: note
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REVIEWER_LOGIN: ${{ steps.closer.outputs.login }}
+        run: |
+          # Issue #762: Issue #740 made "write one line on what you took away,
+          # then close" the tracking Issue's main ask, and that line is the only
+          # trace of the thing review_status cannot hold — a two-valued field can
+          # say the reading happened, not what landed. On this path (the one most
+          # closes take, Issue #313) the line was written as a GitHub comment and
+          # then dropped, while /wikicommit-review recorded the same thing via
+          # --note. Same product, kept or lost depending on which door was used.
+          #
+          # Which comment counts: the closer's most recent one. "The last comment
+          # before the close" would misattribute someone else's unrelated comment
+          # posted just before; concatenating every comment sweeps in fix requests
+          # and back-and-forth that are not what the closer took away. Scoping to
+          # the closer costs nothing extra to identify — the previous step has
+          # already resolved that login live, and fails the job when it cannot, so
+          # REVIEWER_LOGIN is guaranteed non-empty by the time this runs.
+          #
+          # "Most recent" is decided here, not by the API. The per-issue endpoint
+          # (GET /repos/{owner}/{repo}/issues/{issue_number}/comments) accepts only
+          # since/per_page/page — `sort` and `direction` belong to the *repository*
+          # level endpoint (/repos/{owner}/{repo}/issues/comments) and are silently
+          # ignored here, so the response is the documented default of ascending ID
+          # (oldest first). Asking for desc and taking the first match would have
+          # recorded the closer's *earliest* comment, and on an issue past one page
+          # would have fetched the oldest 100 and missed the note entirely. So:
+          # paginate, then take the maximum by created_at locally. For a per-page
+          # tracking Issue that is one request; the ordering no longer depends on
+          # an undocumented server behaviour either way.
+          #
+          # Nothing here may fail the run. The note is additive, while this step
+          # sits between the in-tree review_status rewrite and the commit that
+          # publishes it — a transient API error must degrade to "a record with no
+          # body", never to a closed Issue whose page stays pending with no retry
+          # path (this workflow only triggers on `issues: closed`).
+          COMMENTS_JSON="${RUNNER_TEMP}/wikicommit-close-comments.json"
+          NOTE_FILE="${RUNNER_TEMP}/wikicommit-close-note.txt"
+          set +e
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            -X GET -F per_page=100 --paginate \
+            > "${COMMENTS_JSON}"
+          fetch_status=$?
+          set -e
+          if [ "${fetch_status}" -ne 0 ]; then
+            echo "::warning::Could not fetch the tracking Issue's comments; recording the review without a prose body."
+            exit 0
+          fi
+          # The body is free text written by whoever closed the Issue, so it is
+          # never interpolated into a command line: it is selected in Python,
+          # written straight to a file, and handed to record_review.py as
+          # --note-file. It passes through neither ${{ }} nor a shell expansion,
+          # which is the same rule the rest of this workflow applies to
+          # github.event.* values. The login is read from the environment rather
+          # than spliced into the program for the same reason.
+          set +e
+          python - "${COMMENTS_JSON}" "${NOTE_FILE}" <<'PY'
+          import json
+          import os
+          import sys
+
+          def pages(text):
+              # `gh api --paginate` writes each page's JSON array back to back with
+              # no separator, so the whole file is not a single JSON document.
+              # Decoding incrementally handles both that and the one-page case,
+              # without depending on a `gh` new enough to have --slurp.
+              decoder = json.JSONDecoder()
+              index = 0
+              while True:
+                  while index < len(text) and text[index].isspace():
+                      index += 1
+                  if index >= len(text):
+                      return
+                  value, index = decoder.raw_decode(text, index)
+                  yield value
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              raw = handle.read()
+          comments = [comment for page in pages(raw) for comment in page]
+          login = os.environ["REVIEWER_LOGIN"]
+          mine = [c for c in comments if (c.get("user") or {}).get("login") == login]
+          if mine:
+              # created_at is ISO 8601 in UTC, so string order is chronological;
+              # id breaks the tie for two comments within the same second.
+              latest = max(mine, key=lambda c: (c.get("created_at") or "", c.get("id") or 0))
+              body = (latest.get("body") or "").strip()
+              if body:
+                  with open(sys.argv[2], "w", encoding="utf-8") as out:
+                      out.write(body + "\n")
+          PY
+          select_status=$?
+          set -e
+          if [ "${select_status}" -ne 0 ]; then
+            echo "::warning::Could not select the closing comment; recording the review without a prose body."
+            exit 0
+          fi
+          if [ -s "${NOTE_FILE}" ]; then
+            echo "note_file=${NOTE_FILE}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Record the human review
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
+        env:
+          PAGE_PATH: ${{ steps.resolve.outputs.path }}
+          REVIEWER_LOGIN: ${{ steps.closer.outputs.login }}
+          NOTE_FILE: ${{ steps.note.outputs.note_file }}
+        run: |
+          # Issue #750: this is the main way a human review happens, and until now
+          # it left no record. Closing a tracking Issue from the GitHub web or
+          # mobile UI runs no local script at all (that being the whole point of
+          # Issue #313), so `kind: human` records could only ever be produced by
+          # /wikicommit-review — and the aggregation would report human_reviewed=0
+          # on a wiki where people had in fact reviewed a dozen pages. A wrong
+          # number is worse than none (Issue #567): if this tool reports coverage,
+          # it must not report it with its main path missing.
+          #
+          # Written in the same commit as review_status below, so there is no state
+          # in which one exists without the other — no new control flow and no new
+          # failure mode, just one more file in a commit this job already makes.
+          #
+          # The record carries no findings — this path has no structured place to
+          # put them — but it does now carry the closer's own words as its prose
+          # body (Issue #762), which is what the template asked for. When the
+          # Issue was closed without a comment from the closer, no --note-file is
+          # passed and the record is written exactly as it was before: closing in
+          # silence is a normal way to close, not a failure.
+          NOTE_ARGS=()
+          if [ -n "${NOTE_FILE}" ]; then
+            NOTE_ARGS=(--note-file "${NOTE_FILE}")
+          fi
+          python .wikicommit/scripts/record_review.py "${PAGE_PATH}" \
+            --kind human --stage issue-close \
+            --reviewer "${REVIEWER_LOGIN}" \
+            --attempts 1 --result pass "${NOTE_ARGS[@]}"
+
       - name: Commit and open PR
         id: pr
         if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true'
@@ -295,7 +435,9 @@ jobs:
           # recreating it fresh from the default branch's HEAD (checked out above).
           git push origin --delete "${BRANCH}" 2>/dev/null || true
           git checkout -B "${BRANCH}"
-          git add "${PAGE_PATH}"
+          # The page and its review record go in together (Issue #750) — a commit
+          # carrying one without the other is the state this workflow must not create.
+          git add "${PAGE_PATH}" .wikicommit/review/
           # Each -m becomes its own paragraph (git joins them with a blank
           # line), avoiding an embedded-newline string that would fight the
           # YAML block scalar's indentation rules.

@@ -54,20 +54,93 @@ KNOWN_SOURCE_LICENSES = {
 SHARE_ALIKE_LICENSE_PREFIXES = ("cc-by-sa", "cc-sa", "gfdl", "odbl", "cc-by-nc-sa")
 
 
+# 静的取得で「本文は取れるが、ページが載せている内容の一部が黙って落ちる」ことが
+# 確認済みの URL 形（#715）。値は「何が落ちるか」の一文で、登録時に一度だけ知らせる
+# ためだけに使う（`is_share_alike()` の注意書きと同じ形）。
+#
+# これは**ガードではない** — ブロックせず、`status` も変えず、取得も止めない。
+# `check_extraction_quality.py` の 3 ガードはいずれも「そもそも取得できるか／取れた
+# ものがゴミか」を判定して Pass 1 の分岐を左右するが、ここで扱うのは「取得は成功し、
+# 取れた本文も本物で、ただし別の一部が欠ける」という、取得後のテキストからは原理的に
+# 見分けられない partial extraction（#574 が YouTube について定義した失敗クラスの
+# 2 例目）である。本文だけで十分なソースは実在するため、止めるのではなく知らせる。
+#
+# 判定はホストとパスの形だけで決まる決定論的なもので、`KNOWN_SOURCE_LICENSES` と同じ
+# 「確認済みのものだけを表に持つ」パターンに従う。ただし `KNOWN_JS_SHELL_DOMAINS` の
+# 「確認済みのみ」規則をそのまま持ち込みはしない — あちらは誤ったエントリが取得自体を
+# 飛ばす（実害がある）のに対し、こちらの誤りは余計な注意書きが 1 行出るだけであり、
+# 取りこぼしの方（この Issue が直そうとしている黙った欠落）が明確に重い。非対称の
+# 向きが逆なので、規則も同じにはならない。
+_GITHUB_THREAD_PATH_RE = re.compile(r"^/[^/]+/[^/]+/(?:issues|pull)/\d+(?:/|$)")
+
+# ホスト（登録可能ドメイン相当の接尾辞）→ (パス判定, 何が落ちるか)。
+PARTIAL_EXTRACTION_URL_NOTES = (
+    (
+        "github.com",
+        _GITHUB_THREAD_PATH_RE,
+        "only the issue/PR body is extracted — every comment on the thread is "
+        "dropped without an error. Register this only if the body alone is the "
+        "source you want",
+    ),
+)
+
+
+def host_suffix_candidates(url: str) -> list[str]:
+    """URL のホストを、左ラベルを順に落とした接尾辞の列（具体的な順）で返す。
+
+    `it.wikipedia.org` → `["it.wikipedia.org", "wikipedia.org"]`。末尾 1 ラベル
+    （TLD 単独）は含めない。ホスト表を引く箇所（`license_for_url()` /
+    `partial_extraction_note()`）はすべてこれを共有する — 同じ導出を各所に複製
+    すると、片方だけホスト解析の端ケースを直したときに黙ってずれるため。
+    """
+    host = urlsplit(url).netloc.lower().split("@")[-1].split(":")[0]
+    if not host:
+        return []
+    labels = host.split(".")
+    return [".".join(labels[i:]) for i in range(len(labels) - 1)]
+
+
+def partial_extraction_note(url: str) -> str:
+    """URL が既知の partial extraction 形なら「何が落ちるか」を返す。無ければ空文字列。
+
+    ホストの照合は `license_for_url()` と同じく左ラベルを順に落としながら行い
+    （`host_suffix_candidates()` を共有する）、パスは対応する正規表現で判定する。
+    `github.com` を丸ごと対象にはしない — README・blob・release の取得は実際に
+    完全なので、そこで注意書きを出すのは誤りであり、最も多い GitHub URL の形を
+    ノイズで埋めることになる。
+    """
+    candidates = set(host_suffix_candidates(url))
+    if not candidates:
+        return ""
+    path = urlsplit(url).path or "/"
+    for domain, path_re, note in PARTIAL_EXTRACTION_URL_NOTES:
+        if domain in candidates and path_re.search(path):
+            return note
+    return ""
+
+
 def is_share_alike(license_id: str) -> bool:
     """ライセンス識別子が ShareAlike 系かどうかを返す（#570）。"""
     normalized = license_id.strip().lower()
     return any(normalized.startswith(prefix) for prefix in SHARE_ALIKE_LICENSE_PREFIXES)
 
 
+def append_note(existing: str, addition: str) -> str:
+    """`CREATED:` メッセージに注意書きを 1 件足す（区切りは `; `）。
+
+    登録時の通知は複数（退避したパス・ライセンス・ShareAlike・partial extraction）
+    が同時に立ちうるため、どれか 1 つが他を上書きしないよう常にここで連結する。
+    """
+    return f"{existing}; {addition}" if existing else addition
+
+
 def license_for_url(url: str) -> str:
-    """URL のホストから既知ライセンスの SPDX 識別子を引く。未知なら空文字列。"""
-    host = urlsplit(url).netloc.lower().split("@")[-1].split(":")[0]
-    if not host:
-        return ""
-    labels = host.split(".")
-    for i in range(len(labels) - 1):
-        candidate = ".".join(labels[i:])
+    """URL のホストから既知ライセンスの SPDX 識別子を引く。未知なら空文字列。
+
+    候補は最も具体的なホストから順に見る（`www.a.wikipedia.org` より
+    `wikipedia.org` を後に評価する）— 表に両方があれば具体的な方を採るため。
+    """
+    for candidate in host_suffix_candidates(url):
         if candidate in KNOWN_SOURCE_LICENSES:
             return KNOWN_SOURCE_LICENSES[candidate]
     return ""
@@ -462,6 +535,44 @@ def parse_frontmatter_status(content: str) -> str | None:
     return None
 
 
+RETRACTION_REASON_RE = re.compile(
+    r"^## Retraction Reason\r?\n(.*?)(?=\n## |\Z)", re.DOTALL | re.MULTILINE
+)
+
+
+def parse_retraction_reason(content: str) -> str:
+    """管理ファイルの `## Retraction Reason` セクション本文を1行に畳んで返す（Issue #737）。
+
+    `status: retracted` は人間にしか書けない値であり（証拠拘束ルール〈Issue #442〉の
+    下で機械はソースを疑えない）、なぜ取り下げたかは enum ではなく散文で残す
+    — 本 Issue の範囲では機械は報告しかせず、理由で分岐する消費者がいないため
+    （`## Failure Reason`〈Issue #408〉と同じ形）。
+
+    結果は `RETRACTED: <path> (<msg>)` という1行の結果コード契約に埋め込むため、
+    改行・連続空白を単一の半角空白へ潰し、長い場合は切り詰める。セクションが無い
+    場合は空文字列を返す — 呼び出し側はその場合「理由の記載なし」と伝える。
+    """
+    m = RETRACTION_REASON_RE.search(content)
+    if not m:
+        return ""
+    collapsed = " ".join(m.group(1).split())
+    if len(collapsed) > 200:
+        collapsed = collapsed[:197] + "..."
+    return collapsed
+
+
+def retracted_result(mgmt_rel: str, content: str) -> tuple[str, str, str]:
+    """`status: retracted` な管理ファイルに対する共通の結果コードを組み立てる。
+
+    `SKIP` に落とさないことが要点である（Issue #737 の穴 (2)）。`SKIP: already
+    registered` は「なぜ使えないのか」を一切伝えないため、人間が同じソースを
+    もう一度登録しようとしたときに取り下げの事実が黙って握り潰される。
+    """
+    reason = parse_retraction_reason(content)
+    detail = f"reason: {reason}" if reason else "no ## Retraction Reason recorded"
+    return ("RETRACTED", mgmt_rel, f"previously retracted by a human — {detail}")
+
+
 def parse_frontmatter_has_failed_pages(content: str) -> bool:
     """管理ファイルの failed_pages が非空かどうかを返す（#567）。
 
@@ -597,7 +708,7 @@ def process_file(
 
     Returns:
         (result_code, mgmt_path_str, message)
-        result_code: "CREATED" | "SKIP" | "UPDATED" | "ERROR"
+        result_code: "CREATED" | "SKIP" | "UPDATED" | "RETRACTED" | "ERROR"
     """
     # A Windows-native caller may pass a backslash-separated relative path
     # (e.g. "pdfs\\04_foo.pdf"). Written verbatim into frontmatter, backslash
@@ -655,11 +766,10 @@ def process_file(
         if license_override and is_share_alike(license_override):
             # URL 側と同じ一度きりの通知（#570）。type: path には既知ドメイン対応表が
             # 効かないため入口は --license だけだが、義務の中身は URL ソースと変わらない。
-            created_note = (
-                f"{created_note}; " if created_note else ""
-            ) + (
+            created_note = append_note(
+                created_note,
                 f"{license_override} is a share-alike license: a page written from this source "
-                f"alone must be offered under it too"
+                f"alone must be offered under it too",
             )
         if index is not None:
             # Keep a caller-supplied index in step with what was just written,
@@ -672,6 +782,13 @@ def process_file(
     existing_status = parse_frontmatter_status(existing)
 
     mgmt_rel = str(mgmt_file.relative_to(repo_root))
+
+    # 取り下げ済み（Issue #737）— hash 比較より前に返す。ここを通すと
+    # 「ソースファイルを1バイト触っただけで status: outdated に書き換わり、
+    # Pass 1 の収集対象へ復帰する」という、取り下げの無言解除が成立する
+    # （check_ingest_freshness.py が retracted を対象外にしているのと同じ理由）。
+    if existing_status == "retracted":
+        return retracted_result(mgmt_rel, existing)
 
     if existing_hash == file_hash:
         # ハッシュ一致 → outdated 状態なら pending に戻す（ソースが元に戻ったため）
@@ -706,6 +823,10 @@ def process_url(url: str, repo_root: Path, license_override: str = "") -> tuple[
     外れており、「キューに入っている」という SKIP の前提が成り立たない — この場合に
     SKIP を返すと、その URL は鮮度を再確認する経路をどこにも持たなくなるので
     generated 等と同じく RECHECK を返す。
+
+    retracted（Issue #737）は上のどれにも落とさず RETRACTED を返す。再フェッチしても
+    再登録しても取り下げの判断は変わらないため、伝えるべきなのは「なぜ使えないのか」
+    だけである。
     """
     # 同一性はファイル名ではなく source.url で判定する（#572）。
     mgmt_file = find_mgmt_file_for_url(url, repo_root)
@@ -738,23 +859,33 @@ def process_url(url: str, repo_root: Path, license_override: str = "") -> tuple[
         license_id = license_override or license_for_url(url)
         mgmt_file.write_text(build_frontmatter_url(url, license_id), encoding="utf-8")
         if license_id and not license_override:
-            created_note = (
-                f"{created_note}; " if created_note else ""
-            ) + f"license: {license_id} (from the known-domain table)"
+            created_note = append_note(
+                created_note, f"license: {license_id} (from the known-domain table)"
+            )
         if license_id and is_share_alike(license_id):
             # ページがこのソース「だけ」から作られると、そのページは同じ
             # ライセンスでの提供義務を負う（#570）。登録時に一度だけ知らせる。
-            created_note = (
-                f"{created_note}; " if created_note else ""
-            ) + (
+            created_note = append_note(
+                created_note,
                 f"{license_id} is a share-alike license: a page written from this source alone "
-                f"must be offered under it too"
+                f"must be offered under it too",
             )
+        partial_note = partial_extraction_note(url)
+        if partial_note:
+            # 取得は成功するが一部が黙って落ちる URL 形（#715）。ブロックはせず、
+            # ShareAlike と同じく登録時に一度だけ知らせて判断は人間に委ねる。
+            created_note = append_note(created_note, f"partial extraction: {partial_note}")
         return ("CREATED", str(mgmt_file.relative_to(repo_root)), created_note)
 
     mgmt_rel = str(mgmt_file.relative_to(repo_root))
     existing = mgmt_file.read_text(encoding="utf-8-sig")
     existing_status = parse_frontmatter_status(existing)
+
+    # 取り下げ済み（Issue #737）— RECHECK / SKIP のどちらにも落とさない。
+    # RECHECK なら Pass 1 が取り下げたはずの URL を再フェッチしてしまい、
+    # SKIP なら「既に登録済み」としか言われず理由が伝わらない。
+    if existing_status == "retracted":
+        return retracted_result(mgmt_rel, existing)
 
     if existing_status in ("generated", "failed", "excluded"):
         return ("RECHECK", mgmt_rel, f"previous status: {existing_status}")
@@ -904,6 +1035,9 @@ def _tally(result: str, path: str, msg: str, counts: dict) -> bool:
     elif result == "RECHECK":
         print(f"RECHECK: {path} ({msg})")
         counts["rechecked"] += 1
+    elif result == "RETRACTED":
+        print(f"RETRACTED: {path} ({msg})")
+        counts["retracted"] += 1
     else:
         return True
     return False
@@ -1039,7 +1173,7 @@ def main_from_args(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    counts: dict = {"created": 0, "updated": 0, "skipped": 0, "rechecked": 0}
+    counts: dict = {"created": 0, "updated": 0, "skipped": 0, "rechecked": 0, "retracted": 0}
     has_error = False
 
     if source.startswith("https://") or source.startswith("http://"):
@@ -1070,7 +1204,8 @@ def main_from_args(argv: list[str] | None = None) -> int:
         has_error = _tally(result, path, msg, counts)
 
     c, u, s, r = counts["created"], counts["updated"], counts["skipped"], counts["rechecked"]
-    print(f"SUMMARY: created={c}, updated={u}, skipped={s}, rechecked={r}")
+    rt = counts["retracted"]
+    print(f"SUMMARY: created={c}, updated={u}, skipped={s}, rechecked={r}, retracted={rt}")
     return 1 if has_error else 0
 
 
