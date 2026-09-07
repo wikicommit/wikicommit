@@ -57,13 +57,13 @@ def evaluate_permission_json(raw: str, repo: str) -> tuple[str, str, str]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
-        return "WARNING", f"{repo}: gh api のレスポンスを解析できませんでした（設定を確認できません）", "unknown"
+        return "WARNING", f"{repo}: the gh api response could not be parsed, so the setting is undetermined", "unknown"
 
     if not isinstance(data, dict):
-        return "WARNING", f"{repo}: gh api のレスポンスを解析できませんでした（設定を確認できません）", "unknown"
+        return "WARNING", f"{repo}: the gh api response could not be parsed, so the setting is undetermined", "unknown"
 
     if data.get("can_approve_pull_request_reviews"):
-        return "OK", f"{repo}: {SETTING_NAME} は有効です", "true"
+        return "OK", f"{repo}: {SETTING_NAME} is enabled", "true"
 
     default_permissions = data.get("default_workflow_permissions", "read")
     enable_cmd = (
@@ -72,33 +72,33 @@ def evaluate_permission_json(raw: str, repo: str) -> tuple[str, str, str]:
         f"-f default_workflow_permissions={default_permissions}"
     )
     return "WARNING", (
-        f"{repo}: {SETTING_NAME} が無効です。review-issue-close-sync.yml が"
-        f"レビュー追跡Issue Close後の自動マージに失敗します（Issue #403）。"
-        f"有効化: {enable_cmd}"
+        f"{repo}: {SETTING_NAME} is disabled, so review-issue-close-sync.yml "
+        f"cannot auto-merge after a review tracking Issue is closed (Issue #403). "
+        f"Enable it with: {enable_cmd}"
     ), "false"
 
 
 def main() -> int:
     if not WORKFLOW_PATH.is_file():
-        print("OK: review-issue-close-sync.yml が存在しないためこのチェックは対象外です")
+        print("OK: review-issue-close-sync.yml is not present, so this check does not apply")
         print("SUMMARY: enabled=n/a")
         return 0
 
     auth = _run(["gh", "auth", "status"])
     if auth.returncode != 0:
-        print(f"WARNING: gh が未認証のため {SETTING_NAME} の状態を確認できません")
+        print(f"WARNING: gh is not authenticated, so {SETTING_NAME} cannot be checked")
         print("SUMMARY: enabled=unknown")
         return 0
 
     repo = resolve_repo()
     if repo is None:
-        print(f"WARNING: リポジトリを特定できないため {SETTING_NAME} の状態を確認できません")
+        print(f"WARNING: the repository could not be resolved, so {SETTING_NAME} cannot be checked")
         print("SUMMARY: enabled=unknown")
         return 0
 
     result = _run(["gh", "api", f"repos/{repo}/actions/permissions/workflow"])
     if result.returncode != 0:
-        print(f"WARNING: {repo}: gh api repos/{repo}/actions/permissions/workflow の呼び出しに失敗しました（権限不足等の可能性）")
+        print(f"WARNING: {repo}: the call to gh api repos/{repo}/actions/permissions/workflow failed (insufficient permissions, perhaps)")
         print("SUMMARY: enabled=unknown")
         return 0
 

@@ -42,6 +42,7 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
   - [Requirements](#requirements)
   - [インストール](#インストール)
   - [Skills 一覧](#skills-一覧)
+  - [設計ドキュメント](#設計ドキュメント)
   - [Contributing](#contributing)
   - [License](#license)
 
@@ -175,6 +176,10 @@ bash /tmp/wikicommit/install.sh
 | 16 | 運用・プレビュー | `/wikicommit-update` | インストール済み配布物と同期（PR・非auto-merge） |
 
 ---
+
+## 設計ドキュメント
+
+`docs/` に、このプロジェクトを作りながら書いた設計記録を置いています。整えた仕様書ではなく、「なぜそうなっているか」「何を検討して何を採らなかったか」を残すことを目的にした記録です。まず [docs/DesignDoc-architecture.md](docs/DesignDoc-architecture.md)（設計原則・全体アーキテクチャ・主要な設計決定）から読んでください。そのあとは頭から通読するのではなく、`docs/DesignDoc-data.md` §4.8（レビュー記録の持ち方）のように**判断 1 件を単位に**読むことを想定しています（全体で約 1 MB あります）。読み方の断り書き — `Issue #NNN` が何を指すか、本文が参照するパスのうちどれがこのリポジトリに含まれないか — は [docs/README.md](docs/README.md) にあります。
 
 ## Contributing
 

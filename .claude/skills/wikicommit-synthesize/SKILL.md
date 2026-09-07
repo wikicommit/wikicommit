@@ -25,6 +25,15 @@ Everything from Step 1 on is identical in both modes.
 
 ## Processing Flow
 
+**Open a run record first (Issue #790)**:
+
+```bash
+python .wikicommit/scripts/record_run.py start --skill wikicommit-synthesize \
+    --model "<the model ID this runtime reports for you>" --arg "<the topic, if one was given>"
+```
+
+A record with a start and no end is what says a run did not finish, and nothing else in this repository is keyed on a run — so leaving it open is the signal rather than a failure state to avoid. Keep the path it prints.
+
 ### Step 0: Survey Mode (only when `<topic>` is absent)
 
 Skip this step entirely when `<topic>` was given.
@@ -112,7 +121,11 @@ here without writing anything, and say the wiki was left untouched. Do not pick
 one on your own: this Skill writes primary wiki content, and the whole point of
 this step is that the person, not the model, decides what the wiki gets. If this
 Skill was invoked without anyone there to answer, stopping is the correct
-outcome; re-run it with an explicit `<topic>` to skip the survey.
+outcome; re-run it with an explicit `<topic>` to skip the survey. Close the run
+record on the way out (`python .wikicommit/scripts/record_run.py end <the path
+printed at the start>`): this is a run that finished, and since a non-interactive
+argumentless invocation always lands here, leaving it open would report every one
+of them as a run that did not finish (Issue #790).
 
 Rejected angles are not recorded anywhere. The view is rebuilt from the wiki on
 every run, so any angle still supported by the wiki can be proposed again;
@@ -193,7 +206,7 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
    **This is a filter on the grounding set, not on the index.** Synthesized pages stay searchable — `/wikicommit-search` and `/wikicommit-ask` must still find them, and a reader looking for the topic should reach the page written about it. Do not exclude them from `search_index.py`.
 
 4. Sort the remaining hits roughly by the bm25 order returned by `search_index.py` (already ranked per-language) and select the top 5–10. A naive cross-language score comparison is acceptable as an approximation.
-5. If there are zero hits across all languages combined — or every hit was dropped by item 3 — display "No pages related to \"<topic>\" were found" and stop (do not run the remaining steps).
+5. If there are zero hits across all languages combined — or every hit was dropped by item 3 — display "No pages related to \"<topic>\" were found" and stop (do not run the remaining steps), closing the run record first with `python .wikicommit/scripts/record_run.py end <the path printed at the start>` — the search ran and answered, so this is a finished run rather than one that died partway (Issue #790).
 
 ### Step 4: Fetch Page Content
 
@@ -255,7 +268,7 @@ Of the three ways a page gets written, this was the only one with no check on th
 
    Pass each grounding page's **full body**, not the passages you drew on. Showing the reviewer only the text you wrote from biases it toward PASS by construction.
 
-2. **Check that the returned JSON carries `rules_version` matching `.wikicommit/review-rules.md`'s frontmatter.** A missing or mismatched value means the subagent did not read the rules, so its verdict says nothing about the checks they define. Relaunch **once**; if the second attempt is also missing or wrong, **stop and report it** — do not consume `generate.max_retries` and do not record it as a review of this page. This is a problem with the instructions or the environment, not with the synthesis.
+2. **Check that the returned JSON carries `rules_version` matching `.wikicommit/review-rules.md`'s frontmatter.** A missing or mismatched value means the subagent did not read the rules, so its verdict says nothing about the checks they define. Relaunch **once**; if the second attempt is also missing or wrong, **stop and report it** — close the run record with `record_run.py end <path> --halted-reason "rules_version mismatch"` on the way out (Issue #790: this stops without writing the page, so nothing else records that the run happened) — do not consume `generate.max_retries` and do not record it as a review of this page. This is a problem with the instructions or the environment, not with the synthesis.
 
 3. **Grounding pages that disagree with each other are reported, not failed.** The rules file has the subagent set `page_at_fault: "other"` on those entries and keep `result` at `"PASS"` when they are the only kind of defect found; carry the pairs to step 12 and report them there. Failing instead would be a trap with no exit — this Skill cannot edit a grounding page, so every retry would produce a correct synthesis, draw the identical unfixable finding, and end at item 5 with the page discarded.
 
@@ -354,7 +367,14 @@ Do not skip this because the page is only one file. A view page has no source of
 
 ### Step 11: Guidance
 
-Once the write is complete, tell the user:
+Close the run record first, so its elapsed time covers the whole run:
+
+```bash
+python .wikicommit/scripts/record_run.py end <the path printed at the start> \
+    --page <the view page written> --outcome synthesized=1
+```
+
+Then tell the user, including that path and its elapsed time — the record is not committed, so this run's own output is the only place a reader sees them:
 
 ```
 Written to .wikicommit/view/<lang>/<slug>.md, and rebuilt .wikicommit/view/<lang>/index.md so the page appears in the view index.

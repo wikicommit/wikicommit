@@ -52,19 +52,19 @@ def _split_frontmatter(content: str) -> tuple[dict | None, str, str]:
             break
 
     if end_idx is None:
-        return None, "frontmatter の終端 `---` が見つかりません", content
+        return None, "frontmatter has no closing `---`", content
 
     body = "\n".join(lines[end_idx + 1:])
 
     try:
         fm = yaml.safe_load("\n".join(lines[1:end_idx]))
     except yaml.YAMLError as e:
-        return None, f"frontmatter の YAML パースに失敗しました: {e}", body
+        return None, f"frontmatter is not valid YAML: {e}", body
 
     if fm is None:
         return {}, "", body
     if not isinstance(fm, dict):
-        return None, "frontmatter がマッピング形式ではありません", body
+        return None, "frontmatter is not a mapping", body
     return fm, "", body
 
 
@@ -95,7 +95,7 @@ def parse_frontmatter(path: Path) -> tuple[dict | None, str]:
     try:
         content = path.read_text(encoding="utf-8-sig")
     except OSError as e:
-        return None, f"ファイルを読み込めませんでした: {e}"
+        return None, f"could not be read: {e}"
     return parse_frontmatter_text(content)
 
 

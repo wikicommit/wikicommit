@@ -19,9 +19,16 @@ Interactive translation Skill (Issue #280). Per-page processing is identical to 
 
 ## Processing Flow
 
-### Step 0: Read Config
+### Step 0: Open a Run Record and Read Config
 
-Read `.wikicommit/config.yml` and obtain `translation.primary_lang` and `translation.targets`. If `.wikicommit/config.yml` does not exist, stop and tell the user to run `/wikicommit-init` first.
+```bash
+python .wikicommit/scripts/record_run.py start --skill wikicommit-translate \
+    --model "<the model ID this runtime reports for you>" --arg "<each argument, one --arg each>"
+```
+
+A record with a start and no end is what says a run did not finish, and nothing else in this repository is keyed on a run — so leaving it open is the signal rather than a failure state to avoid. Keep the path it prints. (Issue #790)
+
+Then read `.wikicommit/config.yml` and obtain `translation.primary_lang` and `translation.targets`. If `.wikicommit/config.yml` does not exist, stop and tell the user to run `/wikicommit-init` first.
 
 ### Step 1: Determine Mode
 
@@ -113,6 +120,15 @@ python .wikicommit/scripts/rebuild_index.py
 This deterministically rebuilds `index.md` for every Type directory under `.wikicommit/entity/` from the pages currently on disk (Issue #406 — the same script `wikicommit-generate` uses, replacing this Skill's previous per-directory LLM-driven update, Issue #338). It scans each directory itself, so there is no need to track which `<target language>/<Type>/` directories this run touched, and it correctly rebuilds `index.md` if one already exists from a prior `wikicommit-generate` run on the same language. `status: removed` pages are excluded automatically, and the frontmatter uses the bare Type name for `title` (Issue #320). This is a local write only — **do not commit**.
 
 ### After Completion
+
+Close the run record before reporting, so its elapsed time covers the whole run:
+
+```bash
+python .wikicommit/scripts/record_run.py end <the path Step 0 printed> \
+    --page <each translation page written> --outcome translated=<N> --outcome failed=<N>
+```
+
+Report its path and elapsed time — the record is not committed, so this run's own output is the only place a reader sees them.
 
 ```
 Next steps:

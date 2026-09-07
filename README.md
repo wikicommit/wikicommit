@@ -42,6 +42,7 @@ Wikis that are actually running in production:
   - [Requirements](#requirements)
   - [Installation](#installation)
   - [Skills List](#skills-list)
+  - [Design Docs](#design-docs)
   - [Contributing](#contributing)
   - [License](#license)
 
@@ -185,6 +186,10 @@ After installation, run this in the repository where you want to initialize the 
 | 16 | Operations/Preview | `/wikicommit-update` | Bring the repository in step with the installed distribution (PR, not auto-merged) |
 
 ---
+
+## Design Docs
+
+`docs/` holds the design record this project was built from. It is written in Japanese, and it is a record kept while building rather than a polished specification — its purpose is to preserve *why* something works the way it does, and what was considered and rejected. Start with [docs/DesignDoc-architecture.md](docs/DesignDoc-architecture.md) — the design principles, the overall architecture, and the major decisions. After that, read by the unit of a single decision — for example `docs/DesignDoc-data.md` §4.8 on how review records are stored — rather than front to back; the set is roughly 1 MB in total. [docs/README.md](docs/README.md) explains how to read it, including what the `Issue #NNN` references mean and which referenced paths are not part of this repository.
 
 ## Contributing
 

@@ -86,8 +86,8 @@ def granularity_strings(path: Path, wikicommit_block: object) -> list[str]:
     granularity = wikicommit_block.get("granularity", []) if isinstance(wikicommit_block, dict) else []
     if not isinstance(granularity, list):
         print(
-            f"WARNING: {path}: wikicommit.granularity がリストではありません "
-            f"({type(granularity).__name__})。この型の granularity は検査対象から外れています"
+            f"WARNING: {path}: wikicommit.granularity is not a list "
+            f"({type(granularity).__name__}), so this type's granularity is excluded from the check"
         )
         return []
 
@@ -97,11 +97,11 @@ def granularity_strings(path: Path, wikicommit_block: object) -> list[str]:
             usable.append(entry)
             continue
         print(
-            f"WARNING: {path}: wikicommit.granularity[{i}] が文字列ではなく "
-            f"{type(entry).__name__} としてパースされています（箇条書き中のコロンが YAML の "
-            "マッピングとして読まれた可能性）。この箇条書きは検査対象から外れているため、"
-            "ここで補強している property が UNREINFORCED として報告されることがあります。"
-            "区切りをコロンから em dash（—）に変えてください"
+            f"WARNING: {path}: wikicommit.granularity[{i}] parsed as "
+            f"{type(entry).__name__} rather than a string (a colon inside the bullet was "
+            "probably read as a YAML mapping). That bullet is excluded from the check, so a "
+            "property reinforced there can be reported as UNREINFORCED. "
+            "Replace the colon separator with an em dash (—)"
         )
     return usable
 
@@ -189,7 +189,7 @@ def check_file(path: Path, types: dict, properties: dict) -> list[tuple[str, str
 def main() -> int:
     index, err = load_or_build_index()
     if index is None:
-        print(f"WARNING: Schema.org 語彙の取得に失敗したため、このチェックをスキップします: {err}")
+        print(f"WARNING: the Schema.org vocabulary could not be loaded, so this check was skipped: {err}")
         print("SUMMARY: unreinforced=0")
         return 0
 

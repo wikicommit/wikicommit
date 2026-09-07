@@ -325,7 +325,7 @@ def url_to_filename(url: str) -> str:
         # No host (e.g. "https://" or "https:///foo") — refuse rather than
         # return a path starting with "/", which Path.__truediv__ would treat
         # as absolute and silently write outside repo_root.
-        raise ValueError(f"URL に有効なホスト名が含まれていません: {url!r}")
+        raise ValueError(f"URL has no valid host name: {url!r}")
     if not path:
         # Bare-domain URL (no path segment). Return just the host — see the
         # docstring for why this must not be "{host}/index" (#213). A bare
@@ -723,11 +723,11 @@ def process_file(
 
     abs_source = repo_root / source_path
     if Path(source_path).is_absolute():
-        err = f"ERROR: {source_path}: 絶対パスは使用できません。リポジトリルートからの相対パスを指定してください"
+        err = f"ERROR: {source_path}: absolute paths are not accepted; give a path relative to the repository root"
     elif not abs_source.exists():
-        err = f"ERROR: {source_path}: ファイルが存在しません"
+        err = f"ERROR: {source_path}: file does not exist"
     elif not abs_source.is_file():
-        err = f"ERROR: {source_path}: ファイルではありません"
+        err = f"ERROR: {source_path}: is not a file"
     else:
         err = None
     if err:
@@ -914,13 +914,13 @@ def write_hash(mgmt_rel: str, content_file: str, repo_root: Path) -> tuple[str, 
     """
     mgmt_path = repo_root / mgmt_rel
     if not mgmt_path.is_file():
-        return ("ERROR", mgmt_rel, "管理ファイルが存在しません")
+        return ("ERROR", mgmt_rel, "the management file does not exist")
 
     content_path = Path(content_file)
     if not content_path.is_absolute():
         content_path = repo_root / content_path
     if not content_path.is_file():
-        return ("ERROR", mgmt_rel, f"コンテンツファイルが存在しません: {content_file}")
+        return ("ERROR", mgmt_rel, f"the content file does not exist: {content_file}")
 
     existing = mgmt_path.read_text(encoding="utf-8-sig")
     source_type = parse_frontmatter_source_type(existing)
@@ -928,7 +928,7 @@ def write_hash(mgmt_rel: str, content_file: str, repo_root: Path) -> tuple[str, 
         return (
             "ERROR",
             mgmt_rel,
-            f"source.type が url/wikicommit ではありません（現在: {source_type}）",
+            f"source.type is not url/wikicommit (currently: {source_type})",
         )
 
     new_hash = sha256_file(str(content_path))
@@ -937,7 +937,7 @@ def write_hash(mgmt_rel: str, content_file: str, repo_root: Path) -> tuple[str, 
         return (
             "ERROR",
             mgmt_rel,
-            "hash フィールドが見つからず書き込めません（frontmatter の形式を確認してください）",
+            "the hash field was not found, so it could not be written (check the frontmatter format)",
         )
     mgmt_path.write_text(updated, encoding="utf-8")
     return ("HASH_WRITTEN", mgmt_rel, new_hash)
@@ -958,13 +958,13 @@ def check_hash(mgmt_rel: str, content_file: str, repo_root: Path) -> tuple[str, 
     """
     mgmt_path = repo_root / mgmt_rel
     if not mgmt_path.is_file():
-        return ("ERROR", mgmt_rel, "管理ファイルが存在しません")
+        return ("ERROR", mgmt_rel, "the management file does not exist")
 
     content_path = Path(content_file)
     if not content_path.is_absolute():
         content_path = repo_root / content_path
     if not content_path.is_file():
-        return ("HASH_MISMATCH", mgmt_rel, "スクラッチファイルが存在しません（キャッシュなし）")
+        return ("HASH_MISMATCH", mgmt_rel, "the scratch file does not exist (not cached)")
 
     existing = mgmt_path.read_text(encoding="utf-8-sig")
     source_type = parse_frontmatter_source_type(existing)
@@ -972,17 +972,17 @@ def check_hash(mgmt_rel: str, content_file: str, repo_root: Path) -> tuple[str, 
         return (
             "ERROR",
             mgmt_rel,
-            f"source.type が url/wikicommit ではありません（現在: {source_type}）",
+            f"source.type is not url/wikicommit (currently: {source_type})",
         )
 
     current_hash = parse_frontmatter_hash(existing)
     if not current_hash or current_hash == '""':
-        return ("HASH_MISMATCH", mgmt_rel, "source.hash が未設定です")
+        return ("HASH_MISMATCH", mgmt_rel, "source.hash is not set")
 
     scratch_hash = sha256_file(str(content_path))
     if scratch_hash == current_hash:
         return ("HASH_MATCH", mgmt_rel, scratch_hash)
-    return ("HASH_MISMATCH", mgmt_rel, "hash不一致（ソース更新後の再フェッチが必要）")
+    return ("HASH_MISMATCH", mgmt_rel, "hash mismatch (the source changed and needs re-fetching)")
 
 
 def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
@@ -1182,12 +1182,12 @@ def main_from_args(argv: list[str] | None = None) -> int:
     elif args.include:
         source_dir = Path(source)
         if not (repo_root / source_dir).is_dir():
-            print(f"ERROR: {source}: ディレクトリが存在しません", file=sys.stderr)
+            print(f"ERROR: {source}: directory does not exist", file=sys.stderr)
             return 1
         pattern = str(repo_root / source_dir / args.include)
         matched = [p for p in glob.glob(pattern, recursive=True) if Path(p).is_file()]
         if not matched:
-            print(f"WARNING: {source}/{args.include}: マッチするファイルがありません", file=sys.stderr)
+            print(f"WARNING: {source}/{args.include}: no file matched", file=sys.stderr)
         # One scan of .wikicommit/source/path/ for the whole batch, kept up to
         # date by process_file() as it creates files; scanning per source would
         # read every management file once per matched source.

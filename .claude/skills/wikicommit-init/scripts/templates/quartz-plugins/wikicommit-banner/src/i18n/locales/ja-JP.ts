@@ -1,30 +1,36 @@
 export default {
   components: {
     wikicommitBanner: {
-      // Issue #740: `review_status` is a two-valued field, which makes it
-      // structurally a container for an *event* — it happened, or it has not
-      // yet. What it held until now was a *claim* about the page, and a claim
-      // has content, which is why the content had to be bolted on as a
-      // checklist. The heading follows the field back to what it can actually
-      // carry: nobody has read this page yet. That is a fact about reach, not
-      // a defect in the page — and after Issue #751 the machine's own source
-      // check is stated a line below, so "nobody has read it" can no longer be
-      // misread as "nothing has been done to it".
-      title: "このページはまだ誰も読んでいません",
-      body: "LLM が自動生成しました。内容に誤りがある可能性があります。",
+      // Issue #774: the heading states a fact that is true of the page in
+      // either state, so it no longer swaps. "Nobody has read this page yet"
+      // (Issue #740) was false in front of the person reading it: what it
+      // actually said was that no read by someone with write access had been
+      // recorded, a distinction most readers do not hold. Dropping it is what
+      // finally makes the heading obey Issue #739's principle — review adds a
+      // line, it does not retract a warning — because a heading that swaps
+      // forces the pending side to say *something*, and the only thing left to
+      // say there is a negation. Issue #751 had to land first: with the
+      // machine's own source check stated a line below, dropping the claim
+      // about reading cannot be read as "nothing has been done to this page".
+      title: "LLM が自動生成したページです",
+      // Split from the heading (Issue #774): the heading carries the fact, this
+      // carries what follows from it. Before the split the two said nearly the
+      // same thing.
+      body: "内容に誤りがある可能性があります。",
       generatedAt: "生成日:",
       generatedBy: "生成モデル:",
       translatedAt: "翻訳日:",
       translatedBy: "翻訳モデル:",
       reviewedBy: "読んだ人:",
-      // Issue #739: the reviewed state adds a line rather than removing the
-      // warning, so it needs a heading of its own. Wording it as "a person
-      // checked this" and no further keeps it to what `reviewed` actually
-      // means (Issue #723's transition table); anything stronger would be a
-      // guarantee nobody made. It also carries the fact for a reviewed page
-      // with no `reviewed_by` — route B pages and anything reviewed before
-      // that field existed — so no name-less placeholder line is needed.
-      titleReviewed: "このページは人が読みました",
+      // Issue #774: what `titleReviewed` used to be, moved out of the heading
+      // and into the line review adds. It is shown only when `reviewed_by` is
+      // absent — a route B page (`/wikicommit-review` runs locally and cannot
+      // obtain a GitHub login) or one reviewed before that field existed. With
+      // a name, the `reviewedBy` line below says the same thing and says who,
+      // and printing both would repeat "read" twice. Having this fallback is
+      // what keeps the two states distinguishable without depending on
+      // `reviewed_by` being present.
+      readByAPerson: "人が読みました",
       // Issue #751: what the machine check actually compared, stamped onto the
       // published copy of the page by convert_wikilinks.py and present on no
       // page in .wikicommit/entity/. Worded as "checked against its sources"
@@ -77,7 +83,9 @@ export default {
       reportBodyProblemHeading: "## 報告内容",
       siteSummaryPages: "総ページ数:",
       siteSummaryReviewed: "人が読んだページ:",
-      siteSummaryReviewNote: "ページは LLM が生成した時点で公開されます。上の数字は、そのうち人が最後まで読んだ件数です — Wiki の完成度でも、内容の正しさの保証でもありません。",
+      siteSummaryReviewNote: "ページは LLM が生成した時点で公開されます。「人が読んだページ」はそのうち人が最後まで読んだ件数です — Wiki の完成度でも、内容の正しさの保証でもありません。",
+      siteSummaryAiReviewed: "出典と照合:",
+      siteSummaryAiReviewNote: "「出典と照合」は生成時に、ページの記述をその出典と照合した件数です。照合しているのは出典との一致だけで、網羅性・実在の人物や組織への影響・読者自身の知識との食い違いは見ていません。",
     },
   },
 }

@@ -44,6 +44,15 @@ Before starting, read `.wikicommit/config.yml` and obtain `primary_lang`, `theme
 
 Read `.wikicommit/entity-policy.md` at the same time (Issue #667). It answers a different question from `theme`, on the same entities: `theme` decides **relevance** (has this anything to do with the subject?), the entity policy decides **permissibility** (granted it does, should a page exist for it?). A living person at the centre of the subject scores highest on relevance and may still be one this wiki does not want a page about, which is why the two are separate and why neither substitutes for the other. Hold two things from it for Pass 2c: `wikicommit.exclude_living_persons` (a boolean, default `false`) and the body prose. If the file is absent, treat it as the shipped default — the switch off and no prose — and carry on silently; a wiki initialized before this file existed keeps working unchanged. If the file **exists** but cannot be read or its frontmatter does not parse, fall back to that same default but **say so**: print a `WARNING:` naming the file at that moment, and repeat it in the Completion Notice. Do not fail open in silence — one mistyped line in a hand-edited file would otherwise turn the whole policy off with nothing in the run's output to distinguish it from a wiki that never set one, and unlike `source-policy.md`'s domain list there is no built-in fallback behind it. If the body is empty or still the shipped comment, there is no prose policy, exactly as an empty `theme` disables the relevance judgment.
 
+**Open a run record before anything else (Issue #790)**:
+
+```bash
+python .wikicommit/scripts/record_run.py start --skill wikicommit-generate \
+    --model "<the model ID this runtime reports for you>" --arg "<each argument, one --arg each>"
+```
+
+**Keep the path it prints** — every exit from this Skill below closes that same record, and the closing call needs it. Nothing else in this repository is keyed on a run: if this one dies partway, half the management files sit at `pending` and half at `generated`, which is indistinguishable from a queue that simply has not reached them, and the two halt paths below change no file at all. A record with a start and no end is exactly the signal that a run did not finish, so **an unclosed record is not a failure state to avoid** — it is the answer. Report the record's path in the Completion Notice.
+
 With `--regenerate`, skip Step 0 entirely and go to the Regeneration Mode section below — that mode takes a page, not a source, and registers nothing.
 
 ### Step 0: Source Registration (only when argument is given)
@@ -150,6 +159,15 @@ Then apply the same count guard the rest of this Skill uses: if more than 5 page
 
 After all selected pages are processed, run `rebuild_index.py` exactly as the normal flow does (below) — a rebuild can change a page's `title`, and `index.md` carries titles (Issue #406). Skip the Ingest Status Reconciliation step: no management file's status was in play. Then report, per page, which were rebuilt, which were unchanged, which were skipped and why, which failed review, and which fell back to `.wikicommit/schema/default.md` for want of a schema file for their type (Pass 3 step 1, Issue #575 — this mode never reaches the Completion Notice that otherwise carries that list, and a rebuild run right after `/wikicommit-schema-propose` will still fall back until that Skill's PR is merged, since it deliberately does not auto-merge); remind the user that rebuilt pages are back at `review_status: pending` and that the next `/wikicommit-merge` will open a fresh review-tracking Issue for each (its scan only skips pages with an *open* Issue, so a previously-closed one does not suppress the new one).
 
+Close the run record opened at the start of this Skill before writing that report, so its elapsed time covers the whole run, and give its path and duration alongside the report:
+
+```bash
+python .wikicommit/scripts/record_run.py end <the path start printed> \
+    --page <each page rebuilt> --outcome regenerated=<N> --outcome unchanged=<N> --outcome failed=<N>
+```
+
+This mode does not reach the Completion Notice, which is where the closing call otherwise lives, so without this line every regeneration run — including one that did exactly what was asked — would be reported by `check_run_records.py` as a run that did not finish, and the elapsed time the record exists to hold would never be written (Issue #790).
+
 ### Pass 1: Text Extraction
 
 1. Collect source management files from `.wikicommit/source/` whose `status` is `pending` or `outdated`, plus those with `status: partial` **and a non-empty `failed_pages`** (Issue #567):
@@ -189,7 +207,7 @@ After all selected pages are processed, run `rebuild_index.py` exactly as the no
      python .wikicommit/scripts/check_extraction_quality.py check-fetch-capability <source.url>
      ```
 
-     `MISSING_PACKAGE:` (exit 1) → **stop processing entirely** and display the `pip install` command from the script's output, exactly like the `markitdown --version` prerequisite check below — this is an environment problem the user fixes once, not a property of this source, so it is not a `status: failed` extraction failure and must not be recorded as one. `OK:` (exit 0) → proceed. Like the `markitdown` check, this only needs to pass once per host per run; do not re-run it for every subsequent source with the same host.
+     `MISSING_PACKAGE:` (exit 1) → **stop processing entirely**, close the run record with `record_run.py end <path> --halted-reason "missing package: <name>"` (this path changes no file, so without that line the run leaves no trace at all — Issue #790), display the `pip install` command from the script's output, exactly like the `markitdown --version` prerequisite check below — this is an environment problem the user fixes once, not a property of this source, so it is not a `status: failed` extraction failure and must not be recorded as one. `OK:` (exit 0) → proceed. Like the `markitdown` check, this only needs to pass once per host per run; do not re-run it for every subsequent source with the same host.
 
      This is a third axis, separate from guards A and B (Issue #574). A YouTube page fetched without `youtube-transcript-api` is neither an empty shell (guard B's domains) nor low-density boilerplate (guard A) — it is a *partial* extraction of real prose, measuring 0.90 on guard A's ratio with the transcript missing versus 0.93 with it present, so neither existing guard can distinguish it from a complete one. Checking the capability *before* fetching also keeps "the package is missing" distinguishable from "this video has no captions" (see the transcript roll-up in step 6 below); checking after the fact could not tell those two apart, and they call for opposite responses.
 
@@ -696,7 +714,7 @@ Taro Yamada is a senior engineer at CompanyA...
 
 3. For `action: update` entities, the LLM must merge new information into the existing page:
    - Update content fields (`description`, body text, `tags`, etc.) with new information from the source
-   - Carry the existing `review_status` and `reviewed_by` across unchanged here, and do not decide them in this Pass. **A page that is `reviewed` does not simply stay `reviewed` (Issue #724)**: this same branch rewrites the body, `properties` (`description` included), `tags` and `expires_at` from the new source, and leaving the badge where it is would attach a human's sign-off — and, since Issue #663, that human's real name — to text no one has read. Every other write path (`action: create`, `--regenerate`, `wikicommit-translate`, `wikicommit-synthesize`) writes `pending`; this one is the outlier. The decision is not made by judgment: Pass 4 step 6 runs `reset_review_on_content_change.py` on each page it writes, which compares it against `git show HEAD:` and demotes it only when a **content** field actually differs (`sources[]` and the `generated_*` fields do not count — an `action: update` that only appends a source leaves the review standing, which is the whole reason this is a comparison rather than an unconditional reset)
+   - Carry the existing `review_status` and `reviewed_by` across unchanged here, and do not decide them in this Pass. **A page that is `reviewed` does not simply stay `reviewed` (Issue #724)**: this same branch rewrites the body, `properties` (`description` included), `tags` and `expires_at` from the new source, and leaving `review_status` where it is would attach a human's sign-off — and, since Issue #663, that human's real name — to text no one has read. Every other write path (`action: create`, `--regenerate`, `wikicommit-translate`, `wikicommit-synthesize`) writes `pending`; this one is the outlier. The decision is not made by judgment: Pass 4 step 6 runs `reset_review_on_content_change.py` on each page it writes, which compares it against `git show HEAD:` and demotes it only when a **content** field actually differs (`sources[]` and the `generated_*` fields do not count — an `action: update` that only appends a source leaves the review standing, which is the whole reason this is a comparison rather than an unconditional reset)
    - Update `generated_at`, `generated_by` and `generated_with` to reflect this generation run
    - Append the new source to the `sources` list only if no entry with the same `path` (or `url`) already exists, carrying that source's `license` across from the management file as in step 5 below. If an entry with the same `path`/`url` is already present, update that entry's `hash` instead of appending a duplicate, and leave its existing `license` alone unless the management file now records one and the page entry has none (Issue #558 — a human may have corrected the page's value, so never overwrite a non-empty one).
    - `expires_at`: if Pass 2 returned a non-null `expires_at` for this entity, set/overwrite the page's `expires_at` with it (a source-stated date takes precedence, since it reflects the most recently ingested information). If Pass 2 returned `null`, leave the existing page's `expires_at` untouched either way (don't add one, and don't clear one a human or an earlier run may have set) — `null` here only means "this source didn't mention a date," not "there is no expiration."
@@ -734,7 +752,7 @@ For each generated page (content is carried as context from Pass 3):
 
 2. **Check that the returned JSON carries `rules_version`, and that it matches the value in `.wikicommit/review-rules.md`'s frontmatter.** A missing or mismatched value means the subagent did not read the rules, and its verdict then says nothing about the checks those rules define — a PASS from an unread rulebook is indistinguishable from a real one, which is the whole reason for the echo.
 
-   Relaunch the review **once**. If the second attempt is also missing or wrong, **stop the entire run and report it** — do not consume `generate.max_retries`, do not add the page to `failed_pages`, and do not write `status: failed`. Nothing is wrong with the page: this is a problem with the instructions or the environment, and recording it against the page would leave a false record (Issue #574's precedent, and Issue #567 on a wrong record being worse than none).
+   Relaunch the review **once**. If the second attempt is also missing or wrong, **stop the entire run and report it** — close the run record with `record_run.py end <path> --halted-reason "rules_version mismatch"` first, for the same reason as the fetch-capability halt above (Issue #790: this stops without changing a file, so nothing else records that it happened) — do not consume `generate.max_retries`, do not add the page to `failed_pages`, and do not write `status: failed`. Nothing is wrong with the page: this is a problem with the instructions or the environment, and recording it against the page would leave a false record (Issue #574's precedent, and Issue #567 on a wrong record being worse than none).
 
 3. **Route the cross-page findings the rules produce.** An entry with `page_at_fault: "other"` is not a FAIL — so when it is the only kind of defect found, `result` is `"PASS"` and step 6 writes the page normally. Do not regenerate, and do not touch the other page: Pass 4 regenerates one page against its own sources and has neither the other page's sources nor any mandate over it. Once the page's review has settled as a pass and step 6 has written it, append the pair — both page paths, the fact, and both versions — to a running list for the Completion Notice, the same way `ambiguous` / `exclude` / `failed_pages` are rolled up. Append it then rather than on each review attempt, so a retry driven by some *other* defect does not report the same pair twice, and a page discarded at step 5 is not reported as one this run generated.
 4. If the review result is **FAIL** (for any of the above reasons), regenerate the page (up to `generate.max_retries` times from `.wikicommit/config.yml`; default: 2). **Feed the subagent's findings into the retry (Issue #452)**: pass the full `issues` array from step 1 — most importantly each entry's `instruction` — back into the Pass 3 regeneration prompt as explicit, itemized corrections for this attempt, alongside the same source text and context Pass 3 used originally. Do not regenerate from a bare "the previous attempt failed review" instruction with no detail — two consecutive FAILs on the same source for the same underlying defect (e.g. the same inferential gloss re-added both times) is exactly the failure mode this step exists to prevent, since it indicates the retry never actually saw what was wrong with the attempt before it. Leave out the cross-page findings that point at the *other* page (`page_at_fault: "other"` — step 3's routing rule): regenerating this page cannot fix them, and feeding them in as corrections would push it away from what its own sources say.
@@ -813,6 +831,20 @@ This finds `.wikicommit/source/**/*.md` management files still left at `status: 
 ### Completion Notice
 
 Display a summary of the results (pages succeeded / skipped / failed / excluded).
+
+**Close the run record first (Issue #790)**, so the timings and counts it holds are this run's:
+
+```bash
+python .wikicommit/scripts/record_run.py end <the path start printed> \
+    --source <each source management file processed> --page <each page written> \
+    --outcome generated=<N> --outcome failed=<N> --outcome excluded=<N>
+```
+
+Then report its path and elapsed time in the notice — that duration exists nowhere else, and the record is not committed, so this run's own output is the only place a reader sees it:
+
+```
+Run record: .wikicommit/run/20260907-104233-generate.md (22m14s)
+```
 
 Then always print one line for the source-integrity review, whatever its outcome (Issue #750):
 
@@ -1050,7 +1082,7 @@ Register one with /wikicommit-generate <url-or-path>; the next run folds it in a
 same page.
 ```
 
-If `reset_review_on_content_change.py` (Pass 4 step 6) printed any `RESET:` line, list those pages (Issue #724). These were `reviewed` before this run and are not any more, which is a state change a reader of the published wiki will see — the reviewed badge and the reviewer's name both disappear from the page:
+If `reset_review_on_content_change.py` (Pass 4 step 6) printed any `RESET:` line, list those pages (Issue #724). These were `reviewed` before this run and are not any more, which is a state change a reader of the published wiki will see — the banner's line saying a person read the page disappears, and the reviewer's name with it:
 
 ```
 The following pages were previously reviewed and had their content rewritten by this run, so they are

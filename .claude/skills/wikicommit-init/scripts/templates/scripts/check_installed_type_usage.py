@@ -134,7 +134,7 @@ def main() -> int:
 
     index, err = load_or_build_index()
     if index is None:
-        print(f"WARNING: Schema.org 語彙の取得に失敗したため、このチェックをスキップします: {err}")
+        print(f"WARNING: the Schema.org vocabulary could not be loaded, so this check was skipped: {err}")
         print("SUMMARY: unused=0, ancestor_fallback=0")
         return 0
     types = index["types"]
@@ -157,8 +157,8 @@ def main() -> int:
             if not exempt:
                 suffix = f", provenance: {provenance}" if provenance else ""
                 print(
-                    f"UNUSED: schema:{type_name} ({path}{suffix}) — このスキーマファイルを使う"
-                    f"ページが 1 件もありません"
+                    f"UNUSED: schema:{type_name} ({path}{suffix}) — no page uses "
+                    f"this schema file"
                 )
                 unused_count += 1
             continue
@@ -166,9 +166,9 @@ def main() -> int:
         descendants = installed_descendants(type_name, installed, types)
         if descendants:
             print(
-                f"ANCESTOR_FALLBACK: schema:{type_name} に {pages} ページありますが、"
-                f"より具体的な {', '.join('schema:' + d for d in descendants)} も"
-                f"インストール済みです（粒度が粗い可能性）"
+                f"ANCESTOR_FALLBACK: schema:{type_name} has {pages} page(s), but the "
+                f"more specific {', '.join('schema:' + d for d in descendants)} "
+                f"is also installed (the granularity may be too coarse)"
             )
             fallback_count += 1
 

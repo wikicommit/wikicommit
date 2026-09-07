@@ -114,15 +114,15 @@ def main() -> int:
             spaced = " ".join(_split_words(tag))
             if title_key and key == title_key:
                 print(
-                    f'TITLE_ECHO: {page}: タグ "{tag}" はページの title と同じです'
-                    f"（そのページ自身としか括れません）"
+                    f'TITLE_ECHO: {page}: tag "{tag}" repeats the page title'
+                    f" (it can only group the page with itself)"
                 )
                 print(f"page: {page}")
                 title_echo += 1
             elif key in labels or spaced in labels:
                 print(
-                    f'TYPE_ECHO: {page}: タグ "{tag}" はページの type と同じです'
-                    f"（type: フィールドが既に述べています）"
+                    f'TYPE_ECHO: {page}: tag "{tag}" repeats the page type'
+                    f" (the type: field already says this)"
                 )
                 print(f"page: {page}")
                 type_echo += 1

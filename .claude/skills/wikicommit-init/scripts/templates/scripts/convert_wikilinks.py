@@ -112,7 +112,7 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     try:
         record = standing_verdict(load_records(page_rel))
     except OSError as e:
-        print(f"WARNING: {src_path}: レビュー記録を読み込めませんでした: {e}")
+        print(f"WARNING: {src_path}: review records could not be read: {e}")
         return None
     if record is None or str(record.get("result") or "") != "pass":
         return None
@@ -120,7 +120,7 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     try:
         current_hash = compute_page_content_hash(src_path)
     except (RecordError, OSError, ValueError) as e:
-        print(f"WARNING: {src_path}: ページのハッシュを計算できませんでした: {e}")
+        print(f"WARNING: {src_path}: the page content hash could not be computed: {e}")
         return None
     if str(record.get("page_content_hash") or "") != current_hash:
         return None
@@ -147,7 +147,7 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     # covers. Records are written by another process, so this is checked here
     # rather than assumed.
     if any(ch in model or ch in reviewed_at for ch in ("\n", "\r")):
-        print(f"WARNING: {src_path}: レビュー記録の値に改行が含まれるため表示しません")
+        print(f"WARNING: {src_path}: a review record value contains a line break, so it is not displayed")
         return None
 
     findings = record.get("findings")
@@ -323,6 +323,24 @@ ROOT_INDEX_LABELS = {
         "counts_note": "ページは LLM が生成した時点で公開されます。"
                        "「人が読んだ」はそのうち人が最後まで読んだ件数であり、"
                        "Wiki の完成度でも、内容の正しさの保証でもありません。",
+        # Issue #769: the same line with the AI count in it. Kept as separate
+        # templates rather than assembled from fragments because word order and
+        # the parenthesis style differ per language, which is why `counts`
+        # carries its own leading separator (Issue #730) in the first place.
+        # The AI count comes first: it is the full-coverage number, and
+        # "read by a person" is the sample taken out of it — the same order the
+        # overview page uses.
+        "counts_ai": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んだ {reviewed}）",
+        "counts_ai_one": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んだ {reviewed}）",
+        # Issue #769: a separate key, emitted only when some page actually
+        # carries a standing verdict. Worded like the overview page's
+        # `ai_reviewed_note`: it names what the check does *not* cover, because
+        # stating only what it does would rebuild, facing the other way, the
+        # overstatement Issue #740 removed from `reviewed`.
+        "ai_counts_note": "「出典と照合」は生成時に、ページの記述をその出典と"
+                          "照合した件数です。照合しているのは出典との一致だけで、"
+                          "網羅性・実在の人物や組織への影響・"
+                          "読者自身の知識との食い違いは見ていません。",
         "licensing": "各ページの利用条件は、そのページが生成された出典ごとに異なります。"
                      "サイト全体に単一のライセンスはありません。",
     },
@@ -338,6 +356,15 @@ DEFAULT_ROOT_INDEX_LABELS = {
                    "\"Read by a person\" is how many of them someone has since read "
                    "all the way through — not how much of the wiki is finished, and "
                    "not a guarantee that anything is correct.",
+    "counts_ai": " ({pages} pages / {ai_reviewed} checked against sources / "
+                 "{reviewed} read by a person)",
+    "counts_ai_one": " ({pages} page / {ai_reviewed} checked against sources / "
+                     "{reviewed} read by a person)",
+    "ai_counts_note": "\"Checked against sources\" is how many pages were compared "
+                      "against their own sources when they were generated. That check "
+                      "covers agreement with those sources and nothing else — not "
+                      "completeness, not the effect on real people and organizations, "
+                      "not conflicts with what you know.",
     "licensing": "Terms of use differ per page, following the sources each page was "
                  "generated from. There is no single license covering the whole site.",
 }
@@ -384,7 +411,8 @@ def generate_root_index(
     total_pages: int,
     reviewed_pages: int,
     site_description: dict[str, str] | None = None,
-    lang_counts: dict[str, tuple[int, int]] | None = None,
+    lang_counts: dict[str, tuple[int, int, int]] | None = None,
+    ai_reviewed_pages: int = 0,
 ) -> None:
     """Write a root content/index.md that links to the wiki top page(s).
 
@@ -432,10 +460,11 @@ def generate_root_index(
     readers, whereas a caption could not. Languages with no entry simply get no
     description; an absent field reproduces the previous output exactly.
 
-    `lang_counts` (Issue #730) is {lang: (pages, reviewed)} counted from the
-    pages this build published. On a multilingual wiki the two frontmatter
-    fields above are omitted entirely and these per-language counts take their
-    place in the body, one pair per language link. Two reasons the single
+    `lang_counts` (Issue #730, extended by Issue #769) is
+    {lang: (pages, reviewed, ai_reviewed)} counted from the pages this build
+    published. On a multilingual wiki the two frontmatter fields above are
+    omitted entirely and these per-language counts take their place in the body,
+    one pair per language link. Two reasons the single
     site-wide total was wrong there. (1) Nobody experiences it: this page exists
     to choose a language, and the wiki behind each choice is one language's
     worth of pages — a translation is the same knowledge again, not more of it.
@@ -444,6 +473,15 @@ def generate_root_index(
     Issue #664 as a statement about the trust ladder, so translations drag it
     away from what it means to claim. Splitting pages but not reviewed counts
     would leave (2) intact, so both are split.
+
+    `ai_reviewed_pages` (Issue #769) is the site-wide count of pages carrying a
+    standing AI verdict, embedded as a third frontmatter field on a
+    single-language wiki. It is omitted at zero rather than written as 0, and
+    that is accuracy rather than tidiness: a wiki predating the review tree has
+    no records (they are never created retroactively), which is not the same
+    claim as "nothing was checked". On a multilingual wiki the per-language
+    third number in `lang_counts` takes its place, for the same reason the other
+    two are split there.
 
     Omitting the two fields is what suppresses the banner's site summary: it
     renders only when both are numbers, so no change to WikiCommitBanner.tsx is
@@ -475,6 +513,16 @@ def generate_root_index(
             f"wikicommit_page_count: {total_pages}",
             f"wikicommit_reviewed_count: {reviewed_pages}",
         ]
+        # Issue #769: omitted at zero rather than written as 0, and this is
+        # accuracy rather than tidiness. A wiki generated before review records
+        # existed has none (they are not created retroactively), and a language
+        # of nothing but translation pages has none either (the translation
+        # quality check is deliberately not recorded). Both mean "no record",
+        # while `checked against sources: 0` says "nothing was checked". The
+        # overview page already omits its own line the same way. It also keeps
+        # the output byte-identical on a repository with no records at all.
+        if ai_reviewed_pages:
+            lines.append(f"wikicommit_ai_reviewed_count: {ai_reviewed_pages}")
     lines += [
         "---",
         "",
@@ -498,15 +546,26 @@ def generate_root_index(
             # non-removed .md under it, and primary_lang skips that filter
             # entirely (compute_langs() always prepends it), so both can reach
             # this list with nothing page_stats could count (Issue #730).
-            pages, reviewed = counts.get(lang, (0, 0))
-            template = labels["counts_one"] if pages == 1 else labels["counts"]
+            pages, reviewed, ai_reviewed = counts.get(lang, (0, 0, 0))
+            # Issue #769: counted per language for the same reason Issue #730
+            # split pages and reviewed counts, and the reason holds harder here
+            # — translation pages carry no record at all, so a site-wide figure
+            # would be diluted by however many translations exist. A language
+            # with no records keeps the two-number form (see the frontmatter
+            # note above on why zero is omitted rather than printed).
+            if ai_reviewed:
+                template = labels["counts_ai_one"] if pages == 1 else labels["counts_ai"]
+            else:
+                template = labels["counts_one"] if pages == 1 else labels["counts"]
             entry = f"- [{lang}](./{lang}/)" + template.format(
-                pages=pages, reviewed=reviewed
+                pages=pages, reviewed=reviewed, ai_reviewed=ai_reviewed
             )
             if lang in descriptions:
                 entry += f" — {descriptions[lang]}"
             lines.append(entry)
         lines += ["", labels["counts_note"]]
+        if any(ai for _, _, ai in counts.values()):
+            lines += ["", labels["ai_counts_note"]]
     elif primary_lang in descriptions:
         # Single-language wiki: there is no language list to hang the
         # description off, so it goes under the top link instead.
@@ -1234,7 +1293,7 @@ OVERVIEW_LABELS = {
         # honesty it was added for — and this line says what it counts.
         "reviewed_note": (
             "ページは LLM が生成した時点で公開されます。"
-            "上の数字は、そのうち人が最後まで読んだ件数です — "
+            "「人が読んだページ」はそのうち人が最後まで読んだ件数です — "
             "Wiki の完成度でも、内容の正しさの保証でもありません。"
         ),
         # Issue #751: a separate key from `reviewed`, never a reuse of it.
@@ -1293,9 +1352,9 @@ DEFAULT_OVERVIEW_LABELS = {
     "total_pages": "Total pages",
     "reviewed": "Read by a person",
     "reviewed_note": (
-        "Pages are published as soon as an LLM generates them. The count above is how "
-        "many a person has since read all the way through — not how much of the wiki is "
-        "finished, and not a guarantee that anything is correct."
+        "Pages are published as soon as an LLM generates them. \"Read by a person\" is "
+        "how many a person has since read all the way through — not how much of the wiki "
+        "is finished, and not a guarantee that anything is correct."
     ),
     "ai_reviewed": "Checked against sources (AI)",
     "ai_reviewed_note": (
@@ -1791,7 +1850,7 @@ def convert_file(
     try:
         content = src_path.read_text(encoding="utf-8")
     except OSError as e:
-        print(f"WARNING: {src_path}: ファイルを読み込めませんでした: {e}")
+        print(f"WARNING: {src_path}: could not be read: {e}")
         return 0, 0, link_keys
 
     # Before WikiLink substitution, never after: this pass adjusts links that
@@ -2037,6 +2096,7 @@ def main() -> int:
     skipped_removed = 0
     total_pages = 0
     reviewed_pages = 0
+    ai_reviewed_pages = 0
     written_rel_paths: set[Path] = set()
     # Overview accumulators (Issue #585), filled by the same single walk that
     # already computes total_pages/reviewed_pages: one entry per published page,
@@ -2145,16 +2205,27 @@ def main() -> int:
         # same exclusion check_orphans.py/check_expires.py/etc. already apply.
         fm = load_frontmatter(src_path) or {}
         is_index = src_path.name == "index.md"
-        if not is_index:
-            total_pages += 1
-            if fm.get("review_status") == "reviewed":
-                reviewed_pages += 1
         # One lookup per page, shared by the published stamp and the overview's
         # site-wide tally (Issue #751). Index pages are excluded: they are
         # build-generated navigation that no model reviewed, and
         # rebuild_index.py already stamps them `review_status: reviewed` for
         # exactly that reason (Issue #580).
         ai_review = None if is_index else load_ai_review(src_path, repo_root, fm)
+        if not is_index:
+            total_pages += 1
+            if fm.get("review_status") == "reviewed":
+                reviewed_pages += 1
+            # Issue #769: counted in this walk rather than from page_stats so
+            # that all three site-wide numbers cover the same set of pages. A
+            # page whose path never resolves to <lang>/<Type>/<slug>.md is
+            # published, stamped with its verdict by convert_file() below, and
+            # counted in total_pages — but it never reaches page_stats, so
+            # tallying there would report "1 of 2 checked" for a wiki where
+            # both pages carry one, and "no record at all" for a wiki whose
+            # only page does. That is the misreading this count exists to
+            # remove, pointed the other way.
+            if ai_review:
+                ai_reviewed_pages += 1
         file_converted, file_unresolved, link_keys = convert_file(
             src_path, rel_path, source_dir, output_dir, primary_lang,
             out_rel_path=out_rel_path, view_dir=view_dir, is_view=is_view,
@@ -2250,18 +2321,22 @@ def main() -> int:
     # function's (src_path, rel_path, out_rel_path, is_view) list, and rebinding
     # it to an int here would leave any later use of it broken in a way neither
     # ruff nor the tests would catch.
-    lang_counts: dict[str, tuple[int, int]] = {}
+    lang_counts: dict[str, tuple[int, int, int]] = {}
     for stat in page_stats:
         if stat["is_index"]:
             continue
-        lang_pages, lang_reviewed = lang_counts.get(stat["lang"], (0, 0))
+        lang_pages, lang_reviewed, lang_ai = lang_counts.get(stat["lang"], (0, 0, 0))
         lang_counts[stat["lang"]] = (
             lang_pages + 1,
             lang_reviewed + (1 if stat["review_status"] == "reviewed" else 0),
+            # `ai_review` is already resolved once per page above and shared with
+            # the published stamp and the overview tally (Issue #751), so
+            # counting it here adds no walk (Issue #769).
+            lang_ai + (1 if stat["ai_review"] else 0),
         )
     generate_root_index(
         output_dir, primary_lang, langs, total_pages, reviewed_pages,
-        load_site_description(repo_root), lang_counts,
+        load_site_description(repo_root), lang_counts, ai_reviewed_pages,
     )
     written_rel_paths.add(Path("index.md"))
     written_rel_paths.add(

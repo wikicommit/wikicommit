@@ -174,7 +174,7 @@ def main() -> int:
     # ── Check WikiLinks in --changed files ────────────────────────────────
     for path in changed_paths:
         if not path.exists():
-            print(f"WARNING: {path}: ファイルが見つかりません（スキップ）")
+            print(f"WARNING: {path}: file not found (skipped)")
             total_warnings += 1
             continue
 
@@ -199,7 +199,7 @@ def main() -> int:
                 # Same-commit new addition — but still block links to pages being removed
                 target = lang_path if lang_path_abs in changed_abs else primary_path
                 if is_removed(target):
-                    msg = f"[[{type_name}/{slug}]] → status: removed のページへのリンクです"
+                    msg = f"[[{type_name}/{slug}]] → links to a page with status: removed"
                     print(f"ERROR: {rel_str}: {msg}")
                     _emit_annotation("error", "wikilink-removed", f"{rel_str}: {msg}", rel_str)
                     total_errors += 1
@@ -207,19 +207,19 @@ def main() -> int:
 
             if lang_path.exists():
                 if is_removed(lang_path):
-                    msg = f"[[{type_name}/{slug}]] → status: removed のページへのリンクです"
+                    msg = f"[[{type_name}/{slug}]] → links to a page with status: removed"
                     print(f"ERROR: {rel_str}: {msg}")
                     _emit_annotation("error", "wikilink-removed", f"{rel_str}: {msg}", rel_str)
                     total_errors += 1
                 # else: link is valid
             elif lang != primary_lang and primary_path.exists():
                 if is_removed(primary_path):
-                    msg = f"[[{type_name}/{slug}]] → status: removed のページへのリンクです"
+                    msg = f"[[{type_name}/{slug}]] → links to a page with status: removed"
                     print(f"ERROR: {rel_str}: {msg}")
                     _emit_annotation("error", "wikilink-removed", f"{rel_str}: {msg}", rel_str)
                     total_errors += 1
                 else:
-                    msg = f"[[{type_name}/{slug}]] → {primary_lang} のみ存在します（翻訳ページ未作成）"
+                    msg = f"[[{type_name}/{slug}]] → exists only in {primary_lang} (translation page not created yet)"
                     print(f"WARNING: {rel_str}: {msg}")
                     _emit_annotation("warning", "wikilink-no-translation", f"{rel_str}: {msg}", rel_str)
                     total_warnings += 1
@@ -242,10 +242,10 @@ def main() -> int:
                     # left as a WARNING it reads exactly like the line below, and
                     # check_wanted_pages.py would go on to advise creating a
                     # duplicate of a page that is already there (Issue #563).
-                    found = "、".join(f"{t}/{slug}.md" for t in other_types)
+                    found = ", ".join(f"{t}/{slug}.md" for t in other_types)
                     msg = (
-                        f"[[{type_name}/{slug}]] → このページは存在しませんが、"
-                        f"同じ slug が {found} に実在します（Type セグメントの誤りの可能性）"
+                        f"[[{type_name}/{slug}]] → this page does not exist, but the "
+                        f"same slug exists at {found} (the Type segment may be wrong)"
                     )
                     print(f"ERROR: {rel_str}: {msg}")
                     _emit_annotation(
@@ -259,7 +259,7 @@ def main() -> int:
                     # (e.g. benchmark names mentioned across multiple sources) never
                     # accumulated enough signal to get their own page. check_wanted_pages.py
                     # now surfaces these as a non-blocking report instead.
-                    msg = f"[[{type_name}/{slug}]] → ページが存在しません"
+                    msg = f"[[{type_name}/{slug}]] → page does not exist"
                     print(f"WARNING: {rel_str}: {msg}")
                     _emit_annotation("warning", "wikilink-missing", f"{rel_str}: {msg}", rel_str)
                     total_warnings += 1
@@ -307,7 +307,7 @@ def main() -> int:
         # Derive the WikiLink key (Type/slug) from the file path
         resolved = type_slug_from_wiki_path(del_path, entity_dir, view_dir)
         if resolved is None:
-            msg = "entity/・view/ 配下のパスとして解決できないため被リンクチェックをスキップします"
+            msg = "does not resolve to a path under entity/ or view/, so the backlink check was skipped"
             print(f"WARNING: {del_rel_str}: {msg}")
             _emit_annotation("warning", "wikilink-unresolvable-path", f"{del_rel_str}: {msg}", del_rel_str)
             total_warnings += 1
@@ -316,8 +316,8 @@ def main() -> int:
         wikilink_key = f"{type_name}/{slug}"
 
         for ref_str in backlink_index.get(wikilink_key, []):
-            msg = f"被リンクが残っています ({ref_str})"
-            print(f"WARNING: {del_rel_str} (status: removed への変更): {msg}")
+            msg = f"a backlink remains ({ref_str})"
+            print(f"WARNING: {del_rel_str} (being changed to status: removed): {msg}")
             _emit_annotation(
                 "warning", "wikilink-backlink-remaining",
                 f"{del_rel_str}: {msg}", del_rel_str

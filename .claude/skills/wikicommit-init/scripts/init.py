@@ -175,6 +175,50 @@ def _apply_footer_repo_url(config_content: str, repo_url: str | None) -> str:
     return _FOOTER_LINKS_BLOCK_RE.sub(lambda m: f"{m.group('indent')}links: {{}}\n", config_content)
 
 
+# `primary_lang` (ISO 639-1) -> the BCP 47 tag quartz.config.yaml's `locale` takes
+# (Issue #771). The values are exactly the locale files shipped by the three
+# community-derived plugins that draw the site chrome (explorer / graph / search);
+# `tests/test_init.py` checks that every one of them still exists in all three, so a
+# locale dropped upstream fails here rather than silently falling back at build time.
+#
+# This is NOT the same table as `LANG_TO_LOCALE` in the WikiCommit plugins' own
+# `src/i18n/index.ts`. That one lists the languages *WikiCommit itself* has written
+# translations for (two: en, ja); this one lists what the community plugins already
+# translate (28). Naming them alike would make them look like two copies to keep in
+# sync, which they are not.
+#
+# Where a language has several regional locales, the one covering the most readers is
+# chosen: `en` -> en-US (not en-GB), `zh` -> zh-CN (not zh-TW), `pt` -> pt-BR. A wiki
+# that wants a regional variant edits the one line by hand. `no` is mapped alongside
+# `nb` because the macrolanguage code is what people actually type for Norwegian.
+QUARTZ_LOCALE_BY_PRIMARY_LANG = {
+    "ar": "ar-SA", "ca": "ca-ES", "cs": "cs-CZ", "de": "de-DE", "en": "en-US",
+    "es": "es-ES", "fa": "fa-IR", "fi": "fi-FI", "fr": "fr-FR", "he": "he-IL",
+    "hu": "hu-HU", "id": "id-ID", "it": "it-IT", "ja": "ja-JP", "kk": "kk-KZ",
+    "ko": "ko-KR", "lt": "lt-LT", "nb": "nb-NO", "nl": "nl-NL", "no": "nb-NO",
+    "pl": "pl-PL", "pt": "pt-BR", "ro": "ro-RO", "ru": "ru-RU", "th": "th-TH",
+    "tr": "tr-TR", "uk": "uk-UA", "vi": "vi-VN", "zh": "zh-CN",
+}
+
+# Quartz falls back to en-US for an unknown locale anyway, but writing the fallback
+# explicitly keeps the generated config a real value rather than a tag no plugin has.
+DEFAULT_QUARTZ_LOCALE = "en-US"
+
+
+def quartz_locale_for(primary_lang: str) -> str:
+    """Resolve quartz.config.yaml's `{LOCALE}` from `primary_lang` (Issue #771).
+
+    Before this, the template carried a hard-coded `locale: en-US` that init never
+    substituted, so a Japanese wiki shipped with its body text and banner in Japanese
+    and its sidebar, search and graph in English — the translations existed, they were
+    simply never reached. An unmapped language stays en-US rather than being guessed
+    at: an invented tag would leave the chrome in English regardless while making the
+    config claim otherwise.
+    """
+    return QUARTZ_LOCALE_BY_PRIMARY_LANG.get((primary_lang or "").strip().lower(),
+                                             DEFAULT_QUARTZ_LOCALE)
+
+
 _THEME_LINE_RE = re.compile(r"^theme:.*$", re.MULTILINE)
 
 
@@ -692,6 +736,9 @@ def main() -> int:
             quartz_config_content = quartz_config_template.replace("{PAGE_TITLE}", page_title_yaml)
             quartz_config_content = quartz_config_content.replace(
                 "{PAGE_TITLE_SUFFIX}", page_title_suffix_yaml
+            )
+            quartz_config_content = quartz_config_content.replace(
+                "{LOCALE}", quartz_locale_for(args.primary_lang)
             )
             quartz_config_content = _apply_footer_repo_url(quartz_config_content, args.repo_url)
             quartz_config_path = repo_root / "quartz.config.yaml"

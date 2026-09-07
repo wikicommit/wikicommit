@@ -18,7 +18,14 @@ configuration:
   enableSPA: true
   enablePopovers: true
   analytics: null
-  locale: en-US
+  # サイト全体の chrome（サイドバー・検索・グラフ・言語切り替えの見出し）の言語を決める
+  # 値。`/wikicommit-init` が `primary_lang` から導出して書き込む（Issue #771）。
+  # **ページ本文とバナー・出典欄・properties 欄はこの値に従わない** — そちらは各ページの
+  # frontmatter の `lang` を見る（Issue #378）。したがって多言語 Wiki では、翻訳ページの
+  # 本文は読者の言語・その周りの chrome は原文言語、という混在が残る。locale は 1 サイトに
+  # 1 つしか持てず、chrome を描くプラグインのうち 3 つ（explorer / graph / search）は
+  # ページ単位に切り替えられないため、これは設定では解けない。
+  locale: {LOCALE}
   baseUrl: localhost:8080
   ignorePatterns:
     - private

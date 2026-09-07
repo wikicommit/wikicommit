@@ -107,7 +107,7 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
         try:
             content = path.read_text(encoding="utf-8-sig")
         except OSError as e:
-            print(f"WARNING: {path}: ファイルを読み込めませんでした: {e}", file=sys.stderr)
+            print(f"WARNING: {path}: could not be read: {e}", file=sys.stderr)
             continue
         fm, err, body = parse_frontmatter_and_body_text(content)
         if err or not isinstance(fm, dict):

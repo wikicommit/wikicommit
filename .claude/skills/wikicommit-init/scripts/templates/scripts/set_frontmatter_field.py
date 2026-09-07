@@ -151,14 +151,14 @@ def apply_frontmatter_fields(
     kind of detail a copy silently gets wrong.
     """
     if not page_path.is_file():
-        raise FrontmatterFileError(f"{page_path}: ファイルが存在しません")
+        raise FrontmatterFileError(f"{page_path}: file does not exist")
 
     with page_path.open(encoding="utf-8-sig", newline="") as f:
         content = f.read()
 
     m = FRONTMATTER_RE.match(content)
     if not m:
-        raise FrontmatterFileError(f"{page_path}: frontmatter ブロックが見つかりません")
+        raise FrontmatterFileError(f"{page_path}: no frontmatter block found")
 
     yaml_block = m.group(2)
     delimiter = m.group(3)
@@ -193,12 +193,12 @@ def parse_kv(raw: str, flag: str) -> tuple[str, str] | None:
     malformed input, so callers can propagate a normal `return 1` from
     main() instead of exiting mid-parse."""
     if "=" not in raw:
-        print(f"ERROR: {flag} は KEY=VALUE 形式で指定してください: {raw!r}", file=sys.stderr)
+        print(f"ERROR: {flag} must be given as KEY=VALUE: {raw!r}", file=sys.stderr)
         return None
     key, _, value = raw.partition("=")
     key = key.strip()
     if not key:
-        print(f"ERROR: {flag} のキーが空です: {raw!r}", file=sys.stderr)
+        print(f"ERROR: the key of {flag} is empty: {raw!r}", file=sys.stderr)
         return None
     return key, value
 
@@ -223,12 +223,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.sets and not args.unsets:
-        print("ERROR: --set または --unset を1件以上指定してください", file=sys.stderr)
+        print("ERROR: give at least one --set or --unset", file=sys.stderr)
         return 1
 
     unset_keys = [raw.strip() for raw in args.unsets]
     if any(not key for key in unset_keys):
-        print("ERROR: --unset のキーが空です", file=sys.stderr)
+        print("ERROR: the key of --unset is empty", file=sys.stderr)
         return 1
     # --unset だけが KEY 単体を取り、`--set` / `--require` は KEY=VALUE を取る。
     # 兄弟フラグの書式につられて `--unset reviewed_by=""` と書いても、その文字列が
@@ -238,7 +238,7 @@ def main() -> int:
     for key in unset_keys:
         if "=" in key or ":" in key:
             print(
-                f"ERROR: --unset はキー名のみを指定してください（KEY=VALUE 形式ではありません）: {key!r}",
+                f"ERROR: --unset takes a key name only, not KEY=VALUE: {key!r}",
                 file=sys.stderr,
             )
             return 1

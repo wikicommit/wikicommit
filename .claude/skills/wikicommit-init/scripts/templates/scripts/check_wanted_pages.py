@@ -71,7 +71,7 @@ def main() -> int:
         try:
             content = page.read_text(encoding="utf-8-sig")
         except OSError as e:
-            print(f"WARNING: {page}: ファイルを読み込めませんでした: {e}", file=sys.stderr)
+            print(f"WARNING: {page}: could not be read: {e}", file=sys.stderr)
             continue
 
         ref_str = str(page)
@@ -105,9 +105,9 @@ def main() -> int:
             slug_index = build_slug_type_index(ENTITY_DIR)
         other_types = other_types_for_slug(type_name, slug, slug_index)
         if other_types:
-            found = "、".join(f"{t}/{slug}.md" for t in other_types)
+            found = ", ".join(f"{t}/{slug}.md" for t in other_types)
             print(
-                f"TYPE_MISMATCH: {key} は実体なし。同じ slug が {found} に実在"
+                f"TYPE_MISMATCH: {key} has no page, but the same slug exists at {found}"
                 f" (referenced by {len(refs)} pages: {', '.join(refs)})"
             )
             print(f"page: {key}")

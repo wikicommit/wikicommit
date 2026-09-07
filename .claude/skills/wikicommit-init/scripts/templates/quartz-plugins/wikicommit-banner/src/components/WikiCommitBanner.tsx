@@ -154,12 +154,26 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
   // the generator.
   const pageCount = frontmatter?.wikicommit_page_count as number | undefined
   const reviewedCount = frontmatter?.wikicommit_reviewed_count as number | undefined
+  // Issue #769: written only when at least one page carries a standing verdict,
+  // so its absence is "no record" rather than "nothing was checked" — a wiki
+  // generated before review records existed has none, and they are not created
+  // retroactively. Guarded on the type, like the two counts above, because a
+  // stale content/index.md from an earlier build could carry anything.
+  const aiReviewedCount = frontmatter?.wikicommit_ai_reviewed_count as number | undefined
   const siteSummary =
     typeof pageCount === "number" && typeof reviewedCount === "number" ? (
       <div class="wikicommit-site-summary">
         <p class="wikicommit-site-summary__counts">
           {t.siteSummaryPages} <strong>{pageCount}</strong>
           &nbsp;&nbsp;
+          {/* The full-coverage number first, then the sample taken out of it —
+              the same order the overview page uses. */}
+          {typeof aiReviewedCount === "number" ? (
+            <>
+              {t.siteSummaryAiReviewed} <strong>{aiReviewedCount}</strong>
+              &nbsp;&nbsp;
+            </>
+          ) : null}
           {t.siteSummaryReviewed} <strong>{reviewedCount}</strong>
         </p>
         {/* Issue #664: the count alone reads as "nobody cares about this
@@ -170,6 +184,13 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
             not how far along the wiki is. Deliberately not an invitation to
             review — this wiki does not take outside reviewers. */}
         <p class="wikicommit-site-summary__note">{t.siteSummaryReviewNote}</p>
+        {/* Issue #769: a separate note, shown only with the count it explains.
+            Its wording names what the check does *not* cover — stating only
+            what it does would rebuild, facing the other way, the overstatement
+            Issue #740 removed from "read by a person". */}
+        {typeof aiReviewedCount === "number" ? (
+          <p class="wikicommit-site-summary__note">{t.siteSummaryAiReviewNote}</p>
+        ) : null}
       </div>
     ) : null
 
@@ -298,7 +319,7 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
     </span>
   )
 
-  // Who the `reviewed` badge belongs to (Issue #663). review-issue-close-sync.yml
+  // Who the `reviewed` state belongs to (Issue #663). review-issue-close-sync.yml
   // writes this login into frontmatter in the same commit that flips
   // review_status, so the value is here for the same reason generated_by is —
   // this component reads frontmatter and nothing else. Absent on any page
@@ -383,10 +404,18 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
   // (Issue #723's transition table; Issue #722 on completeness).
   //
   // So review adds a line rather than removing the warning, and the markup says
-  // that: same body, same generation line, plus a heading and a reviewer.
-  // The ⚠️ stays pending-only — it belongs to "nobody has read this yet", which
-  // is the part that really does end at review — and the two states are still
-  // told apart by icon, heading and border colour.
+  // that: same heading, same body, same generation line, plus one line saying a
+  // person has read it.
+  //
+  // Issue #774 finished this. The heading used to swap
+  // (`isPending ? t.title : t.titleReviewed`), and a heading that swaps forces
+  // the pending side to say *something* — the only thing left to say there was
+  // "nobody has read this page yet", which is false in front of the person
+  // reading it. It now states a fact true in either state, and the ⚠️ goes with
+  // it: being LLM-written is exactly what the icon cautions about, and that does
+  // not end at review. The two states are told apart by border colour and by the
+  // presence of the read line, neither of which depends on `reviewed_by` being
+  // set — a route B page has no login to record.
   return (
     <>
       {siteSummary}
@@ -395,18 +424,32 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
           isPending ? "wikicommit-banner--pending" : "wikicommit-banner--reviewed"
         }`}
       >
-        {isPending ? <span class="wikicommit-banner__icon">⚠️</span> : null}
+        <span class="wikicommit-banner__icon">⚠️</span>
         <div class="wikicommit-banner__body">
-          <strong>{isPending ? t.title : t.titleReviewed}</strong>
+          <strong>{t.title}</strong>
           <p>{t.body}</p>
           <p>
             {generatedAtLabel} {generatedAt}&nbsp;&nbsp;{generatedByLabel} {generatedBy}
           </p>
           {aiReviewLine}
-          {!isPending && reviewedBy ? (
+          {/* The line review adds. Rendered for every reviewed page, named or
+              not: with the heading no longer swapping, this is what tells the
+              two states apart, so it must not depend on `reviewed_by` (absent
+              on route B pages and on anything reviewed before Issue #663).
+              With a name the `reviewedBy` line states both that a person read
+              it and who; without one the fallback states the first half alone,
+              rather than an empty label or an `unknown` placeholder — a missing
+              reviewer is a normal state, not a gap to fill (Issue #663). */}
+          {!isPending ? (
             <p class="wikicommit-banner__reviewer">
-              {t.reviewedBy}{" "}
-              <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
+              {reviewedBy ? (
+                <>
+                  {t.reviewedBy}{" "}
+                  <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
+                </>
+              ) : (
+                t.readByAPerson
+              )}
             </p>
           ) : null}
           <div class="wikicommit-banner__actions">

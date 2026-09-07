@@ -16,7 +16,16 @@ Runs quality checks against the uncommitted changes under `.wikicommit/` (wiki p
 
 ## Processing Flow
 
-### Step 0: Resolve Default Branch
+### Step 0: Open a Run Record and Resolve Default Branch
+
+```bash
+python .wikicommit/scripts/record_run.py start --skill wikicommit-merge \
+    --model "<the model ID this runtime reports for you>"
+```
+
+Keep the path it prints; Step 10 closes it. A record with a start and no end is what says a run did not finish, and this Skill has more ways to stop partway than any other here — a blocking quality check in Step 3, a PR that never reaches a mergeable state in Step 7, a rate-limited Issue creation in Step 8 — several of which leave a branch and a PR behind with nothing recording that a run was underway (Issue #790). Leaving the record open is that signal, not a failure state to avoid.
+
+Then:
 
 ```bash
 gh repo view --json defaultBranchRef -q .defaultBranchRef.name
@@ -44,7 +53,7 @@ git -c core.quotePath=false status --porcelain -- ".wikicommit/entity/**/*.md" "
 >
 > `-c core.quotePath=false` is applied to every `git status --porcelain` call in this skill (also in Step 2, items 1 and 3). By default, paths containing non-ASCII characters (e.g. Japanese filenames) are quoted and octal-escaped in the output, and naively extracting them as `rest = line[3:]` yields a path string that doesn't actually exist (Issue #115).
 
-If the output is empty → display "No changes to merge" and stop.
+If the output is empty → close the run record (`python .wikicommit/scripts/record_run.py end <the path Step 0 printed>`), display "No changes to merge" and stop. Close it here rather than leaving it open: this is the Skill finding nothing to do and saying so, which is a run that finished, and it is a common enough outcome that leaving the record open would fill `check_run_records.py`'s `INCOMPLETE_RUN:` list with runs that had no problem — diluting the signal it exists to carry (Issue #790).
 
 ### Step 2: Classify Changed Files
 
@@ -343,6 +352,27 @@ If `generated_at`/`generated_by` (`sources`-based and synthesized pages) or `tra
 
 #### Issue Body Template
 
+##### Language of the Issue body
+
+**Render the chosen template in the wiki's `primary_lang`** — `translation.primary_lang` from `.wikicommit/config.yml`, the same value `/wikicommit-init` set. When it is `en`, or when the file is missing, unreadable, or has no `primary_lang`, emit the English template verbatim as before.
+
+The English templates below stay canonical: translate at write time rather than keeping one template per language. Three variants times two languages would double this Skill's instruction area, and a SKILL.md is loaded in full on every invocation.
+
+**Why this Issue is translated when the console output of the distributed scripts and this repository's `CHANGELOG.md` are fixed English** (Issue #773, against Issue #770 / #772): the rule is the same one in all three cases — the language follows the reader. Those two are read by an operator and by an agent, so they are diagnostics and stay in one language. This Issue is read by whoever closes it, which by design (Issue #313) includes someone who only reads the published wiki and has no Claude Code session at all. Every other reader-facing surface already switches (the banner, the sources box, the build-generated pages); the tracking Issue was the one that did not.
+
+**`.github/ISSUE_TEMPLATE/report.md` is not the same case and stays English.** It says why in its own words: there is one of it per repository, so it has no language of its own. A tracking Issue is one per page, and that page has a `lang`, so the same reasoning lands the other way.
+
+**`primary_lang`, not the page's own `lang`.** A tracking Issue follows one page, which makes the page's language the intuitive choice, but the person who reads it is whoever holds write access to close it — a property of the repository, not of the page. On a wiki with `targets`, using the page's `lang` would send that one operator Issues in two languages.
+
+Leave these untranslated wherever they appear:
+
+- The marker line `<!-- wikicommit-page: <page path> -->`. `review-issue-close-sync.yml` matches it exactly, and it is the only part of the body any machine reads.
+- The Issue title (`Review: <Type>/<slug> (<lang>)`). It is an identifier, and listing and searching depend on its shape.
+- Anything anyone is expected to type or look at: command names (`/wikicommit-fix`, `/wikicommit-generate <url>`, `/wikicommit-merge`, `/wikicommit-status`), file paths, frontmatter keys and values (`sources:`, `properties:`, `review_status`, `status: retracted`), and the `wikicommit-review` label.
+- The field values themselves — the page path, the dates, and the model IDs — and the literal `unknown` this step writes in place of a missing one (it stands in a field-value slot, and Step 9's Issues use the same literal).
+
+The section headings and the prose are translated, since they are what the reader is there to read. **This includes the shared "How to Proceed" section**: "insert this verbatim" below means the three variants all get the same text, not that this one section stays English. Leaving it untranslated would hand the reader this change is for — someone closing the Issue with no Claude Code session — the write-access requirement, the warning that a comment asking for a change does not make the change, and the two comment exceptions in a language they may not read, inside a body that is otherwise in their own.
+
 Three variants exist, selected by which provenance field the target page's frontmatter has:
 
 - **`sources`-based pages** (no `translated_from`, no `derived_from`) — a normal `wikicommit-generate` output.
@@ -441,7 +471,7 @@ report link does not make at all; one sentence naming the difference keeps it le
 
 ##### Shared "How to Proceed" section (all variants)
 
-Insert this verbatim into every Issue body, between "## Once You Have Read It" and the marker line:
+Insert this verbatim into every Issue body, between "## Once You Have Read It" and the marker line — "verbatim" meaning identical across all three variants, not exempt from "Language of the Issue body" above; render it in `primary_lang` along with the variant it is inserted into:
 
 ```markdown
 ## How to Proceed
@@ -704,7 +734,16 @@ The marker line is an HTML comment, same as Step 8's — invisible in the Issue 
 
 ### Step 10: Completion Report
 
-Report the following to the user:
+Close the run record first, so its elapsed time covers the whole run:
+
+```bash
+python .wikicommit/scripts/record_run.py end <the path Step 0 printed> \
+    --outcome pr=<PR number> --outcome tracking_issues=<N> --outcome failure_issues=<N>
+```
+
+`--outcome` takes integers, so `pr=<number>` records which PR this run produced. This Skill's counts are deliberately not the same keys as the generating Skills' (Issue #790): it does not write pages, and a shared vocabulary would mean shipping keys that are permanently zero on one side or the other.
+
+Report its path and elapsed time along with the following:
 
 - The bulk update PR number and branch name created in Step 6
 - The list of `<new source files>` included in the bulk update PR from Step 2 item 3 (omit if none)

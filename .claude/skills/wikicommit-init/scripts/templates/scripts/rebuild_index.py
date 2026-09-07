@@ -144,7 +144,7 @@ def rebuild_view_index(lang_dir: Path, lang: str) -> tuple[str, int]:
         if (fm or {}).get("status") == "removed":
             continue
         if not (fm or {}).get("title"):
-            print(f"WARNING: {page}: title フィールドがありません — omitted from index.md")
+            print(f"WARNING: {page}: has no title field — omitted from index.md")
             continue
         entries.append(page.stem)
     entries.sort()
@@ -197,7 +197,7 @@ def rebuild_index(type_dir: Path) -> tuple[str, int] | None:
             continue
         title = (fm or {}).get("title")
         if not title:
-            print(f"WARNING: {page}: title フィールドがありません — omitted from index.md")
+            print(f"WARNING: {page}: has no title field — omitted from index.md")
             continue
         entries.append((page.stem, str(title)))
     entries.sort(key=lambda e: e[0])

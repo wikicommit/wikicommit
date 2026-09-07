@@ -174,15 +174,15 @@ def process_page(raw_path: str) -> str:
 
     if not rel_path.startswith(ACCEPTED_PREFIXES):
         print(
-            f"ERROR: {raw_path}: {ENTITY_DIR.as_posix()}/ または "
-            f"{VIEW_DIR.as_posix()}/ 配下のページを指定してください",
+            f"ERROR: {raw_path}: specify a page under {ENTITY_DIR.as_posix()}/ "
+            f"or {VIEW_DIR.as_posix()}/",
             file=sys.stderr,
         )
         return "error"
 
     page_path = Path(rel_path)
     if not page_path.is_file():
-        print(f"ERROR: {raw_path}: ファイルが存在しません", file=sys.stderr)
+        print(f"ERROR: {raw_path}: file does not exist", file=sys.stderr)
         return "error"
 
     if page_path.name == "index.md":
@@ -198,7 +198,7 @@ def process_page(raw_path: str) -> str:
     try:
         work_text = page_path.read_text(encoding="utf-8-sig")
     except OSError as e:
-        print(f"ERROR: {raw_path}: ファイルを読み込めませんでした: {e}", file=sys.stderr)
+        print(f"ERROR: {raw_path}: could not be read: {e}", file=sys.stderr)
         return "error"
 
     work_fm, err, work_body = parse_frontmatter_and_body_text(work_text)
@@ -221,8 +221,8 @@ def process_page(raw_path: str) -> str:
         # 誤って戻す代償は追跡 Issue が 1 件増えることだが、誤って維持する
         # 代償は人間が読んでいない文章に署名が残ることである。
         print(
-            f"WARNING: {raw_path}: HEAD 版の frontmatter を読めませんでした"
-            f"（{head_err}）。内容が変わったものとして扱います",
+            f"WARNING: {raw_path}: the HEAD frontmatter could not be read "
+            f"({head_err}); treating the content as changed",
             file=sys.stderr,
         )
         changed = ["(HEAD unparsable)"]
@@ -255,7 +255,7 @@ def process_page(raw_path: str) -> str:
 def main(argv: list[str]) -> int:
     if not argv:
         print(
-            "ERROR: ページを 1 件以上指定してください: "
+            "ERROR: specify at least one page: "
             "reset_review_on_content_change.py <page>...",
             file=sys.stderr,
         )

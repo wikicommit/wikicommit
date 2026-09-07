@@ -41,7 +41,7 @@ def _parse_page(path: Path) -> tuple[dict, set[str]]:
     try:
         content = path.read_text(encoding="utf-8-sig")
     except OSError as e:
-        print(f"WARNING: {path}: ファイルを読み込めませんでした: {e}", file=sys.stderr)
+        print(f"WARNING: {path}: could not be read: {e}", file=sys.stderr)
         return {}, set()
     fm, err = parse_frontmatter_text(content)
     if err:

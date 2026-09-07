@@ -89,7 +89,7 @@ def _create_index_table(con: sqlite3.Connection) -> bool:
 
 def build_index() -> int:
     if not ENTITY_DIR.exists() and not VIEW_DIR.exists():
-        print(f"ERROR: {ENTITY_DIR} が存在しません")
+        print(f"ERROR: {ENTITY_DIR} does not exist")
         return 1
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -100,8 +100,8 @@ def build_index() -> int:
             con.close()
             DB_PATH.unlink(missing_ok=True)
             print(
-                "ERROR: SQLite の FTS5 trigram トークナイザが利用できません "
-                f"(sqlite3.sqlite_version={sqlite3.sqlite_version}, SQLite 3.34+ が必要・3.38+ 推奨)"
+                "ERROR: the SQLite FTS5 trigram tokenizer is unavailable "
+                f"(sqlite3.sqlite_version={sqlite3.sqlite_version}; SQLite 3.34+ required, 3.38+ recommended)"
             )
             return 1
 
@@ -316,7 +316,7 @@ def query_index(
         try:
             rows = con.execute(sql, params).fetchall()
         except (sqlite3.OperationalError, sqlite3.DatabaseError) as e:
-            print(f"ERROR: 検索クエリの実行に失敗しました: {e}")
+            print(f"ERROR: the search query failed: {e}")
             return 1
 
         for path, title, type_, page_lang, review_status, snip in rows:
@@ -362,10 +362,10 @@ def main() -> int:
     # the same words (flat AND vs. grouped OR/AND), so silently combining them
     # would search for something the caller did not ask for.
     if args.query is not None and args.expand:
-        print("ERROR: 位置引数の query と --expand は同時に指定できません（どちらか一方を使ってください）")
+        print("ERROR: the positional query and --expand cannot both be given; use one or the other")
         return 1
     if args.query is None and not args.expand:
-        print("ERROR: 検索語がありません。位置引数の query か --expand のいずれかを指定してください")
+        print("ERROR: no search term; give either the positional query or --expand")
         return 1
 
     return query_index(args.query, args.lang, args.limit, expand=args.expand)

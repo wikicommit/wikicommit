@@ -110,7 +110,7 @@ def main() -> int:
     for fp in target_files:
         fp = Path(fp)
         if not fp.exists():
-            print(f"ERROR: {fp}: ファイルが存在しません", file=sys.stderr)
+            print(f"ERROR: {fp}: file does not exist", file=sys.stderr)
             total_errors += 1
             continue
 
@@ -122,7 +122,7 @@ def main() -> int:
         try:
             content = fp.read_text(encoding="utf-8-sig")
         except OSError as e:
-            print(f"ERROR: {rel_str}: ファイルを読み込めませんでした: {e}")
+            print(f"ERROR: {rel_str}: could not be read: {e}")
             total_errors += 1
             continue
 
@@ -133,12 +133,12 @@ def main() -> int:
             # validate_frontmatter.py already reports a malformed frontmatter
             # block as a blocking error; this script only cares about body
             # content, so it just skips a page it cannot split cleanly.
-            print(f"WARNING: {rel_str}: frontmatter を解析できないため本文チェックをスキップします ({err})")
+            print(f"WARNING: {rel_str}: frontmatter could not be parsed, so the body check was skipped ({err})")
             continue
 
         for tag in find_raw_html(body):
             snippet = tag if len(tag) <= 120 else tag[:117] + "..."
-            msg = f"生 HTML タグが検出されました: {snippet}"
+            msg = f"raw HTML tag detected: {snippet}"
             print(f"ERROR: {rel_str}: {msg}")
             if IN_GITHUB_ACTIONS:
                 emit_github_annotation("error", rel_str, msg)

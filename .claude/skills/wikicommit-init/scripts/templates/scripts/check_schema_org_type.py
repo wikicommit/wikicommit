@@ -158,19 +158,19 @@ def _print_range(prop_name: str, properties: dict, types: dict) -> None:
 
     if entity_types and not datatype_types:
         print(
-            f"RANGE: {prop_name} はエンティティ型のみを参照します（候補: {', '.join(entity_types)}）。"
-            "値が独立したページとして存在する（べき）エンティティを指す場合は [[Type/slug]] 形式で書いてください"
+            f"RANGE: {prop_name} references entity types only (candidates: {', '.join(entity_types)}). "
+            "Write the value as [[Type/slug]] when it names an entity that exists (or should exist) as its own page"
         )
     elif entity_types and datatype_types:
         print(
-            f"RANGE: {prop_name} はエンティティ型とデータ型が混在します"
-            f"（エンティティ候補: {', '.join(entity_types)} / データ型候補: {', '.join(datatype_types)}）。"
-            "値が独立したページとして存在する（べき）エンティティを指す場合のみ [[Type/slug]] 形式で書いてください"
+            f"RANGE: {prop_name} mixes entity types and data types "
+            f"(entity candidates: {', '.join(entity_types)} / data type candidates: {', '.join(datatype_types)}). "
+            "Write the value as [[Type/slug]] only when it names an entity that exists (or should exist) as its own page"
         )
     else:
         print(
-            f"RANGE: {prop_name} はデータ型のみを参照します（候補: {', '.join(datatype_types)}）。"
-            "WikiLink 化は不要です"
+            f"RANGE: {prop_name} references data types only (candidates: {', '.join(datatype_types)}). "
+            "No WikiLink is needed"
         )
 
 
@@ -202,7 +202,7 @@ def main() -> int:
 
     index, err = load_or_build_index()
     if index is None:
-        print(f"ERROR: Schema.org 語彙の取得に失敗しました: {err}")
+        print(f"ERROR: the Schema.org vocabulary could not be loaded: {err}")
         return 1
 
     types = index["types"]
@@ -216,16 +216,16 @@ def main() -> int:
 
     if not args.type:
         if args.list_properties:
-            print("ERROR: --list-properties には --type の指定が必要です")
+            print("ERROR: --list-properties requires --type")
             return 1
-        print("ERROR: --type / --list-types / --list-installed-hierarchy のいずれかを指定してください")
+        print("ERROR: specify one of --type / --list-types / --list-installed-hierarchy")
         return 1
 
     type_name = strip_prefix(args.type)
 
     if args.list_properties:
         if type_name not in types:
-            print(f"ERROR: schema:{type_name} は Schema.org 語彙に存在しません")
+            print(f"ERROR: schema:{type_name} does not exist in the Schema.org vocabulary")
             return 1
         return _list_properties(type_name, types, properties)
 
@@ -235,9 +235,9 @@ def main() -> int:
     type_exists = type_name in types
     checked += 1
     if type_exists:
-        print(f"OK: schema:{type_name} は Schema.org 語彙に存在します")
+        print(f"OK: schema:{type_name} exists in the Schema.org vocabulary")
     else:
-        print(f"ERROR: schema:{type_name} は Schema.org 語彙に存在しません")
+        print(f"ERROR: schema:{type_name} does not exist in the Schema.org vocabulary")
         errors += 1
 
     ancestry = ancestors(type_name, types) if type_exists else set()
@@ -247,20 +247,20 @@ def main() -> int:
         checked += 1
 
         if not type_exists:
-            print(f"ERROR: schema:{type_name} が存在しないため {prop_name} の所属を検証できません")
+            print(f"ERROR: schema:{type_name} does not exist, so the domain of {prop_name} cannot be verified")
             errors += 1
             continue
 
         in_domain = property_in_domain(prop_name, ancestry, properties)
         if in_domain is None:
-            print(f"ERROR: {prop_name} は Schema.org 語彙に存在しません")
+            print(f"ERROR: {prop_name} does not exist in the Schema.org vocabulary")
             errors += 1
         elif in_domain:
-            print(f"OK: {prop_name} は schema:{type_name}（またはその祖先型）に属します")
+            print(f"OK: {prop_name} belongs to schema:{type_name} (or one of its ancestor types)")
             if args.show_range:
                 _print_range(prop_name, properties, types)
         else:
-            print(f"ERROR: {prop_name} は schema:{type_name} およびその祖先型のいずれにも属しません")
+            print(f"ERROR: {prop_name} belongs to neither schema:{type_name} nor any of its ancestor types")
             errors += 1
 
     print(f"SUMMARY: type=schema:{type_name}, checked={checked}, errors={errors}")

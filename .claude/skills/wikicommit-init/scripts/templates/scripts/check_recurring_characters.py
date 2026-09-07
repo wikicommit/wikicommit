@@ -175,8 +175,8 @@ def main() -> int:
         if len(works) < RECURRENCE_THRESHOLD:
             continue
         print(
-            f"RECURRING: \"{display_name[key]}\" が {len(works)} 件の作品にプレーンテキストで"
-            f"登場しますが Person ページがありません ({', '.join(works)})"
+            f"RECURRING: \"{display_name[key]}\" appears as plain text in {len(works)} work(s) "
+            f"but has no Person page ({', '.join(works)})"
         )
         recurring_count += 1
 

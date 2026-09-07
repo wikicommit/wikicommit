@@ -15,6 +15,9 @@ node_modules/
 # WikiCommit search index (derived data, rebuilt from .wikicommit/entity/)
 .wikicommit/.cache/
 
+# WikiCommit run records (one file per Skill run; rotated by record_run.py)
+.wikicommit/run/
+
 # OS
 .DS_Store
 Thumbs.db

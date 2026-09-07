@@ -46,7 +46,7 @@ If the target file does not exist, display an error and stop.
    python .wikicommit/scripts/validate_frontmatter.py <page>
    ```
 
-2. Extract the names of missing fields from the `ERROR:` lines in the output (lines containing the literal string `必須フィールドがありません`, which is what `validate_frontmatter.py` currently prints for a missing required field; format-violation errors are not subject to completion proposals — they are only presented to the user in step 4).
+2. Extract the names of missing fields from the `ERROR:` lines in the output (lines containing the literal string `required field is missing`, which is what `validate_frontmatter.py` currently prints for a missing required field; format-violation errors are not subject to completion proposals — they are only presented to the user in step 4).
 3. Determine the corresponding schema file from the target page's `type`:
    - `schema:Person` → `.wikicommit/schema/Person.md`
    - `schema:custom/Decision` → `.wikicommit/schema/custom/Decision.md`

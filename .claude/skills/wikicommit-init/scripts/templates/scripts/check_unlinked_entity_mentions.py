@@ -108,7 +108,7 @@ def plain_string_values(raw: object) -> list[str]:
 def main() -> int:
     index, err = load_or_build_index()
     if index is None:
-        print(f"WARNING: Schema.org 語彙の取得に失敗したため、このチェックをスキップします: {err}")
+        print(f"WARNING: the Schema.org vocabulary could not be loaded, so this check was skipped: {err}")
         print("SUMMARY: unlinked=0")
         return 0
     types, properties = index["types"], index["properties"]
@@ -176,8 +176,8 @@ def main() -> int:
                     continue
                 total += 1
                 print(
-                    f"UNLINKED: {page}: properties.{prop_name} の \"{value}\" は"
-                    f" {'、'.join(matches)} として実在しますが WikiLink 化されていません"
+                    f"UNLINKED: {page}: properties.{prop_name} \"{value}\" exists as"
+                    f" {', '.join(matches)} but is not written as a WikiLink"
                 )
                 print(f"page: {page}")
 

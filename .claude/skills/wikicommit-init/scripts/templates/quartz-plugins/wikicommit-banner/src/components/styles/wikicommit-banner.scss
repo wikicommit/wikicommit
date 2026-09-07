@@ -1,6 +1,11 @@
 // Shared shell. Both states use it since Issue #739 made the banner state that
-// a page is LLM-written whether or not a person has read it; only the colours
-// below tell them apart, together with the icon and the heading.
+// a page is LLM-written whether or not a person has read it. Since Issue #774
+// the icon and the heading are identical in the two states as well, so what is
+// left to tell them apart is the modifier colour below and the presence of the
+// read line (`.wikicommit-banner__reviewer`) — two signals, not three. Do not
+// collapse the two modifiers into the base class on the strength of "the icon
+// and the heading still say which state this is": they no longer do, and the
+// read line would be left carrying it alone.
 .wikicommit-banner {
   border: 1px solid var(--gray);
   padding: 1rem 1.25rem;
@@ -11,9 +16,11 @@
   align-items: flex-start;
 }
 
-// The warning colouring belongs to "nobody has read this yet", not to "written
-// by a model" — which is why it moved from the base class onto this modifier
-// once the reviewed state started using the same shell.
+// The colouring belongs to the not-yet-read state, not to "written by a model"
+// — which is why it moved from the base class onto this modifier once the
+// reviewed state started using the same shell. The ⚠️ went the other way in
+// Issue #774: the icon marks the heading (LLM-written), which review does not
+// end, so it is rendered in both states while this colouring is not.
 .wikicommit-banner--pending {
   border-left: 4px solid #f5a623;
   background: #fffbf0;
@@ -25,7 +32,9 @@
 }
 
 // Deliberately quiet: a reviewed page is still stating a caveat, so it must not
-// look like a success notice — and not like a warning either.
+// look like a success notice. It carries the same ⚠️ as a pending page
+// (Issue #774), so the difference it draws is one of emphasis — a neutral
+// frame around the same warning — rather than the absence of one.
 .wikicommit-banner--reviewed {
   border-left: 4px solid var(--gray);
   background: var(--light);

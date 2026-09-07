@@ -228,33 +228,33 @@ def main() -> int:
     page_path = (repo_root / args.page).resolve()
 
     if not page_path.is_relative_to(repo_root):
-        print(f"ERROR: {args.page}: リポジトリ外のパスです", file=sys.stderr)
+        print(f"ERROR: {args.page}: path is outside the repository", file=sys.stderr)
         return 1
 
     if not page_path.is_file():
-        print(f"ERROR: {args.page}: ファイルが存在しません", file=sys.stderr)
+        print(f"ERROR: {args.page}: file does not exist", file=sys.stderr)
         return 1
 
     fm = parse_frontmatter(page_path)
     if fm.get("status") == "removed":
-        print(f"ERROR: {args.page}: 既に status: removed です", file=sys.stderr)
+        print(f"ERROR: {args.page}: already has status: removed", file=sys.stderr)
         return 1
 
     if args.reason == "merged" and not args.merged_into:
-        print("ERROR: --reason merged の場合 --merged-into が必須です", file=sys.stderr)
+        print("ERROR: --merged-into is required when --reason merged is given", file=sys.stderr)
         return 1
 
     merged_into = args.merged_into
     if merged_into:
         if not (repo_root / merged_into).is_file():
-            print(f"ERROR: --merged-into で指定されたファイルが存在しません: {merged_into}", file=sys.stderr)
+            print(f"ERROR: the file given to --merged-into does not exist: {merged_into}", file=sys.stderr)
             return 1
 
     if args.today:
         try:
             today = datetime.date.fromisoformat(args.today).isoformat()
         except ValueError:
-            print(f"ERROR: --today: 不正な日付形式です: {args.today}", file=sys.stderr)
+            print(f"ERROR: --today: invalid date format: {args.today}", file=sys.stderr)
             return 1
     else:
         today = datetime.date.today().isoformat()
@@ -266,7 +266,7 @@ def main() -> int:
     try:
         apply_removed_fields_to_file(page_path, fields)
     except ValueError:
-        print(f"ERROR: {args.page}: frontmatter が見つかりません", file=sys.stderr)
+        print(f"ERROR: {args.page}: no frontmatter found", file=sys.stderr)
         return 1
 
     removed_paths = [page_path]
