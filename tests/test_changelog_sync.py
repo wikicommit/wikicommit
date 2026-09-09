@@ -20,6 +20,13 @@ Issue #577 はこのファイルを「利用者が前回インストールした
 `CHANGELOG.md` で、日本語版は `README_ja.md` と同じ「読みやすさのための便宜」に留まり、
 機械が読む対象ではないためドリフトを許容する — 同期を強制すると、配布されず誰も
 機械的に読まないファイルのために全エントリの逐語訳が必須になる。
+
+Issue #801 で `CHANGELOG.md` は「最新の 1 版 + 過去版の索引」になり、確定した過去の版は
+`changelog/<version>.md` へ移った。**この同期は対を列挙して持たず走査で行う** — 版を
+1 つ足すたびにファイルが 1 つ増えるため、リストで持つとリリースのたびに更新箇所が
+1 つ増え、更新漏れがそのまま「そのファイルだけ Skill ツリー側が古い」として残る
+（このテストが防ごうとしている状態そのものである）。構造そのもの（索引と実ファイルの
+一致・確定版が高々 1 つ）は `tests/test_changelog_structure.py` が見る。
 """
 
 from pathlib import Path
@@ -30,6 +37,12 @@ REPO_ROOT = Path(__file__).parent.parent
 ROOT_CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 JA_CHANGELOG = REPO_ROOT / "CHANGELOG_ja.md"
 SKILL_CHANGELOG = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "CHANGELOG.md"
+ROOT_ARCHIVE = REPO_ROOT / "changelog"
+SKILL_ARCHIVE = SKILL_CHANGELOG.parent / "changelog"
+
+
+def _archive_names(directory: Path) -> set[str]:
+    return {p.name for p in directory.glob("*.md")} if directory.is_dir() else set()
 
 
 def test_both_copies_exist():
@@ -49,12 +62,37 @@ def test_the_two_copies_are_identical():
     )
 
 
-def test_the_header_names_all_four_places_to_update():
-    """版を上げるときの更新箇所は 3 つから 4 つになった。数だけ直して項目を足し忘れると、
-    Skill ツリー側のコピーが黙って古いまま残る。"""
+def test_the_header_names_all_five_places_to_update():
+    """版を上げるときの更新箇所は 3 つ → 4 つ → 5 つと増えてきた。数だけ直して項目を
+    足し忘れると、Skill ツリー側のコピーが黙って古いまま残る（4 つ目）か、回転が
+    起こらず CHANGELOG.md が全履歴を抱えたままになる（5 つ目。Issue #801）。"""
     text = ROOT_CHANGELOG.read_text(encoding="utf-8")
-    assert "update all four of these together" in text
+    assert "update all five of these together" in text
     assert ".claude/skills/wikicommit-init/CHANGELOG.md" in text
+    assert "changelog/<version>.md" in text
+
+
+def test_the_archive_exists_in_both_places():
+    """`install.sh` も `npx skills add` も Skill ディレクトリ配下しか運ばないので、
+    ルートにしか無い過去版は利用者に一度も届かない — 索引だけが届いて、その行が指す先が
+    存在しない状態になる。"""
+    assert ROOT_ARCHIVE.is_dir(), ROOT_ARCHIVE
+    assert SKILL_ARCHIVE.is_dir(), SKILL_ARCHIVE
+
+
+def test_every_archived_version_is_identical_in_both_places():
+    """対を列挙せず走査する。版が増えるたびに対が 1 つ増えるため、リストで持つと
+    リリースのたびに更新箇所が増え、漏れがそのまま「そのファイルだけ古い」として残る。"""
+    root_names, skill_names = _archive_names(ROOT_ARCHIVE), _archive_names(SKILL_ARCHIVE)
+    assert root_names == skill_names, (
+        "changelog/ の中身がルートと Skill ツリーで食い違っています: "
+        f"ルートのみ={sorted(root_names - skill_names)}, "
+        f"Skill ツリーのみ={sorted(skill_names - root_names)}"
+    )
+    assert root_names, "changelog/ が空です（過去版が 1 つも無い）"
+    for name in sorted(root_names):
+        assert (ROOT_ARCHIVE / name).read_text(encoding="utf-8") == \
+            (SKILL_ARCHIVE / name).read_text(encoding="utf-8"), f"changelog/{name} が食い違っています"
 
 
 def test_the_header_forbids_development_repository_paths():
@@ -102,21 +140,23 @@ def test_the_canonical_changelog_is_written_in_english():
     import re
 
     cjk = re.compile(r"[\u3040-\u30ff\u4e00-\u9fff]")
-    text = ROOT_CHANGELOG.read_text(encoding="utf-8")
 
-    # ヘッダー（最初の見出しまで）＋各トップレベル項目を、それぞれ 1 つの塊として見る。
-    blocks = re.split(r"\n(?=- )", text)
     offenders = []
-    for block in blocks:
-        lines = [line for line in block.splitlines() if line.strip()]
-        if not lines:
-            continue
-        japanese = [line for line in lines if cjk.search(line)]
-        if len(japanese) > len(lines) * 0.5:
-            offenders.append((lines[0][:80], len(japanese), len(lines)))
+    # 過去版も同じ検査を掛ける（Issue #801）。既存エントリは英語なので回帰防止として
+    # 働く一方、外すと分割した瞬間に 1392 行中 1147 行がこの検査の外へ出る。
+    for path in [ROOT_CHANGELOG, *sorted(ROOT_ARCHIVE.glob("*.md"))]:
+        text = path.read_text(encoding="utf-8")
+        # ヘッダー（最初の見出しまで）＋各トップレベル項目を、それぞれ 1 つの塊として見る。
+        for block in re.split(r"\n(?=- )", text):
+            lines = [line for line in block.splitlines() if line.strip()]
+            if not lines:
+                continue
+            japanese = [line for line in lines if cjk.search(line)]
+            if len(japanese) > len(lines) * 0.5:
+                offenders.append((path.name, lines[0][:80], len(japanese), len(lines)))
 
     assert not offenders, (
-        "CHANGELOG.md に日本語で書かれた箇所があります。正本は英語です "
+        "CHANGELOG に日本語で書かれた箇所があります。正本は英語です "
         "（日本語版は CHANGELOG_ja.md）: "
-        + "; ".join(f"{head!r} ({jp}/{total} 行)" for head, jp, total in offenders)
+        + "; ".join(f"{name}: {head!r} ({jp}/{total} 行)" for name, head, jp, total in offenders)
     )

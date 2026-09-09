@@ -29,9 +29,14 @@ Claude Code's plugin machinery, which cannot see this file.
 pattern used by `tests/test_skill_distribution_list_sync.py`.
 
 This version is unrelated to `pyproject.toml`'s `version`, which declares the
-development repository's own Python package for its test/lint dependencies and
-is never distributed. The two currently hold the same string by coincidence of
-both starting at 0.1.0; nothing keeps them equal and nothing should.
+development repository's own Python package for its test/lint dependencies.
+Nothing keeps them equal and nothing should: `pyproject.toml` sets
+`packages = []` so it is not a distributed package, nothing in the repository
+reads its `version`, and what bumps *this* version — a change to a type template
+or a page generation rule — has no bearing on a test/lint dependency
+declaration. They have in fact diverged (this file has moved on while
+`pyproject.toml` stayed at its initial number), which is the expected outcome
+rather than drift to repair.
 
 Consumers:
 - `init.py` — stamps `wikicommit_version` into `.wikicommit/config.yml`
@@ -52,7 +57,7 @@ Skills read it by running this file directly:
 # and a new `CHANGELOG.md` entry; the CHANGELOG entry is what tells a user
 # which pages are worth regenerating, since the version alone is coarser than
 # the per-type template changes it stands for.
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 
 def get_version() -> str:

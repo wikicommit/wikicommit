@@ -25,8 +25,7 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 実際に運用している Wiki です。
 
-- **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — Claude Code や GitHub Copilot など AI 駆動開発ツールに関するナレッジベース。
-- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — ジョヴァンニ・ボッカッチョ『デカメロン』（14世紀のイタリア語原文）を英語・日本語に翻訳した多言語 Wiki。
+- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — ジョヴァンニ・ボッカッチョ『デカメロン』（14 世紀イタリア）についての Wiki。イタリア語で執筆し、英語・日本語へ翻訳しています。
 
 ## 目次
 
@@ -40,7 +39,9 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
     - [Step 3: マージ後レビュー](#step-3-マージ後レビュー)
   - [技術スタック](#技術スタック)
   - [Requirements](#requirements)
+    - [コンテキスト長](#コンテキスト長)
   - [インストール](#インストール)
+  - [変更履歴](#変更履歴)
   - [Skills 一覧](#skills-一覧)
   - [設計ドキュメント](#設計ドキュメント)
   - [Contributing](#contributing)
@@ -75,13 +76,12 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 ### Step 3: マージ後レビュー
 
-レビュー追跡 Issue（`wikicommit-review` ラベル。`review_status: pending` のページごとに自動生成）を確認：
+**機械は全ページを、人は一部を読みます。** 各ページは生成時にその元になった文書と照合され、WikiLink はマージ前に検証されます — つまり人の読みはそのどちらのやり直しでもありません。人が足すのは自動チェックが届かないもの、すなわち実在の人物・組織に対して書きすぎていないか、読者自身の知識と食い違っていないか、別のバッチで書かれた他のページと矛盾していないか、です。全ページを読むことは目標ではありません（`/wikicommit-status` が特に見る価値のあるページを挙げます）。
 
-- ページ内容がソースと整合しているか
-- WikiLink（`[[Type/slug]]`）が正しいか
+レビュー追跡 Issue（`wikicommit-review` ラベル。`review_status: pending` のページごとに自動生成）を確認します。Close が述べるのは 2 つです — このページの知識が人に渡ったこと、そして読んでいて明らかに変だと思う点は無かったこと。内容が正しいことの保証ではありません。
 
-- **問題なし** → Issue を Close するだけで完了。`review-issue-close-sync.yml` が検知して `review_status: reviewed` に更新・自動マージされる
-- **修正が必要** → まず人間が Issue に指摘内容をコメントとして残す。`/wikicommit-fix <issue-url>` が Issue の本文・コメントを踏まえた修正案を AI が提示し、人間の確認後 `/wikicommit-merge` で修正を反映してから Issue を Close する
+- **引っかかる点は無かった** → Issue を Close するだけで完了。`review-issue-close-sync.yml` が検知して `review_status: reviewed` に更新・自動マージされる
+- **引っかかる点があった** → コメントに書いて Issue は開けたままにする（修正は読んだ人が行う必要はありません）。`/wikicommit-fix <issue-url>` が Issue の本文・コメントを踏まえた修正案を AI が提示し、人間の確認後 `/wikicommit-merge` で修正を反映してから Issue を Close する
 - **Issue を経由せず、人間が直接ページを作成・編集した場合** → `/wikicommit-review <page>` で frontmatter 補完・ソース整合性チェックを行いレビュー完了を記録した上で `/wikicommit-merge`
 
 `main` へのマージをトリガーに Quartz v5 による静的 Wiki ビルドと GitHub Pages への自動デプロイが行われます。
@@ -106,6 +106,33 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 - [lychee](https://github.com/lycheeverse/lychee)（外部リンク検証用。未インストール時は `/wikicommit-init` が自動インストールを試みる）
 
 > Skills は [agentskills.io](https://agentskills.io) 標準準拠の SKILL.md 群のため、Codex など他の対応コーディングエージェントでも原理的には動作するはずですが、現時点で動作検証を行っているのは Claude Code のみです。
+
+### コンテキスト長
+
+WikiCommit は LLM 推論を提供しません — ユーザーが自身の Claude Code / GitHub Copilot / API 契約を持ち込みます。その契約にはコンテキスト長の要件があり、それを決めるのは `/wikicommit-generate` です。ソースを 1 件も読む前に固定のオーバーヘッドを積み、その上に各ソースの抽出テキストが乗ります。
+
+```text
+必要なコンテキスト ≈ 51K（固定） + 約15K × 1回で処理するソース件数
+
+  固定分の内訳:
+    wikicommit-generate/SKILL.md（全文が読み込まれる）  約47K
+    Schema.org 型名一覧（--list-type-names）            約3.4K
+```
+
+| コンテキスト長 | 1 回あたりのソース件数 |
+|---|---|
+| 200K | 5 件まで（ガード自身の上限） |
+| 1M | 5 件まで（同じ上限） |
+
+`/wikicommit-generate` は 1 回に 5 件を超えるソースを処理する前に確認を求めるため、どちらの行も新しい制限ではなく既存のガードそのものです。固定分はかつて約 84K でした — Schema.org の全 933 型を**説明文ごと**毎回読み込んでいたためです。現在は名前だけを読み込み、実際に検討する数件についてのみ説明文を引きます。以前は 200K がガード自身の上限を下回っていましたが、現在は下回りません。
+
+**「15K/件」は見積もりであり、自分で実測できます。** `/wikicommit-generate` は `.wikicommit/source/` 配下の各ソース管理ファイルに `extracted_tokens` を書き込むため、1 度実行すれば `grep extracted_tokens .wikicommit/source/**/*.md` で、実際に投入しているソースについての実測値が得られます。15K は日本語 Wikipedia 記事 1 本の値で、短いブログ記事ならはるかに小さく、PDF レポートならはるかに大きくなります。
+
+**200K の出どころ。** Claude Code では Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 の既定が 200K、Sonnet 5 と Fable 5・5.1 はネイティブ 1M です。Opus を 1M にするには `[1m]` サフィックス（`/model opus[1m]`）か環境変数が必要で、利用可否はプランに依存します — Max / Team / Enterprise は自動、**Pro は usage credits が必要**、API 従量は利用可です。いずれも 2026-09 時点の値であり、最新は [Claude Code のモデル設定ドキュメント](https://code.claude.com/docs/en/model-config)を参照してください。
+
+**超えるとどうなるか。** Claude Code は失敗せず会話を圧縮し、その後で各 Skill の**先頭 5,000 トークンだけ**を再添付します — `wikicommit-generate/SKILL.md` ではおよそ先頭 110 行、つまり Step 0 までです。Pass 1〜4 はその外側にあります。実行は手順を持たないまま続き、出力は一見正常に見えるため、上の表は目安ではなく実際の上限として扱ってください。
+
+`/wikicommit-collect` と `/wikicommit-init` も型名一覧を読み込みますが、どちらも generate のようにソースごとのテキストを累積しないため、同じ総量には達しません。
 
 ## インストール
 
@@ -154,6 +181,10 @@ bash /tmp/wikicommit/install.sh
 /wikicommit-init
 ```
 
+## 変更履歴
+
+WikiCommit 自身（Skills とそれが展開するテンプレート木）の版ごとの変更は [CHANGELOG.md](CHANGELOG.md) にあります。配布リポジトリは開発履歴を引き継がないため、最後にインストールした版から何が変わったかを知る手段はこのファイルだけであり、`/wikicommit-update` が同期時に読む先でもあります。
+
 ## Skills 一覧
 
 | # | カテゴリ | コマンド | 説明 |
@@ -183,7 +214,7 @@ bash /tmp/wikicommit/install.sh
 
 ## Contributing
 
-開発フロー（テスト・Lint の実行方法、`Issues/` 草案 → 登録の流れ、PR の出し方）は [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+設計記録の読み方 — ここに何が公開されているか、`Issue #NNN` が何を指すか、本文が参照するパスのうちどれがこのリポジトリに含まれないか — は [docs/README.md](docs/README.md) にあります。テストの実行方法、本文の多くが日本語で書かれている理由、開発リポジトリの外で skip されるテストについては [tests/README.md](tests/README.md) を参照してください。
 
 ## License
 

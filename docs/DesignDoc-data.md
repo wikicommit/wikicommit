@@ -167,7 +167,9 @@ schema:
 >
 > `git tag` を版の担い手にしない理由は 3 層構造（開発リポジトリ → `git archive` による配布リポジトリ → ユーザーの wiki リポジトリ）にある: 配布リポジトリは開発履歴を引き継がない単一コミットの積み重ねであるため、タグは配布側に別途手で打つ必要があり、開発側の版と独立に管理することになる（片方だけ更新するズレが構造的に起こりうる）。一方 `plugin.json` は `git archive` のホワイトリストに含まれており、開発リポジトリで編集すれば配布側へ自動的に運ばれる。Claude Code の版フォールバック順序（`plugin.json` → marketplace エントリ → git tag → commit SHA）でも `plugin.json` が最優先でありタグは参照すらされないため、`plugin.json` に一本化すればタグは不要になる。
 >
-> `pyproject.toml` の `version` とは無関係の別物（あちらは開発リポジトリ自身の Python パッケージ宣言であり配布されない）。現時点でたまたま同じ `0.1.0` だが、揃え続ける規約は置かない。
+> `pyproject.toml` の `version` とは無関係の別物（あちらは開発リポジトリ自身の Python パッケージ宣言。**Issue #788 以降は公開もされている** — `tests/` を動かすのに要るため）。揃え続ける規約は置かない。理由は 3 つで、いずれも版が動いても成り立つ: `packages = []` であり配布される Python パッケージではない、`version` の消費者がリポジトリに 1 つも無い（`importlib.metadata` / `pkg_resources` / `tomllib` のいずれも grep で 0 件）、そして版を上げる契機（型テンプレート・ページ生成ルールの変更）とあのファイルが宣言するもの（テスト・lint の依存）が無関係である。
+>
+> **そして実際に乖離した。** `pyproject.toml` は `0.1.0` のまま、`_version.py` / `plugin.json` は `0.4.0` へ進んでいる（2026-09-09 時点）。**これは直すべきドリフトではなく、上の決定が想定どおりに働いた結果である** — この節はかつて「現時点でたまたま同じ `0.1.0` だが」と書いており、同じ理由づけが `_version.py` と `tests/test_version_sync.py` にもあったが、一致が消えた時点でその 3 箇所は前半が偽・後半だけが残る形になっていた（Issue #799）。乖離が現実になった後でも成り立つ上の 3 つの理由に書き直してある。あわせて `pyproject.toml` 自身にも同じ趣旨のコメントを置いた — 矛盾に当たる場所（ルート直下の短いファイルの 2〜3 行目が `CHANGELOG.md` の `## [0.4.0]` の隣に並ぶ）と、説明のある場所が一致していないことが、この Issue が起票された経緯そのものだったため。
 >
 > **既存リポジトリへの遡及付与は行わない**。`init.py` は `--no-overwrite` 時に `config.yml` を wholesale でスキップするため、既に init 済みのリポジトリには刻印されない。本ドキュメント群で繰り返し採られている「新旧混在を許容する」方針に従い、`wikicommit_version` の欠如は「この機能追加より前に作られた」ことを意味するものとして扱う。
 >
@@ -231,7 +233,7 @@ schema:
 
 <!-- -->
 
-> **`theme` 駆動の Schema.org 標準型提案ステップは廃止済み（Issue #404。旧 Issue #286 の巻き戻し）→ より保守的な形で限定復活（Issue #490）**: `theme` に非空文字列を入力した場合、`wikicommit-init` は以前、続けて軽量な Schema.org 標準型の提案ステップを実行していた（Issue #286）。`check_schema_org_type.py --list-types`（Issue #285）で取得した Schema.org 型名+説明文一覧を `theme` の一文と照らし、基本6型（Person/Place/Organization/Event/HowTo/DefinedTerm）以外に有用そうな標準型があれば Enter ベースで承認/スキップを確認し、承認された型のみ `.wikicommit/schema/<Type>.md` を新規追加する仕組みだった。しかし `theme` 一文だけを根拠とする低確信度の提案であり、0件提案（何も提案しない）が設計上の想定される通常の結果だったため、大半のケースで「何も提案されないためだけの追加ステップ」が `wikicommit-init` フローに挟まっていた。同じ型提案の機能は、実際のソース文書を根拠にその場で判断する `wikicommit-generate` Pass 2b（Issue #315。`docs/DesignDoc-data.md` §5.4・`docs/DesignDoc-skills.md` §11.6）としてより高精度な形で既に存在していたため、`wikicommit-init` 側のステップを削除し型提案を Pass 2b に一本化した。
+> **`theme` 駆動の Schema.org 標準型提案ステップは廃止済み（Issue #404。旧 Issue #286 の巻き戻し）→ より保守的な形で限定復活（Issue #490）**: `theme` に非空文字列を入力した場合、`wikicommit-init` は以前、続けて軽量な Schema.org 標準型の提案ステップを実行していた（Issue #286）。`check_schema_org_type.py --list-type-names`（Issue #285。当初は `--list-types` で説明文も併せて取得していたが、Issue #798 で型名の一覧と候補型の説明文〈`--describe`〉の 2 段階に分けた）で取得した Schema.org 型名一覧を `theme` の一文と照らし、基本6型（Person/Place/Organization/Event/HowTo/DefinedTerm）以外に有用そうな標準型があれば Enter ベースで承認/スキップを確認し、承認された型のみ `.wikicommit/schema/<Type>.md` を新規追加する仕組みだった。しかし `theme` 一文だけを根拠とする低確信度の提案であり、0件提案（何も提案しない）が設計上の想定される通常の結果だったため、大半のケースで「何も提案されないためだけの追加ステップ」が `wikicommit-init` フローに挟まっていた。同じ型提案の機能は、実際のソース文書を根拠にその場で判断する `wikicommit-generate` Pass 2b（Issue #315。`docs/DesignDoc-data.md` §5.4・`docs/DesignDoc-skills.md` §11.6）としてより高精度な形で既に存在していたため、`wikicommit-init` 側のステップを削除し型提案を Pass 2b に一本化した。
 >
 > しかし `dev/pilot-ai-driven-dev-wiki-round3.md` の実行で、`/wikicommit-collect` を経由せず `/wikicommit-generate <url>` で直接ソース登録する運用（CLAUDE.md の主経路）では型提案の「入口」自体が存在せず、型の不足が Pass 2b まで気づかれず、しかも非対話実行（サブエージェント経由）だと Enter 確認が取れずデフォルト却下されて消えてしまうことが判明した（この非対話デフォルト却下自体は、後に Issue #507 が Pass 2b 自身に踏み込んで部分的に解消した — §5.4 の該当コールアウト参照）。そこで Issue #490 は、旧 Issue #286 よりさらに保守的な判定基準（「theme 文から自信を持って断定できる場合のみ」提案する。例: 「AI駆動開発ツールのナレッジベース」というテーマであれば `schema:SoftwareApplication` が必要になることは theme 文だけからでも断定できる）に限定した上でこのステップを復活させた。旧実装との相違点は判定バーの厳格さのみで、仕組み自体（`check_schema_org_type.py` による検証・Enter ベース承認・追加のみ可の書き込み例外）は同一。
 >

@@ -34,7 +34,7 @@ Then read `.wikicommit/config.yml` and obtain `translation.primary_lang` and `tr
 
 - **Argument given** → single-page mode (Step 2).
   - `--lang <target>` given → target language list = `[<target>]`.
-  - `--lang` omitted → target language list = `translation.targets`. If `targets` is empty, stop with: "対象言語がありません。`--lang <lang>` を指定するか `config.yml` の `targets` を設定してください。"
+  - `--lang` omitted → target language list = `translation.targets`. If `targets` is empty, stop with: "No target language. Pass `--lang <lang>`, or set `targets` in `config.yml`." (fixed English — read by the operator, so Issue #770's rule applies)
 - **No argument** → batch mode (Step 3).
 
 ### Step 2: Single-Page Mode
@@ -42,7 +42,7 @@ Then read `.wikicommit/config.yml` and obtain `translation.primary_lang` and `tr
 For each target language in the target list determined in Step 1:
 
 1. Skip the target if it equals the source page's own `lang` (translating a page into its own language is a no-op).
-2. Translate unconditionally — whether or not a translation already exists for this target, always regenerate the full translation from the current source content (same behavior as the Phase 4 pipeline: "新規・更新いずれも無条件に全文再翻訳").
+2. Translate unconditionally — whether or not a translation already exists for this target, always regenerate the full translation from the current source content (same behavior as the Phase 4 pipeline: a full re-translation every time, whether the target is new or already exists).
 3. Run the per-page translation procedure in Step 4.
 
 Single-page mode has no work list to reorder, so it cannot settle the glossary first the way batch mode does (Step 3) — it uses whatever target-language `DefinedTerm` pages already exist, via the same Step 4 step 2b table. Translating a wiki's `DefinedTerm` pages before its other pages is therefore worth doing by hand here, or by running batch mode instead (Issue #554).

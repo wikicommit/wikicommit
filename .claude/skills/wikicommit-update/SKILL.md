@@ -185,7 +185,14 @@ The body should carry: the version range, what was refreshed, what the user decl
 
 ### Step 9: Report
 
-Read `.claude/skills/wikicommit-init/CHANGELOG.md` and take **only the entries between the two versions from Step 1** — the file is the whole history, and pasting all of it is the same as reporting nothing. When Step 1 found no stamp, say the range is unknown and summarize rather than reproducing everything.
+**Read only the versions between the two from Step 1** (Issue #801). The changelog is one file per release, so this is a matter of opening the right files rather than filtering a large one:
+
+- `.claude/skills/wikicommit-init/CHANGELOG.md` holds `[Unreleased]`, the latest released version, and an index of every earlier one
+- `.claude/skills/wikicommit-init/changelog/<version>.md` holds each earlier version, one per file
+
+Take the index, pick the versions above the synced one, and open those files and no others. A user one version behind should read one entry — do not read the whole set and then filter, which costs the same as before the split. Pasting everything you read is likewise the same as reporting nothing.
+
+When Step 1 found no stamp the range is unknown: say so, and summarize from the latest version and the index rather than opening every file.
 
 Then count the pages worth rebuilding:
 

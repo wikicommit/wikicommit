@@ -299,6 +299,72 @@ def existing_lang_targets(
     return result
 
 
+# The four *_LABELS dicts below (root index, source type, source page,
+# overview) ship two languages: Japanese here, English in the DEFAULT_*
+# fallback beside each one. **That is not a claim that two is the right
+# number** — no record exists of anyone deciding on these two. What has been
+# decided is the other half: when to add a third.
+#
+# **Adding one is blocked on verification, not on translation.** A translation
+# can be produced for any of these strings at any time. What this project has
+# no way to do is check that the result says what the English says, and the
+# cost of getting that wrong is not uniform across the keys:
+#
+#   - Most keys are plain labels ("Sources", "Type", "Total pages"). A clumsy
+#     translation is clumsy and nothing more.
+#   - A minority carry claims — counts_note, ai_counts_note, licensing,
+#     reviewed_note, retracted_notice. Those sentences say what this wiki does
+#     and does not vouch for, what its sources permit, and why a source was
+#     dropped. Several of them exist specifically to keep this wiki from
+#     overstating what it knows.
+#
+# **The second kind fails invisibly.** Left in English it fails visibly: a
+# reader who cannot read it knows they cannot. Mistranslated slightly stronger,
+# it reads fine and the reader believes something this wiki deliberately does
+# not say — and nobody here can see that it happened.
+#
+# **A partial language is not an option today.** These dicts are read with
+# bracket access, so one missing key raises KeyError and fails the build. That
+# is a guarantee, not a defect — a language is complete or absent, never
+# half-rendered. The one exception is SOURCE_TYPE_LABELS, whose values are
+# looked up with .get(source_type, source_type) and degrade to the bare type
+# string instead.
+#
+# **To add a language**, add it to all four dicts in the same change as the
+# translations themselves. There is no registry to keep in step (they are keyed
+# by primary_lang directly, unlike the Quartz plugins' LANG_TO_LOCALE), but
+# they are four independent dicts, so adding to one and not the rest is silent:
+# that wiki gets a translated root index and English source pages.
+#
+# **A language with no entry renders in English**, per surface, via the
+# DEFAULT_* dict.
+#
+# **The published pages do not say that the fallback happened** (Issue #825).
+# The question was whether a reader should be told, rather than being shown
+# English as if it were the site's language, and the answer is no. Three
+# reasons, in the order they decide it:
+#
+#   - **A notice would not restore what was lost.** The English string *is* the
+#     canonical wording — the other language's entry would be a translation of
+#     it — so a reader who can read English has already received the claim, and
+#     learning that Italian was intended changes nothing about what this wiki
+#     vouches for. A reader who cannot read English cannot read the notice
+#     either.
+#   - **A language-independent marker only restates what is already visible.**
+#     A flag or an `(en)` tag says "this is English", which is exactly what
+#     English text in an Italian page already says. That was the point of
+#     leaving it in English: the failure is visible without help.
+#   - **It would be a standing notice on every surface of every page**, one
+#     nobody can act on — a reader cannot supply the missing labels. That is the
+#     shape a reader stops seeing, and it would buy the fade at the cost of
+#     weight on the banner, where two Issues already hold the line against
+#     adding any.
+#
+# **The operator is told instead, once**, by `init.py` when they choose a
+# primary_lang this project has no labels for. They are the one person who can
+# act on it, and telling them costs the published pages nothing. Do not read
+# this as "the fallback is fine and needs no disclosure" — it is disclosed, to
+# the party that can do something with it.
 ROOT_INDEX_LABELS = {
     "ja": {
         "top": "Wiki トップ",
@@ -309,20 +375,30 @@ ROOT_INDEX_LABELS = {
         # leading separator included, lives in the label because the word order
         # differs per language and there is no separator that reads right in
         # both (Japanese wants none before a full-width parenthesis).
-        "counts": "（{pages} ページ / 人が読んだ {reviewed}）",
+        "counts": "（{pages} ページ / 人が読んで確認 {reviewed}）",
         # Japanese does not inflect for number, so this is the same string. It
         # is spelled out rather than defaulted so that every label set answers
         # the singular case explicitly.
-        "counts_one": "（{pages} ページ / 人が読んだ {reviewed}）",
+        "counts_one": "（{pages} ページ / 人が読んで確認 {reviewed}）",
         # Issue #730 carries Issue #664's note across: without the two
         # frontmatter fields the banner renders nothing, and the note would
         # vanish with it. A bare "reviewed 0" reads as "nobody cares about this
         # project", which is the opposite of the honesty the count is there for.
         # Kept consistent with the overview page's wording, since the root index
         # links straight to it.
+        # Issue #800: says that the human number is partial *by design*, which is
+        # what turns it from a backlog into a stated design. Saying only "not a
+        # guarantee of correctness" left the reader nothing to draw from the
+        # number at all. Sampling vocabulary stays out (Issue #769): whether
+        # RISKY: actually selects well is still unmeasured, and the word alone
+        # would imply a formal sampling design exists.
         "counts_note": "ページは LLM が生成した時点で公開されます。"
-                       "「人が読んだ」はそのうち人が最後まで読んだ件数であり、"
-                       "Wiki の完成度でも、内容の正しさの保証でもありません。",
+                       "出典との照合は機械が行い、"
+                       "「人が読んで確認」はそのうち人が最後まで読み、"
+                       "明らかな問題を見つけなかった件数です。"
+                       "人による確認は設計上一部のページのみであり、"
+                       "この数字が総数に達することは目指していません。"
+                       "網羅的な品質保証でもありません。",
         # Issue #769: the same line with the AI count in it. Kept as separate
         # templates rather than assembled from fragments because word order and
         # the parenthesis style differ per language, which is why `counts`
@@ -330,8 +406,8 @@ ROOT_INDEX_LABELS = {
         # The AI count comes first: it is the full-coverage number, and
         # "read by a person" is the sample taken out of it — the same order the
         # overview page uses.
-        "counts_ai": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んだ {reviewed}）",
-        "counts_ai_one": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んだ {reviewed}）",
+        "counts_ai": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んで確認 {reviewed}）",
+        "counts_ai_one": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んで確認 {reviewed}）",
         # Issue #769: a separate key, emitted only when some page actually
         # carries a standing verdict. Worded like the overview page's
         # `ai_reviewed_note`: it names what the check does *not* cover, because
@@ -350,16 +426,19 @@ DEFAULT_ROOT_INDEX_LABELS = {
     "select": "Select language",
     "sources": "Sources",
     "overview": "Overview",
-    "counts": " ({pages} pages / {reviewed} read by a person)",
-    "counts_one": " ({pages} page / {reviewed} read by a person)",
-    "counts_note": "Pages are published as soon as an LLM generates them. "
-                   "\"Read by a person\" is how many of them someone has since read "
-                   "all the way through — not how much of the wiki is finished, and "
-                   "not a guarantee that anything is correct.",
+    "counts": " ({pages} pages / {reviewed} read and checked by a person)",
+    "counts_one": " ({pages} page / {reviewed} read and checked by a person)",
+    "counts_note": "Pages are published as soon as an LLM generates them. The check "
+                   "against sources is run by machine; \"read and checked "
+                   "by a person\" is how many pages someone has since read all the "
+                   "way through without anything obviously wrong standing out. Only "
+                   "some pages are read by a person, by design — this number is not "
+                   "meant to reach the total, and it is not a complete quality "
+                   "guarantee.",
     "counts_ai": " ({pages} pages / {ai_reviewed} checked against sources / "
-                 "{reviewed} read by a person)",
+                 "{reviewed} read and checked by a person)",
     "counts_ai_one": " ({pages} page / {ai_reviewed} checked against sources / "
-                     "{reviewed} read by a person)",
+                     "{reviewed} read and checked by a person)",
     "ai_counts_note": "\"Checked against sources\" is how many pages were compared "
                       "against their own sources when they were generated. That check "
                       "covers agreement with those sources and nothing else — not "
@@ -729,6 +808,9 @@ def relative_link(current_lang: str, current_type: str, target_lang: str, target
 # (a human assertion with no backing management file to mirror here).
 SOURCE_TYPE_ORDER = ["path", "url", "wikicommit"]
 
+# Two languages, and the note above ROOT_INDEX_LABELS says why adding a
+# third is gated on verification rather than translation. All four
+# *_LABELS dicts have to gain the language in the same change.
 SOURCE_TYPE_LABELS = {
     "ja": {"path": "ファイル", "url": "URL", "wikicommit": "WikiCommit連携"},
 }
@@ -1282,19 +1364,29 @@ def generate_source_pages(
 # /wikicommit-status, since "today" would freeze at build time and quietly go
 # stale until the next deploy.
 
+# Two languages, and the note above ROOT_INDEX_LABELS says why adding a
+# third is gated on verification rather than translation. All four
+# *_LABELS dicts have to gain the language in the same change.
 OVERVIEW_LABELS = {
     "ja": {
         "title": "Wiki 全体の俯瞰",
         "totals": "全体の数字",
         "total_pages": "総ページ数",
-        "reviewed": "人が読んだページ",
+        "reviewed": "人が読んで確認",
         # Issue #664: the bare count reads as "nobody cares about this project"
         # to a first-time reader. The number stays — hiding it would give up the
         # honesty it was added for — and this line says what it counts.
+        # Issue #800: says the human number is partial *by design*, matching the
+        # root index's `counts_note` word for word in substance. Sampling
+        # vocabulary stays out (Issue #769).
         "reviewed_note": (
             "ページは LLM が生成した時点で公開されます。"
-            "「人が読んだページ」はそのうち人が最後まで読んだ件数です — "
-            "Wiki の完成度でも、内容の正しさの保証でもありません。"
+            "出典との照合は機械が行い、"
+            "「人が読んで確認」はそのうち人が最後まで読み、"
+            "明らかな問題を見つけなかった件数です。"
+            "人による確認は設計上一部のページのみであり、"
+            "この数字が総数に達することは目指していません。"
+            "網羅的な品質保証でもありません。"
         ),
         # Issue #751: a separate key from `reviewed`, never a reuse of it.
         # Issue #664, and then Issue #740, deliberately made that one name the
@@ -1322,7 +1414,7 @@ OVERVIEW_LABELS = {
         "by_type": "型別の傾向",
         "col_type": "型",
         "col_pages": "ページ数",
-        "col_reviewed": "人が読んだ",
+        "col_reviewed": "人が読んで確認",
         "col_avg_backlinks": "平均被リンク数",
         "col_orphans": "孤立",
         "gaps": "知識の不足",
@@ -1350,11 +1442,14 @@ DEFAULT_OVERVIEW_LABELS = {
     "title": "Overview",
     "totals": "At a glance",
     "total_pages": "Total pages",
-    "reviewed": "Read by a person",
+    "reviewed": "Read and checked by a person",
     "reviewed_note": (
-        "Pages are published as soon as an LLM generates them. \"Read by a person\" is "
-        "how many a person has since read all the way through — not how much of the wiki "
-        "is finished, and not a guarantee that anything is correct."
+        "Pages are published as soon as an LLM generates them. The check against sources "
+        "is run by machine; \"read and checked by a person\" is how many pages "
+        "someone has since read all the way through without anything obviously "
+        "wrong standing out. Only some pages are read by a person, by design — this "
+        "number is not meant to reach the total, and it is not a complete quality "
+        "guarantee."
     ),
     "ai_reviewed": "Checked against sources (AI)",
     "ai_reviewed_note": (
@@ -1374,7 +1469,7 @@ DEFAULT_OVERVIEW_LABELS = {
     "by_type": "By type",
     "col_type": "Type",
     "col_pages": "Pages",
-    "col_reviewed": "Read",
+    "col_reviewed": "Read + checked",
     "col_avg_backlinks": "Avg. backlinks",
     "col_orphans": "Orphans",
     "gaps": "Gaps",

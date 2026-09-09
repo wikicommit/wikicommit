@@ -53,6 +53,20 @@ python .wikicommit/scripts/record_run.py start --skill wikicommit-generate \
 
 **Keep the path it prints** — every exit from this Skill below closes that same record, and the closing call needs it. Nothing else in this repository is keyed on a run: if this one dies partway, half the management files sit at `pending` and half at `generated`, which is indistinguishable from a queue that simply has not reached them, and the two halt paths below change no file at all. A record with a start and no end is exactly the signal that a run did not finish, so **an unclosed record is not a failure state to avoid** — it is the answer. Report the record's path in the Completion Notice.
 
+**Stamp a checkpoint at the entry to each pass, once per source (Issue #797)**:
+
+```bash
+python .wikicommit/scripts/record_run.py checkpoint <the path start printed> \
+    --pass <pass1-extract|pass2b-type|pass2c-entities|pass3-generate|pass4-review> \
+    --source "<the source management file this pass is running for>"
+```
+
+`ended_at` says whether this run finished; the stamps say **where it got to and what it skipped**. Both questions have cost this project real audits: the two halt paths below stop without changing a single file, so the record is their only trace and without a stamp that trace has no position — and separately, a step at the tail of this flow silently not running is a failure this Skill has shipped three times (Issues #406, #452, #474), each found afterwards by a human reading a published repository. A pass with no stamp is a pass that did not run, and `/wikicommit-status` reports it.
+
+Under `--regenerate` only `pass1-extract`, `pass3-generate` and `pass4-review` are stamped — that mode takes a page rather than a source, so Pass 2 does not run, and `--source` carries the page being rebuilt. Pass 2a takes no stamp: it runs unconditionally in the same breath as Pass 1's extraction and has no branch of its own, so a stamp there would locate nothing Pass 1's does not.
+
+**Known limitation, until this file is split by pass**: only the instruction for the *first* stamp is reliably still in context late in a long run. The stamping instructions for Pass 2 onward sit past this file's opening, and context compaction can drop them while the run continues — so on a compacted run the later stamps go missing whether or not the passes ran, and `MISSING_PASS:` reports a pass that in fact executed. The error falls on the safe side (a pass that really was skipped is never reported as having run), and it costs a glance at a run that was fine.
+
 With `--regenerate`, skip Step 0 entirely and go to the Regeneration Mode section below — that mode takes a page, not a source, and registers nothing.
 
 ### Step 0: Source Registration (only when argument is given)
@@ -139,6 +153,8 @@ Then apply the same count guard the rest of this Skill uses: if more than 5 page
 
 #### Per-page procedure
 
+Stamp checkpoints as in the normal flow, but only the three passes this mode runs — `pass1-extract` before step 1, `pass3-generate` before step 2, `pass4-review` before step 3 — with `--source` naming the page being rebuilt. `record_run.py` reads `--regenerate` off the record's own `args` and narrows what it expects to those three, so 2b and 2c are not reported as skipped here (Issue #797).
+
 1. **Re-acquire every source** listed in the page's `sources:` (a source whose management file is `status: retracted` is the one exception — it is dropped rather than fetched; see below), using Pass 1's extraction rules for that `source.type` unchanged (including its guards) — but **only the acquisition half of Pass 1**: none of Pass 1's writes to the source management file happen here (no `--write-hash`, no `extracted_tokens`, no `status: failed`/`## Failure Reason`), per step 5 below. `--write-hash` in particular would overwrite the management file's `source.hash` with freshly-fetched content while its `status` stays `generated`, so a later `/wikicommit-generate <url>` would re-fetch, see `HASH_MATCH:` and report "No changes" — the source change this mode just refused to fold in would be lost for good. If a guard blocks a source (known-JS-shell domain, missing fetch capability, low density), skip the page and report it rather than marking the source failed; the source's own management file is not this operation's to change. Two deltas:
    - **Prefer the cache, keyed on the page's own hash.** For a `type: url`/`wikicommit` source, first locate that source's source management file by scanning `.wikicommit/source/url/` for the one whose `source.url` equals this `sources[].url` — do **not** re-derive the filename from the URL, which does not match management files registered under the older flat or percent-encoded naming (Issue #191/#192/#572); `.claude/skills/wikicommit-ask/scripts/resolve_source_cache_path.py` already performs exactly this scan and prints the resulting cache path. `<scratch-path>` is that management file's path relative to `.wikicommit/source/url/` without the `.md` extension, as defined in Pass 1. If `.wikicommit/.cache/ingest-fetch/<scratch-path>.md` exists and its SHA-256 equals the page's own recorded `sources[].hash`, use it and do not fetch. The point of this mode is to apply new generation rules, not to pick up source changes; a network round trip per source would be pure cost. Compare against the **page's** hash directly (e.g. `sha256sum`), not with `add_source.py --check-hash`: that command compares the scratch file against the *management file's* current `source.hash`, which can have moved on since this page was generated (the source was re-registered and re-fetched afterwards), so a `HASH_MATCH:` there would hand the rebuild newer content than the page records — and the next bullet's guard, which only fires after a real fetch, would never run. When there is no matching management file, no scratch file (a clean checkout, a different machine), or the scratch file's hash differs from the page's, fetch normally and let the next bullet decide.
    - **A changed or unavailable source disqualifies the page.** After a real fetch — or, for `type: path`, after hashing the file on disk — compare against the page's recorded `sources[].hash`. On a mismatch, do **not** rebuild: report the page, name the source, and point the user at `/wikicommit-generate <path|url>`, which is the existing `outdated` path for exactly this. Folding a source change into a rules refresh would put two unrelated changes into one page under one review, and would leave the source's own management file describing a state that no longer holds. Treat a source that cannot be re-acquired at all the same way — a `type: path` file no longer on disk, or a fetch that errors out: skip the whole page and report it, rather than rebuilding from the sources that did resolve. Rebuilding on a subset would silently drop whatever the page drew from the missing source, which is the same loss the `manual`-source exclusion above exists to prevent.
@@ -169,6 +185,8 @@ python .wikicommit/scripts/record_run.py end <the path start printed> \
 This mode does not reach the Completion Notice, which is where the closing call otherwise lives, so without this line every regeneration run — including one that did exactly what was asked — would be reported by `check_run_records.py` as a run that did not finish, and the elapsed time the record exists to hold would never be written (Issue #790).
 
 ### Pass 1: Text Extraction
+
+**Stamp `--pass pass1-extract` before extracting each source** (see the run-record block above). This is the stamp that survives compaction, so it is the one that always marks how far a run got.
 
 1. Collect source management files from `.wikicommit/source/` whose `status` is `pending` or `outdated`, plus those with `status: partial` **and a non-empty `failed_pages`** (Issue #567):
    - **`status: retracted` is never collected** (Issue #737), and this needs no extra rule: the condition above is an allowlist, and `retracted` is not on it. Say it explicitly anyway, because a later edit that widens this list would silently put a withdrawn source back into circulation. The argument branch below does not reach one either — Step 0 stops on `RETRACTED:` before Pass 1 begins, so "the user named this source, so process it whatever its state" never applies to a retraction.
@@ -319,9 +337,11 @@ As a concrete restatement of the same test (Issue #479): does the source have a 
 
 #### Pass 2b: Type Necessity Judgment (Issue #315)
 
+**Stamp `--pass pass2b-type` on entry**, with `--source` naming this source's management file.
+
 Before extracting entities, decide whether the source content calls for a Schema.org type that isn't already in `installed schema/`. This runs **once per source** (not once per entity) and is grounded in the Pass 2a summary — the same "read the summary, judge against the full Schema.org type list" pattern `wikicommit-init`'s theme-driven suggestion (Issue #286, since removed by Issue #404) used, except here the evidence is the actual source content rather than a single free-text `theme` sentence, so this judgment is comparatively high-confidence.
 
-1. Ensure the shared Schema.org vocabulary cache is available (lazily built on first use): `python .wikicommit/scripts/check_schema_org_type.py --list-types`. Run this once per `/wikicommit-generate` invocation (not once per source), same as before. Non-zero exit (vocabulary fetch failed) → skip Pass 2b entirely for every source this run and proceed straight to Pass 2c with only `installed schema/` types available; do not block or fail the run over this.
+1. Load the Schema.org type names (this also builds the shared vocabulary cache lazily on first use): `python .wikicommit/scripts/check_schema_org_type.py --list-type-names`. Run this once per `/wikicommit-generate` invocation (not once per source), same as before. This prints the 933 type names without their descriptions -- stage one of type recall (Issue #798); step 2 below picks candidates from it and reads only those descriptions. Non-zero exit (vocabulary fetch failed) → skip Pass 2b entirely for every source this run and proceed straight to Pass 2c with only `installed schema/` types available; do not block or fail the run over this.
 
    **Also determine, once per invocation (not once per candidate — Issue #507)**: is this run interactive
    (a live human can actually answer an Enter prompt right now) or non-interactive/subagent-driven (no
@@ -333,9 +353,25 @@ Before extracting entities, decide whether the source content calls for a Schema
    re-deriving it per candidate risks the judgment flipping mid-run (one candidate shown a real prompt,
    another silently auto-approved/declined) and the Completion Notice misrepresenting what actually
    happened. Step 3 below branches on this stored determination rather than re-judging it.
-2. Using the `--list-types` output and the Pass 2a summary, judge whether one or more Schema.org standard types — beyond what's already in `installed schema/` — would fit this source's content meaningfully better than any installed type (not merely "also plausible": a clearer semantic fit, where more of the source's concrete details map onto that type's actual properties). Skip any candidate type that already has a file in `.wikicommit/schema/`, including one just added by an earlier source **in this same run** (scan the directory on disk, same reasoning as the existing-pages scan in Pass 2c below) — never propose a type twice. Zero candidates is an expected common outcome, not a fallback; do not force a candidate to justify running this step. **This includes the source document itself (Issue #475)** when Pass 2a flagged it as a source-entity candidate: judge a type for it the same way as for any other candidate (e.g. `schema:Report` for a whitepaper, `schema:Legislation` for a piece of legislation — not `schema:ScholarlyArticle`/`NewsArticle`/`BlogPosting`/`ShortStory`/`Book`, which already ship in `installed schema/` by default since Issue #479 and so are resolved directly in Pass 2c without ever reaching this step). Note that the source management file's `schema:` hint (Pass 2c context list below) describes the source's primary discussed *subject* (e.g. `schema:Person` for a biography) — it is not evidence about what the source *document itself* is, so it does not carry over to this judgment; treat the source-entity's type purely on its own content-fit merits, independent of whatever hint applies to the entities discussed within the source.
+2. Using the `--list-type-names` output and the Pass 2a summary, judge whether one or more Schema.org standard types — beyond what's already in `installed schema/` — would fit this source's content meaningfully better than any installed type (not merely "also plausible": a clearer semantic fit, where more of the source's concrete details map onto that type's actual properties). Skip any candidate type that already has a file in `.wikicommit/schema/`, including one just added by an earlier source **in this same run** (scan the directory on disk, same reasoning as the existing-pages scan in Pass 2c below) — never propose a type twice. Zero candidates is an expected common outcome, not a fallback; do not force a candidate to justify running this step. **This includes the source document itself (Issue #475)** when Pass 2a flagged it as a source-entity candidate: judge a type for it the same way as for any other candidate (e.g. `schema:Report` for a whitepaper, `schema:Legislation` for a piece of legislation — not `schema:ScholarlyArticle`/`NewsArticle`/`BlogPosting`/`ShortStory`/`Book`, which already ship in `installed schema/` by default since Issue #479 and so are resolved directly in Pass 2c without ever reaching this step). Note that the source management file's `schema:` hint (Pass 2c context list below) describes the source's primary discussed *subject* (e.g. `schema:Person` for a biography) — it is not evidence about what the source *document itself* is, so it does not carry over to this judgment; treat the source-entity's type purely on its own content-fit merits, independent of whatever hint applies to the entities discussed within the source.
 
    **Named-entity pattern (Issue #447)**: apply extra scrutiny when a candidate entity is a concrete, named subject — a specific software product, research dataset/benchmark, creative work, standard, etc. — rather than an abstract term, concept, or methodology. `DefinedTerm` is broad enough to technically represent almost anything with a name, which can make it look like a safe default and suppress a proposal that would otherwise pass the bar above. For this pattern specifically, the fact that `DefinedTerm` could technically represent the entity is **not** by itself a reason to skip proposing a more specific standard type (e.g. `SoftwareApplication` for a named software product, `Dataset` for a named benchmark). This does not relax the threshold for abstract terms/concepts/methodologies (e.g. a named approach like "vibe coding" with no more specific standard type) — those should still default to zero candidates as before.
+
+   **Then confirm the candidates against the vocabulary before going further** (stage two, Issue #798):
+
+   ```bash
+   python .wikicommit/scripts/check_schema_org_type.py --describe \
+     "$(cat <<'EOF'
+   <Candidate1>
+   EOF
+   )" \
+     "$(cat <<'EOF'
+   <Candidate2>
+   EOF
+   )"
+   ```
+
+   Each candidate name goes through its own quote-delimited heredoc, for the same reason step 4's `--property` values do — these are names this step itself just proposed, not values an earlier script already verified. Names alone are enough to bring a type to mind, but not always enough to be sure what it means — read the descriptions of the handful you picked and drop any whose actual definition does not fit. A name that comes back as `ERROR:` was invented rather than recalled; drop it. Call this again if you want to look at more names.
 3. For each candidate, branch on the interactive/non-interactive determination made once, for the whole
    run, in step 1 above:
 
@@ -452,6 +488,8 @@ Before extracting entities, decide whether the source content calls for a Schema
 
 #### Pass 2c: Entity Extraction (LLM → JSON)
 
+**Stamp `--pass pass2c-entities` on entry**, with `--source` naming this source's management file.
+
 Ask the LLM to analyze the extracted text and return **only** the following JSON (no Markdown code block wrapper):
 
 ```json
@@ -546,6 +584,7 @@ Ask the LLM to analyze the extracted text and return **only** the following JSON
 }
 ```
 
+<!-- skill-language-exception: verbatim source text quoted to illustrate the multi-deadline expires_at rule -->
 The last example illustrates two things at once: `expires_at` (the source text states multiple deadlines for different disbursement schedules — "8月支給分は7月1日、12月支給分は11月1日、4月支給分は3月1日" — so `2026-07-01`, the earliest of the three, was chosen per the multi-deadline rule below, while the full breakdown still goes into the page body as usual) and the outcome of a Pass 2b approval: this entity is generated directly as `schema:GovernmentService`, the type approved and added to `.wikicommit/schema/` moments earlier in Pass 2b for this exact source, rather than falling back to the nearest already-installed type. Note what that entity is — the allowance scheme itself: who qualifies, what it pays, on what schedule. The ordered steps a resident performs to *apply* for it are a different subject, and if the same source sets them out they are a second entity of a different type, per the deference and one-source-many-types rules below. Do not read this example as `GovernmentService` being the right answer and `HowTo` the wrong one for a single page.
 
 The `kilimanjaro-coffee` example illustrates `coverage_gap_note` (Issue #284): the source text states the coffee's growing altitude, but `.wikicommit/schema/DefinedTerm.md`'s `properties:` block has no field for it, so the LLM records the gap in one sentence instead of silently dropping it or inventing a frontmatter field.
@@ -600,13 +639,15 @@ Rules:
   Nothing here reaches back. Turning the switch on does not remove pages that already exist, because `--regenerate` does not run this pass — say so in the Completion Notice below, and point at `/wikicommit-remove` (`removed_reason: gdpr` where that applies) as the way to take one down.
 - Set `expires_at` to a concrete `YYYY-MM-DD` date only when the source text explicitly states a calendar date after which the entity's content is expected to be stale — an application deadline, a fiscal-year-bound validity period, a stated expiration date, etc. (Issue #279 — this field previously went unused because Pass 2 never surfaced source-stated dates as a candidate.) Otherwise leave it `null`; never guess or infer a date that is not written in the source (e.g. do not translate a vague "来年度まで" into a specific date), and never derive it from unrelated context like the source's publication date. If the source states several distinct dates that could each plausibly apply to the entity (e.g. different deadlines per sub-case, as in the `GovernmentService` example above), set `expires_at` to the **earliest** of them — `expires_at` exists to prompt a re-check by the review process (`check_expires.py`), and it is safer to flag content for re-review too early than too late; the full breakdown of all the dates still belongs in the page body, which this field does not replace.
 - Set `coverage_gap_note` (Issue #284) to a **single sentence** when the source text contains a concrete, domain-specific attribute for this entity (e.g. target age range, required tools, jurisdiction) that has no corresponding field in the entity's type schema's `properties:` block. If an entity has multiple such gaps, summarize them all in one sentence (do not use an array — follow the same single-string design as `exclude_note`). This applies only to `create`/`update` entities (never `exclude` or `ambiguous` ones). This is evidence-gathering only: never write to `.wikicommit/schema/` and never invent a new frontmatter field to hold the value — the gap information still belongs in the page body as usual, unaffected by this note. Leave `coverage_gap_note` `null` when nothing is missing, which is expected to be the common case. When non-null, write it in `<primary_lang>` — the same language as `summary` (Issue #314; same reasoning as `exclude_note` above).
-- After obtaining the JSON, write its `summary` field into the source management file's `## Summary` section: create the section (`## Summary` heading followed by the text) if it does not already exist, or overwrite its existing contents if it does. If one or more entities have a non-null `coverage_gap_note`, append them to the same `## Summary` write, one sentence per entity (e.g. `"「キリマンジャロコーヒー」: 産地の標高（1,600〜2,000m）の記載があったが DefinedTerm.md の properties フィールドに受け皿がないため本文にのみ記載"`) — this is the same write, not a separate step, so it must land in the same overwrite as `summary`. Since `exclude_note`/`coverage_gap_note` are already required to be in `<primary_lang>` (same as `summary`, see above), this write never needs to translate anything to make the section consistent — do not translate at write time either. **Never modify a `## User Notes` section** if present — that section is hand-written by a human and must be preserved verbatim.
+- After obtaining the JSON, write its `summary` field into the source management file's `## Summary` section: create the section (`## Summary` heading followed by the text) if it does not already exist, or overwrite its existing contents if it does. If one or more entities have a non-null `coverage_gap_note`, append them to the same `## Summary` write, one sentence per entity (e.g. `"「キリマンジャロコーヒー」: 産地の標高（1,600〜2,000m）の記載があったが DefinedTerm.md の properties フィールドに受け皿がないため本文にのみ記載"`) — this is the same write, not a separate step, so it must land in the same overwrite as `summary`. Since `exclude_note`/`coverage_gap_note` are already required to be in `<primary_lang>` (same as `summary`, see above), this write never needs to translate anything to make the section consistent — do not translate at write time either. **Never modify a `## User Notes` section** if present — that section is hand-written by a human and must be preserved verbatim. <!-- skill-language-exception: example coverage_gap_note text, quoted to show the shape of the sentence written into ## Summary -->
 
   > **Heading labels are always fixed English, regardless of `primary_lang`** (Issue #405 — a `primary_lang: en` pilot found the `## サマリ`/`## ユーザーメモ` heading labels hard-coded in Japanese even though the `summary` body text itself was correctly written in English per Issue #314). The source management file is an internal bookkeeping file under `.wikicommit/source/`, not reader-facing wiki content, so it is not localized: always write `## Summary` and `## User Notes` verbatim, never a translated or `primary_lang`-dependent heading. Pre-existing management files generated before this change keep their old `## サマリ`/`## ユーザーメモ` headings as-is (no automatic migration, same "both forms may coexist" policy the source-tree layout itself already follows); only newly written/overwritten `## Summary` sections use the new heading. If a management file still has the old `## サマリ` heading, treat it as the same section (overwrite it in place rather than adding a second, redundant `## Summary` section) — but do not rename an untouched `## ユーザーメモ` heading you are not otherwise touching, since that section must be preserved verbatim per the rule above.
 
 For `action: update` entities, read the existing page with the Read tool and add it as additional context for Pass 3.
 
 ### Pass 3: Page Generation (File Boundary Protocol)
+
+**Stamp `--pass pass3-generate` on entry**, with `--source` naming this source's management file (under `--regenerate`, the page being rebuilt).
 
 **Guard**: before generating any page for this source, if `source.type` is `url` or `wikicommit`, re-read the management file and confirm `source.hash` is non-empty (not `""`). This should already hold — Pass 1's hash write-back step (above) fails the source before reaching Pass 2 otherwise — but re-check here as a safety net (e.g. against a management file left over from before this guard existed). If `source.hash` is still empty, mark this source `status: failed`, write a reason to the management file's `## Failure Reason` section (create it if absent, overwrite if present — e.g. `"source.hash was still empty when Pass 3 was reached; the source could not be confirmed as fetched during Pass 1 (safety-net guard)."`) in English regardless of `<primary_lang>` (same reasoning as the Pass 1 extraction-failure case above — Issue #408), notify the user, and skip Pass 2–4 for it entirely; never write a page whose `sources[].hash` would be empty.
 
@@ -728,6 +769,8 @@ Taro Yamada is a senior engineer at CompanyA...
 
 ### Pass 4: Source Integrity Review (Review Subagent)
 
+**Stamp `--pass pass4-review` on entry**, with `--source` naming this source's management file (under `--regenerate`, the page being rebuilt).
+
 For each generated page (content is carried as context from Pass 3):
 
 **The review discipline is not in this file (Issue #752).** It lives in `.wikicommit/review-rules.md` — one copy, read by all three review paths, instead of three copies that had already drifted apart. What stays here is the choreography: how the subagent is launched, what to hand it, and what to do with what comes back.
@@ -840,11 +883,14 @@ python .wikicommit/scripts/record_run.py end <the path start printed> \
     --outcome generated=<N> --outcome failed=<N> --outcome excluded=<N>
 ```
 
-Then report its path and elapsed time in the notice — that duration exists nowhere else, and the record is not committed, so this run's own output is the only place a reader sees it:
+Then report its path, elapsed time and the passes it stamped in the notice — that duration exists nowhere else, and **the record is not committed**, so this run's own output is the only place a reader sees any of it. That matters most in the unattended cloud runs, where the record dies with the VM: this line is the only form in which the stamps reach a PR body at all (Issue #797).
 
 ```
 Run record: .wikicommit/run/20260907-104233-generate.md (22m14s)
+Passes stamped: pass1-extract x5, pass2b-type x5, pass2c-entities x5, pass3-generate x5, pass4-review x5
 ```
+
+If any expected pass has no stamp, say so on that line rather than omitting it silently — and say whether it is because the pass genuinely had nothing to do (every source blocked at Pass 1, say) or because you cannot tell.
 
 Then always print one line for the source-integrity review, whatever its outcome (Issue #750):
 

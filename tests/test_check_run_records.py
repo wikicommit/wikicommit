@@ -165,3 +165,112 @@ def test_the_status_skill_runs_this_check():
     """A consumer nothing invokes is the receptacle this was meant not to be."""
     text = (REPO / ".claude" / "skills" / "wikicommit-status" / "SKILL.md").read_text(encoding="utf-8")
     assert "check_run_records.py" in text
+
+
+# --- checkpoints (Issue #797) -------------------------------------------------
+#
+# `ended_at` says whether the run finished; these lines say where it got to and
+# what it skipped. The class they exist for is Issues #406 / #452 / #474 — a step
+# at the tail of a long flow silently not running — all three of which were found
+# only by a human auditing a published repository afterwards.
+
+
+def _stamps(*names: str) -> list[dict]:
+    return [{"pass": n, "at": "2026-09-07T10:44:02+09:00", "token": "unchecked"} for n in names]
+
+
+def test_a_record_with_no_stamps_says_nothing_about_passes(tmp_path):
+    """Records written before checkpoints existed have no `passes` key at all,
+    and there is nothing honest to report for them."""
+    _record(tmp_path, "20260907-104233-generate.md", ended_at="2026-09-07T11:05:12+09:00")
+    result = _run(tmp_path)
+    assert "pass(es)" not in result.stdout
+    assert "MISSING_PASS:" not in result.stdout
+    assert "SUMMARY: runs=1, incomplete=0, missing_pass=0" in result.stdout
+
+
+def test_an_empty_passes_list_is_also_silent(tmp_path):
+    """"Stamped nothing" reads the same as "predates stamping" — both mean the
+    reader has no basis to say a pass was skipped."""
+    _record(tmp_path, "20260907-104233-generate.md",
+            ended_at="2026-09-07T11:05:12+09:00", passes=[])
+    assert "MISSING_PASS:" not in _run(tmp_path).stdout
+
+
+def test_last_run_reports_how_many_passes_were_stamped(tmp_path):
+    _record(tmp_path, "20260907-104233-generate.md", ended_at="2026-09-07T11:05:12+09:00",
+            outcome={"generated": 12}, passes=_stamps(
+                "pass1-extract", "pass2b-type", "pass2c-entities",
+                "pass3-generate", "pass4-review"))
+    result = _run(tmp_path)
+    assert "LAST_RUN: 2026-09-07 10:42 wikicommit-generate (22m39s, 5 pass(es), generated=12)" \
+        in result.stdout
+
+
+def test_an_unfinished_run_says_where_it_got_to(tmp_path):
+    """The two halt paths change no file, so this is the only trace — and without
+    a stamp that trace has no position."""
+    _record(tmp_path, "20260905-140300-generate.md", started_at="2026-09-05T14:03:00+09:00",
+            halted_reason="rules_version mismatch",
+            passes=_stamps("pass1-extract", "pass2b-type"))
+    result = _run(tmp_path)
+    assert "halted: rules_version mismatch" in result.stdout
+    assert "reached pass2b-type" in result.stdout
+    assert "pass2c-entities, pass3-generate, pass4-review never ran" in result.stdout
+
+
+def test_a_finished_run_with_a_gap_is_reported_as_missing_pass(tmp_path):
+    """This is the #406 / #452 / #474 shape: the run completed, and a step in it
+    simply did not happen."""
+    _record(tmp_path, "20260907-104233-generate.md", ended_at="2026-09-07T11:05:12+09:00",
+            passes=_stamps("pass1-extract", "pass2b-type", "pass2c-entities", "pass3-generate"))
+    result = _run(tmp_path)
+    assert "MISSING_PASS: 2026-09-07 10:42 wikicommit-generate " \
+        "(finished, but pass4-review left no stamp)" in result.stdout
+    assert "missing_pass=1" in result.stdout
+
+
+def test_an_unfinished_run_is_not_also_reported_as_missing_pass(tmp_path):
+    """It is already on INCOMPLETE_RUN: with the obvious reason for the gap, and
+    "finished, but" would be false of it."""
+    _record(tmp_path, "20260905-140300-generate.md", started_at="2026-09-05T14:03:00+09:00",
+            passes=_stamps("pass1-extract"))
+    result = _run(tmp_path)
+    assert "INCOMPLETE_RUN:" in result.stdout
+    assert "MISSING_PASS:" not in result.stdout
+    assert "missing_pass=0" in result.stdout
+
+
+def test_a_regenerate_run_is_not_faulted_for_skipping_pass_2(tmp_path):
+    """That mode takes a page rather than a source, so Pass 2 does not run by
+    design — and the narrowing is read off the record's own args."""
+    _record(tmp_path, "20260907-104233-generate.md", ended_at="2026-09-07T11:05:12+09:00",
+            args=["--regenerate", "--all"],
+            passes=_stamps("pass1-extract", "pass3-generate", "pass4-review"))
+    result = _run(tmp_path)
+    assert "MISSING_PASS:" not in result.stdout
+    assert "missing_pass=0" in result.stdout
+
+
+def test_a_repeated_pass_name_is_not_a_gap(tmp_path):
+    """generate walks the passes once per source; five `pass1-extract` stamps are
+    five sources."""
+    _record(tmp_path, "20260907-104233-generate.md", ended_at="2026-09-07T11:05:12+09:00",
+            passes=_stamps("pass1-extract", "pass2b-type", "pass2c-entities",
+                           "pass3-generate", "pass4-review",
+                           "pass1-extract", "pass2b-type", "pass2c-entities",
+                           "pass3-generate", "pass4-review"))
+    result = _run(tmp_path)
+    assert "MISSING_PASS:" not in result.stdout
+    assert "10 pass(es)" in result.stdout
+
+
+def test_a_malformed_passes_value_does_not_take_down_the_report(tmp_path):
+    """A hand-edited record must not cost the caller the incomplete count, which
+    is the one number here that has to err high."""
+    _record(tmp_path, "20260907-104233-generate.md",
+            ended_at="2026-09-07T11:05:12+09:00", passes="not a list")
+    result = _run(tmp_path)
+    assert result.returncode == 0
+    assert "Traceback" not in result.stderr
+    assert "SUMMARY: runs=1, incomplete=0, missing_pass=0" in result.stdout

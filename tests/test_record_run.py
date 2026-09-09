@@ -232,3 +232,144 @@ def test_each_writing_skill_invokes_the_recorder(skill):
     text = (REPO / ".claude" / "skills" / skill / "SKILL.md").read_text(encoding="utf-8")
     assert f"record_run.py start --skill {skill}" in text, skill
     assert "record_run.py end" in text, skill
+
+
+# --- checkpoints (Issue #797) -------------------------------------------------
+#
+# `ended_at` answers whether a run finished; these answer where it got to and
+# what it skipped. The asymmetry above holds here too and is what most of these
+# assert: a forgotten stamp reports a pass that ran as missing, never the
+# reverse, so nothing here may let a skipped pass look like it executed.
+
+
+def _pass_file(cwd: Path, pass_name: str, token: str,
+               skill: str = "wikicommit-generate") -> Path:
+    path = cwd / ".claude" / "skills" / skill / "passes" / f"{pass_name}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\npass: {pass_name}\npass_token: {token}\n---\n", encoding="utf-8")
+    return path
+
+
+def test_start_writes_an_empty_passes_list(tmp_path):
+    """Empty rather than absent, so "stamped nothing" stays distinguishable from
+    "written before checkpoints existed" — which is what the reader keys on."""
+    assert _front(_start(tmp_path))["passes"] == []
+
+
+def test_a_checkpoint_appends_a_stamp(tmp_path):
+    path = _start(tmp_path)
+    result = _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)),
+                  "--pass", "pass1-extract", "--source", "src/a.md")
+    assert result.returncode == 0, result.stderr
+    stamps = _front(path)["passes"]
+    assert len(stamps) == 1
+    assert stamps[0]["pass"] == "pass1-extract"
+    assert stamps[0]["source"] == "src/a.md"
+    assert stamps[0]["token"] == "unchecked"
+    assert stamps[0]["at"]
+
+
+def test_checkpoints_accumulate_in_order_and_repeat_per_source(tmp_path):
+    """generate walks the passes once per source, so the same name recurring is
+    five sources rather than a duplicate — the order is the run's own path."""
+    path = _start(tmp_path)
+    rel = str(path.relative_to(tmp_path))
+    for source in ("a", "b"):
+        for name in ("pass1-extract", "pass2b-type"):
+            assert _run(tmp_path, "checkpoint", rel, "--pass", name,
+                        "--source", source).returncode == 0
+    assert [s["pass"] for s in _front(path)["passes"]] == [
+        "pass1-extract", "pass2b-type", "pass1-extract", "pass2b-type"]
+
+
+def test_the_body_stays_empty_after_checkpoints(tmp_path):
+    """Issue #790 decided the body holds nothing; stamps are frontmatter for
+    exactly that reason, and an append-to-body implementation would pass every
+    other assertion here."""
+    path = _start(tmp_path)
+    _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)), "--pass", "pass1-extract")
+    assert path.read_text(encoding="utf-8").endswith("---\n")
+    assert path.read_text(encoding="utf-8").count("---") == 2
+
+
+def test_an_unknown_pass_is_rejected(tmp_path):
+    """One typo would otherwise be reported as two findings — an unknown pass
+    stamped, and the real one looking as though it never ran."""
+    path = _start(tmp_path)
+    result = _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)),
+                  "--pass", "pass9-nonexistent")
+    assert result.returncode == 1
+    assert "not a pass" in result.stderr
+    assert _front(path)["passes"] == []
+
+
+def test_a_matching_token_is_recorded_as_ok(tmp_path):
+    path = _start(tmp_path)
+    _pass_file(tmp_path, "pass2b-type", "a3f9c1")
+    result = _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)),
+                  "--pass", "pass2b-type", "--token", "a3f9c1")
+    assert result.returncode == 0, result.stderr
+    assert _front(path)["passes"][0]["token"] == "ok"
+
+
+def test_a_mismatched_token_fails_but_still_records_the_stamp(tmp_path):
+    """The verification's whole point is that the script reads the file rather
+    than believing the claim. Refusing to record the stamp would then tell a
+    second, false story: that the pass never started."""
+    path = _start(tmp_path)
+    _pass_file(tmp_path, "pass2b-type", "a3f9c1")
+    result = _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)),
+                  "--pass", "pass2b-type", "--token", "wrong")
+    assert result.returncode == 1
+    assert "does not match" in result.stderr
+    assert _front(path)["passes"][0]["token"] == "mismatch"
+
+
+def test_a_token_with_no_pass_file_is_a_failure_not_a_pass(tmp_path):
+    """Absent, unreadable and token-less are one thing from here: nothing on
+    disk backs the claim just made."""
+    path = _start(tmp_path)
+    result = _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)),
+                  "--pass", "pass2b-type", "--token", "a3f9c1")
+    assert result.returncode == 1
+    assert _front(path)["passes"][0]["token"] == "missing"
+
+
+def test_no_token_means_no_check_rather_than_a_silent_pass(tmp_path):
+    """Before the SKILL.md is split there are no pass files, and this mode is
+    what makes the feature independent of that split."""
+    path = _start(tmp_path)
+    result = _run(tmp_path, "checkpoint", str(path.relative_to(tmp_path)), "--pass", "pass1-extract")
+    assert result.returncode == 0
+    assert _front(path)["passes"][0]["token"] == "unchecked"
+
+
+def test_checkpoint_refuses_a_path_that_does_not_exist(tmp_path):
+    result = _run(tmp_path, "checkpoint", ".wikicommit/run/nope.md", "--pass", "pass1-extract")
+    assert result.returncode == 1
+    assert "no such run record" in result.stderr
+
+
+def test_the_expected_passes_narrow_under_regenerate(tmp_path):
+    """--regenerate takes a page, not a source, so Pass 2 does not run at all.
+    Reporting 2b/2c missing there would report the mode working as designed —
+    and the narrowing is read off the record's own args, not restated by the
+    caller."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    from record_run import expected_passes
+    assert "pass2b-type" in expected_passes({"skill": "wikicommit-generate", "args": []})
+    narrowed = expected_passes({"skill": "wikicommit-generate", "args": ["--regenerate", "--all"]})
+    assert "pass2b-type" not in narrowed
+    assert list(narrowed) == ["pass1-extract", "pass3-generate", "pass4-review"]
+
+
+def test_generate_stamps_every_pass_it_declares():
+    """A pass in EXPECTED_PASSES that the SKILL.md never stamps is reported
+    missing on every single run, which trains a reader to ignore the line."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    from record_run import EXPECTED_PASSES
+    text = (REPO / ".claude" / "skills" / "wikicommit-generate" / "SKILL.md").read_text(
+        encoding="utf-8")
+    assert "record_run.py checkpoint" in text
+    for name in EXPECTED_PASSES["wikicommit-generate"]:
+        assert name in text, name

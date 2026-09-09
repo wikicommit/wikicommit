@@ -478,7 +478,7 @@ Insert this verbatim into every Issue body, between "## Once You Have Read It" a
 
 Closing this Issue takes write access to this repository (or triage access, if it is owned by an organization) — GitHub only lets you close an Issue you did not open yourself if you have one of those, and hides the button otherwise. If you are reading this without that access, open a new Issue of your own describing what is wrong instead: that needs no special access, and `/wikicommit-fix` reads it. On a published wiki, the report link in the banner at the top of the page does this for you with the page already filled in (that link is worded in the page's own language, so its exact label differs from page to page).
 Read the page (locally, or on the published wiki once it's live) and, if everything looks good, simply close this Issue — that alone is enough. A GitHub Actions workflow (`.github/workflows/review-issue-close-sync.yml`) detects the close, flips this page's `review_status` from `pending` to `reviewed`, and auto-merges that change once quality checks pass. There is no PR to Approve here — closing this Issue is the entire action, and it works the same whether you use Claude Code or just the GitHub web/mobile UI.
-If changes are needed, edit the page first (e.g. via `/wikicommit-fix`, or a manual edit followed by `/wikicommit-merge`) and close this Issue once the fix has landed.
+If changes are needed, write what you found in a comment and leave this Issue open. **You do not have to make the fix yourself** — `/wikicommit-fix <this Issue's URL>` reads this body and its comments. It is closed once the fix has landed.
 **A comment saying what you took away, or what you noticed, is exactly what this Issue is for** — that needs nothing further from you, and nothing else has to happen to it.
 **A comment asking for a change does not make the change**: the workflow that runs on close only reads the marker line at the bottom of this Issue's body and flips `review_status` from `pending` to `reviewed` — it never reads comments. Closing after only asking for a fix merges the page with that fix unmade. To have it applied, run `/wikicommit-fix <this Issue's URL>` explicitly (it reads both this Issue's body and its comments and proposes a fix), and close this Issue only after that fix has landed.
 **Two kinds of comment are the exception, because both are about a page's sources rather than its text, and `/wikicommit-fix` cannot touch sources at all.**
@@ -502,8 +502,9 @@ this Issue (the box you type into when you close is the same one). It does not h
 — "that surprised me" or "nothing here was new to me" is enough.
 
 **This is not a test of your understanding.** It is the record that this page's knowledge actually
-reached a person. That, and nothing more, is what closing this Issue states: not that the page is
-correct.
+reached a person. Closing this Issue states two things — that this page's knowledge reached a
+person, and that **nothing struck you as obviously wrong while reading**. It is not a guarantee
+that the content is correct.
 
 This page was already checked against the documents it was written from, by machine, when it was
 generated — where the published page shows it, the banner at the top names the model and the date. Nothing below was
@@ -528,6 +529,9 @@ checked by any automation, so if you noticed any of it while reading, put that i
   all of them. If you know one of the documents this page lists under `sources:` to be unreliable,
   say which and why — a comment carries this one onward (see "How to Proceed").
 - Is `<Type>` the right type for this subject, and do the `properties:` keys listed in `.wikicommit/schema/<Type>.md` fit it? This type was added automatically while this page was being written, and no automated check judges whether it *fits* — only that it exists in the Schema.org vocabulary.
+
+**If something did stick out, a comment is all that is asked of you — and in that case do not close
+this Issue.** The fix is not yours to make; whoever has access closes this once it has landed.
 
 On a published wiki, the report link on the page collects the same kinds of thing from any reader
 who happens to notice one. This Issue is the step above it: closing it is how this wiki records that someone
@@ -557,8 +561,9 @@ this Issue (the box you type into when you close is the same one). It does not h
 — "that surprised me" or "nothing here was new to me" is enough.
 
 **This is not a test of your understanding.** It is the record that this page's knowledge actually
-reached a person. That, and nothing more, is what closing this Issue states: not that the page is
-correct.
+reached a person. Closing this Issue states two things — that this page's knowledge reached a
+person, and that **nothing struck you as obviously wrong while reading**. It is not a guarantee
+that the content is correct.
 
 This page was already checked against the original it was translated from, by a machine translation-quality
 pass, when it was generated. Nothing
@@ -573,6 +578,9 @@ comment. **You are not being asked to go looking.**
   inside it were not.
 
 If a fact here is out of date or wrong on the substance rather than the wording, the page to fix is the original this was translated from, not this one — a fix written here is overwritten the next time the original changes and the translation is regenerated. The same goes for a source: this page has none of its own, and anything wrong with the documents behind it belongs to the original's own sources.
+
+**If something did stick out, a comment is all that is asked of you — and in that case do not close
+this Issue.** The fix is not yours to make; whoever has access closes this once it has landed.
 
 On a published wiki, the report link on the page collects the same kinds of thing from any reader
 who happens to notice one. This Issue is the step above it: closing it is how this wiki records that someone
@@ -600,8 +608,9 @@ this Issue (the box you type into when you close is the same one). It does not h
 — "that surprised me" or "nothing here was new to me" is enough.
 
 **This is not a test of your understanding.** It is the record that this page's knowledge actually
-reached a person. That, and nothing more, is what closing this Issue states: not that the page is
-correct.
+reached a person. Closing this Issue states two things — that this page's knowledge reached a
+person, and that **nothing struck you as obviously wrong while reading**. It is not a guarantee
+that the content is correct.
 
 Every claim on this page was already checked, by machine, against the pages listed under "Derived
 from". Nothing below was checked by any automation, so if you noticed any of it while reading, put
@@ -615,6 +624,9 @@ that in the same comment. **You are not being asked to go looking.**
 This is the page where that one earns the most. Every automated check here compares a single claim against the pages under "Derived from"; an implication that arises only from putting several of their statements side by side is visible to no check at all — and putting statements side by side is exactly what this page does.
 
 If a fact here is wrong rather than badly combined, the page to fix is the one under "Derived from" that states it, not this one. The same goes for a source: this page has none of its own, and anything wrong with the documents behind it belongs to whichever page under "Derived from" was written from them.
+
+**If something did stick out, a comment is all that is asked of you — and in that case do not close
+this Issue.** The fix is not yours to make; whoever has access closes this once it has landed.
 
 On a published wiki, the report link on the page collects the same kinds of thing from any reader
 who happens to notice one. This Issue is the step above it: closing it is how this wiki records that someone

@@ -736,8 +736,8 @@ def test_root_index_counts_pages_across_all_languages(tmp_path):
     assert "wikicommit_page_count" not in out
     assert "wikicommit_reviewed_count" not in out
     body = root_index_body(tmp_path)
-    assert "- [ja](./ja/)（1 ページ / 人が読んだ 1）" in body
-    assert "- [en](./en/)（1 ページ / 人が読んだ 0）" in body
+    assert "- [ja](./ja/)（1 ページ / 人が読んで確認 1）" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0）" in body
 
 
 def test_root_index_never_embeds_theme_even_when_configured(tmp_path):
@@ -784,9 +784,9 @@ def test_root_index_shows_site_description_for_every_language(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [it](./it/) (1 page / 0 read by a person) — Base di conoscenza sul Decameron." in body
-    assert "- [en](./en/) (1 page / 0 read by a person) — A knowledge base on the Decameron." in body
-    assert "- [ja](./ja/) (1 page / 0 read by a person) — 「デカメロン」の知識ベース。" in body
+    assert "- [it](./it/) (1 page / 0 read and checked by a person) — Base di conoscenza sul Decameron." in body
+    assert "- [en](./en/) (1 page / 0 read and checked by a person) — A knowledge base on the Decameron." in body
+    assert "- [ja](./ja/) (1 page / 0 read and checked by a person) — 「デカメロン」の知識ベース。" in body
 
 
 def test_root_index_omits_description_only_for_languages_without_one(tmp_path):
@@ -803,10 +803,10 @@ def test_root_index_omits_description_only_for_languages_without_one(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [it](./it/) (1 page / 0 read by a person) — Base di conoscenza sul Decameron." in body
+    assert "- [it](./it/) (1 page / 0 read and checked by a person) — Base di conoscenza sul Decameron." in body
     # The language without an entry keeps the counts but no dash — not an empty dash.
-    assert "- [en](./en/) (1 page / 0 read by a person)\n" in body
-    assert "- [en](./en/) (1 page / 0 read by a person) —" not in body
+    assert "- [en](./en/) (1 page / 0 read and checked by a person)\n" in body
+    assert "- [en](./en/) (1 page / 0 read and checked by a person) —" not in body
 
 
 def test_root_index_without_site_description_is_unchanged(tmp_path):
@@ -822,8 +822,8 @@ def test_root_index_without_site_description_is_unchanged(tmp_path):
     body = root_index_body(tmp_path)
     # Issue #730 adds the per-language counts; the em-dash description slot the
     # absent site_description would have filled stays empty either way.
-    assert "- [ja](./ja/)（1 ページ / 人が読んだ 0）\n" in body
-    assert "- [en](./en/)（1 ページ / 人が読んだ 0）\n" in body
+    assert "- [ja](./ja/)（1 ページ / 人が読んで確認 0）\n" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0）\n" in body
     assert "—" not in body.split("## ")[1]
 
 
@@ -859,7 +859,7 @@ def test_root_index_ignores_malformed_site_description(tmp_path):
 
     result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
     assert result.returncode == 0
-    assert "- [ja](./ja/)（1 ページ / 人が読んだ 0）\n" in root_index_body(tmp_path)
+    assert "- [ja](./ja/)（1 ページ / 人が読んで確認 0）\n" in root_index_body(tmp_path)
 
 
 def test_root_index_drops_only_the_non_string_site_description_entries(tmp_path):
@@ -875,8 +875,8 @@ def test_root_index_drops_only_the_non_string_site_description_entries(tmp_path)
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [ja](./ja/)（1 ページ / 人が読んだ 0） — 技術ナレッジベース。" in body
-    assert "- [en](./en/)（1 ページ / 人が読んだ 0）\n" in body
+    assert "- [ja](./ja/)（1 ページ / 人が読んで確認 0） — 技術ナレッジベース。" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0）\n" in body
 
 
 def test_root_index_collapses_newlines_inside_a_site_description(tmp_path):
@@ -896,9 +896,9 @@ def test_root_index_collapses_newlines_inside_a_site_description(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [ja](./ja/)（1 ページ / 人が読んだ 0） — 一行目です。 二行目です。\n" in body
+    assert "- [ja](./ja/)（1 ページ / 人が読んで確認 0） — 一行目です。 二行目です。\n" in body
     # The list is still one list: the en row directly follows the ja row.
-    assert "一行目です。 二行目です。\n- [en](./en/)（1 ページ / 人が読んだ 0） — One. Two.\n" in body
+    assert "一行目です。 二行目です。\n- [en](./en/)（1 ページ / 人が読んで確認 0） — One. Two.\n" in body
 
 
 def test_root_index_skips_description_for_a_language_with_no_pages(tmp_path):
@@ -1006,7 +1006,7 @@ def test_root_index_shows_site_description_for_a_discovered_language(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [en](./en/)（1 ページ / 人が読んだ 0） — A knowledge base.\n" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0） — A knowledge base.\n" in body
 
 
 def test_root_index_skips_discovered_language_whose_only_page_failed_to_write(tmp_path):
@@ -1061,8 +1061,8 @@ def test_root_index_reports_counts_per_language_and_drops_the_site_total(tmp_pat
     assert "wikicommit_page_count" not in out
     assert "wikicommit_reviewed_count" not in out
     body = root_index_body(tmp_path)
-    assert "- [ja](./ja/)（2 ページ / 人が読んだ 2）" in body
-    assert "- [en](./en/)（1 ページ / 人が読んだ 0）" in body
+    assert "- [ja](./ja/)（2 ページ / 人が読んで確認 2）" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0）" in body
 
 
 def test_root_index_keeps_the_site_total_on_a_single_language_wiki(tmp_path):
@@ -1093,7 +1093,7 @@ def test_root_index_keeps_issue_664_note_when_the_banner_stops_rendering(tmp_pat
 
     body = root_index_body(tmp_path)
     assert "ページは LLM が生成した時点で公開されます。" in body
-    assert "Wiki の完成度でも、内容の正しさの保証でもありません。" in body
+    assert "網羅的な品質保証でもありません。" in body
     # Under the language list, not above it.
     assert body.index("- [en](./en/)") < body.index("ページは LLM が生成した時点で")
 
@@ -1124,7 +1124,7 @@ def test_root_index_counts_view_pages_but_not_type_indexes(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [ja](./ja/)（2 ページ / 人が読んだ 0）" in body
+    assert "- [ja](./ja/)（2 ページ / 人が読んで確認 0）" in body
 
 
 def test_root_index_reports_zero_for_a_language_with_no_resolvable_page(tmp_path):
@@ -1141,7 +1141,7 @@ def test_root_index_reports_zero_for_a_language_with_no_resolvable_page(tmp_path
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [en](./en/)（0 ページ / 人が読んだ 0）" in body
+    assert "- [en](./en/)（0 ページ / 人が読んで確認 0）" in body
 
 
 def test_root_index_counts_use_english_singular_for_one_page(tmp_path):
@@ -1155,7 +1155,7 @@ def test_root_index_counts_use_english_singular_for_one_page(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [en](./en/) (1 page / 0 read by a person)" in body
+    assert "- [en](./en/) (1 page / 0 read and checked by a person)" in body
     assert "1 pages" not in body
 
 
@@ -2409,10 +2409,10 @@ def test_overview_totals_count_pages_reviewed_langs_and_translation_coverage(tmp
 
     out = read_overview(tmp_path)
     assert "**総ページ数**: 3" in out
-    assert "**人が読んだページ**: 1 / 3 (33%)" in out
+    assert "**人が読んで確認**: 1 / 3 (33%)" in out
     # Issue #664: the bare count reads as "nobody cares about this project";
     # the number stays and a caption below the totals says what it counts.
-    assert "人が最後まで読んだ件数です" in out
+    assert "人が最後まで読み、明らかな問題を見つけなかった件数です" in out
     assert "**型数**: 2" in out
     assert "**言語別ページ数**: en 1, ja 2" in out
     # One of the two ja keys also exists in en.
@@ -2504,8 +2504,8 @@ def test_overview_labels_follow_primary_lang(tmp_path):
     # Issue #664: both label dicts carry the reframed count and its caption, and
     # the two must say the same thing — a reader following the root index's link
     # sees both surfaces in a row.
-    assert "**Read by a person**:" in out
-    assert "how many a person has since read all the way through" in out
+    assert "**Read and checked by a person**:" in out
+    assert "how many pages someone has since read all the way through" in out
 
 
 def test_overview_written_with_no_pages_at_all(tmp_path):
@@ -2912,7 +2912,7 @@ def test_overview_reports_ai_review_separately_from_human_review(tmp_path):
 
     overview = (tmp_path / "content" / "overview" / "index.md").read_text(encoding="utf-8")
     assert "**出典と照合済み（AI）**: 1 / 1 (100%) (claude-opus-5[1m])" in overview
-    assert "**人が読んだページ**: 0 / 1 (0%)" in overview
+    assert "**人が読んで確認**: 0 / 1 (0%)" in overview
     # Says what was compared, and says what it did not look at. Reading this as
     # "verified" is the over-claim Issue #740 is fixing on the human side.
     assert "照合しているのは出典との一致だけで" in overview
@@ -2962,8 +2962,8 @@ def test_root_index_reports_the_ai_review_count_per_language(tmp_path):
     body = (tmp_path / "content" / "index.md").read_text(encoding="utf-8").split("---", 2)[2]
     # The language with a record gets three numbers, in full-coverage-then-sample
     # order; the one without keeps the two-number form.
-    assert "- [ja](./ja/)（1 ページ / 出典と照合 1 / 人が読んだ 0）" in body
-    assert "- [en](./en/)（1 ページ / 人が読んだ 0）" in body
+    assert "- [ja](./ja/)（1 ページ / 出典と照合 1 / 人が読んで確認 0）" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0）" in body
     assert "照合しているのは出典との一致だけで" in body
 
 
@@ -3030,7 +3030,7 @@ def test_root_index_note_names_the_label_rather_than_pointing_at_a_number(tmp_pa
     assert result.returncode == 0
 
     overview = (tmp_path / "content" / "overview" / "index.md").read_text(encoding="utf-8")
-    assert '"Read by a person" is how many' in overview
+    assert '"read and checked by a person" is how many' in overview
     assert "The count above" not in overview
 
 

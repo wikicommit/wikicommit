@@ -21,16 +21,21 @@ export default {
       generatedBy: "生成モデル:",
       translatedAt: "翻訳日:",
       translatedBy: "翻訳モデル:",
-      reviewedBy: "読んだ人:",
+      // Issue #800: a sentence with a {name} placeholder rather than a bare
+      // "label: value" pair, because the line now states what the reading
+      // found as well as who did it. The renderer splits on {name} and puts
+      // the profile link in the gap. `counts` in convert_wikilinks.py already
+      // uses placeholders this way, so this is not a new pattern here.
+      readBy: "{name} が読み、明らかな問題は見つかりませんでした",
       // Issue #774: what `titleReviewed` used to be, moved out of the heading
       // and into the line review adds. It is shown only when `reviewed_by` is
       // absent — a route B page (`/wikicommit-review` runs locally and cannot
       // obtain a GitHub login) or one reviewed before that field existed. With
-      // a name, the `reviewedBy` line below says the same thing and says who,
+      // a name, the `readBy` line below says the same thing and says who,
       // and printing both would repeat "read" twice. Having this fallback is
       // what keeps the two states distinguishable without depending on
       // `reviewed_by` being present.
-      readByAPerson: "人が読みました",
+      readByAPerson: "人が読み、明らかな問題は見つかりませんでした",
       // Issue #751: what the machine check actually compared, stamped onto the
       // published copy of the page by convert_wikilinks.py and present on no
       // page in .wikicommit/entity/. Worded as "checked against its sources"
@@ -82,8 +87,8 @@ export default {
       // own — each line already labels itself.
       reportBodyProblemHeading: "## 報告内容",
       siteSummaryPages: "総ページ数:",
-      siteSummaryReviewed: "人が読んだページ:",
-      siteSummaryReviewNote: "ページは LLM が生成した時点で公開されます。「人が読んだページ」はそのうち人が最後まで読んだ件数です — Wiki の完成度でも、内容の正しさの保証でもありません。",
+      siteSummaryReviewed: "人が読んで確認:",
+      siteSummaryReviewNote: "ページは LLM が生成した時点で公開されます。出典との照合は機械が行い、「人が読んで確認」はそのうち人が最後まで読み、明らかな問題を見つけなかった件数です。人による確認は設計上一部のページのみであり、この数字が総数に達することは目指していません。網羅的な品質保証でもありません。",
       siteSummaryAiReviewed: "出典と照合:",
       siteSummaryAiReviewNote: "「出典と照合」は生成時に、ページの記述をその出典と照合した件数です。照合しているのは出典との一致だけで、網羅性・実在の人物や組織への影響・読者自身の知識との食い違いは見ていません。",
     },

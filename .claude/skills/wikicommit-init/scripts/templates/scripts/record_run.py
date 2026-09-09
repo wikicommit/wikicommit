@@ -90,6 +90,38 @@ shape of a run only), and per-script timings (most of the time is LLM inference
 outside any script, so timing the cheap deterministic parts would measure the
 wrong thing).
 
+## Checkpoints say *where* a run got to (Issue #797)
+
+`ended_at` answers whether a run finished. It says nothing about what happened
+inside it, and two questions live in that gap:
+
+- **Where did it stop?** The two halt paths change no file (guard C in Issue
+  #574, a `rules_version` mismatch in Issue #752), so the run record is the only
+  trace — and without a checkpoint that trace has no position.
+- **Was a pass skipped?** Issues #406, #452 and #474 are all one class: a step at
+  the tail of a long multi-pass flow silently does not run. All three were found
+  by a human auditing a published pilot repository afterwards. All three were
+  fixed by delegating the step to a deterministic script — which does nothing
+  when the instruction to *call* that script is itself the step that drops.
+
+`checkpoint` stamps the entry to each pass into the `passes` list. A missing
+stamp is a pass that did not run; the last stamp is how far the run got.
+
+**The verification has a third party.** Issue #752 could check that a subagent
+had read the rules file because the subagent returns JSON an orchestrator
+compares — and that same Issue records the limit: `wikicommit-review` uses no
+subagent, so nothing checks it there. A single agent asserting it read a file,
+to itself, verifies nothing. Handing the comparison to *this script* restores
+the second party without needing a second agent: `--token` makes it open the
+pass file on disk and compare, so the claim is checked against the file rather
+than against the claim.
+
+What that does and does not catch: a pass skipped entirely, and where a run
+stopped, are both caught. A pass file opened and then disregarded is not — the
+same limit `rules_version` has, since grepping one line out of a file is always
+possible. The stamps stay in frontmatter as a list of flat mappings: the body
+stays empty (see above), and "scalars and lists all the way down" still holds.
+
 `check_run_records.py` is the consumer, without which this would be a receptacle
 nothing reads — the shape Issue #553 rules out.
 """
@@ -123,6 +155,50 @@ SKILLS = (
 # Keep the newest N records and drop the rest at write time. A record is a few
 # hundred bytes, so a count is enough and needs no clock (Issue #790).
 KEEP_RECORDS = 50
+
+# The passes a Skill stamps, in order (Issue #797). Only `wikicommit-generate`
+# has one: it is the multi-pass Skill, and starting with it alone is how the
+# shape gets confirmed before the other three inherit it. `merge`'s Step 1-10
+# already leave their result in `end`'s `--outcome`.
+#
+# Pass 2a is deliberately not a checkpoint. It runs unconditionally, in the same
+# breath as Pass 1's extraction, and has no branch and no halt of its own; the
+# first place the flow inside Pass 2 can diverge is 2b's type-approval, which
+# takes a different route under interactive and non-interactive runs. Adding a
+# stamp there would cost a read-modify-write per source and locate nothing that
+# Pass 1's stamp does not already locate.
+EXPECTED_PASSES = {
+    "wikicommit-generate": (
+        "pass1-extract",
+        "pass2b-type",
+        "pass2c-entities",
+        "pass3-generate",
+        "pass4-review",
+    ),
+}
+
+# `--regenerate` runs a narrower flow: it takes a page rather than a source, so
+# the entities are already settled and Pass 2 does not run at all (Issue #578).
+# Reporting 2b and 2c as missing there would be reporting the mode working as
+# designed.
+REGENERATE_PASSES = {
+    "wikicommit-generate": ("pass1-extract", "pass3-generate", "pass4-review"),
+}
+
+# Where `--token` looks for the file whose token it is checking. The convention
+# is fixed rather than configurable: the point of the check is that the script
+# resolves the location itself, and a caller that could also name the file could
+# name one it had just written.
+PASS_FILE_DIR = "passes"
+
+# What the `token:` field on a stamp can say. `unchecked` is what a caller that
+# passed no `--token` gets — written rather than omitted so every stamp has the
+# same shape, and so "nobody checked" is visibly different from "checked and
+# fine" for a reader scanning the list.
+TOKEN_UNCHECKED = "unchecked"
+TOKEN_OK = "ok"
+TOKEN_MISSING = "missing"
+TOKEN_MISMATCH = "mismatch"
 
 _STAMP_RE = re.compile(r"^\d{8}-\d{6}-")
 
@@ -263,6 +339,118 @@ def format_elapsed(start: datetime, end: datetime) -> str:
     return f"{seconds}s"
 
 
+def expected_passes(record: dict) -> tuple[str, ...]:
+    """The passes this run was supposed to stamp, in order.
+
+    Narrowed for `--regenerate`, which skips Pass 2 entirely by design. Reading
+    that off the record's own `args` keeps the narrowing where the fact lives
+    instead of asking the caller to restate it at checkpoint time.
+    """
+    skill = str(record.get("skill") or "")
+    args = record.get("args")
+    args = args if isinstance(args, list) else []
+    if any(str(a).startswith("--regenerate") for a in args) and skill in REGENERATE_PASSES:
+        return REGENERATE_PASSES[skill]
+    return EXPECTED_PASSES.get(skill, ())
+
+
+def pass_file_for(skill: str, pass_name: str) -> Path:
+    """`.claude/skills/<skill>/passes/<pass>.md` — the file `--token` reads."""
+    return Path(".claude/skills") / skill / PASS_FILE_DIR / f"{pass_name}.md"
+
+
+def read_pass_token(path: Path) -> str | None:
+    """The `pass_token` declared in a pass file's frontmatter, or None.
+
+    None covers every way the file can fail to yield one — absent, unparseable,
+    no such key. The caller treats all of them the same way, because they are
+    the same thing from the checkpoint's point of view: nothing on disk backs
+    the token that was just claimed.
+    """
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return None
+    if not text.startswith("---"):
+        return None
+    _, _, rest = text.partition("---\n")
+    front, sep, _ = rest.partition("\n---")
+    if not sep:
+        return None
+    try:
+        data = yaml.safe_load(front)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    token = data.get("pass_token")
+    return str(token) if token not in (None, "") else None
+
+
+def cmd_checkpoint(args) -> int:
+    """Stamp the entry to one pass onto an open run record (Issue #797)."""
+    path = Path(args.run)
+    if not path.is_file():
+        raise RunError(f"{args.run}: no such run record (pass the path `start` printed)")
+    record = read_record(path)
+
+    skill = str(record.get("skill") or "")
+    known = EXPECTED_PASSES.get(skill, ())
+    if known and args.pass_name not in known:
+        # A typo would otherwise land as an unknown pass *and* leave the real one
+        # looking as though it never ran — one slip reported as two failures, and
+        # neither of them the actual one.
+        raise RunError(
+            f"--pass {args.pass_name!r} is not a pass of {skill} "
+            f"(expected one of: {', '.join(known)})"
+        )
+
+    token_state = TOKEN_UNCHECKED
+    failure = ""
+    if args.token:
+        pass_file = pass_file_for(skill, args.pass_name)
+        declared = read_pass_token(pass_file)
+        if declared is None:
+            token_state = TOKEN_MISSING
+            failure = (
+                f"{pass_file}: no pass_token to check --token against "
+                "(the file is absent, unreadable, or declares none)"
+            )
+        elif declared != args.token:
+            token_state = TOKEN_MISMATCH
+            failure = (
+                f"{pass_file}: pass_token does not match --token "
+                "(this pass ran without its file being read)"
+            )
+        else:
+            token_state = TOKEN_OK
+
+    stamp = {
+        "pass": args.pass_name,
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "token": token_state,
+    }
+    if args.source:
+        # The unit the pass is iterating over: a source management file normally,
+        # the page being rebuilt under `--regenerate`. Without it a run that died
+        # on its third source is indistinguishable from one that died on its
+        # first, since the pass names repeat once per source.
+        stamp["source"] = args.source
+    passes = record.get("passes")
+    record["passes"] = ([*passes] if isinstance(passes, list) else []) + [stamp]
+    # The stamp is written even when the token check failed. A checkpoint that
+    # refused to record its own failure would leave the run looking as though the
+    # pass never started, which is a different — and wrong — story.
+    write_record(path, record)
+
+    suffix = f", source={args.source}" if args.source else ""
+    print(f"CHECKPOINT: {path} (pass={args.pass_name}, token={token_state}{suffix})")
+    if failure:
+        print(f"ERROR: {failure}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_start(args) -> int:
     directory = RUN_DIR
     directory.mkdir(parents=True, exist_ok=True)
@@ -278,6 +466,10 @@ def cmd_start(args) -> int:
         "args": list(args.args),
         "sources": [],
         "pages": [],
+        # Empty rather than absent, in the same shape the stamps will take: a run
+        # that recorded nothing is then visibly different from one written before
+        # checkpoints existed, whose records have no such key at all (Issue #797).
+        "passes": [],
         "outcome": {},
         "halted_reason": "",
     }
@@ -329,6 +521,15 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--arg", dest="args", action="append", default=[], metavar="ARG",
                        help="an argument this run was invoked with (repeatable)")
 
+    check = sub.add_parser("checkpoint", help="stamp the entry to one pass (Issue #797)")
+    check.add_argument("run", help="path printed by `start`")
+    check.add_argument("--pass", dest="pass_name", required=True, metavar="NAME",
+                       help="the pass being entered, e.g. pass1-extract")
+    check.add_argument("--token", default="", metavar="TOKEN",
+                       help="pass_token claimed for this pass; checked against the pass file on disk")
+    check.add_argument("--source", default="", metavar="PATH",
+                       help="the source (or, under --regenerate, the page) this pass is running for")
+
     end = sub.add_parser("end", help="close the record opened by `start`")
     end.add_argument("run", help="path printed by `start`")
     end.add_argument("--source", dest="sources", action="append", default=[], metavar="PATH")
@@ -341,8 +542,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     args = build_parser().parse_args(argv)
+    handlers = {"start": cmd_start, "checkpoint": cmd_checkpoint, "end": cmd_end}
     try:
-        return cmd_start(args) if args.command == "start" else cmd_end(args)
+        return handlers[args.command](args)
     except (RunError, OSError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1

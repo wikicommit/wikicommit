@@ -129,6 +129,32 @@ function buildReviewSearchUrl(
   return `https://github.com/${repo}/issues?q=${encodeURIComponent(q)}`
 }
 
+/**
+ * Render `readBy` — a sentence carrying a `{name}` placeholder — with the
+ * reviewer's GitHub profile link in the placeholder's position (Issue #800).
+ *
+ * The line used to be a bare `label: value` pair, so a plain label plus a link
+ * was enough. It now states what the reading found as well as who did it, and
+ * word order differs per language (Japanese puts the name first, English last),
+ * so the whole sentence lives in the locale string and only the link is
+ * substituted here. `counts` in convert_wikilinks.py already carries
+ * placeholders this way; this is not a new pattern in the project.
+ *
+ * A locale string that somehow lacks `{name}` still renders: the split yields
+ * one part, the link is appended after it, and nothing is dropped.
+ */
+function renderReadBy(template: string, login: string) {
+  const [before, ...rest] = template.split("{name}")
+  const after = rest.join("{name}")
+  return (
+    <>
+      {before}
+      <a href={`https://github.com/${encodeURIComponent(login)}`}>{login}</a>
+      {after}
+    </>
+  )
+}
+
 const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzComponentProps) => {
   const frontmatter = fileData.frontmatter
   // WikiCommitSources / WikiCommitJsonLD と同様、removed ページには何も表示しない
@@ -374,8 +400,7 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
         <div class="wikicommit-banner__report">
           {reviewedBy ? (
             <span class="wikicommit-banner__reviewer">
-              {t.reviewedBy}{" "}
-              <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
+              {renderReadBy(t.readBy, reviewedBy)}
             </span>
           ) : null}
           {reportAction}
@@ -436,17 +461,14 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
               not: with the heading no longer swapping, this is what tells the
               two states apart, so it must not depend on `reviewed_by` (absent
               on route B pages and on anything reviewed before Issue #663).
-              With a name the `reviewedBy` line states both that a person read
-              it and who; without one the fallback states the first half alone,
+              With a name the `readBy` line states what the reading found and who
+              did it; without one the fallback states the same finding unnamed,
               rather than an empty label or an `unknown` placeholder — a missing
               reviewer is a normal state, not a gap to fill (Issue #663). */}
           {!isPending ? (
             <p class="wikicommit-banner__reviewer">
               {reviewedBy ? (
-                <>
-                  {t.reviewedBy}{" "}
-                  <a href={`https://github.com/${encodeURIComponent(reviewedBy)}`}>{reviewedBy}</a>
-                </>
+                renderReadBy(t.readBy, reviewedBy)
               ) : (
                 t.readByAPerson
               )}

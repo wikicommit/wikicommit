@@ -78,7 +78,7 @@ view ツリー（`.wikicommit/view/<lang>/<slug>.md`。Wiki 自身のページ�
 | `check_distribution_freshness.py` | インストール済み配布物とテンプレートの差分検出（古い・欠落・孤児。読み取り専用） | なし（常に 0） |
 | `search_index.py` | FTS5 trigram 検索インデックスの構築・クエリ（`wikicommit-search`・`wikicommit-ask` 共有） | SQLite が trigram トークナイザ非対応、または `.wikicommit/entity/` が存在しない |
 | `check_schema_coverage.py` | `.wikicommit/schema/` に専用ファイルのない `type:` 値の集計（`wikicommit-generate`・`wikicommit-schema-propose`・`wikicommit-status` 共有） | なし（常に 0） |
-| `check_schema_org_type.py` | Schema.org 語彙に対する型・プロパティの実在検証、型名+説明文一覧の取得（`wikicommit-generate`・`wikicommit-schema-propose` 共有） | 型が語彙に存在しない、プロパティが型（祖先型含む）に属さない、語彙の取得・パースに失敗、または `--type`/`--list-types` のいずれも未指定 |
+| `check_schema_org_type.py` | Schema.org 語彙に対する型・プロパティの実在検証、型名一覧の取得と候補型の説明文の取得（2 段階。Issue #798）（`wikicommit-generate`・`wikicommit-schema-propose` 共有） | 型が語彙に存在しない、プロパティが型（祖先型含む）に属さない、語彙の取得・パースに失敗、または `--type`/`--list-type-names`/`--describe`/`--list-installed-hierarchy` のいずれも未指定 |
 | `build_survey_view.py` | Wiki 全体を1つのコンテキストに収まる縮約ビューへ落とす（`wikicommit-synthesize` の俯瞰モード〈Issue #586〉と `wikicommit-collect` の Step 3.5〈Issue #672〉が共有。`--include-view` を渡さない限り view ツリーは対象外。Issue #675） | なし（常に 0） |
 | `rebuild_index.py` | Type ディレクトリの `index.md`、および view ツリーの言語別 `index.md` を決定論的に再構築（`wikicommit-generate`・`wikicommit-translate`・`wikicommit-synthesize` 共有。Issue #406・#547・#675） | なし（常に 0） |
 | `check_extraction_quality.py` | 既知JS-shellドメイン判定（ブロッキング）・取得能力の事前チェック（ブロッキング。Issue #574）・抽出テキストの低情報密度判定（警告。Issue #562）（`wikicommit-generate`・`wikicommit-collect` 共有。Issue #425） | ドメインが既知不可リストに一致（`check-domain`）、必要な追加パッケージが未導入（`check-fetch-capability`）、抽出テキストが低密度（`check-density`）、または対象ファイルが読み込めない |
@@ -1005,7 +1005,7 @@ Schema.org の公式機械可読語彙ダンプ（`https://schema.org/version/la
 
 ### 使用場面
 
-- `wikicommit-generate` Skill：Pass 2c のプロンプトに Schema.org 型名+説明文の全一覧をプリロードするため（`--list-types`）。Pass 2b の型・プロパティ実在検証にも使う（`--type`/`--property`）。Pass 3 が `properties:` の値を WikiLink 化すべきか判断する材料にも使う（`--show-range`。Issue #496）。Pass 2b が新規型の候補プロパティを選ぶ際、型が持ちうるプロパティ一覧を閲覧する材料にも使う（`--list-properties`。Issue #497）
+- `wikicommit-generate` Skill：Pass 2b のプロンプトに Schema.org 型名の一覧をプリロードし（`--list-type-names`）、絞り込んだ候補の説明文だけを引くため（`--describe`）。Pass 2b の型・プロパティ実在検証にも使う（`--type`/`--property`）。Pass 3 が `properties:` の値を WikiLink 化すべきか判断する材料にも使う（`--show-range`。Issue #496）。Pass 2b が新規型の候補プロパティを選ぶ際、型が持ちうるプロパティ一覧を閲覧する材料にも使う（`--list-properties`。Issue #497）
 - `wikicommit-schema-propose` Skill：型・プロパティの実在検証（`--type`/`--property`）。Step 4（標準型パス）が候補プロパティを選ぶ際の閲覧にも使う（`--list-properties`）
 
 語彙の読み込み・キャッシュ（`.wikicommit/schemaorg-vocab.json`）・`domainIncludes`/`rangeIncludes`/`rdfs:subClassOf` 継承チェーン判定のロジックは `.wikicommit/scripts/_schemaorg_vocab.py`（`_frontmatter.py`/`_wikilink.py` と同じ、複数スクリプトが import する共有モジュール）に切り出されている（Issue #495、`rangeIncludes`/DataType 判定は Issue #496 で追加）。`validate_frontmatter.py` の `properties:` フィールド検証（同スクリプトの節を参照）もこのモジュールを共有し、CLI としての本スクリプトとロジックが乖離しないようにしている。本スクリプト自身は CLI 引数のパース・出力整形のみを担う薄いラッパー。
@@ -1015,11 +1015,12 @@ Schema.org の公式機械可読語彙ダンプ（`https://schema.org/version/la
 ```
 python .wikicommit/scripts/check_schema_org_type.py --type <TypeName> [--property <PropertyName>]... [--show-range]
 python .wikicommit/scripts/check_schema_org_type.py --type <TypeName> --list-properties
-python .wikicommit/scripts/check_schema_org_type.py --list-types
+python .wikicommit/scripts/check_schema_org_type.py --list-type-names
+python .wikicommit/scripts/check_schema_org_type.py --describe <TypeName>...
 python .wikicommit/scripts/check_schema_org_type.py --list-installed-hierarchy
 ```
 
-`--type` / `--list-types` / `--list-installed-hierarchy` のいずれか 1 つを指定する。すべて省略した場合はエラー（`--list-properties` 単独指定時は「`--list-properties` には `--type` の指定が必要です」という専用のエラーメッセージになる）。優先順位: `--list-types` が指定されていれば他の全フラグを無視してこのモード。次に `--list-installed-hierarchy` が指定されていれば同様に他の全フラグを無視してこのモード（Issue #565）。次に `--type` + `--list-properties` が指定されていればこのモード（`--property`/`--show-range` は無視）。それ以外は `--type`（+ 任意で `--property`/`--show-range`）の既存の検証モード。
+`--type` / `--list-type-names` / `--describe` / `--list-installed-hierarchy` のいずれか 1 つを指定する。すべて省略した場合はエラー（`--list-properties` 単独指定時は「`--list-properties` には `--type` の指定が必要です」という専用のエラーメッセージになる）。優先順位: `--list-type-names` が指定されていれば他の全フラグを無視してこのモード。次に `--describe`、次に `--list-installed-hierarchy` が指定されていれば同様に他の全フラグを無視してこのモード（Issue #798・#565）。次に `--type` + `--list-properties` が指定されていればこのモード（`--property`/`--show-range` は無視）。それ以外は `--type`（+ 任意で `--property`/`--show-range`）の既存の検証モード。
 
 ### 保存先（Git管理下・Issue #319）
 
@@ -1027,7 +1028,7 @@ python .wikicommit/scripts/check_schema_org_type.py --list-installed-hierarchy
 
 `search_index.sqlite3` 等の `.wikicommit/.cache/`（`.gitignore` 除外）配下のファイルとは異なり、本ファイルは `.wikicommit/.cache/` の外（`.wikicommit/schemaorg-vocab.json`）に置き、Git 管理対象とする。理由: `search_index.sqlite3` は実行のたびに全件再構築される真の使い捨てキャッシュ（消しても実害ゼロ）だが、本ファイルはネットワーク取得コストのある準静的な参照データであり、削除すると次回実行時に毎回ネットワーク取得が再発生する。`.cache/` という名前が与える「気軽に消してよい」という印象と実際の性質が食い違っていたため、`llm-agent-research-wiki` パイロットでの指摘（`Issues/registered/p3-117-schemaorg-vocab-cache-placement.md`（非公開の開発リポジトリ側の記録））を受けてGit管理下に切り出した。副次的な効果として、クローン直後から使え、複数人・複数マシン間でのネットワーク取得の重複コストも避けられる。
 
-再生成したい場合はユーザーが `.wikicommit/schemaorg-vocab.json` を手動削除して再実行する。Git管理下にあるため、再生成後の差分は他の追跡ファイルと同様に通常のコミット・PRレビューを経て反映される（`wikicommit-merge` が `.wikicommit/schemaorg-vocab.json` の新規作成を検出しコミットに含める。`.claude/skills/wikicommit-merge/SKILL.md` Step 2 参照）。`--type`/`--list-types`/`--show-range`/`--list-properties` のどの呼び出しもこの同じファイルを共有する。`rangeIncludes`/`is_datatype`（Issue #496 で追加されたキー）・property の `comment`（Issue #497 で追加されたキー）を含まない旧形式のキャッシュは手動削除不要 ── `_schemaorg_vocab.py` の `load_or_build_index()` が `_is_well_shaped_index()` でこの形状不一致を自動検出し、再取得・再構築する（各 `types` エントリに `is_datatype`、各 `properties` エントリに `range`/`comment` キーが揃っているかまで検証する。外側の `{"types": dict, "properties": dict}` の型だけでは、旧形式のキャッシュを誤って正常として受理してしまい、`--show-range` が黙って何も報告しなくなる、`--list-properties` の説明列が常に空になる、または `is_in_datatype_lineage()` がキー欠落を `is_datatype: false` と誤認して DataType 型をエンティティ型として誤分類する、という複数のサイレント劣化を招くため）。
+再生成したい場合はユーザーが `.wikicommit/schemaorg-vocab.json` を手動削除して再実行する。Git管理下にあるため、再生成後の差分は他の追跡ファイルと同様に通常のコミット・PRレビューを経て反映される（`wikicommit-merge` が `.wikicommit/schemaorg-vocab.json` の新規作成を検出しコミットに含める。`.claude/skills/wikicommit-merge/SKILL.md` Step 2 参照）。`--type`/`--list-type-names`/`--describe`/`--show-range`/`--list-properties` のどの呼び出しもこの同じファイルを共有する。`rangeIncludes`/`is_datatype`（Issue #496 で追加されたキー）・property の `comment`（Issue #497 で追加されたキー）を含まない旧形式のキャッシュは手動削除不要 ── `_schemaorg_vocab.py` の `load_or_build_index()` が `_is_well_shaped_index()` でこの形状不一致を自動検出し、再取得・再構築する（各 `types` エントリに `is_datatype`、各 `properties` エントリに `range`/`comment` キーが揃っているかまで検証する。外側の `{"types": dict, "properties": dict}` の型だけでは、旧形式のキャッシュを誤って正常として受理してしまい、`--show-range` が黙って何も報告しなくなる、`--list-properties` の説明列が常に空になる、または `is_in_datatype_lineage()` がキー欠落を `is_datatype: false` と誤認して DataType 型をエンティティ型として誤分類する、という複数のサイレント劣化を招くため）。
 
 ### 処理フロー（`--type`/`--property`/`--show-range`）
 
@@ -1060,9 +1061,26 @@ SUMMARY: installed_types=4
 
 **間に挟まる非インストール型は名前を出さない**（`Park` が `CivicStructure` 経由で `Place` の子孫であっても、`CivicStructure.md` が無ければ `Place` だけを出す）。Pass 2c が選べるのはインストール済みの型だけであり、選べない型を提示しても迷わせるだけであるため。
 
-### 処理フロー（`--list-types`）
+### 処理フロー（`--list-type-names` / `--describe`）— 型の想起は 2 段階（Issue #798）
 
-キャッシュから型一覧を取得し、型名（アルファベット順）+ 一行説明（`rdfs:comment`）をタブ区切りで出力する。`wikicommit-generate` Pass 2 はこの出力をそのままプロンプトに含める。
+キャッシュから型名だけをアルファベット順に出力する（`--list-type-names`。**説明文を付けない**）。続けて、そこから絞り込んだ候補について `--describe <TypeName>...` が型名 + 一行説明（`rdfs:comment`）をタブ区切りで出力する。
+
+**分けた理由は、この一覧が果たしているのが想起であって存在保証ではないため**である。型が実在するかは候補が承認された後の `--type <Type> --property ...` が決定論的に確かめており、一覧の役目は「モデルが思いつかない型を候補に上げさせる」ことに尽きる。想起には、誰も検討していない 928 型の説明文は要らない。
+
+| | 実測 |
+|---|---|
+| 旧 `--list-types`（全 933 型の名前 + 説明） | 147,421 B（約 37K トークン） |
+| `--list-type-names`（名前のみ） | 13,441 B（約 3.4K トークン） |
+| `--describe` 3 件 | 170 B |
+| **合計** | **約 14 KB（−90%）** |
+
+これは `/wikicommit-generate` の固定オーバーヘッドをソース件数によらず約 84K → 約 51K トークンに下げる（`README.md` の Requirements → Context window が正本）。
+
+**`--list-types` は残さず削除した**（Issue #798 の検討事項 5）。3 Skill が 2 段階へ移った時点で呼び出し元が 0 になり、「どの Skill も使っていないが配布はされているモード」を仕様に残すことは、Issue #553 が確立した「消費者のいない受け皿を配らない」に反する。しかも残せば、プリロードすべきでないと決めたばかりの高価な経路を仕様書が宣伝し続けることになる。同じ需要は `--describe` がオンデマンドで満たす。
+
+**`--describe` は語彙に無い名前を ERROR にする**（同 検討事項 6）。黙って落とすと、段階 1 が 933 件の実在する名前を渡している以上「戻ってこなかった名前＝モデルの創作」であることが承認ステップまで伝わらない。1 件でも該当すれば終了コード 1 を返すが、実在した分は通常どおり出力する（呼び出し側が有効な候補だけで進めるため）。
+
+**この削減は測れない**（同 検討事項 1）。説明文を落として型提案の recall が落ちたかを判定する eval 基盤はこのリポジトリに無く、Issue #669 が `chain_of_thought` を実装せず削除したときと同じ状況にある（削減は確実・品質劣化は判定不能）。壊れ方が軽いこと（型提案は元々ゼロ件が通常の結果で、`wikicommit-schema-propose` と `check_schema_coverage.py` が事後の安全網として残る）を根拠に採ったうえで、**次のパイロットの観察項目**として「`provenance` が `init-theme` / `collect` / `generate-interactive` / `generate-auto` の型が実際に生まれるか」を記録する — それが recall を落としていないことの唯一の間接的な証拠になる。
 
 ### 出力フォーマット（`--type`/`--property`）
 
@@ -1096,21 +1114,30 @@ name<TAB>Thing<TAB>-<TAB>The name of the item.
 SUMMARY: type=schema:Person, properties=81
 ```
 
-### 出力フォーマット（`--list-types`）
+### 出力フォーマット（`--list-type-names`）
 
 ```
-CreativeWork<TAB>The most generic kind of creative work...
-Game<TAB>The Game type represents things which are games...
-Thing<TAB>The most generic type of item.
+CreativeWork
+Game
+Thing
 SUMMARY: types=933
+```
+
+### 出力フォーマット（`--describe`）
+
+```
+Park<TAB>A park.
+Museum<TAB>A museum.
+ERROR: schema:NotARealType does not exist in the Schema.org vocabulary
+SUMMARY: described=2, errors=1
 ```
 
 （`<TAB>` はタブ文字 1 個を表す表記。実際の出力はタブ区切り。）
 
 ### 終了コード
 
-- `0`: `--type` の型（および指定した全 `--property`）が実在・所属確認済み。または `--list-types`/`--list-properties` が完了。`--show-range` の有無は終了コードに影響しない
-- `1`: 型が存在しない、プロパティが存在しない/所属しない、`--list-properties` が `--type` なしで指定された、語彙の取得・パースに失敗、または `--type`/`--list-types` のいずれも指定されなかった
+- `0`: `--type` の型（および指定した全 `--property`）が実在・所属確認済み。または `--list-type-names`/`--describe`（全件実在）/`--list-properties` が完了。`--show-range` の有無は終了コードに影響しない
+- `1`: 型が存在しない、プロパティが存在しない/所属しない、`--describe` に語彙へ無い名前が含まれる、`--list-properties` が `--type` なしで指定された、語彙の取得・パースに失敗、または `--type`/`--list-type-names`/`--describe`/`--list-installed-hierarchy` のいずれも指定されなかった
 
 ---
 
@@ -1512,6 +1539,8 @@ RETRACTED_EVIDENCE: .wikicommit/entity/ja/Place/v.md (the review of 2026-09-05 r
 
 ```
 python .wikicommit/scripts/record_run.py start --skill <skill> [--model "<model ID>"] [--arg <arg>]...
+python .wikicommit/scripts/record_run.py checkpoint <run-record-path> --pass <name>
+    [--token <token>] [--source <path>]
 python .wikicommit/scripts/record_run.py end <run-record-path> [--source <path>]... [--page <path>]...
     [--outcome KEY=VALUE]... [--halted-reason "<reason>"]
 ```
@@ -1530,6 +1559,11 @@ wikicommit_version: "0.3.0"
 args: ["https://example.com/article"]
 sources: [".wikicommit/source/url/example.com/article.md"]
 pages: [".wikicommit/entity/ja/Place/minuma.md"]
+passes:                                  # Issue #797。空リストなら「打点なし」
+  - {pass: pass1-extract, at: "2026-09-07T10:44:02+09:00", token: unchecked,
+     source: ".wikicommit/source/url/example.com/article.md"}
+  - {pass: pass2b-type, at: "2026-09-07T10:51:37+09:00", token: ok,
+     source: ".wikicommit/source/url/example.com/article.md"}
 outcome: {generated: 12, failed: 1, excluded: 2}
 halted_reason: ""
 ---
@@ -1542,6 +1576,54 @@ halted_reason: ""
 **誤りの向きが重要である**: 打刻忘れは完走した実行を未完走として報告するだけで、逆は起こらない。偽の「未完走」は 1 回の確認で済む一方、偽の「完走」はこの記録が答えるべき唯一の問いを黙って葬る。**`end` が `--run <path>` を必須とし、同じ Skill の未完了記録を推測で閉じないのも同じ理由**である — 推測は前のセッションで本当に死んだ実行を閉じ、その信号を消す。
 
 `end` はこのファイル唯一の read-modify-write であり、Issue #750 が意図的に避けた形である。ここで安全なのは一般化しない理由による: 実行記録は本文もコメントも持たないため YAML の round-trip で失うものが無い（`config.yml` はまさにそれでコメント記入例を丸ごと失った。Issue #713）。
+
+### `checkpoint` — 実行の**どこまで**を残す（Issue #797）
+
+`ended_at` が答えるのは実行**全体**の生死だけで、その内側で何が起きたかには答えない。空いていた 2 つの問いはどちらもこのリポジトリが実際に払ったコストである:
+
+| 問い | checkpoint 以前 | checkpoint 後 |
+|---|---|---|
+| どこで止まったか | `ended_at` が空、としか言えない。ガード C（Issue #574）・`rules_version` 不一致（Issue #752）は**ファイルを 1 つも変えずに止まる**ため run 記録が唯一の痕跡で、その痕跡が位置を持たなかった | **最後に到達したパスが残る** |
+| パスが丸ごと飛ばされたか | 検出不能。Issue #406 / #452 / #474 は同一のクラス（長い多段フローの末尾で手順が落ちる）で、**3 件とも公開済みパイロットを人が手で監査して初めて見つかった** | **打点の欠落として検出** |
+
+3 件とも解決策は「決定論的スクリプトへの委譲」だったが、**委譲したスクリプトを呼ぶ手順そのものが落ちた場合は同じ形で再発する**。打点はその 1 段外側に立つ。
+
+#### 照合の第三者はスクリプト自身である
+
+Issue #752 が `rules_version` の echo 検証を成立させられたのは、サブエージェントが JSON を返し orchestrator がそれを照合するという **2 者**がいたためで、同 Issue 自身が「`wikicommit-review` はサブエージェントを使わないため echo 検証が効かない」と限界を明記している。単一エージェントでは「自分が読んだと自分に申告する」だけになり何も検証しない。
+
+`--token` を渡すと `record_run.py` が `.claude/skills/<skill>/passes/<pass>.md` を**自分でディスクから開いて** frontmatter の `pass_token` と突き合わせる。**照合先のパスは引数で受け取らない** — 呼び出し側がファイルを指定できるなら、自分で書いたファイルを指すこともできてしまい、第三者性が消える。
+
+| 失敗 | 検出 |
+|---|---|
+| パスが丸ごと飛ばされた | **打点の欠落**（`MISSING_PASS:` / `never ran`） |
+| どこで止まったか | **最後の打点** |
+| パスファイルを開かずに即興で実行した | **トークン不一致**（`token: mismatch`・exit 1） |
+| ファイルは開いたが従わなかった | **検出不能**（`rules_version` と同じ限界。トークン行だけ grep することは防げない） |
+
+**`--token` は SKILL.md のパス分割（進行的開示）を前提とする**が、本機能はその分割に依存しない — パスファイルが無い段階では `--token` を渡さず `--pass` だけで打点し、上表の上 2 行はそれで成立する。3 行目だけが分割後に効くようになる。
+
+**トークンが照合できなかった場合も打点は書かれる**（`token: mismatch` / `token: missing`）うえで exit 1 を返す。書かずに落ちると「そのパスは始まってすらいない」という別の（そして誤った）話になるため。
+
+#### 打点の粒度と、Pass 2a に打たない理由
+
+`wikicommit-generate` の `EXPECTED_PASSES` は `pass1-extract` / `pass2b-type` / `pass2c-entities` / `pass3-generate` / `pass4-review` の 5 つで、**ソース 1 件につき 1 周**打つ（`--source` がその周回の対象を持つ）。パス単位だけにするとソース 3 件目で止まったことが分からない — パス名は繰り返し現れるので、`--source` が無いと 1 件目で死んだ実行と区別が付かない。
+
+**Pass 2a には打たない**。Pass 1 の抽出と地続きに無条件で走り、分岐も停止経路も持たないため、そこに打点しても Pass 1 の打点が示す位置以上のことは分からない一方、ソースごとに read-modify-write が 1 回増える。
+
+`--pass` は `EXPECTED_PASSES` に対して検証する。打ち間違いを通すと**未知のパスが 1 つ増え、同時に本物のパスが「実行されなかった」ように見える** — 1 つのミスが 2 つの誤った所見になり、しかもどちらも実際の問題ではない。
+
+`--regenerate` の実行では期待集合が `pass1-extract` / `pass3-generate` / `pass4-review` の 3 つに狭まる（同モードは Pass 2 を実行しない。`docs/DesignDoc-pipeline.md` §6.1）。判定は記録自身の `args` を読んで行う — 呼び出し側に再申告させない。
+
+#### read-modify-write のコスト（実測）
+
+`end` は Issue #790 が「このファイル唯一の read-modify-write」としていたが、打点も同じ形を採るため回数が増える。**ソース 5 件 × パス 5 つ ＝ 25 回で実測 1.27 秒（1 回あたり約 51 ms）、記録ファイルは約 2.5 KB。** Issue #790 が RMW を許した根拠（実行記録は本文もコメントも持たないので YAML の round-trip で失うものが無い）は回数によらず成立し、実行時間の大半は LLM 推論であるため相対的な影響は無い。
+
+#### 既知の限界: compaction は分割前の Pass 2 以降の打点指示を落としうる
+
+打点忘れの誤りの向きは `ended_at` と同じで安全側である（打たなければ「実行されていない」と報告され、逆は起こらない）。ただしこれは**打点の指示がコンテキストに残っていること**に依存する — 分割前の `wikicommit-generate/SKILL.md` では Pass 2 以降の打点指示がファイル冒頭から遠く、context compaction がそれを落としたまま実行が続きうる。その場合、実際には走ったパスが `MISSING_PASS:` として報告される（偽陽性）。この非対称は SKILL.md のパスごとの分割が入るまで残る。SKILL.md 側にも同じ限界を明記してある。
+
+**クラウドセッションでは記録が VM とともに消える**（Issue #790 が明記した代償）。そして無人実行こそ compaction をいちばん踏む経路であり、**検証手段がいちばん検証したい環境で残らない**。git 追跡対象にする案は Issue #790 が理由を挙げて退けているため蒸し返さず、代わりに `wikicommit-generate` の Completion Notice が打点の要約を 1 行出す（PR 本文経由でそこだけは残る）。
 
 ### 記録しないもの
 
@@ -1561,13 +1643,14 @@ halted_reason: ""
 ```
 RUN_STARTED: .wikicommit/run/20260907-104233-generate.md (skill=wikicommit-generate, started_at=2026-09-07T10:42:33+09:00)
 NOTE: pass this path back to `record_run.py end` when the run finishes.
+CHECKPOINT: .wikicommit/run/20260907-104233-generate.md (pass=pass1-extract, token=unchecked, source=.wikicommit/source/url/example.com/article.md)
 RUN_ENDED: .wikicommit/run/20260907-104233-generate.md (ended_at=2026-09-07T11:05:12+09:00, elapsed=22m39s)
 ```
 
 ### 終了コード
 
-- `0`: 記録を開いた／閉じた
-- `1`: 引数不正（未知の `--skill`・`--outcome` が整数でない）、`end` に渡されたパスが存在しない、frontmatter が読めない、書き込みに失敗
+- `0`: 記録を開いた／打点した／閉じた
+- `1`: 引数不正（未知の `--skill`・`--outcome` が整数でない・`--pass` がその Skill のパスでない）、`checkpoint`／`end` に渡されたパスが存在しない、`--token` がパスファイルの `pass_token` と一致しない（打点自体は書かれる）、frontmatter が読めない、書き込みに失敗
 
 ---
 
@@ -1579,8 +1662,13 @@ RUN_ENDED: .wikicommit/run/20260907-104233-generate.md (ended_at=2026-09-07T11:0
 
 | 行 | 答える問い |
 |---|---|
-| `LAST_RUN:` | 直近の実行はいつ・どの Skill・どれだけかかって・何を produce したか |
-| `INCOMPLETE_RUN:` | 完走しなかった実行はどれか（`halted_reason` があれば添える） |
+| `LAST_RUN:` | 直近の実行はいつ・どの Skill・どれだけかかって・いくつのパスを踏んで・何を produce したか |
+| `INCOMPLETE_RUN:` | 完走しなかった実行はどれか（`halted_reason` があれば添え、打点があれば**どこまで到達したか**も添える） |
+| `MISSING_PASS:` | **完走したのに打点の無いパスがある**実行はどれか（Issue #797） |
+
+**`MISSING_PASS:` は所見であって断定ではない** — `check_installed_type_usage.py` の `ANCESTOR_FALLBACK:` と同じ姿勢を採る。全ソースが Pass 1 でブロックされた・全件が既に最新だった、といった場合には Pass 2 以降に何もすることが無く、そこで終わるのは正常である。この行が言うのは「完走したが飛ばしたものがある」ことまでで、それ自体は不具合を意味しない。**完走していない実行はこの行に出さない** — 既に `INCOMPLETE_RUN:` が報告しており、そこには欠落の明白な理由がある。二重に出すと、片方（"finished, but"）が偽になる。
+
+**打点を 1 つも持たない記録については、パスについて何も出力しない**。Issue #797 以前に書かれた記録は `passes` キー自体を持たず、打点しない Skill の記録は空リストを持つ — どちらも報告のしようがなく、黙っているのが唯一正直な出力である。`start` が空リストを明示的に書くのは、この 2 状態を区別するためである。
 
 **`LAST_RUN:` は 1 件のみ**。答える問いは「いま走らせたものが何かに到達したか」であって履歴ではなく、しかも履歴はローテーションで有界であるため、長い一覧は完全な窓ではなく恣意的な窓を報告することになる。**未完了の記録は全件を列挙する** — 個別に対処できるものであり、件数はローテーションが既に抑えている。
 
@@ -1601,16 +1689,19 @@ python .wikicommit/scripts/check_run_records.py
 ### 出力フォーマット
 
 ```
-LAST_RUN: 2026-09-07 10:42 wikicommit-generate (22m39s, generated=12 failed=1)
-INCOMPLETE_RUN: 2026-09-05 14:03 wikicommit-generate (no ended_at — halted: rules_version mismatch)
-SUMMARY: runs=7, incomplete=1
+LAST_RUN: 2026-09-07 10:42 wikicommit-generate (22m39s, 5 pass(es), generated=12 failed=1)
+INCOMPLETE_RUN: 2026-09-05 14:03 wikicommit-generate (no ended_at — halted: rules_version mismatch — reached pass2b-type; pass2c-entities, pass3-generate, pass4-review never ran)
+MISSING_PASS: 2026-09-06 09:10 wikicommit-generate (finished, but pass4-review left no stamp)
+SUMMARY: runs=7, incomplete=1, missing_pass=1
 ```
 
-ディレクトリが無い・記録が 1 件も無い場合は `SUMMARY: runs=0, incomplete=0` と `NOTE:` を出す — 「まだ一度も実行が記録されていない」と「全部の実行が完走した」は別の状態であり、0 だけを出すと後者に見える。読めない記録は stderr に `WARNING:` を出して飛ばす（黙って落とすと、ここで唯一高めに誤るべき数である未完了件数を過少に報告することになる）。
+ディレクトリが無い・記録が 1 件も無い場合は `SUMMARY: runs=0, incomplete=0, missing_pass=0` と `NOTE:` を出す — 「まだ一度も実行が記録されていない」と「全部の実行が完走した」は別の状態であり、0 だけを出すと後者に見える。読めない記録は stderr に `WARNING:` を出して飛ばす（黙って落とすと、ここで唯一高めに誤るべき数である未完了件数を過少に報告することになる）。
 
 ### 既知の限界
 
 **記録は git で追跡されないため、この報告はそのチェックアウトに限られる** — clone 先は 1 件も見えず、クラウドセッションの記録は VM とともに消える。ここが 0 であることは「このマシンに記録が無い」を意味し、「実行されていない」を意味しない。
+
+**打点の欠落は、パスが走らなかったことの間接的な証拠にすぎない**。指示が context compaction で落ちれば、走ったパスも打点を残さない（`record_run.py` の同名の節を参照）。誤りの向きは安全側 — 本当に飛ばされたパスが「走った」と報告されることはない — だが、`MISSING_PASS:` の偽陽性は SKILL.md のパス分割が入るまで残る。
 
 ### 終了コード
 

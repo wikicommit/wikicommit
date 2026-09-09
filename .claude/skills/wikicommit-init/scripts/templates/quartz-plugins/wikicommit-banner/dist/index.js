@@ -22,16 +22,21 @@ var en_US_default = {
       generatedBy: "Model:",
       translatedAt: "Translated:",
       translatedBy: "Model:",
-      reviewedBy: "Read by:",
+      // Issue #800: a sentence with a {name} placeholder rather than a bare
+      // "label: value" pair, because the line now states what the reading
+      // found as well as who did it. The renderer splits on {name} and puts
+      // the profile link in the gap. `counts` in convert_wikilinks.py already
+      // uses placeholders this way, so this is not a new pattern here.
+      readBy: "Read by {name} \u2014 nothing obviously wrong stood out",
       // Issue #774: what `titleReviewed` used to be, moved out of the heading
       // and into the line review adds. It is shown only when `reviewed_by` is
       // absent — a route B page (`/wikicommit-review` runs locally and cannot
       // obtain a GitHub login) or one reviewed before that field existed. With
-      // a name, the `reviewedBy` line below says the same thing and says who,
+      // a name, the `readBy` line below says the same thing and says who,
       // and printing both would repeat "read" twice. Having this fallback is
       // what keeps the two states distinguishable without depending on
       // `reviewed_by` being present.
-      readByAPerson: "A person has read this page",
+      readByAPerson: "A person read this page \u2014 nothing obviously wrong stood out",
       // Issue #751: what the machine check actually compared, stamped onto the
       // published copy of the page by convert_wikilinks.py and present on no
       // page in .wikicommit/entity/. Worded as "checked against its sources"
@@ -82,8 +87,8 @@ var en_US_default = {
       // own — each line already labels itself.
       reportBodyProblemHeading: "## Problem",
       siteSummaryPages: "Pages:",
-      siteSummaryReviewed: "Read by a person:",
-      siteSummaryReviewNote: 'Every page is published as soon as an LLM generates it. "Read by a person" is how many a person has since read all the way through \u2014 not how much of the wiki is finished, and not a guarantee that anything is correct.',
+      siteSummaryReviewed: "Read and checked by a person:",
+      siteSummaryReviewNote: 'Every page is published as soon as an LLM generates it. The check against sources is run by machine; "read and checked by a person" is how many pages someone has since read all the way through without anything obviously wrong standing out. Only some pages are read by a person, by design \u2014 this number is not meant to reach the total, and it is not a complete quality guarantee.',
       siteSummaryAiReviewed: "Checked against sources:",
       siteSummaryAiReviewNote: '"Checked against sources" is how many pages were compared against their own sources when they were generated. That check covers agreement with those sources and nothing else \u2014 not completeness, not the effect on real people and organizations, not conflicts with what you know.'
     }
@@ -114,16 +119,21 @@ var ja_JP_default = {
       generatedBy: "\u751F\u6210\u30E2\u30C7\u30EB:",
       translatedAt: "\u7FFB\u8A33\u65E5:",
       translatedBy: "\u7FFB\u8A33\u30E2\u30C7\u30EB:",
-      reviewedBy: "\u8AAD\u3093\u3060\u4EBA:",
+      // Issue #800: a sentence with a {name} placeholder rather than a bare
+      // "label: value" pair, because the line now states what the reading
+      // found as well as who did it. The renderer splits on {name} and puts
+      // the profile link in the gap. `counts` in convert_wikilinks.py already
+      // uses placeholders this way, so this is not a new pattern here.
+      readBy: "{name} \u304C\u8AAD\u307F\u3001\u660E\u3089\u304B\u306A\u554F\u984C\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
       // Issue #774: what `titleReviewed` used to be, moved out of the heading
       // and into the line review adds. It is shown only when `reviewed_by` is
       // absent — a route B page (`/wikicommit-review` runs locally and cannot
       // obtain a GitHub login) or one reviewed before that field existed. With
-      // a name, the `reviewedBy` line below says the same thing and says who,
+      // a name, the `readBy` line below says the same thing and says who,
       // and printing both would repeat "read" twice. Having this fallback is
       // what keeps the two states distinguishable without depending on
       // `reviewed_by` being present.
-      readByAPerson: "\u4EBA\u304C\u8AAD\u307F\u307E\u3057\u305F",
+      readByAPerson: "\u4EBA\u304C\u8AAD\u307F\u3001\u660E\u3089\u304B\u306A\u554F\u984C\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
       // Issue #751: what the machine check actually compared, stamped onto the
       // published copy of the page by convert_wikilinks.py and present on no
       // page in .wikicommit/entity/. Worded as "checked against its sources"
@@ -174,8 +184,8 @@ var ja_JP_default = {
       // own — each line already labels itself.
       reportBodyProblemHeading: "## \u5831\u544A\u5185\u5BB9",
       siteSummaryPages: "\u7DCF\u30DA\u30FC\u30B8\u6570:",
-      siteSummaryReviewed: "\u4EBA\u304C\u8AAD\u3093\u3060\u30DA\u30FC\u30B8:",
-      siteSummaryReviewNote: "\u30DA\u30FC\u30B8\u306F LLM \u304C\u751F\u6210\u3057\u305F\u6642\u70B9\u3067\u516C\u958B\u3055\u308C\u307E\u3059\u3002\u300C\u4EBA\u304C\u8AAD\u3093\u3060\u30DA\u30FC\u30B8\u300D\u306F\u305D\u306E\u3046\u3061\u4EBA\u304C\u6700\u5F8C\u307E\u3067\u8AAD\u3093\u3060\u4EF6\u6570\u3067\u3059 \u2014 Wiki \u306E\u5B8C\u6210\u5EA6\u3067\u3082\u3001\u5185\u5BB9\u306E\u6B63\u3057\u3055\u306E\u4FDD\u8A3C\u3067\u3082\u3042\u308A\u307E\u305B\u3093\u3002",
+      siteSummaryReviewed: "\u4EBA\u304C\u8AAD\u3093\u3067\u78BA\u8A8D:",
+      siteSummaryReviewNote: "\u30DA\u30FC\u30B8\u306F LLM \u304C\u751F\u6210\u3057\u305F\u6642\u70B9\u3067\u516C\u958B\u3055\u308C\u307E\u3059\u3002\u51FA\u5178\u3068\u306E\u7167\u5408\u306F\u6A5F\u68B0\u304C\u884C\u3044\u3001\u300C\u4EBA\u304C\u8AAD\u3093\u3067\u78BA\u8A8D\u300D\u306F\u305D\u306E\u3046\u3061\u4EBA\u304C\u6700\u5F8C\u307E\u3067\u8AAD\u307F\u3001\u660E\u3089\u304B\u306A\u554F\u984C\u3092\u898B\u3064\u3051\u306A\u304B\u3063\u305F\u4EF6\u6570\u3067\u3059\u3002\u4EBA\u306B\u3088\u308B\u78BA\u8A8D\u306F\u8A2D\u8A08\u4E0A\u4E00\u90E8\u306E\u30DA\u30FC\u30B8\u306E\u307F\u3067\u3042\u308A\u3001\u3053\u306E\u6570\u5B57\u304C\u7DCF\u6570\u306B\u9054\u3059\u308B\u3053\u3068\u306F\u76EE\u6307\u3057\u3066\u3044\u307E\u305B\u3093\u3002\u7DB2\u7F85\u7684\u306A\u54C1\u8CEA\u4FDD\u8A3C\u3067\u3082\u3042\u308A\u307E\u305B\u3093\u3002",
       siteSummaryAiReviewed: "\u51FA\u5178\u3068\u7167\u5408:",
       siteSummaryAiReviewNote: "\u300C\u51FA\u5178\u3068\u7167\u5408\u300D\u306F\u751F\u6210\u6642\u306B\u3001\u30DA\u30FC\u30B8\u306E\u8A18\u8FF0\u3092\u305D\u306E\u51FA\u5178\u3068\u7167\u5408\u3057\u305F\u4EF6\u6570\u3067\u3059\u3002\u7167\u5408\u3057\u3066\u3044\u308B\u306E\u306F\u51FA\u5178\u3068\u306E\u4E00\u81F4\u3060\u3051\u3067\u3001\u7DB2\u7F85\u6027\u30FB\u5B9F\u5728\u306E\u4EBA\u7269\u3084\u7D44\u7E54\u3078\u306E\u5F71\u97FF\u30FB\u8AAD\u8005\u81EA\u8EAB\u306E\u77E5\u8B58\u3068\u306E\u98DF\u3044\u9055\u3044\u306F\u898B\u3066\u3044\u307E\u305B\u3093\u3002"
     }
@@ -252,6 +262,15 @@ function buildReviewSearchUrl(repo, type, lang, relativePath) {
   if (!slug) return void 0;
   const q2 = `is:issue is:open label:wikicommit-review in:title "${type}/${slug} (${lang})"`;
   return `https://github.com/${repo}/issues?q=${encodeURIComponent(q2)}`;
+}
+function renderReadBy(template, login) {
+  const [before, ...rest] = template.split("{name}");
+  const after = rest.join("{name}");
+  return /* @__PURE__ */ u2(S, { children: [
+    before,
+    /* @__PURE__ */ u2("a", { href: `https://github.com/${encodeURIComponent(login)}`, children: login }),
+    after
+  ] });
 }
 var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
   const frontmatter = fileData.frontmatter;
@@ -340,11 +359,7 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
     return /* @__PURE__ */ u2(S, { children: [
       siteSummary,
       /* @__PURE__ */ u2("div", { class: "wikicommit-banner__report", children: [
-        reviewedBy ? /* @__PURE__ */ u2("span", { class: "wikicommit-banner__reviewer", children: [
-          t2.reviewedBy,
-          " ",
-          /* @__PURE__ */ u2("a", { href: `https://github.com/${encodeURIComponent(reviewedBy)}`, children: reviewedBy })
-        ] }) : null,
+        reviewedBy ? /* @__PURE__ */ u2("span", { class: "wikicommit-banner__reviewer", children: renderReadBy(t2.readBy, reviewedBy) }) : null,
         reportAction
       ] })
     ] });
@@ -371,11 +386,7 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
               generatedBy
             ] }),
             aiReviewLine,
-            !isPending ? /* @__PURE__ */ u2("p", { class: "wikicommit-banner__reviewer", children: reviewedBy ? /* @__PURE__ */ u2(S, { children: [
-              t2.reviewedBy,
-              " ",
-              /* @__PURE__ */ u2("a", { href: `https://github.com/${encodeURIComponent(reviewedBy)}`, children: reviewedBy })
-            ] }) : t2.readByAPerson }) : null,
+            !isPending ? /* @__PURE__ */ u2("p", { class: "wikicommit-banner__reviewer", children: reviewedBy ? renderReadBy(t2.readBy, reviewedBy) : t2.readByAPerson }) : null,
             /* @__PURE__ */ u2("div", { class: "wikicommit-banner__actions", children: [
               reviewSearchUrl ? /* @__PURE__ */ u2("a", { href: reviewSearchUrl, class: "wikicommit-banner__link", children: t2.reviewStatusLink }) : null,
               reportAction

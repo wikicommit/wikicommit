@@ -84,7 +84,7 @@ def _comment_text(raw: object) -> str:
     both so a description isn't silently dropped. Also collapses embedded
     newlines/runs of whitespace to single spaces: roughly 6% of real
     Schema.org type comments (e.g. "3DModel") span multiple lines, which
-    would otherwise break --list-types' one-line-per-type tab-separated
+    would otherwise break --describe's one-line-per-type tab-separated
     output contract."""
     if isinstance(raw, str):
         text = raw
@@ -112,7 +112,7 @@ def _build_index(jsonld: dict) -> dict:
 
     A property's own "comment" (Issue #497) supports check_schema_org_type.py's
     `--list-properties` mode — the same one-line-description contract
-    `--list-types` already has for types, via the same `_comment_text()`."""
+    `--describe` already has for types, via the same `_comment_text()`."""
     types: dict[str, dict] = {}
     properties: dict[str, dict] = {}
 

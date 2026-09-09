@@ -37,6 +37,7 @@
 | ルート生成物一覧の単一情報源化と、その不変条件の検証 | ✅ 済み | `init.py` の生成物と `print_next_steps.py` の `git add` 案内は、`.claude/skills/wikicommit-init/scripts/_root_outputs.py` という 1 つの宣言的な一覧から組み立てられる（Issue #642。この一覧は init.py の verbatim コピーも駆動するため、ルート生成物の追加は 1 箇所の編集で済む）。`tests/test_root_outputs.py` が一覧自体の不変条件（variant の妥当性・パスの一意性・宣言したテンプレートの実在・`git add` から意図的に外したパス〈`package-lock.json`〉と条件付きパス〈`.wikicommit/schemaorg-vocab.json`〉の扱い）と、**生成できない 3 つ目の一覧である SKILL.md の散文**が Quartz 限定の生成物を漏らしていないことを検証する。実際に init.py を走らせて案内どおりの `git add` 後に未追跡ファイルが残らないことの検証は `tests/test_smoke_local.py`（Issue #556）が引き続き担う |
 | ユーザー向け出力テンプレートへの内部語彙混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_user_facing_vocabulary.py` を **blocking** で実行し、`.claude/skills/wikicommit-*/SKILL.md` のユーザー向けフェンス済みテンプレートに `Step N`/`Pass N`・`Route A`/`Route B`・`Issue #NNN`/`PR #NNN` が混入していると失敗させる（Issue #588。`docs/DesignDoc-skills.md` §11.8）。[L10](#l10-ユーザー向け出力テンプレートへの内部語彙混入チェック-対応済みissue-588) |
 | 配布スクリプトのコンソール出力言語チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_script_output_language.py` を **blocking** で実行し、`.claude/skills/**/scripts/*.py` の `print()` 出力に日本語が含まれていると失敗させる（Issue #770。`docs/DesignDoc-ScriptSpec.md`「共通規則」）。[L11](#l11-配布スクリプトのコンソール出力言語チェック-対応済みissue-770) |
+| Skill の出力に日本語固定が残っていないかのチェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_output_language.py` を **blocking** で実行し、`.claude/skills/wikicommit-*/SKILL.md` の全行（散文・フェンス双方）から日本語の文末記号・鉤括弧（`。、？！「」`）を検出する（Issue #808。[L12](#l12-skill-の出力に日本語固定が残っていないかのチェック-対応済みissue-808)） |
 
 ---
 
@@ -222,6 +223,26 @@ Issue #215（`Issues/registered/p3-062-skill-invocation-mode-audit.md`）で副�
 **既知の限界**: `print()` の引数しか見ない。メッセージを**戻り値として返す**スクリプト（`_frontmatter.py` がその形で、エラー文を呼び出し側へ渡し、そちらが出力する。同ファイル自身の文字列は Issue #770 で英語化済みだが、そこに日本語が戻ってもこの走査には掛からない）はこの走査では拾えず、手作業での確認になる。公開ページに出る読者向けラベル（`convert_wikilinks.py` の `ROOT_INDEX_LABELS` / `OVERVIEW_LABELS` / `SOURCE_*_LABELS`）も同じ理由で走査対象外だが、こちらは日本語であることが正しい層であり、限界ではなく設計である。
 
 `tests/test_check_script_output_language.py` がスクリプト自体の挙動（`print()` リテラル・f-string 定数部の検出、補間値・コメント・docstring・非 `print()` リテラルの除外、`scripts/` 以外のディレクトリの非走査）に加えて、**実際の `.claude/skills/` が検出 0 件であること**も検証する。
+
+### L12. Skill の出力に日本語固定が残っていないかのチェック（✅ 対応済み・Issue #808）
+
+Issue #770・#772・#773 は同じ問いに 3 回答えており、答えは毎回**「言語は読み手に従う」**である — 運用者・エージェント向けの診断は固定英語（#770）、読者・報告者向けは Wiki の `primary_lang`（#773）、配布物そのものは英語（#772）。**このどれからも「SKILL.md に日本語を直書きする」は出てこない**が、Issue #808 はそういう箇所を 6 件見つけた。規則は「誰かがたまたま見たとき」にしか働いていなかったことになる。L9〜L11 と同じく **blocking**（exit 1）とする。
+
+とりわけ鋭いのは `wikicommit-fix` Step 7 の Issue コメントで、**読み手は公開ページの報告リンクから Issue を立てた任意の読者**である。しかも同 Skill は `gh issue close` を意図的に行わない設計なので、コメントが読めなければ報告者は何をすべきか分からず Issue が開いたまま残る。イタリア語 Wiki の報告者に日本語のコメントが返っていた。
+
+**この箇所の言語は Issue #824 でさらに絞り込まれ、`primary_lang` ではなく Step 2 で特定した対象ページの `lang`（＝報告者が実際に読んだページ）になった** — `targets` を持つ Wiki では両者が食い違い、翻訳ページの報告者には `primary_lang` でも届かないため。上段の「読者・報告者向けは `primary_lang`」は追跡 Issue 本文（#773）についての要約であり、この Skill にはそのまま当てはまらない。本チェック自体の対象（SKILL.md に日本語を直書きしないこと）はどちらの決定にも依存しない。
+
+`tools/check_skill_output_language.py` が `.claude/skills/wikicommit-*/SKILL.md` の**全行**を走査する。L10 と違ってフェンスに限定しない — Issue #808 の 6 件のうちフェンス内にあったのは 1 件だけで、残る 5 件は通常の指示散文に置かれた引用文字列だった。内部限定 Skill（`implement-issue` / `review-and-merge`）を除く線引きは L10 と共有する。
+
+**検出するのは CJK ではなく日本語の文末記号・鉤括弧（`。、？！「」`）である。** SKILL.md には正当な日本語の**例示**（ページタイトル・エンティティ名・検索語・ソースからの引用）が多数あり、CJK の有無では `"生年を1981年に修正して"`（例示の引数）と `"対象言語がありません。"`（実際に出力するエラー文）を区別できない。文末記号なら区別できる — 出力される日本語の散文はそれを持ち、タイトルや検索語は持たない。Issue #808 の 6 件に対して実測すると、**例示への誤検出 0 件で 5 件を検出**する。CJK 一律で判定すると SKILL.md 内の例示が全部エラーになり、Issue #562 が低情報密度ガードについて記録した「常時点灯する所見は読まれなくなる」を初日から踏むことになる。
+
+例外は行内または直前の非空行に理由付きの HTML コメント（`<!-- skill-language-exception: <理由> -->`）を置いて明示し、理由が空のマーカーはそれ自体をエラーとする（L10 と同じ規約）。現在の例外は 3 件で、いずれも英語の文の中に引用された日本語の例示である。
+
+**マーカーは行単位で照合するため、フェンス内の行はフェンスの外からは免除できない**（直前の非空行がフェンスの開始行ではなく同じブロックの別の行になるため）。マーカーをフェンスの中に置けば検出は止まるが、ここでのフェンスは Skill がそのまま出力するテンプレートなので、コメントごと読者に印字される。フェンス内では例外を足すのではなく、日本語の文末記号を持たない形へ例示を書き換える（ページタイトル・検索語はそのままで通る）。L10 がこの縁を持たないのは、あちらのマーカーがフェンスの開始行の直前に置かれブロック全体を覆うためである。
+
+**既知の限界**: 文末記号を持たない日本語の**ラベル**は見えない。Issue #808 の `要確認:`（`OK` の隣に出す所見ラベル）がまさにそれで、行の意味を理解しない限り周囲の例示と区別できない。L10 が散文について記録しているのと同じクラスの限界であり、CI は規則が黙って腐る範囲を狭めるものであって塞ぐものではない。**配布テンプレート（`templates/`）も走査対象外**とする — そこには方針として日本語のまま据え置くもの（Python スクリプトのコメント・docstring〈#770〉、`ja-JP.ts` のロケール文字列）があり、日本語であることが正しい層である。
+
+`tests/test_check_skill_output_language.py` がスクリプト自体の挙動（散文・フェンス双方の検出、鉤括弧、例示の非検出、行内／直前行の例外マーカー、理由なしマーカー、内部限定 Skill の非走査）に加えて、**実際の `.claude/skills/` が検出 0 件であること**も検証する。
 
 ---
 

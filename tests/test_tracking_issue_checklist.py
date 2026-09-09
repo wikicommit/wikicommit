@@ -515,3 +515,124 @@ def test_review_skill_asks_about_the_sources_themselves():
         "wikicommit-review/SKILL.md no longer routes a source report to the "
         "retraction that receives it."
     )
+
+
+# ── Issue #800: what closing states, and what a reader does when something
+#    stands out ────────────────────────────────────────────────────────────────
+
+CLOSING_STATES_PHRASE = "Closing this Issue states two things"
+COMMENT_AND_LEAVE_OPEN_PHRASE = "a comment is all that is asked of you"
+NOT_GOING_LOOKING_PHRASE = "not being asked to go looking"
+
+
+def test_every_variant_says_closing_states_two_things(variants):
+    """Issue #800 raised the second half from implication to claim.
+
+    Issue #740 narrowed `reviewed` to an event and, in doing so, left the
+    templates saying only what closing does *not* mean ("not that the page is
+    correct"). A reader could then draw nothing at all from the fact that a
+    person read a page and said nothing — which is the opposite of what the
+    trust ladder is for. The claim that was added back is about the *reading*
+    ("nothing struck you as obviously wrong"), not about the page, which is why
+    it still fits a two-valued field.
+    """
+    for heading, body in variants.items():
+        assert CLOSING_STATES_PHRASE in body, (
+            f"The {heading!r} template no longer says closing states two "
+            "things, so the reader is told only what closing does not mean."
+        )
+        assert "obviously wrong" in body, (
+            f"The {heading!r} template no longer names the second half of what "
+            "closing states."
+        )
+
+
+def test_every_variant_tells_a_reader_to_comment_without_closing(variants):
+    """The reader is not the one who has to fix it (Issue #800).
+
+    Before this the templates said to fix the page first and then close, which
+    asks work of a reader who, by Issue #665's own finding, may not even have
+    the access to do it. This route lives in prose and nothing else would notice
+    if it were dropped — the same reason Issue #736 put a test on its own
+    two-part route.
+    """
+    for heading, body in variants.items():
+        assert COMMENT_AND_LEAVE_OPEN_PHRASE in body, (
+            f"The {heading!r} template no longer tells a reader who noticed "
+            "something that a comment is enough."
+        )
+        assert "do not close" in body.lower(), (
+            f"The {heading!r} template no longer tells that reader to leave the "
+            "Issue open, so a comment plus a close would merge the page as "
+            "reviewed with the problem unaddressed."
+        )
+
+
+def test_the_second_half_never_becomes_an_instruction_to_go_looking(variants):
+    """The one sentence keeping "obviously wrong" from turning into a search.
+
+    Issue #800's whole basis for putting a claim back into a two-valued field is
+    that it ends when the reading ends. Drop this and "did anything strike you"
+    slides into "did you look hard enough", which is a negative proof and
+    exactly the weight Issue #740 removed.
+    """
+    for heading, body in variants.items():
+        assert NOT_GOING_LOOKING_PHRASE in body, (
+            f"The {heading!r} template no longer says the reader is not being "
+            "asked to go looking, so the claim it now carries reads as a search."
+        )
+
+
+def test_the_how_to_proceed_section_does_not_ask_the_reader_to_fix_it():
+    """The shared section, checked once — it is inserted verbatim into all three."""
+    section = variant_body(SHARED_HOW_TO_PROCEED_HEADING)
+    assert "You do not have to make the fix yourself" in section, (
+        'The shared "How to Proceed" section no longer relieves the reader of '
+        "making the fix (Issue #800)."
+    )
+    assert "edit the page first" not in section, (
+        'The shared "How to Proceed" section is back to telling the reader to '
+        "edit the page before closing, which asks work of someone who may not "
+        "have write access at all (Issue #665)."
+    )
+
+
+def test_the_two_claims_are_mirrored_in_the_design_doc():
+    """Issue #729's three-way agreement, for the wording Issue #800 changed.
+
+    The Japanese design record in DesignDoc-pipeline.md §6.2 is the other copy
+    of these templates; when the two drifted before, the design doc described a
+    checklist the Skill no longer wrote.
+    """
+    design_doc = (
+        Path(__file__).parent.parent / "docs" / "DesignDoc-pipeline.md"
+    ).read_text(encoding="utf-8")
+    assert design_doc.count("Close が述べるのは 2 つです") == 3, (
+        "DesignDoc-pipeline.md §6.2's three variants no longer all say that "
+        "closing states two things (Issue #800 / #729)."
+    )
+    assert design_doc.count("引っかかる点があった場合は") == 3, (
+        "DesignDoc-pipeline.md §6.2's three variants no longer all tell a "
+        "reader who noticed something to comment without closing."
+    )
+    assert "修正が必要な場合は先にページを修正" not in design_doc, (
+        "DesignDoc-pipeline.md still tells the reader to fix the page before "
+        "closing (Issue #800)."
+    )
+
+
+def test_the_review_skill_states_the_same_two_claims():
+    """Route B records `reviewed` directly, so it has to mean the same thing.
+
+    `wikicommit-review` writes the field itself instead of closing an Issue. If
+    only the tracking-Issue templates carried the second claim, the same field
+    would mean two different things depending on which route set it.
+    """
+    assert "Recording `reviewed` states two things" in REVIEW_SKILL, (
+        "wikicommit-review no longer states what recording `reviewed` claims, "
+        "so route B and route A disagree about the same field (Issue #800)."
+    )
+    assert "Do not record `reviewed` over a flagged problem" in REVIEW_SKILL, (
+        "wikicommit-review no longer refuses to record a review over a problem "
+        "the reviewer just raised, which would state something they contradicted."
+    )

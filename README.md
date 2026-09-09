@@ -25,8 +25,7 @@ A Git-based knowledge management platform. An LLM generates wiki pages from your
 
 Wikis that are actually running in production:
 
-- **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — A knowledge base about AI-driven development tools such as Claude Code and GitHub Copilot.
-- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A multilingual wiki translating Giovanni Boccaccio's *The Decameron* (14th-century Italian original) into English and Japanese.
+- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A wiki about Giovanni Boccaccio's *The Decameron*, written in Italian and translated into English and Japanese.
 
 ## Table of Contents
 
@@ -40,7 +39,9 @@ Wikis that are actually running in production:
     - [Step 3: Post-merge review](#step-3-post-merge-review)
   - [Tech Stack](#tech-stack)
   - [Requirements](#requirements)
+    - [Context window](#context-window)
   - [Installation](#installation)
+  - [Changelog](#changelog)
   - [Skills List](#skills-list)
   - [Design Docs](#design-docs)
   - [Contributing](#contributing)
@@ -85,13 +86,12 @@ That last one matters when an encyclopedia covers your subject. A page written f
 
 ### Step 3: Post-merge review
 
-Check the review-tracking Issue (`wikicommit-review` label, automatically created for each page with `review_status: pending`):
+**The machine checks every page; a person reads some of them.** Each page is compared against the documents it was written from when it is generated, and the WikiLinks are validated before the merge — so the reading is not a re-run of either. What it adds is what no automated check reaches: whether a sentence is unfair to a real person or organization, whether the page conflicts with what you already know, and whether it contradicts another page written in a different batch. Reading every page is not the goal; `/wikicommit-status` lists the ones most worth a second look.
 
-- Does the page content align with the source?
-- Are the WikiLinks (`[[Type/slug]]`) correct?
+Check the review-tracking Issue (`wikicommit-review` label, automatically created for each page with `review_status: pending`). Closing it states two things: that this page's knowledge reached a person, and that nothing struck them as obviously wrong while reading. It is not a guarantee that the content is correct.
 
-- **No problems** → Just close the Issue to finish. `review-issue-close-sync.yml` detects this, updates `review_status: reviewed`, and auto-merges.
-- **Needs fixing** → First, a human leaves the points to address as comments on the Issue. `/wikicommit-fix <issue-url>` has the AI propose a fix based on the Issue body and comments; after human confirmation, `/wikicommit-merge` applies the fix, and then the Issue is closed.
+- **Nothing stood out** → Just close the Issue to finish. `review-issue-close-sync.yml` detects this, updates `review_status: reviewed`, and auto-merges.
+- **Something stood out** → Leave it in a comment and keep the Issue open — the fix is not the reader's to make. `/wikicommit-fix <issue-url>` has the AI propose a fix based on the Issue body and comments; after human confirmation, `/wikicommit-merge` applies the fix, and then the Issue is closed.
 - **Page created or edited directly by a human without going through an Issue** → `/wikicommit-review <page>` completes the frontmatter, runs a source-consistency check, and records review completion, then `/wikicommit-merge`.
 
 Merging to `main` triggers a static wiki build via Quartz v5 and automatic deployment to GitHub Pages.
@@ -116,6 +116,33 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 - [lychee](https://github.com/lycheeverse/lychee) (for external link validation; if not installed, `/wikicommit-init` makes a best-effort attempt to auto-install it)
 
 > Because the Skills are a set of SKILL.md files compliant with the [agentskills.io](https://agentskills.io) standard, they should in principle work with other compatible coding agents such as Codex, but Claude Code is currently the only environment we've verified.
+
+### Context window
+
+WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract. That contract has a context requirement, and `/wikicommit-generate` is the command that sets it: it loads a fixed overhead before it reads a single source, then adds the extracted text of each source on top.
+
+```text
+context needed  ≈  51K (fixed)  +  ~15K x (sources processed in one run)
+
+  the fixed part:
+    wikicommit-generate/SKILL.md, loaded in full        ~47K
+    the Schema.org type names (--list-type-names)       ~3.4K
+```
+
+| Context window | Sources per run |
+|---|---|
+| 200K | up to 5 (the guard's own limit) |
+| 1M | up to 5 (the same limit) |
+
+`/wikicommit-generate` already asks before processing more than 5 sources in one run, so both rows are that existing guard rather than a new one. The fixed part used to be ~84K, because the full Schema.org type list — every one of the 933 types *with its description* — was loaded on every run; it now loads the names alone and reads the descriptions of only the handful of types actually being considered. That put a 200K window below the guard's own limit; it no longer does.
+
+**The 15K per source is an estimate, and you can measure your own.** `/wikicommit-generate` writes `extracted_tokens` into every source management file under `.wikicommit/source/`, so after one run `grep extracted_tokens .wikicommit/source/**/*.md` gives you the real figure for the kind of source you actually feed it. 15K is what a Japanese Wikipedia article came to; a short blog post is far less, a PDF report far more.
+
+**Where 200K comes from.** In Claude Code, Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 default to a 200K window; Sonnet 5 and Fable 5 / 5.1 are natively 1M. Opus reaches 1M with the `[1m]` suffix (`/model opus[1m]`) or an environment variable, and whether that is available depends on your plan — Max, Team and Enterprise get it automatically, Pro needs usage credits, and metered API access can use it. These are the figures as of 2026-09; see [Claude Code's model configuration docs](https://code.claude.com/docs/en/model-config) for the current ones.
+
+**What happens if you exceed it.** Claude Code compacts the conversation rather than failing, and re-attaches only the **first 5,000 tokens** of each skill afterwards — roughly the first 110 lines of `wikicommit-generate/SKILL.md`, which is Step 0 and nothing else. Passes 1 through 4 are outside it. The run continues without them and produces output that looks normal, so treat the table above as a real limit rather than a suggestion.
+
+`/wikicommit-collect` and `/wikicommit-init` also load the type names, but neither accumulates per-source text the way generate does, so neither approaches the same total.
 
 ## Installation
 
@@ -164,6 +191,10 @@ After installation, run this in the repository where you want to initialize the 
 /wikicommit-init
 ```
 
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) records what changed in each version of WikiCommit itself — the Skills and the template tree they expand. The distribution repository carries no development history, so this file is the only way to learn what changed since the version you last installed, and it is what `/wikicommit-update` reads when it syncs a repository with a newer release.
+
 ## Skills List
 
 | # | Category | Command | Description |
@@ -193,7 +224,7 @@ After installation, run this in the repository where you want to initialize the 
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow (how to run tests and lints, the `Issues/` draft → registration flow, and how to open a PR).
+[docs/README.md](docs/README.md) explains how to read the design record — what is published here, what the `Issue #NNN` references mean, and which referenced paths are not part of this repository. [tests/README.md](tests/README.md) covers the test suite: how to run it, why much of it is written in Japanese, and which tests are skipped outside the development repository.
 
 ## License
 

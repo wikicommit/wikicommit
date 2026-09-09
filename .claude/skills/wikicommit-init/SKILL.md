@@ -12,7 +12,7 @@ Generates WikiCommit's `.wikicommit/` directory structure, schema, and configura
 
 Confirm the following with the user (use the default value if there is no answer):
 
-1. **Primary language** (primary_lang): `en` (default). This is the source language of the wiki the user is creating (not the language of the WikiCommit tool itself). Users who want a Japanese-language wiki (e.g. the `world-kids-play-wiki` pilot) should explicitly answer `ja`.
+1. **Primary language** (primary_lang): `en` (default). This is the source language of the wiki the user is creating (not the language of the WikiCommit tool itself). Users who want a Japanese-language wiki (e.g. the `world-kids-play-wiki` pilot) should explicitly answer `ja`. **Any other answer is supported and produces a wiki in that language, but WikiCommit's own labels — the review banner, the sources box, page properties, and the generated index/overview pages — have translations only for `en` and `ja` and render in English on every other wiki** (page bodies and Quartz's own chrome still follow the chosen language). `init.py` prints this as a `NOTE:` line when it applies, so there is no need to pre-empt it here; the published pages deliberately say nothing about it, which makes that line the only place it is stated (Issue #825).
 2. **Wiki theme** (theme): free text, empty (default, skip with a blank Enter). Used by `wikicommit-generate`'s exclude judgment to automatically skip entities unrelated to the wiki's topic; leaving it empty disables that judgment (all entities are generated as before). **It answers "what is this wiki about" — and only that.** Two neighbouring questions have their own files, both of which `init.py` writes a template for in Processing Flow step 2: "which sources do we take in" is `.wikicommit/source-policy.md` (Issue #564), and "granted a subject is relevant, may we write about it at all" is `.wikicommit/entity-policy.md` (Issue #667). Neither exists yet at this point, so name them as the place to write those policies *after* init finishes rather than telling the user to open one now. Say so when prompting, without spelling out all three axes — the prompt only has to keep the answer to this one: a source-selection rule written here is read only when deciding whether an already-ingested entity gets a page, where it is pure noise, and is never read at the point it would matter; a "do not write about X" rule written here is read at the right moment but gets weighed as relevance, which is a different question and gives a different answer for a subject that is squarely on-topic and still off-limits. Example prompt:
 
    ```
@@ -151,6 +151,13 @@ Confirm the following with the user (use the default value if there is no answer
    `NOTE: quartz.config.yaml: no --repo-url resolved ...` line — when you see it, tell the user, and
    that they can add the link by hand in `quartz.config.yaml` once the repository has a remote.
 
+   `init.py` prints a second `NOTE:` line — `NOTE: WikiCommit ships its own labels in en/ja only ...` —
+   when `primary_lang` is neither `en` nor `ja` (Issue #825). **Relay it to the user too.** Prerequisite 1
+   deliberately does not pre-empt it, and the published pages deliberately say nothing about the
+   fallback, so this line is the only place anyone is told; left sitting in `init.py`'s output it
+   reaches nobody, which is the state Issue #825 set out to fix. Say what falls back to English and
+   what does not, and that they can supply the missing labels if they want them translated.
+
    Add `--repo-root <path>` if a non-default repository root was specified.
 
    When `--quartz` is given, in addition to `.lychee.toml` / `.markdownlint.json`, it also generates
@@ -187,8 +194,11 @@ Confirm the following with the user (use the default value if there is no answer
       `wikicommit-generate` Pass 2b and `wikicommit-collect`'s Type Proposal step make):
 
       ```bash
-      python .wikicommit/scripts/check_schema_org_type.py --list-types
+      python .wikicommit/scripts/check_schema_org_type.py --list-type-names
       ```
+
+      This prints the 933 type names without their descriptions — stage one of type recall
+      (Issue #798). Sub-step ii picks candidates from it and reads only those descriptions.
 
       Non-zero exit (vocabulary fetch failed, e.g. no network) → skip the rest of this sub-step.
       Zero exit → record that the vocabulary cache now exists on disk (`.wikicommit/schemaorg-vocab.json`)
@@ -196,7 +206,7 @@ Confirm the following with the user (use the default value if there is no answer
       step, so the printed `git add` command actually includes this new file (it is committed like any
       other WikiCommit output, per that script's own docstring).
 
-   ii. Using the `--list-types` output and the theme text alone, judge whether a Schema.org standard
+   ii. Using the `--list-type-names` output and the theme text alone, judge whether a Schema.org standard
       type — beyond the 6 always-generated base types (Person/Place/Organization/Event/HowTo/DefinedTerm)
       — is **obviously** implied by the theme, not merely plausible. This bar is deliberately stricter
       than the original Issue #286 step Issue #404 removed: that step treated "zero candidates" as the
@@ -209,6 +219,29 @@ Confirm the following with the user (use the default value if there is no answer
       Prerequisites) and skip any type that already has a file there — this directory only just gained
       its 6 base type files moments ago in step 2 above, so this is the first point where that scan is
       trustworthy.
+
+      **This step's evidence is the weakest of the three type-proposal routes** — one sentence of
+      `theme`, before a single source has been read — so read the description of every candidate
+      before proposing it (stage two, Issue #798):
+
+      ```bash
+      python .wikicommit/scripts/check_schema_org_type.py --describe \
+        "$(cat <<'EOF'
+      <Candidate1>
+      EOF
+      )" \
+        "$(cat <<'EOF'
+      <Candidate2>
+      EOF
+      )"
+      ```
+
+      Each candidate name goes through its own quote-delimited heredoc, for the same reason sub-step
+      iv's `--property` values do — these are names this step itself just proposed, not values an
+      earlier script already verified. Drop any candidate whose actual definition does not match what
+      the theme obviously implies, and any name that comes back as `ERROR:` (a name not in the
+      vocabulary was invented rather than recalled). With a bar this strict the candidate list is
+      short or empty, so this costs nothing in the common case.
 
    iii. For each candidate found, list it for the user and ask for approval, Enter-based (default **N**
       on a blank Enter — this suggestion must never be added silently):
@@ -496,7 +529,7 @@ Confirm the following with the user (use the default value if there is no answer
    - `--variant`: `none` if `--quartz` was not passed to `init.py` in step 2; `quartz_only` if
      `--quartz` was passed without `--quartz-pages`; `quartz_pages` if both were passed.
    - `--vocab-cache-created`: pass this whenever the obvious-type judgment's step i above got a zero
-     exit from `--list-types` (regardless of whether any type ended up approved in step iii — the
+     exit from `--list-type-names` (regardless of whether any type ended up approved in step iii — the
      vocabulary cache file is written to disk as soon as that call succeeds); omit it if that call was
      skipped (blank theme) or failed (non-zero exit, e.g. no network).
    - `--lychee-installed` / `--markitdown-installed`: pass whichever of these ended up installed,

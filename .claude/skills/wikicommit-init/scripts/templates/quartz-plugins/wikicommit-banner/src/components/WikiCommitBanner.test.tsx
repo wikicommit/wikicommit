@@ -50,8 +50,8 @@ describe("WikiCommitBanner", () => {
     for (const claim of ["Nobody has read", "nobody has read", "read this page yet"]) {
       expect(html).not.toContain(claim)
     }
-    expect(html).not.toContain("A person has read this page")
-    expect(html).not.toContain("Read by:")
+    expect(html).not.toContain("A person read this page — nothing obviously wrong stood out")
+    expect(html).not.toContain("nothing obviously wrong stood out")
   })
 
   it("treats a missing review_status as pending", () => {
@@ -69,7 +69,7 @@ describe("WikiCommitBanner", () => {
         review_status: "reviewed",
         reviewed_by: "octocat",
       })
-      expect(html).toContain("Read by:")
+      expect(html).toContain("nothing obviously wrong stood out")
       expect(html).toContain('href="https://github.com/octocat"')
       expect(html).toContain(">octocat<")
     })
@@ -85,7 +85,7 @@ describe("WikiCommitBanner", () => {
       // that never runs review-issue-close-sync.yml never gets one — so absence
       // is the normal state, not a gap worth labelling. It must not surface as
       // an empty label or as the "unknown" placeholder the pending branch uses.
-      expect(without).not.toContain("Read by:")
+      expect(without).not.toContain("nothing obviously wrong stood out")
       expect(without).not.toContain("unknown")
       expect(without).not.toBe(withField)
       expect(without).toContain("Report something you noticed")
@@ -103,13 +103,13 @@ describe("WikiCommitBanner", () => {
         review_status: "reviewed",
         reviewed_by: "   ",
       })
-      expect(html).not.toContain("Read by:")
+      expect(html).not.toContain("nothing obviously wrong stood out")
       expect(html).not.toContain("https://github.com/")
     })
 
     it("ignores a non-string value", () => {
       const html = renderBanner({ title: "山田太郎", review_status: "reviewed", reviewed_by: 42 })
-      expect(html).not.toContain("Read by:")
+      expect(html).not.toContain("nothing obviously wrong stood out")
     })
 
     it("does not show a reviewer on a pending page", () => {
@@ -126,7 +126,7 @@ describe("WikiCommitBanner", () => {
         reviewed_by: "octocat",
       })
       expect(html).toContain("wikicommit-banner--pending")
-      expect(html).not.toContain("Read by:")
+      expect(html).not.toContain("nothing obviously wrong stood out")
       expect(html).not.toContain("https://github.com/octocat")
     })
 
@@ -147,7 +147,7 @@ describe("WikiCommitBanner", () => {
         review_status: "reviewed",
         reviewed_by: "octocat",
       })
-      expect(html).toContain("読んだ人:")
+      expect(html).toContain("が読み、明らかな問題は見つかりませんでした")
     })
   })
 
@@ -220,9 +220,18 @@ describe("WikiCommitBanner", () => {
       // states the fact on its own rather than an empty label or an `unknown`
       // placeholder: a missing reviewer is a normal state, not a gap to fill
       // (Issue #663).
+      // The named form (`readBy`) is what carries a profile link, so its absence
+      // is what tells the two forms apart now that both say what the reading
+      // found (Issue #800 — the old assertion compared the label "Read by:",
+      // which no longer exists as a standalone label). Stubbed for the same
+      // reason the two assertions above it are: the report link's own href is a
+      // github.com URL whenever GITHUB_REPOSITORY is set, and GitHub Actions
+      // sets it on every step, so leaving it unstubbed makes "no github.com
+      // link at all" fail in CI while passing locally.
+      vi.stubEnv("GITHUB_REPOSITORY", undefined)
       const reviewed = renderBanner(reviewedPage)
-      expect(reviewed).not.toContain("Read by:")
-      expect(reviewed).toContain("A person has read this page")
+      expect(reviewed).not.toContain("https://github.com/")
+      expect(reviewed).toContain("A person read this page — nothing obviously wrong stood out")
       expect(reviewed).not.toContain("unknown")
     })
 
@@ -237,7 +246,7 @@ describe("WikiCommitBanner", () => {
 
     it("adds the reviewer rather than replacing anything", () => {
       const html = renderBanner({ ...reviewedPage, reviewed_by: "octocat" })
-      expect(html).toContain("Read by:")
+      expect(html).toContain("nothing obviously wrong stood out")
       expect(html).toContain('href="https://github.com/octocat"')
       // The generation facts are still there alongside it.
       expect(html).toContain("claude-opus-5")
@@ -247,8 +256,8 @@ describe("WikiCommitBanner", () => {
       // Issue #774: printing both would say "read" twice — the `Read by:` line
       // already carries that a person read it, and says who.
       const html = renderBanner({ ...reviewedPage, reviewed_by: "octocat" })
-      expect(html).toContain("Read by:")
-      expect(html).not.toContain("A person has read this page")
+      expect(html).toContain("nothing obviously wrong stood out")
+      expect(html).not.toContain("A person read this page — nothing obviously wrong stood out")
     })
 
     it("shows translation stamps on a reviewed translation page", () => {
@@ -1053,8 +1062,8 @@ describe("WikiCommitBanner", () => {
         wikicommit_page_count: 486,
         wikicommit_reviewed_count: 0,
       })
-      expect(html).toContain("人が読んだページ:")
-      expect(html).toContain("人が最後まで読んだ件数")
+      expect(html).toContain("人が読んで確認:")
+      expect(html).toContain("人が最後まで読み、明らかな問題を見つけなかった件数")
     })
 
     it("is not rendered on a page without the site summary", () => {

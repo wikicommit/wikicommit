@@ -399,12 +399,12 @@ def test_list_properties_takes_priority_over_property_verification(tmp_path):
     assert "SUMMARY: type=schema:Game, properties=" in result.stdout
 
 
-def test_list_types_takes_priority_over_list_properties(tmp_path):
-    """--list-types alongside --type/--list-properties still wins, same as
+def test_list_type_names_takes_priority_over_list_properties(tmp_path):
+    """--list-type-names alongside --type/--list-properties still wins, same as
     it already does over --property (existing behavior, unchanged)."""
     fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
     result = run(
-        ["--type", "schema:Game", "--list-properties", "--list-types"],
+        ["--type", "schema:Game", "--list-properties", "--list-type-names"],
         cwd=tmp_path, fixture_path=fixture,
     )
     assert result.returncode == 0
@@ -412,7 +412,13 @@ def test_list_types_takes_priority_over_list_properties(tmp_path):
     assert "SUMMARY: type=schema:Game" not in result.stdout
 
 
-def test_list_types_prints_names_and_comments(tmp_path):
+def test_list_type_names_prints_names_without_descriptions(tmp_path):
+    """段階 1 は名前だけを返す（Issue #798）。
+
+    説明文まで毎回積んでいたことが 147 KB の正体であり、そこを落とすのが
+    この 2 段階化の全部である。名前の行に説明文が混ざっていないことは、
+    削減が実際に効いていることの唯一の直接的な検証になる。
+    """
     vocab = {
         "@graph": FIXTURE_VOCAB["@graph"] + [
             {
@@ -424,17 +430,75 @@ def test_list_types_prints_names_and_comments(tmp_path):
         ]
     }
     fixture = write_fixture(tmp_path, vocab)
-    result = run(["--list-types"], cwd=tmp_path, fixture_path=fixture)
+    result = run(["--list-type-names"], cwd=tmp_path, fixture_path=fixture)
     assert result.returncode == 0
-    assert "Game\tThe Game type covers ... typical use is board games etc." in result.stdout
-    assert "Thing\t" in result.stdout  # Thing has no rdfs:comment in the fixture -> empty description
+    assert "Game" in result.stdout.splitlines()
+    assert "The Game type covers" not in result.stdout
+    assert "\t" not in result.stdout
     assert "SUMMARY: types=" in result.stdout
 
 
-def test_list_types_collapses_embedded_newlines_in_comment(tmp_path):
+def test_list_type_names_ignores_type_and_property_args(tmp_path):
+    fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
+    result = run(["--list-type-names", "--type", "schema:FooBarNonexistent"], cwd=tmp_path, fixture_path=fixture)
+    assert result.returncode == 0
+    assert "ERROR:" not in result.stdout
+
+
+def test_describe_prints_names_and_comments(tmp_path):
+    """段階 2 は指名された型の説明文だけを返す。"""
+    vocab = {
+        "@graph": FIXTURE_VOCAB["@graph"] + [
+            {
+                "@id": "schema:Game",
+                "@type": "rdfs:Class",
+                "rdfs:subClassOf": {"@id": "schema:CreativeWork"},
+                "rdfs:comment": "The Game type covers ... typical use is board games etc.",
+            },
+        ]
+    }
+    fixture = write_fixture(tmp_path, vocab)
+    result = run(["--describe", "schema:Game"], cwd=tmp_path, fixture_path=fixture)
+    assert result.returncode == 0
+    assert "Game\tThe Game type covers ... typical use is board games etc." in result.stdout
+    assert "SUMMARY: described=1, errors=0" in result.stdout
+    # 指名していない型は出さない — それが段階 2 の存在理由である
+    assert "Thing" not in result.stdout
+
+
+def test_describe_accepts_a_bare_name_without_the_schema_prefix(tmp_path):
+    fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
+    result = run(["--describe", "Thing"], cwd=tmp_path, fixture_path=fixture)
+    assert result.returncode == 0
+    assert "SUMMARY: described=1, errors=0" in result.stdout
+
+
+def test_describe_errors_on_a_name_not_in_the_vocabulary(tmp_path):
+    """語彙に無い名前は黙って落とさず ERROR にする（Issue #798 の検討事項 6）。
+
+    段階 1 が 933 件の実在する名前を渡している以上、戻ってこなかった名前は
+    モデルの創作である。黙って省くとそれが承認ステップまで伝わらない。
+    """
+    fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
+    result = run(["--describe", "schema:FooBarNonexistent"], cwd=tmp_path, fixture_path=fixture)
+    assert result.returncode == 1
+    assert "ERROR: schema:FooBarNonexistent does not exist" in result.stdout
+    assert "SUMMARY: described=0, errors=1" in result.stdout
+
+
+def test_describe_still_prints_the_valid_names_alongside_an_invalid_one(tmp_path):
+    """1 件不正でも実在した分は出す — 呼び出し側が有効な候補だけで進めるため。"""
+    fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
+    result = run(["--describe", "schema:Thing", "schema:FooBarNonexistent"], cwd=tmp_path, fixture_path=fixture)
+    assert result.returncode == 1
+    assert "Thing\t" in result.stdout
+    assert "SUMMARY: described=1, errors=1" in result.stdout
+
+
+def test_describe_collapses_embedded_newlines_in_comment(tmp_path):
     """~6% of real Schema.org type comments (e.g. '3DModel') span multiple
     lines — verified against the live vocab dump while implementing this
-    (Issue #285). --list-types' one-line-per-type contract must hold even
+    (Issue #285). --describe's one-line-per-type contract must hold even
     for those, or a multi-line comment would look like extra bare entries
     to whatever parses this output."""
     vocab = {
@@ -447,13 +511,13 @@ def test_list_types_collapses_embedded_newlines_in_comment(tmp_path):
         ]
     }
     fixture = write_fixture(tmp_path, vocab)
-    result = run(["--list-types"], cwd=tmp_path, fixture_path=fixture)
+    result = run(["--describe", "schema:3DModel"], cwd=tmp_path, fixture_path=fixture)
     assert result.returncode == 0
     lines = result.stdout.splitlines()
     assert "3DModel\tA 3D model represents some kind of 3D content. Spans multiple lines in the source dump." in lines
 
 
-def test_list_types_handles_language_tagged_comment_object(tmp_path):
+def test_describe_handles_language_tagged_comment_object(tmp_path):
     vocab = {
         "@graph": [
             {
@@ -464,23 +528,29 @@ def test_list_types_handles_language_tagged_comment_object(tmp_path):
         ]
     }
     fixture = write_fixture(tmp_path, vocab)
-    result = run(["--list-types"], cwd=tmp_path, fixture_path=fixture)
+    result = run(["--describe", "schema:Thing"], cwd=tmp_path, fixture_path=fixture)
     assert result.returncode == 0
     assert "Thing\tThe most generic type of item." in result.stdout
 
 
-def test_list_types_ignores_type_and_property_args(tmp_path):
+def test_list_types_is_gone(tmp_path):
+    """`--list-types` は残さず削除した（Issue #798 の検討事項 5）。
+
+    3 Skill が 2 段階へ移った時点で呼び出し元が 0 になり、消費者のいない
+    受け皿を配らないという既定（Issue #553）がそのまま当たる。しかも残せば、
+    プリロードすべきでないと決めたばかりの高価な経路を配布物が持ち続ける。
+    """
     fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
-    result = run(["--list-types", "--type", "schema:FooBarNonexistent"], cwd=tmp_path, fixture_path=fixture)
-    assert result.returncode == 0
-    assert "ERROR:" not in result.stdout
+    result = run(["--list-types"], cwd=tmp_path, fixture_path=fixture)
+    assert result.returncode != 0
+    assert "unrecognized arguments" in result.stderr
 
 
-def test_missing_type_and_list_types_both_absent_is_an_error(tmp_path):
+def test_missing_type_and_list_modes_all_absent_is_an_error(tmp_path):
     fixture = write_fixture(tmp_path, FIXTURE_VOCAB)
     result = run([], cwd=tmp_path, fixture_path=fixture)
     assert result.returncode == 1
-    assert "ERROR: specify one of --type / --list-types / --list-installed-hierarchy" in result.stdout
+    assert "ERROR: specify one of --type / --list-type-names / --describe / --list-installed-hierarchy" in result.stdout
 
 
 # ── --list-installed-hierarchy (Issue #565) ──────────────────────────────────

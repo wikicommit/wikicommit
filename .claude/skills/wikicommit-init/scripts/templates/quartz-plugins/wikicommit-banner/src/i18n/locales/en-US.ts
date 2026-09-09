@@ -21,16 +21,21 @@ export default {
       generatedBy: "Model:",
       translatedAt: "Translated:",
       translatedBy: "Model:",
-      reviewedBy: "Read by:",
+      // Issue #800: a sentence with a {name} placeholder rather than a bare
+      // "label: value" pair, because the line now states what the reading
+      // found as well as who did it. The renderer splits on {name} and puts
+      // the profile link in the gap. `counts` in convert_wikilinks.py already
+      // uses placeholders this way, so this is not a new pattern here.
+      readBy: "Read by {name} — nothing obviously wrong stood out",
       // Issue #774: what `titleReviewed` used to be, moved out of the heading
       // and into the line review adds. It is shown only when `reviewed_by` is
       // absent — a route B page (`/wikicommit-review` runs locally and cannot
       // obtain a GitHub login) or one reviewed before that field existed. With
-      // a name, the `reviewedBy` line below says the same thing and says who,
+      // a name, the `readBy` line below says the same thing and says who,
       // and printing both would repeat "read" twice. Having this fallback is
       // what keeps the two states distinguishable without depending on
       // `reviewed_by` being present.
-      readByAPerson: "A person has read this page",
+      readByAPerson: "A person read this page — nothing obviously wrong stood out",
       // Issue #751: what the machine check actually compared, stamped onto the
       // published copy of the page by convert_wikilinks.py and present on no
       // page in .wikicommit/entity/. Worded as "checked against its sources"
@@ -85,8 +90,8 @@ export default {
       // own — each line already labels itself.
       reportBodyProblemHeading: "## Problem",
       siteSummaryPages: "Pages:",
-      siteSummaryReviewed: "Read by a person:",
-      siteSummaryReviewNote: "Every page is published as soon as an LLM generates it. \"Read by a person\" is how many a person has since read all the way through — not how much of the wiki is finished, and not a guarantee that anything is correct.",
+      siteSummaryReviewed: "Read and checked by a person:",
+      siteSummaryReviewNote: "Every page is published as soon as an LLM generates it. The check against sources is run by machine; \"read and checked by a person\" is how many pages someone has since read all the way through without anything obviously wrong standing out. Only some pages are read by a person, by design — this number is not meant to reach the total, and it is not a complete quality guarantee.",
       siteSummaryAiReviewed: "Checked against sources:",
       siteSummaryAiReviewNote: "\"Checked against sources\" is how many pages were compared against their own sources when they were generated. That check covers agreement with those sources and nothing else — not completeness, not the effect on real people and organizations, not conflicts with what you know.",
     },

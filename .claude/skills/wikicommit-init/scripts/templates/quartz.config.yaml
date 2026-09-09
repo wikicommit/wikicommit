@@ -1,30 +1,33 @@
 # yaml-language-server: $schema=./quartz/quartz/plugins/quartz-plugins.schema.json
 #
-# Quartz v5 設定ファイル。/wikicommit-init が生成した初期値です。
-# Quartz v5 本体は npm パッケージとして配布されていないため、
-# git submodule として quartz/ に取り込む必要があります:
+# Quartz v5 configuration. These are the initial values /wikicommit-init wrote.
+# Quartz v5 itself is not distributed as an npm package, so it has to be pulled
+# into quartz/ as a git submodule:
 #   git submodule add https://github.com/jackyzha0/quartz.git quartz
-# 詳細は README または .github/workflows/deploy.yml を参照してください。
+# See the README or .github/workflows/deploy.yml for details.
 configuration:
-  # これら 2 つは同じサイト名を持ちます。**片方だけ変えないでください。**
-  # 別々の場所に届くため、どちらか一方では読者に名前が伝わりません:
-  #   pageTitle       → 左サイドバーの見出しと OGP の og:site_name
-  #   pageTitleSuffix → ブラウザのタブ（<title>）・og:title・twitter:title
-  # Quartz 本体の Head.tsx は <title> を「そのページの frontmatter title + この
-  # suffix」だけで組み立てるため、suffix が空だとどのページのタブにも
-  # サイト名が出ません（トップページなら "Wiki" とだけ表示されます）。
+  # These two carry the same site name. **Do not change only one of them.**
+  # They reach the reader in different places, so setting just one leaves the
+  # name missing from the other:
+  #   pageTitle       -> the left sidebar heading and OGP's og:site_name
+  #   pageTitleSuffix -> the browser tab (<title>), og:title, twitter:title
+  # Quartz's own Head.tsx builds <title> from nothing but "the page's frontmatter
+  # title + this suffix", so an empty suffix means no tab on the site shows the
+  # site name at all (the top page would read just "Wiki").
   pageTitle: {PAGE_TITLE}
   pageTitleSuffix: {PAGE_TITLE_SUFFIX}
   enableSPA: true
   enablePopovers: true
   analytics: null
-  # サイト全体の chrome（サイドバー・検索・グラフ・言語切り替えの見出し）の言語を決める
-  # 値。`/wikicommit-init` が `primary_lang` から導出して書き込む（Issue #771）。
-  # **ページ本文とバナー・出典欄・properties 欄はこの値に従わない** — そちらは各ページの
-  # frontmatter の `lang` を見る（Issue #378）。したがって多言語 Wiki では、翻訳ページの
-  # 本文は読者の言語・その周りの chrome は原文言語、という混在が残る。locale は 1 サイトに
-  # 1 つしか持てず、chrome を描くプラグインのうち 3 つ（explorer / graph / search）は
-  # ページ単位に切り替えられないため、これは設定では解けない。
+  # The language of the site chrome (sidebar, search, graph, language-switcher
+  # headings). `/wikicommit-init` derives it from `primary_lang` (Issue #771).
+  # **Page bodies, the banner, the sources box and the properties box do not
+  # follow this value** -- those read each page's own frontmatter `lang`
+  # (Issue #378). On a multilingual wiki that leaves a mix: a translated page's
+  # body is in the reader's language while the chrome around it stays in the
+  # original language. A site can hold only one locale, and three of the plugins
+  # that draw the chrome (explorer / graph / search) cannot switch per page, so
+  # this is not solvable from configuration.
   locale: {LOCALE}
   baseUrl: localhost:8080
   ignorePatterns:
@@ -130,10 +133,11 @@ plugins:
   - source: github:quartz-community/og-image
     enabled: true
   - source: github:quartz-community/cname
-    # デフォルトは無効: baseUrl は <owner>.github.io/<repo> 形式（GitHub Pages のプロジェクトページ）で
-    # 運用するため、ここでカスタムドメイン用の CNAME ファイルを発行すると
-    # baseUrl のホスト名（<owner>.github.io）がカスタムドメインとして誤登録され、
-    # プロジェクトページの URL（/<repo> 配下）が壊れる。カスタムドメインを使う場合のみ有効化すること。
+    # Disabled by default: baseUrl is run in the <owner>.github.io/<repo> form
+    # (a GitHub Pages project page), so emitting a CNAME file for a custom domain
+    # here would register baseUrl's hostname (<owner>.github.io) as the custom
+    # domain and break the project page's URLs (everything under /<repo>).
+    # Enable this only when you are actually using a custom domain.
     enabled: false
   - source: github:quartz-community/canvas-page
     enabled: true
@@ -143,53 +147,61 @@ plugins:
     enabled: true
   - source: github:quartz-community/tag-page
     enabled: true
-  # 素の explorer（github:quartz-community/explorer）は breadcrumbs と同じ理由
-  # （filterFn/mapFn 相当のカスタマイズは quartz.ts の TypeScript override 必須。
-  # 本プロジェクトは quartz.config.yaml のみを設定面として使う設計のため導入しない）で、
-  # `<lang>` セグメントを展開しないと Type ディレクトリが見えない問題を YAML からは
-  # 解決できない（Issue #196）。Issue #196 時点では、explorer は状態を持つ大規模な
-  # 対話コンポーネント（フォルダ折りたたみ・localStorage 永続化・インラインスクリプト・
-  # 30+ ロケール i18n）でフォークのリスクが高いとしてスコープ外にしていたが（p3-055 /
-  # Issue #209）、調査の結果 filterFn/mapFn の枠組みでは「あるフォルダの子を親に
-  # 繰り上げる」操作自体を表現できない（filter は部分木ごと削除、map はノード単体の
-  # 変更のみ）ことが判明し、そもそもフォーク以外に選択肢がないと確定した。フォーク自体は
-  # breadcrumbs と同じくアップストリームの折りたたみ状態・localStorage キー
-  # （node.slug 由来。畳み込み後も変更なし）・インラインスクリプトの契約を保ったまま、
-  # ツリー構築後に現在ページの `<lang>` フォルダの子だけを親へ繰り上げる処理
-  # （wikicommit-explorer.inline.ts の foldCurrentLangSegment。他言語のフォルダは
-  # 従来どおり畳まれた状態で残り、展開すればブラウズできる）を1箇所追加するだけで
-  # 済んだため、`wikicommit-explorer` としてフォークした。
+  # The stock explorer (github:quartz-community/explorer) cannot solve, from YAML,
+  # the problem that Type directories stay hidden unless the `<lang>` segment is
+  # expanded (Issue #196) -- for the same reason as breadcrumbs: anything like
+  # filterFn/mapFn requires a TypeScript override in quartz.ts, and this project
+  # deliberately keeps quartz.config.yaml as its only configuration surface.
+  # At the time of Issue #196 the explorer was left out of scope as too risky to
+  # fork, being a large stateful interactive component (folder collapse,
+  # localStorage persistence, an inline script, i18n across 30+ locales)
+  # (p3-055 / Issue #209). Investigation then showed that the filterFn/mapFn
+  # framework cannot express the operation at all -- "lift one folder's children
+  # up to its parent" (filter deletes whole subtrees, map only alters a single
+  # node) -- which settled that forking was the only option. The fork itself, like
+  # breadcrumbs, keeps upstream's collapse state, localStorage keys (derived from
+  # node.slug, unchanged by the fold) and inline-script contract intact, and adds
+  # exactly one thing after the tree is built: lifting only the current page's
+  # `<lang>` folder's children up to the parent (foldCurrentLangSegment in
+  # wikicommit-explorer.inline.ts; other languages' folders stay collapsed as
+  # before and can still be expanded and browsed). Hence the
+  # `wikicommit-explorer` fork.
   - source: ../quartz-plugins/wikicommit-explorer
     enabled: true
     layout:
       position: left
       priority: 50
-  # 素の graph（github:quartz-community/graph）の D3Config は
+  # The stock graph's (github:quartz-community/graph) D3Config is exactly
   # drag / zoom / depth / scale / repelForce / centerForce / linkDistance /
-  # fontSize / opacityScale / removeTags / showTags / focusOnHover / enableRadial が
-  # すべてで、ページ単位の除外・言語フィルタ・型フィルタ・次数フィルタをいずれも
-  # 持たない。しかもこれらはビルド時に data-cfg 属性へ JSON として焼き込まれるため
-  # UI から変えられない。多言語 Wiki では言語ごとに塊ができ、言語中立な tags が
-  # その塊を繋ぐ唯一の橋としてハブ化して他のリンクを埋もれさせる、という症状が
-  # `ai-driven-dev-wiki` パイロットで実際に確認された（Issue #584）。
-  # 808行の graph.inline.ts には D3 force simulation / PixiJS 本体があるが、
-  # 絞り込みのチョークポイント（neighbourhood 確定後・nodes 構築前）が1箇所に
-  # 集約されており、設定も renderGraph() の中で毎回読み直されるため、
-  # そこへフィルタを差し込み data-cfg を書き換えて再レンダーするだけで済む。
-  # グローバルグラフにのみコントロールバーを出す（ローカルグラフは depth >= 0 の
-  # BFS で neighbourhood を組むため、後から要素を削ると経路が切れて孤児が残る）。
+  # fontSize / opacityScale / removeTags / showTags / focusOnHover / enableRadial
+  # -- no per-page exclusion, no language filter, no type filter, no degree
+  # filter. And these are baked into a data-cfg attribute as JSON at build time,
+  # so they cannot be changed from the UI either. On a multilingual wiki this
+  # produces one cluster per language, with language-neutral tags becoming the
+  # only bridge between them and hubbing so hard that other links are buried --
+  # observed in the `ai-driven-dev-wiki` pilot (Issue #584).
+  # The 808-line graph.inline.ts holds the D3 force simulation and PixiJS itself,
+  # but the choke point for narrowing (after the neighbourhood is settled, before
+  # nodes are built) sits in a single place, and the config is re-read inside
+  # renderGraph() on every render -- so it is enough to insert a filter there,
+  # rewrite data-cfg and re-render.
+  # The control bar is shown only on the global graph (the local graph builds its
+  # neighbourhood by BFS with depth >= 0, so removing elements afterwards would
+  # cut paths and strand nodes).
   - source: ../quartz-plugins/wikicommit-graph
     enabled: true
     layout:
       position: right
       priority: 10
-  # 素の search（github:quartz-community/search）は #tag 構文のヒントを検索ボックスの
-  # プレースホルダーに追加する YAML オプションを持たない（SearchOptions は
-  # enablePreview/fieldPriority のみ。Issue #312）。#tag によるAND絞り込み自体は
-  # 標準機能で動作するが、既存の tagFilterHint ロケール文字列（タグ自動補完ドロップダウン用に
-  # 全30ロケールへ既に定義済み）をプレースホルダーにも再利用する1行の差分のみで済むため、
-  # 957行超の search.inline.ts（FlexSearch インデックス・検索UI本体）には一切手を入れず
-  # Search.tsx のプレースホルダー組み立て処理のみをフォークした。
+  # The stock search (github:quartz-community/search) has no YAML option for
+  # adding a hint about the #tag syntax to the search box placeholder
+  # (SearchOptions is only enablePreview/fieldPriority -- Issue #312). AND-style
+  # narrowing with #tag works as a standard feature; all that was missing was a
+  # one-line change reusing the existing tagFilterHint locale string (already
+  # defined for all 30 locales, for the tag autocomplete dropdown) in the
+  # placeholder as well. So the 957-plus-line search.inline.ts (the FlexSearch
+  # index and the search UI itself) is untouched, and only Search.tsx's
+  # placeholder assembly is forked.
   - source: ../quartz-plugins/wikicommit-search
     enabled: true
     layout:
@@ -245,14 +257,15 @@ plugins:
       position: left
       priority: 35
       group: toolbar
-  # 素の explorer/breadcrumbs はどちらも `<lang>` セグメントを非表示にする YAML オプションを
-  # 持たない（filterFn/mapFn 相当のカスタマイズは quartz.ts の TypeScript override 必須。
-  # 本プロジェクトは quartz.config.yaml のみを設定面として使う設計のため導入しない）ため、
-  # どちらも `<lang>` セグメントのみを取り除くフォークに置き換える。breadcrumbs は
-  # wikicommit-breadcrumbs、explorer は wikicommit-explorer（左ナビ側。上の
-  # `../quartz-plugins/wikicommit-explorer` エントリのコメント参照。Issue #196 時点では
-  # 状態を持つ大規模な対話コンポーネントであることを理由にスコープ外にしていたが、
-  # 後に Issue #209 で対応した）。
+  # Neither the stock explorer nor the stock breadcrumbs has a YAML option for
+  # hiding the `<lang>` segment (anything like filterFn/mapFn requires a
+  # TypeScript override in quartz.ts, and this project deliberately keeps
+  # quartz.config.yaml as its only configuration surface), so both are replaced
+  # by forks that strip only the `<lang>` segment: wikicommit-breadcrumbs and
+  # wikicommit-explorer (the left nav -- see the comment on the
+  # `../quartz-plugins/wikicommit-explorer` entry above. At the time of
+  # Issue #196 the explorer was out of scope because it is a large stateful
+  # interactive component; it was taken on later in Issue #209).
   - source: ../quartz-plugins/wikicommit-breadcrumbs
     enabled: true
     layout:
@@ -414,27 +427,32 @@ layout:
         left: []
         right: []
     content: {}
-    # folder / tag は Quartz 自身が content/ のディレクトリ構造とページの tags から
-    # 生成するページで、対応する .md の実体がどこにも書き出されない。WikiCommit が
-    # 書き出すナビゲーションページ（root index・content/sources/・Type 別インデックス）は
-    # 書き出し側で review_status: reviewed をスタンプすることでバナーを抑止しているが
-    # （Issue #407・#476・#580）、この2種にはスタンプする書き出し側が存在しないため、
-    # WikiCommitBanner の review_status フォールバック（未設定なら pending。LLM 生成
-    # ページでの書き漏れを安全側へ倒すための意図的な設計）が効いて「⚠️ このページは
-    # 未レビューです / LLM が自動生成しました」が機械生成の目次に表示される。常時表示の
-    # 報告リンクも同様に、目次に対して「この内容に問題があれば報告」を出してしまう。
-    # コンポーネント側でページ種別を判定する案は採らない — WikiCommitBanner は
-    # fileData.slug === "index" のような Quartz のスラッグ命名規約に依存しない方針で
-    # 書かれており、レイアウト設定だけで完結するこちらが整合する（Issue #648）。
+    # folder and tag pages are generated by Quartz itself from content/'s
+    # directory structure and the pages' tags; no corresponding .md is ever
+    # written out for them. The navigation pages WikiCommit does write (the root
+    # index, content/sources/, the per-Type indexes) suppress the banner by
+    # stamping review_status: reviewed at write time (Issues #407 / #476 / #580),
+    # but for these two there is no writer to do the stamping -- so
+    # WikiCommitBanner's review_status fallback (pending when unset, a deliberate
+    # choice that fails safe when an LLM-generated page omits the field) kicks in
+    # and prints "this page is unreviewed / generated automatically by an LLM"
+    # on a machine-generated index. The always-on report link does the same,
+    # inviting readers to report problems with a table of contents.
+    # Deciding the page kind inside the component is not the approach taken --
+    # WikiCommitBanner is written not to depend on Quartz slug-naming conventions
+    # such as fileData.slug === "index", and doing it entirely in layout
+    # configuration is consistent with that (Issue #648).
     #
-    # comments（giscus）も同じ理由でここに置く（Issue #741）。ビルド生成のナビゲーション
-    # ページのうち WikiCommit が .md を書き出すもの（Type 別インデックス・view 別
-    # インデックス・root index・content/sources/・content/overview/）は書き出し側で
-    # frontmatter に comments: false をスタンプして抑止しているが、**この2種には
-    # スタンプする書き出し側が存在しない** — とくに content/<lang>/ には index.md を
-    # 書き出さないため、言語トップ（/ja/ 等）は Quartz が合成する folder ページになり、
-    # frontmatter を持たない。tag ページ（/tags/<tag>）も同様。放置すると、まさに
-    # 除外したかった機械生成の目次にコメント欄が並ぶ。
+    # comments (giscus) belongs here for the same reason (Issue #741). Among the
+    # build-generated navigation pages, the ones WikiCommit writes a .md for (the
+    # per-Type indexes, the per-view indexes, the root index, content/sources/,
+    # content/overview/) suppress it by stamping comments: false into the
+    # frontmatter at write time -- but **for these two there is no writer to do
+    # the stamping**. In particular no index.md is written for content/<lang>/,
+    # so a language top page (/ja/ and the like) is a folder page Quartz
+    # synthesizes and has no frontmatter at all; the same goes for tag pages
+    # (/tags/<tag>). Left alone, a comment box would appear on exactly the
+    # machine-generated tables of contents this exclusion is here to avoid.
     folder:
       exclude:
         - reader-mode

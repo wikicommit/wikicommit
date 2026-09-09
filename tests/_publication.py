@@ -26,6 +26,12 @@ is also one place to find every guard that depends on it.
 When you add a test that reads a `REPO_ROOT` path outside the published set,
 use this helper **and** record the file in `dev/publication-scope.md` §5 — that
 section is the list of ways the public subset can break quietly.
+
+Forgetting is caught rather than left to the next person who remembers: the CI
+`checks` job stages the public subset and runs `pytest tests/` inside it
+(Issue #795), so a test that reads a non-published path without this helper turns
+the build red. That step does not run while the Actions billing quota is
+exhausted, which is why the rule above is still stated as a rule.
 """
 
 from pathlib import Path

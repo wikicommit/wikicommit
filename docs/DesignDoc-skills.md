@@ -250,7 +250,7 @@ description: Register a source file or URL and generate WikiCommit wiki pages lo
 | `wikicommit-generate` | `/wikicommit-generate <path\|url>` / `/wikicommit-generate --regenerate <page\|--type <Type>\|--all>` | ソースを `.wikicommit/source/` に登録し、そのままページ生成まで実行。Git 操作は行わない。ハッシュを計算し管理ファイル（`.md`）を生成または更新。ディレクトリ指定時はファイルごとに個別生成。`--regenerate` は既存ページを現在の生成ルールで作り直す**ページ起点**のモード（Issue #578）— 対象ページの `sources` を再取得し Pass 2・Pass 2b を飛ばして Pass 3・Pass 4 のみを実行、`review_status` を `pending` に戻す。`status: retracted` のソース（Issue #737）だけは再取得せず落として作り直し、ページの `sources[]` からもそのエントリを外す（Issue #744。全件が `retracted` なページは作り直す材料が無いためスキップし `/wikicommit-remove` へ誘導する）。新規 Skill にせずオプションにしたのは Pass 1/3/4 を通常生成と共有するため（差分は「Pass 2 を飛ばす」「`review_status` を戻す」「対象の指定方法」に限られる）。詳細は `docs/DesignDoc-pipeline.md` §6.1 |
 | `wikicommit-merge` | `/wikicommit-merge` | `.wikicommit/` 配下の未コミット変更を対象に品質チェックを実行し、ブランチ作成・PR 作成・マージ・レビュー追跡 Issue 生成（Issue #313）まで行う |
 | `wikicommit-review` | `/wikicommit-review <page>` | frontmatter 補完・sources チェック・整合性チェック（`validate_frontmatter.py` を呼び出す）を行い、`sources` を再取得して独立した事実確認を実施し観点ごとの所見を人間に提示した上でレビュー完了を記録する（Issue #313・#455。全文再掲はソースが取得できない場合や人間が希望した場合のみのフォールバック）。記録方法はページの経路で分岐: 対応するレビュー追跡Issue（`wikicommit-review`ラベル）があれば経路Aのページとみなし `gh issue close` する（`review-issue-close-sync.yml` が `review_status: reviewed` への書き換え・自動マージまで行う）。無ければ経路Bのページとみなし `review_status: reviewed` をローカルに書き込み、その後 `/wikicommit-merge` を呼ぶことで `reviewed` 状態のまま自動マージされる |
-| `wikicommit-fix` | `/wikicommit-fix <issue-url>` / `/wikicommit-fix <page-path\|published-page-url> "<fix instruction>"` | フィードバック（Issueの本文+コメント、またはフリーテキスト指示）・対象ページ・sources 元文書をコンテキストとして LLM に渡し、修正案を提示。人間確認後 `/wikicommit-merge` で PR 作成（Issue #454。ページパス直接指定・公開Wiki URL指定にも対応）。対象ページが翻訳ページ（`translated_from` あり）で、指摘が翻訳固有ではなく内容由来（原文にも影響しうる）と判定した場合、修正対象を原文ページへリダイレクトするか確認する（Issue #529。リダイレクトしてもIssueへのリンクバックは同じIssue番号のまま） |
+| `wikicommit-fix` | `/wikicommit-fix <issue-url>` / `/wikicommit-fix <page-path\|published-page-url> "<fix instruction>"` | フィードバック（Issueの本文+コメント、またはフリーテキスト指示）・対象ページ・sources 元文書をコンテキストとして LLM に渡し、修正案を提示。人間確認後 `/wikicommit-merge` で PR 作成（Issue #454。ページパス直接指定・公開Wiki URL指定にも対応）。対象ページが翻訳ページ（`translated_from` あり）で、指摘が翻訳固有ではなく内容由来（原文にも影響しうる）と判定した場合、修正対象を原文ページへリダイレクトするか確認する（Issue #529。リダイレクトしてもIssueへのリンクバックは同じIssue番号のまま）。マージ完了後に元 Issue へ返す完了コメント（Step 7）は、**Step 2 で特定した対象ページの `lang`**（＝報告者が実際に読んだページ）で描画する — リダイレクトが働いて原文ページを直した場合も、読んだページは変わらないためこちらに従う（Issue #824。Issue #808 の `primary_lang` を置き換えた。追跡 Issue 本文が `primary_lang` を採る Issue #773 とは読み手が違うため答えも違う。`docs/DesignDoc-pipeline.md` §6.2 の該当コールアウト参照） |
 | `wikicommit-remove` | `/wikicommit-remove <page>` | status: removed を付与する（ローカル変更）。翻訳ページも同時処理。その後 `/wikicommit-merge` で PR 作成 |
 | `wikicommit-ask` | `/wikicommit-ask <question>` | `.wikicommit/entity/` を検索し、LLM が回答を生成。MCP なしで知識参照を可能にする |
 | `wikicommit-search` | `/wikicommit-search <query> [--lang <lang>] [--no-expand]` | `.wikicommit/entity/` をキーワード検索し、結果を列挙する。クエリ語は同義語・上位語・略語へ拡張され（Issue #581。`--no-expand` で無効化）、さらに `config.yml` の対象言語ごとに翻訳して言語ごとに逐次検索し、結果をマージする（Issue #582。`translated_from` で結ばれた同一ページは1件に集約し、抑制された他言語版は `(also in: <lang>)` として表示する。`--lang` 明示時は言語をまたぐ fan-out をスキップ＝オプトアウト手段を兼ねる。ただし `<lang>` への翻訳は止めない）。対象言語は `config.yml` に加えて `.wikicommit/entity/` 直下に実在する言語ディレクトリも含める（全クエリが `--lang` を伴うため、含めないと未設定言語のページが端から届かなくなる）。`--limit` は言語数に関わらず言語ごと10件・マージ後10件まで |
@@ -370,7 +370,7 @@ Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論�
 | `wikicommit-generate` / `wikicommit-review` / `wikicommit-synthesize` | `.wikicommit/review-rules.md`（スクリプトではなくデータだが、委譲の構造は同じ） | レビュー規律を 3 箇所で言い直さないため（Issue #752）。移すのは「何を検査するか」だけで、段取りは各 Skill に残る。`_root_outputs.py` に `update: overwrite` で登録し、リポジトリ側からの編集を許さない — 許すと Wiki が自分のレビューを黙って弱められる |
 | `wikicommit-generate` / `wikicommit-translate` / `wikicommit-synthesize` / `wikicommit-merge` | `record_run.py` | 実行 1 回につき 1 ファイルを開いて閉じるため（Issue #790）。対象をこの 4 つに絞る基準は「途中で死んだときに、中途半端な状態と『まだ順番が来ていない』状態が区別できなくなるもの」であり、`fix` / `remove`（単発かつ小さく差分そのものが結果）・`collect`（対話前提）・読み取り専用 Skill（状態を変えない）は入らない。開始と終了の打刻を LLM の記憶に委ねる形だが、**忘れても壊れない** — 開始があって終了が無い記録が、そのまま「完走しなかった」の答えになる（Issue #750 の `page_content_hash: ""` と同じ形）。記録は git で追跡しない点だけが Issue #750 と逆で、ローテーションが可能になり `wikicommit-merge` が無改修で済む |
 | `wikicommit-generate` / `wikicommit-review` / `wikicommit-synthesize` / `review-issue-close-sync.yml` | `record_review.py` | レビュー 1 件を不変ファイルとして書き出すため（Issue #750）。判定は LLM が下し、ファイル手術はスクリプトが行う（Issue #474）。`source_quote` の除去・`page_content_hash` の計算・`reviewed_sources` の収集を呼び出し側の指示遵守に委ねないことが要点で、とくに `page_content_hash` は `reset_review_on_content_change.py` の 6 フィールド無視リストを **import** して使う（複製すると drift し、drift は「誤った鮮度を黙って報告する記録」として現れる） |
-| `wikicommit-generate` | `check_schema_org_type.py --list-types` / `check_schema_org_type.py --list-installed-hierarchy` / `check_schema_coverage.py` / `rebuild_index.py` / `check_extraction_quality.py` / `reconcile_ingest_status.py` | 前者と `check_schema_coverage.py` は Pass 2b の型の要否判断用に Schema.org 型一覧（約933型）を全件プリロードし、未スキーマ化 type 文字列一覧で収束を誘導するため（Issue #315。旧 #285 の `better_type_candidate` 検出用途を置き換え）。`--list-installed-hierarchy` は Pass 2c にインストール済み型同士の祖先／子孫関係を渡すため（Issue #565。祖先型は常に当てはまるため、関係を示さないと粗い型が既定で選ばれる — 語彙から決定論的に導ける情報なのでモデルの記憶に委ねない）。`rebuild_index.py` は全ソース処理後の `index.md` 更新を決定論的スクリプトに委譲し、長い多段生成の末尾でLLMが更新を忘れるリスクを排除するため（Issue #406）。`check_extraction_quality.py` は「非空だが無意味」な抽出結果（既知JS-shellドメイン・低情報密度）および「取得能力の不足による partial extraction」（Issue #574）の判定を、LLMの主観的判断ではなく決定論的ロジックに委ねるため（Issue #425。ただし判定結果の扱いは3ガードで異なり、既知JS-shellドメインはそのソースをブロック、取得能力の不足は処理全体を停止、低情報密度は人間に続行可否を確認する警告である — Issue #562・#574）。`reconcile_ingest_status.py` は `status: pending` の管理ファイルのうち内容が既に公開ページの `sources` に使われているものを検出・是正するため（Issue #474。詳細は本節末尾の callout 参照） |
+| `wikicommit-generate` | `check_schema_org_type.py --list-type-names` / `check_schema_org_type.py --describe` / `check_schema_org_type.py --list-installed-hierarchy` / `check_schema_coverage.py` / `rebuild_index.py` / `check_extraction_quality.py` / `reconcile_ingest_status.py` | 前 2 つと `check_schema_coverage.py` は Pass 2b の型の要否判断用で、`--list-type-names` が約 933 型の**名前だけ**をプリロードし、そこから絞り込んだ候補の説明文を `--describe` が引く（Issue #315。旧 #285 の `better_type_candidate` 検出用途を置き換え。2 段階にしたのは Issue #798 — この一覧が果たしているのは想起であって存在保証ではなく〈実在は候補承認後の `--type` が決定論的に確かめる〉、想起には誰も検討していない 928 型の説明文が要らないため。147 KB → 約 14 KB）。あわせて未スキーマ化 type 文字列一覧で収束を誘導する。`--list-installed-hierarchy` は Pass 2c にインストール済み型同士の祖先／子孫関係を渡すため（Issue #565。祖先型は常に当てはまるため、関係を示さないと粗い型が既定で選ばれる — 語彙から決定論的に導ける情報なのでモデルの記憶に委ねない）。`rebuild_index.py` は全ソース処理後の `index.md` 更新を決定論的スクリプトに委譲し、長い多段生成の末尾でLLMが更新を忘れるリスクを排除するため（Issue #406）。`check_extraction_quality.py` は「非空だが無意味」な抽出結果（既知JS-shellドメイン・低情報密度）および「取得能力の不足による partial extraction」（Issue #574）の判定を、LLMの主観的判断ではなく決定論的ロジックに委ねるため（Issue #425。ただし判定結果の扱いは3ガードで異なり、既知JS-shellドメインはそのソースをブロック、取得能力の不足は処理全体を停止、低情報密度は人間に続行可否を確認する警告である — Issue #562・#574）。`reconcile_ingest_status.py` は `status: pending` の管理ファイルのうち内容が既に公開ページの `sources` に使われているものを検出・是正するため（Issue #474。詳細は本節末尾の callout 参照） |
 | `wikicommit-update` | `check_distribution_freshness.py` / `rebuild_index.py` / `validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py` / `check_orphans.py` | 前者はドリフト検出そのものを担い（Issue #712 で`wikicommit-status` と共有する共通スクリプトとして新設済み。呼び出し元が 2 Skill になるため §11.5 の規則どおり`.wikicommit/scripts/` に置かれている）、残りは更新後の検証に使う。`wikicommit-init/scripts/init.py` も`--no-overwrite`（`overwrite` の適用）・`--update-version`（版の刻印）・`--add-config-keys`（欠落キーの加算）の3 経路で呼ぶ — こちらは Skill 内スクリプトへの越境呼び出しにあたるが、`add_source.py --license-for-url`（Issue #646）と違い**同じ Skill が持つ設定ファイル生成のロジックそのもの**であり、複製すると `_root_outputs.py` の `update` 列が唯一の情報源であるという Issue #712 の前提が崩れる |
 | `wikicommit-schema-propose` | `check_schema_coverage.py` / `check_schema_org_type.py` | schema/ 未カバー type の網羅的集計、および型・プロパティが Schema.org 語彙に実在するかの決定論的検証（オフライン・遅延生成、Git管理下の`.wikicommit/schemaorg-vocab.json`。Issue #319）が必要なため（Issue #285） |
 | `wikicommit-collect` | `check_extraction_quality.py`（`check-domain` のみ。`check-fetch-capability`〈Issue #574〉・`check-density` は候補提示ステップでは使わない — 前者は取得を実際に行う Pass 1 の関心事、後者は取得後にしか判定できないため） | Web候補提示ステップで、既知JS-shellドメインの候補を `wikicommit-generate` と同じ判定ロジックで事前に除外するため（Issue #425） |
@@ -512,7 +512,8 @@ pending / outdated な .wikicommit/source/**/*.md を 1 件ずつ順次処理
   └─ source-as-entity 判定 … ソース文書自身も独立した「作品」ならエンティティ候補に追加
 
 [Pass 2b] 型の要否判断（ソース 1 件につき 1 回）
-  │  check_schema_org_type.py --list-types（約 933 型）と照合し、
+  │  check_schema_org_type.py --list-type-names（約 933 型の名前）と照合し、
+  │  絞った候補の説明文だけを --describe で引いて（Issue #798）、
   │  installed schema/ の外に明確に良い適合先があるか判断（ゼロ件が通常の結果）
   ├─ 対話実行   → Enter ベース承認 [y/N]（既定 N）
   └─ 非対話実行 → さらに厳格な閾値を適用 → 通過分のみプロンプトなしで自動承認
@@ -541,6 +542,32 @@ pending / outdated な .wikicommit/source/**/*.md を 1 件ずつ順次処理
   ↓
 /wikicommit-merge へ（Git 操作はここから。generate 自体は Git に一切触れない）
 ```
+
+#### コンテキスト予算 — 固定 51K と、5 件ガードの二重の役割（Issue #796・#798）
+
+`/wikicommit-generate` は**ソースを 1 件も読む前に**メイン文脈へ固定のオーバーヘッドを積む。2026-09-09 実測（Issue #798 の 2 段階化を反映）:
+
+| メイン文脈に積まれるもの | 実測 | 概算トークン |
+|---|---|---|
+| `wikicommit-generate/SKILL.md` 全文（Skill 起動のたびに全文が載る。§11.9） | 191,168 B | 約 47K |
+| Schema.org 型名一覧（`check_schema_org_type.py --list-type-names`。1 実行 1 回） | 13,441 B | 約 3.4K |
+| **固定小計** | | **約 51K** |
+| 抽出テキスト全文（パス 2a・ソースごと） | 40,442 B/件（日本語 Wikipedia 記事 1 本の実測） | 約 10K × 件数 |
+| 生成ページ本文（パス 3 がパス 4 のために保持） | ページ数ぶん | 累積 |
+
+**固定分の 92% は SKILL.md である。** かつては型一覧が 44%（147,421 B・約 37K トークン）を占めていたが、Issue #798 が 2 段階化して 13,441 B へ落とした — あの一覧が果たしていたのは**想起**であって存在保証ではなく（実在は候補承認後の `--type` が決定論的に確かめる）、想起には誰も検討していない 928 型の説明文が要らないためである。残る削減対象は SKILL.md 自身（進行的開示・サブエージェント化）であり、着手未定。
+
+**5 件ガードは 2 つの役割を同時に果たしている。** Issue #567 がパス 1 に置いた「1 回の収集が 5 件を超えたら人間に確認する」というガードは、**1 回の処理量を人間が制御する**ために設けられたものだが、結果として**コンテキスト予算も律速している** — 上の表の可変分（1 件あたり約 15K）に掛かる係数がその件数だからである。
+
+このことを明記しておかないと、**将来ガードを緩める判断がコンテキスト側の帰結を見落とす**。5 件を 10 件にする変更は「1 回の処理量が増える」だけに見えるが、実際には必要コンテキストが約 51K + 75K から約 51K + 150K へ動く。
+
+**Issue #798 以降、200K 環境でも 5 件が通る。** Claude Code の Opus 既定は 200K であり（2026-09 時点。Sonnet 5 / Fable はネイティブ 1M、Opus は `[1m]` サフィックスで 1M。プラン依存）、5 件処理は約 126K（63%）で収まる — 2 段階化前は約 154K（77%）に達して auto-compact 圏内に入っていた。**したがって 200K の上限が 5 件ガード自身の上限を下回る状態は解消しており、ガードの答え（「全件」か「先頭 5 件」か）とコンテキストの許容量が初めて一致する。**
+
+**それでも compaction の壊れ方は変わらない**ので、上限を超える運用は引き続き避ける。compaction 後に再添付されるのは**各 Skill の先頭 5,000 トークンだけ**であり、`wikicommit-generate/SKILL.md` ではおよそ 105〜117 行目（3.5〜4 バイト/トークン換算）まで — Step 0 までしか残らず、パス 1〜4 と Completion Notice は全部その外側にある。**エージェントは残りの手順を持たないまま実行を続け、出力は一見正常に見える。**
+
+Issue #797 の checkpoint はこの状態を間接的に可視化する（打点の欠落として現れる）が、**同 Issue 自身が「分割前は Pass 2 以降の打点指示も同じ 5,000 トークンの外側にある」という非対称を既知の限界として記録している** — つまり compaction が起きた実行では打点指示ごと落ちうるため、検出は保証されない。
+
+利用者向けの式・推奨件数・公式ドキュメントへのリンクは `README.md` / `README_ja.md` の Requirements → Context window が正本である（`CLAUDE.md` は公開スナップショットに含まれないため、公開側だけを読む利用者に届く場所を正本にした）。
 
 #### パス設計
 
@@ -730,7 +757,7 @@ pending / outdated な .wikicommit/source/**/*.md を 1 件ずつ順次処理
 
 Pass 2b はこれを「その場で解決する」設計に変更する:
 
-1. パス 2a のサマリと、`check_schema_org_type.py --list-types`（パス 2c 用に毎回プリロードするのと同じ全型一覧。約933型）を基に、`installed schema/` 外の Schema.org 標準型がこのソースの内容に明確に良く適合するか判断する（`installed schema/` に既にあるファイルは候補から除外。このバッチ内で既に追加された型も除外）。ゼロ件が通常の結果であり、無理に候補を出す必要はない。
+1. パス 2a のサマリと、`check_schema_org_type.py --list-type-names`（1 実行 1 回プリロードする約 933 型の**名前**の一覧。絞った候補の説明文は `--describe` で引く。Issue #798）を基に、`installed schema/` 外の Schema.org 標準型がこのソースの内容に明確に良く適合するか判断する（`installed schema/` に既にあるファイルは候補から除外。このバッチ内で既に追加された型も除外）。ゼロ件が通常の結果であり、無理に候補を出す必要はない。
 2. 候補があれば、対話実行かどうかで分岐する（Issue #507。判定方法自体は流用の既存の自己申告ロジック）: 対話実行なら `wikicommit-init` の theme 駆動提案（Issue #286。Issue #404 で `wikicommit-init` 側は廃止済み）と同じ Enter ベース UX で人間に個別確認する（デフォルト N）。非対話実行（サブエージェント経由等）なら、Enter プロンプト自体を表示せず、`wikicommit-init`（Issue #490）・`wikicommit-collect`（Issue #489）と同じ「実ソース内容から明確に断定できる場合のみ」というこの手順の閾値よりさらに厳格な閾値をその候補に追加適用し、クリアした候補のみデフォルト **Y** としてプロンプトなしで承認する（クリアしない候補は却下）。
 3. 承認された型（対話承認・非対話自動承認のいずれも）は `check_schema_org_type.py --type <Type> --property <Prop1> ...` で `recommended` プロパティ候補を検証した上で、`.wikicommit/schema/<Type>.md` を標準型フォーマット（§5.2・`DesignDoc-data.md`）でその場でローカルに新規作成する。`wikicommit-generate` の「Git 操作なし・schema/ 不可侵」契約に対する、旧 `wikicommit-init` theme 駆動提案（Issue #286）と同じ「追加のみ可・既存ファイル編集不可」の narrow exception。PR は経由しない — 通常の `.wikicommit/entity/`・`.wikicommit/source/` の変更と同じバッチとして `wikicommit-merge` が後で拾う（`.claude/skills/wikicommit-merge/SKILL.md` Step 2 item 4・Step 5）。非対話自動承認された型にschemaファイル自体への特別なマーカーは残さない（Issue #507。Completion Noticeにのみ明記する）。
 4. 却下・候補なしの型はどこにも永続化しない（意図的 — 間接的な警告機構自体が今回の問題の根源だったため）。事後の救済は `wikicommit-schema-propose`（下記・変わらず存続）の役目とする。

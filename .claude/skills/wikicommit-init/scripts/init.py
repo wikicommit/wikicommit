@@ -205,6 +205,51 @@ QUARTZ_LOCALE_BY_PRIMARY_LANG = {
 DEFAULT_QUARTZ_LOCALE = "en-US"
 
 
+# The languages WikiCommit has written its *own* labels for (Issue #825). Kept
+# apart from QUARTZ_LOCALE_BY_PRIMARY_LANG above for the reason stated there:
+# that table is what the community plugins already translate (28 languages),
+# this one is what this project translates (2), and they move for different
+# reasons.
+#
+# It exists to tell the operator, once, at the moment they pick a primary_lang
+# this project has no labels for. **That is the whole of the disclosure**: the
+# published site says nothing about the fallback, and the decision not to tell
+# the reader is recorded beside ROOT_INDEX_LABELS in
+# templates/scripts/convert_wikilinks.py. The operator is told instead because
+# they are the one person who can act on it — by writing the labels, or by
+# accepting English chrome knowingly — and because telling them costs the
+# published pages nothing.
+#
+# The set is duplicated rather than imported: this script is the one that
+# *creates* .wikicommit/, so at the moment it runs, the tree it would import
+# from does not exist yet. `tests/test_ui_language_fallback_disclosure.py`
+# checks it against every surface the notice names — the plugins' own
+# LANG_TO_LOCALE / locales and convert_wikilinks.py's *_LABELS dicts — so the
+# copies cannot drift apart silently.
+WIKICOMMIT_UI_LANGS = ("en", "ja")
+
+
+def ui_language_notice(primary_lang: str) -> str | None:
+    """One line for an operator whose primary_lang has no WikiCommit labels.
+
+    Returns None for a language this project translates, so the common case
+    prints nothing at all. The wording states what will be in English and what
+    will not, because the split is not obvious: page bodies and the Quartz
+    chrome around them do follow the chosen language, and only WikiCommit's own
+    additions fall back.
+    """
+    lang = (primary_lang or "").strip().lower()
+    if lang in WIKICOMMIT_UI_LANGS:
+        return None
+    return (
+        f"NOTE: WikiCommit ships its own labels in {'/'.join(WIKICOMMIT_UI_LANGS)} only, "
+        f"so on a {lang!r} wiki the review banner, sources box, page properties and the "
+        "generated index/overview pages render in English. Page bodies and Quartz's own "
+        "chrome still follow " + repr(lang) + ". Published pages do not say that this "
+        "happened, so this notice is the only place it is stated."
+    )
+
+
 def quartz_locale_for(primary_lang: str) -> str:
     """Resolve quartz.config.yaml's `{LOCALE}` from `primary_lang` (Issue #771).
 
@@ -785,6 +830,9 @@ def main() -> int:
                 **_flags("quartz-plugins"),
             )
 
+        notice = ui_language_notice(args.primary_lang)
+        if notice:
+            print(notice)
         print(f"SUMMARY: created={len(created)}, skipped={len(skipped)}")
         return 0
 

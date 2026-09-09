@@ -1,4 +1,16 @@
 [project]
+# This version declares only this development repository's own Python package,
+# which exists to pull in the dependencies needed to run this repository's
+# scripts and tests (`pyyaml` below, plus the `dev` extra) and to hold the
+# [tool.ruff] settings. **It is not WikiCommit's version**, and it is
+# deliberately not kept in sync with it (Issue #577 / #799): `packages = []`
+# below means this is not a distributed package, nothing in the repository
+# reads this `version`, and what bumps WikiCommit's version — a change to a
+# type template or a page generation rule — has nothing to do with the
+# dependency and lint declarations here. WikiCommit's own version lives in
+# `.claude/skills/wikicommit-init/scripts/templates/scripts/_version.py` and
+# `.claude-plugin/plugin.json`; the two are held equal by
+# `tests/test_version_sync.py`. Expect this number to sit well behind them.
 name = "wikicommit"
 version = "0.1.0"
 requires-python = ">=3.11"
