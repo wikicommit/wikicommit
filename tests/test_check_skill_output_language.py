@@ -160,12 +160,13 @@ def test_exception_marker_without_a_reason_is_an_error(tmp_path):
     assert "has no reason" in result.stdout
 
 
-def test_internal_only_skills_are_not_scanned(tmp_path):
-    """implement-issue / review-and-merge は読み手が開発者本人であり対象外。
+def test_non_wikicommit_skills_are_not_scanned(tmp_path):
+    """走査対象は wikicommit-* の前方一致に限る（除外リストではない）。
 
-    語彙ガード（Issue #588）が wikicommit-* に限っているのと同じ線引きを共有する。
+    語彙ガード（Issue #588）と同じ線引きを共有する。接頭辞の外にある Skill は
+    開発用の道具であり、読み手は実行している開発者本人である。
     """
-    skill_dir = tmp_path / ".claude" / "skills" / "implement-issue"
+    skill_dir = tmp_path / ".claude" / "skills" / "not-a-wikicommit-skill"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("実装してください。\n", encoding="utf-8")
     result = run(tmp_path)
@@ -182,4 +183,50 @@ def test_real_skills_are_clean():
     """
     result = run(REPO_ROOT)
     assert result.returncode == 0, result.stdout
+    assert "errors=0" in result.stdout
+
+
+# ── SKILL.md の兄弟ファイル（Issue #887） ────────────────────────────────────
+
+def write_instruction_md(root: Path, skill_name: str, rel: str, body: str) -> Path:
+    path = root / ".claude" / "skills" / skill_name / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
+    return path
+
+
+def test_a_sibling_instruction_file_is_scanned(tmp_path):
+    """SKILL.md から出した手順がこのチェックの対象から外れないこと。
+
+    Issue #887 が Regeneration Mode を `references/regenerate.md` へ移した。SKILL.md しか
+    見ない形だと、移した瞬間にその散文が黙って対象外になる — サイズガードが
+    分割を「改善」と報告したのと同じ形である。
+    """
+    write_skill(tmp_path, "wikicommit-generate", """
+        Nothing to flag here.
+    """)
+    write_instruction_md(tmp_path, "wikicommit-generate", "regenerate.md", """
+        Report: "対象ページがありません。"
+    """)
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert "regenerate.md:" in result.stdout
+    assert "files=2" in result.stdout
+
+
+def test_payload_and_template_md_are_not_scanned(tmp_path):
+    """`CHANGELOG.md` / `changelog/` は配布ペイロード、`scripts/templates/` は
+    配布先で展開されるファイルであり、どちらもここから読まれる指示ではない。"""
+    write_skill(tmp_path, "wikicommit-init", """
+        Nothing to flag here.
+    """)
+    japanese = '        Report: "対象言語がありません。"\n'
+    write_instruction_md(tmp_path, "wikicommit-init", "CHANGELOG.md", japanese)
+    write_instruction_md(tmp_path, "wikicommit-init", "changelog/0.4.0.md", japanese)
+    write_instruction_md(
+        tmp_path, "wikicommit-init", "scripts/templates/source-policy.md", japanese
+    )
+    result = run(tmp_path)
+    assert result.returncode == 0
+    assert "files=1" in result.stdout
     assert "errors=0" in result.stdout

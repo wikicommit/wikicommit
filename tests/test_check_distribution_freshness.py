@@ -331,3 +331,98 @@ def test_config_yaml_placeholders_are_not_read_as_structure(repo):
     config = yaml.safe_load((repo / ".wikicommit" / "config.yml").read_text(encoding="utf-8"))
     assert isinstance(config["theme"], str)
     assert ".wikicommit/config.yml" not in _run(repo).stdout
+
+
+# --- Version skew between the two installed halves (Issue #930) ----------------------
+#
+# `.claude/skills/` and `.wikicommit/scripts/` arrive by different commands, so a
+# repository can hold new instructions and old scripts. The dangerous shape is not a
+# crash: when only the inside of an existing option changed, the old script fails in a
+# way that names the wrong cause. These tests pin the two halves of the answer — that
+# `/wikicommit-generate` and `/wikicommit-merge` can ask about that one path cheaply,
+# and that the answer says what being stale there costs.
+#
+# This repository cannot host such a tree itself: `.wikicommit/scripts` is a symlink to
+# the template, so the two halves are literally the same files. The `repo` fixture builds
+# a real one in a temporary directory, which is the only place the skew can exist.
+
+
+def test_a_stale_scripts_tree_says_what_it_costs(repo):
+    """The consequence, not just the count — the part Issue #925 handed over."""
+    (repo / ".wikicommit/scripts/record_run.py").write_text("# stale\n", encoding="utf-8")
+    out = _run(repo, "--only", ".wikicommit/scripts").stdout
+    assert "OUTDATED: .wikicommit/scripts (overwrite)" in out
+    assert "names the wrong cause" in out
+    # And stops there (Issue #935). Three of the six places that run this check belong to
+    # /wikicommit-update itself, and the one in its last step runs after the update — a
+    # line there reports that the update just made did not take, so naming that command
+    # would prescribe what has only now failed. The consequence holds everywhere; the
+    # remedy is what each SKILL.md says in context.
+    assert "/wikicommit-update" not in out
+    assert _summary(out)["outdated"] == 1
+
+
+def test_the_consequence_is_not_pinned_on_every_other_payload(repo):
+    """A stale quartz-plugins means a stale published site, which is a different thing."""
+    (repo / "quartz-plugins/wikicommit-banner/dist/index.js").write_text("// stale\n", encoding="utf-8")
+    out = _run(repo, "--only", "quartz-plugins").stdout
+    assert "OUTDATED: quartz-plugins (overwrite)" in out
+    assert "names the wrong cause" not in out
+
+
+def test_only_narrows_to_the_one_path_asked_about(repo):
+    """Drift elsewhere must not reach a Skill that asked about the scripts alone.
+
+    Not a speed concern — the full check runs in a fraction of a second. At the start of
+    a run the other payloads are real but not actionable *now*, and a line the reader
+    cannot act on is how a report trains people to skip it.
+    """
+    (repo / ".wikicommit/scripts/record_run.py").write_text("# stale\n", encoding="utf-8")
+    (repo / "install-local-plugins.cjs").write_text("// stale\n", encoding="utf-8")
+    out = _run(repo, "--only", ".wikicommit/scripts").stdout
+    assert "OUTDATED: .wikicommit/scripts" in out
+    assert "install-local-plugins.cjs" not in out
+    assert _summary(out)["outdated"] == 1
+
+
+def test_only_suppresses_the_version_line(repo):
+    """`synced` lags behind on a repository that re-ran init and is genuinely in step
+    (only /wikicommit-update writes it), so in a one-line check it would be the loudest
+    thing printed and it would be wrong."""
+    out = _run(repo, "--only", ".wikicommit/scripts").stdout
+    assert "VERSION:" not in out
+    assert "VERSION:" in _run(repo).stdout
+
+
+def test_a_mistyped_only_is_not_reported_as_clean(repo):
+    """Otherwise the flag compares nothing and prints a clean summary — the same silent
+    wrong answer this whole check exists to catch."""
+    result = _run(repo, "--only", ".wikicommit/script")
+    assert "WARNING: --only .wikicommit/script names no root output" in result.stdout
+    assert _summary(result.stdout) == {"outdated": 0, "missing": 0, "orphan": 0}
+
+
+def test_a_fresh_repository_stays_quiet_under_only(repo):
+    out = _run(repo, "--only", ".wikicommit/scripts").stdout
+    assert "OUTDATED:" not in out
+    assert _summary(out)["outdated"] == 0
+
+
+def test_only_on_an_uncompared_entry_is_not_reported_as_clean(repo):
+    """`update: skip` entries print the same clean SUMMARY a fresh tree does.
+
+    The typo guard above covers a path that matches nothing; this covers a path that
+    matches something the script never looks at. Both end at
+    `SUMMARY: outdated=0, missing=0, orphan=0`, and nothing in that line tells the
+    reader which of the two happened — the silent wrong answer `--only` exists to avoid.
+    """
+    result = _run(repo, "--only", ".wikicommit/entity")
+    assert "WARNING: --only .wikicommit/entity names a root output this script does not compare" \
+        in result.stdout
+    assert _summary(result.stdout) == {"outdated": 0, "missing": 0, "orphan": 0}
+
+
+def test_a_compared_entry_does_not_draw_the_uncompared_warning(repo):
+    """The counterpart: a real comparison must stay quiet when it is in step."""
+    out = _run(repo, "--only", ".wikicommit/scripts").stdout
+    assert "does not compare" not in out

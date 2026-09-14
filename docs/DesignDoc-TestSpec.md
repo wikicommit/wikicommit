@@ -30,6 +30,9 @@
 | SKILL.md（LLM 駆動部分）の判断品質 eval | ⛔ 廃止 | ハーネス（Issue #103）を Issue #714 で削除した。導入・再設計の Issue の中でしか実行されず、通常の開発フローでは一度も走らなかった。[S1](#s1-skillmd-eval-ハーネス-廃止issue-714) |
 | SKILL.md description のトリガー精度検証 | ⛔ 廃止 | ハーネス（Issue #104）を Issue #714 で削除した。S1 と同じ理由。[S2](#s2-description-のトリガー精度の検証-廃止issue-714) |
 | SKILL.md 行数上限チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_md_lines.py` を非 blocking で実行（Issue #111。専用ジョブ `skill-md-line-count` からの統合は Issue #591。[L8](#l8-ci-ジョブ構成の集約によるコスト削減-対応済みissue-591)）。[L5](#l5-skillmd-行数上限チェック-対応済みissue-111) |
+| run 記録の出力行が `/wikicommit-status` に配線されていることの検証 | ✅ 済み | `tests/test_run_record_surface_wiring.py` が `check_run_records.py` の stdout 出力行の接頭辞を走査し、その全部が `wikicommit-status/SKILL.md` から参照されていることを検証する（Issue #835）。同スクリプトの `MISSING_PASS:` は SKILL.md に 1 度も現れず、計算された結果がそのまま捨てられていた — 書く側（スクリプト）と読む側（SKILL.md）が別ファイルにあり、片方だけを足しても何も壊れずテストも lint も緑のままになるため、機械で止める。表示ブロックへの配線漏れ（説明にだけ書いて Step 17 に足し忘れる）も別テストで固定する |
+| 配布ワークフローテンプレートの式展開検証 | ✅ 済み | `tests/test_workflow_template_expressions.py` が配布テンプレート 2 本と `.github/workflows/` の全ワークフローについて、`yaml.safe_load` 後の値に中身の無い（または閉じられていない）`${{ ... }}` が無いことを検証する（Issue #830）。GitHub Actions は **`run:` の本文を実行前に式展開する**ため、そこに書いた `#` 行はシェルコメントであっても展開対象であり、空の式を 1 つ書くとファイル全体がパースエラーになって `startup_failure` で一度も起動しなくなる（ジョブ 0 件でログも残らず、run 名がワークフローの `name:` ではなくファイルパスになるという分かりにくい形で現れる）。実際に `review-issue-close-sync.yml` が 0.5.0 で配布され、`update: overwrite`（Issue #712）により再 init したリポジトリへ黙って上書き配布されていた。**禁じるのは綴りではなく空の式である** — YAML コメント側の `${{ }}` はパーサが落とすため無害であり、`deploy.yml` の `${{ steps.pages.outputs.base_url }}` のような中身のある式も対象外 |
+| ワークフローの `actionlint` 検査 | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `actionlint`（版を `1.7.12` に固定し、リリースの tarball から取得）を **blocking** で実行し、配布テンプレート 2 本と `.github/workflows/` の全ワークフローを検査する（Issue #862）。`tests/test_workflow_actionlint.py` が同じ検査を pytest からも掛ける（**バイナリ不在時は skip する** — CI では必須・ローカルでは任意という非対称は意図して選んだもので、その穴は 1 つ上の行の依存ゼロのガードと、`main` に到達する前に PR の CI が必ず 1 回走ることで塞がれている）。**CI は取得したバイナリを `PATH` に載せるため、この pytest もそこで実際に走る** — 作業ツリーに `./actionlint` として落とすと `shutil.which()` が見つけられず CI でも skip され、`*.yaml` 拡張子のワークフロー（上の明示 glob は `*.yml` しか拾わない）がどこからも検査されなくなる。[L13](#l13-ワークフローの-actionlint-検査-対応済みissue-862) |
 | quartz-plugins 間の `LANG_SEGMENT_RE` 同期検証 | ✅ 済み | `wikicommit-breadcrumbs` / `wikicommit-language-switcher` / `wikicommit-explorer` の 3 プラグインは独立 npm パッケージでワークスペース共有がなく、`.wikicommit/entity/<lang>/` の `<lang>` セグメント判定正規表現をそれぞれ個別に複製している。`tests/test_quartz_plugins_lang_segment_sync.py` が 3 ファイルの正規表現リテラルが byte 単位で一致することを検証し drift を検知する（ランタイム共有はビルドインフラの釣り合いが取れないため見送り。Issue #228） |
 | コミットトレーラーのモデル ID がプレースホルダーであることの検証 | ✅ 済み | `tests/test_commit_trailer_placeholders.py` が `.claude/skills/*/SKILL.md`・`CLAUDE.md`・`CONTRIBUTING.md`・`docs/DesignDoc-pipeline.md` の `Co-Authored-By`/`Generated-By`/`Reviewed-By-AI` 行を走査し、`<...>` を除いた残りにモデル名リテラルが残っていないことを検証する（Issue #559。リテラルに戻ると `git log` 上のモデル情報が実行モデルと食い違うが、トレーラーは見た目では正誤が判別できないため機械検知する） |
 | 新規 Skill 追加時の `disable-model-invocation` 要否チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブ（専用ジョブ `skill-invocation-mode` からの統合は Issue #591。[L8](#l8-ci-ジョブ構成の集約によるコスト削減-対応済みissue-591)）が `tools/check_skill_invocation_mode.py` を非 blocking で実行し、`disable-model-invocation: true` が未設定の SKILL.md を一覧表示（要否そのものの機械判定はしない。Issue #234）。`CONTRIBUTING.md`「SKILL.md を変更する場合の追加手順」にも判断基準を明記。[L7](#l7-skill-追加時の-disable-model-invocation-要否チェック-対応済みissue-234) |
@@ -99,7 +102,7 @@
 
 **済み（Issue #89、Issue #134 で `CONTRIBUTING.md` を追加）**。`.github/workflows/test.yml` に `markdownlint` ジョブを追加し、`npx markdownlint-cli2 "docs/**/*.md" "README.md" "CONTRIBUTING.md"` を blocking で実行する。[DesignDoc-CISpec.md](DesignDoc-CISpec.md) の「常に warning のみ（Phase 2）」という blocking/warning 分類はランタイム品質ゲートの話であり、開発リポジトリ自体の CI（本書のスコープ）とは別軸のため blocking とした。
 
-対象パスは `docs/`・`README.md`・`CONTRIBUTING.md` のみとした。`dev/`（研究メモ・PRD ドラフト）と `Issues/`（過去の Issue ドラフト。実体は GitHub Issues 側にあり本書の対象外）は既存設定でのスタイル逸脱が計 300 件超と広範であり、このリポジトリの正本ドキュメントではないため対象外とした。`CONTRIBUTING.md` は外部貢献者が最初に読むドキュメントであり `README.md` と同様の性質のため対象に含めた。なお Issue #660 は `dev/research/` を `docs/research/` へ移し、`docs/**/*.md` のうち `docs/research/**` だけを `.markdownlint-cli2.jsonc` の `ignores` で対象外にしていたが、その後 research/ を公開しない判断に至り `dev/research/` へ戻した（着手前調査を凍結した記録であり、実装が始まる前に何を信じていたかを残すもので、現行の設計・実装とは別物であるため）。`dev/` は元から lint 対象外なので、`ignores` 専用だった `.markdownlint-cli2.jsonc` は不要になり削除した（ルール本体は従前どおり `.markdownlint.json` 側にあり、この設定ファイルが無くても `markdownlint-cli2` はそちらを読む）。既存の逸脱を解消するため `.markdownlint.json` に `MD040: false`（コードフェンスの言語指定省略を許容。ディレクトリツリー・疑似コードの記述が多いため）と `MD024: { "siblings_only": true }`（`DesignDoc-ScriptSpec.md` のようにスクリプトごとに「目的」「使用場面」等の同名見出しが繰り返される構成を許容）を追加した。さらに `docs/DesignDoc-phases.md`・`docs/DesignDoc-data.md`・`docs/DesignDoc-ScriptSpec.md` の MD012（余分な空行）・MD032（リスト前後の空行）・MD036（見出し代わりの強調）はドキュメント内容を変えない範囲で直接修正した。
+対象パスは `docs/`・`README.md`・`CONTRIBUTING.md` のみとした。`dev/`（研究メモ・PRD ドラフト）と `Issues/`（過去の Issue ドラフト。実体は GitHub Issues 側にあり本書の対象外）は既存設定でのスタイル逸脱が計 300 件超と広範であり、このリポジトリの正本ドキュメントではないため対象外とした。`CONTRIBUTING.md` は外部貢献者が最初に読むドキュメントであり `README.md` と同様の性質のため対象に含めた。なお Issue #660 は `dev/research/` を `docs/research/` へ移し、`docs/**/*.md` のうち `docs/research/**` だけを `.markdownlint-cli2.jsonc` の `ignores` で対象外にしていたが、その後 `docs/` に置く正本ドキュメントの範囲から外す判断に至り `dev/research/` へ戻した（現行の設計・実装とは別物であるため）。`dev/` は元から lint 対象外なので、`ignores` 専用だった `.markdownlint-cli2.jsonc` は不要になり削除した（ルール本体は従前どおり `.markdownlint.json` 側にあり、この設定ファイルが無くても `markdownlint-cli2` はそちらを読む）。既存の逸脱を解消するため `.markdownlint.json` に `MD040: false`（コードフェンスの言語指定省略を許容。ディレクトリツリー・疑似コードの記述が多いため）と `MD024: { "siblings_only": true }`（`DesignDoc-ScriptSpec.md` のようにスクリプトごとに「目的」「使用場面」等の同名見出しが繰り返される構成を許容）を追加した。さらに `docs/DesignDoc-phases.md`・`docs/DesignDoc-data.md`・`docs/DesignDoc-ScriptSpec.md` の MD012（余分な空行）・MD032（リスト前後の空行）・MD036（見出し代わりの強調）はドキュメント内容を変えない範囲で直接修正した。
 
 ### L2. Python linter（ruff）の導入（✅ 対応済み・Issue #91）
 
@@ -156,7 +159,7 @@ Issue #215（`Issues/registered/p3-062-skill-invocation-mode-audit.md`）で副�
 
 `test.yml` のジョブ数が増え、1 run あたりの課金分数が無視できない水準に達したため、ジョブ構成を見直して 7 ジョブ → 2 ジョブに削減した。GitHub Actions は**ジョブ単位で分単位に切り上げて**課金するため、実処理の短いジョブを並べること自体がコストになる。
 
-> **CI コストの運用記録は非公開の開発記録（`dev/ci-cost-notes.md`）に置いた** — 無料枠の使い切りとその見分け方・spending limit の扱い・実測した課金分数・private リポジトリの分数がどのアカウントに課金されるかは、開発アカウント固有の事情であり設計判断そのものではないため。本節に残したのはジョブ構成の設計とそのトレードオフである。
+> **本節が扱うのはジョブ構成の設計とそのトレードオフに限る。** 開発アカウント固有の運用事情は扱わない — 記録は非公開の開発記録（`dev/ci-cost-notes.md`）にある。本書が「実測」「内訳」と書いてそのファイルを指している箇所（L6 を含む）も同じ扱いで、引くのはその結論だけである。
 
 #### 採用した削減策
 
@@ -193,7 +196,7 @@ Issue #215（`Issues/registered/p3-062-skill-invocation-mode-audit.md`）で副�
 
 - `docs/` は実際の内容（`DesignDoc-*.md` のみ）に合わせて絞り込む。`wikicommit-collect` の候補一覧が例示する `docs/notes/meeting-0512.md` のような、ユーザー側の架空パスを誤検出しないため。`docs/` プレフィックスの有無は問わない — 素の `DesignDoc-data.md §4.2` も同じ未配布ファイルを指しており配布先では同様に追跡できないため、プレフィックス付きの形だけを見ると簡単に迂回できてしまう
 - 逆方向（`docs/DesignDoc-*.md` から SKILL.md への参照）は開発リポジトリ内に閉じているため対象外。追跡の担い手を「docs → 配布物」の一方向に寄せる、という整理
-- `.claude/skills/implement-issue`・`review-and-merge`（配布対象外の内部 Skill）と `node_modules/` は走査対象外
+- 走査対象は `install.sh` が配る Skill（`DISTRIBUTED_SKILLS`。`tests/test_skill_distribution_list_sync.py` が `install.sh` との一致を強制する）に限る。**除外リストではなく包含リストである** — 配布されない開発用の Skill は、名指しで外されるのではなくこの一覧に載らないことで外れる。`node_modules/` 等はこれとは別の機構（走査中の枝刈り）で、こちらが明示的な除外にあたる
 - `scripts/templates/quartz-plugins/` も他の配布物と同じ `ERROR` 対象である（Issue #644）。導入当初は `DEFERRED:` として出力するだけで `errors` にはカウントしていなかった — `dist/` がコミット済みのビルド成果物であり `src/` だけを直すと両者が食い違うため、プラグイン単位の再ビルドを伴う対応を Issue #644 として切り出していた。同 Issue で 10 箇所の参照を削除し、対象 3 プラグイン（`wikicommit-explorer`・`wikicommit-properties`・`wikicommit-sources`）を `npm ci && npm run build` で再ビルドして `dist/` を `src/` と同期させたため、`DEFERRED_DIRS`・`is_deferred()`・`SUMMARY:` の `deferred=` を削除して一本化した。参照を消す作業は「`src/` を直して再ビルドする」までが一組であり、これを担保するため `.map` も `TEXT_SUFFIXES` に加えている — `.js.map` の `sourcesContent` は `src/` の各ファイルをそのまま抱える一方、バンドラは `dist/*.js` からコメントの大半を落とすため、実際に配布される唯一の写しが `.map` だけということが多い（Issue #644 で削除した 10 箇所も、3 プラグイン全ての `.map` に載っていたのに対し `dist/*.js` に残っていたのは 1 プラグインだけだった）。`dist/*.js` しか見ないと、再ビルドし忘れが無言で通る
 
 ---
@@ -232,7 +235,7 @@ Issue #770・#772・#773 は同じ問いに 3 回答えており、答えは毎�
 
 **この箇所の言語は Issue #824 でさらに絞り込まれ、`primary_lang` ではなく Step 2 で特定した対象ページの `lang`（＝報告者が実際に読んだページ）になった** — `targets` を持つ Wiki では両者が食い違い、翻訳ページの報告者には `primary_lang` でも届かないため。上段の「読者・報告者向けは `primary_lang`」は追跡 Issue 本文（#773）についての要約であり、この Skill にはそのまま当てはまらない。本チェック自体の対象（SKILL.md に日本語を直書きしないこと）はどちらの決定にも依存しない。
 
-`tools/check_skill_output_language.py` が `.claude/skills/wikicommit-*/SKILL.md` の**全行**を走査する。L10 と違ってフェンスに限定しない — Issue #808 の 6 件のうちフェンス内にあったのは 1 件だけで、残る 5 件は通常の指示散文に置かれた引用文字列だった。内部限定 Skill（`implement-issue` / `review-and-merge`）を除く線引きは L10 と共有する。
+`tools/check_skill_output_language.py` が `.claude/skills/wikicommit-*/SKILL.md` の**全行**を走査する。L10 と違ってフェンスに限定しない — Issue #808 の 6 件のうちフェンス内にあったのは 1 件だけで、残る 5 件は通常の指示散文に置かれた引用文字列だった。走査対象を `wikicommit-*` の前方一致に限る線引きは L10 と共有する — こちらも除外リストではなく包含であり、配布されない開発用の Skill は名前がこの接頭辞を持たないことで外れる。
 
 **検出するのは CJK ではなく日本語の文末記号・鉤括弧（`。、？！「」`）である。** SKILL.md には正当な日本語の**例示**（ページタイトル・エンティティ名・検索語・ソースからの引用）が多数あり、CJK の有無では `"生年を1981年に修正して"`（例示の引数）と `"対象言語がありません。"`（実際に出力するエラー文）を区別できない。文末記号なら区別できる — 出力される日本語の散文はそれを持ち、タイトルや検索語は持たない。Issue #808 の 6 件に対して実測すると、**例示への誤検出 0 件で 5 件を検出**する。CJK 一律で判定すると SKILL.md 内の例示が全部エラーになり、Issue #562 が低情報密度ガードについて記録した「常時点灯する所見は読まれなくなる」を初日から踏むことになる。
 
@@ -243,6 +246,36 @@ Issue #770・#772・#773 は同じ問いに 3 回答えており、答えは毎�
 **既知の限界**: 文末記号を持たない日本語の**ラベル**は見えない。Issue #808 の `要確認:`（`OK` の隣に出す所見ラベル）がまさにそれで、行の意味を理解しない限り周囲の例示と区別できない。L10 が散文について記録しているのと同じクラスの限界であり、CI は規則が黙って腐る範囲を狭めるものであって塞ぐものではない。**配布テンプレート（`templates/`）も走査対象外**とする — そこには方針として日本語のまま据え置くもの（Python スクリプトのコメント・docstring〈#770〉、`ja-JP.ts` のロケール文字列）があり、日本語であることが正しい層である。
 
 `tests/test_check_skill_output_language.py` がスクリプト自体の挙動（散文・フェンス双方の検出、鉤括弧、例示の非検出、行内／直前行の例外マーカー、理由なしマーカー、内部限定 Skill の非走査）に加えて、**実際の `.claude/skills/` が検出 0 件であること**も検証する。
+
+---
+
+### L13. ワークフローの `actionlint` 検査（✅ 対応済み・Issue #862）
+
+Issue #830 は、`run:` 本文に literal で書いた中身の無い式展開 1 行が `review-issue-close-sync.yml` 全体をパースエラーにし、そのワークフローが一度も起動していなかったという不具合を直した。再発防止に追加した `tests/test_workflow_template_expressions.py` が見るのは、**その 1 つの失敗クラスだけ**である。配布テンプレートは `_root_outputs.py` の `update: overwrite`（Issue #712）なので、構文エラーはこのリポジトリの外へ増幅して届く一方、それを止める検査はこの 1 クラスと `test_workflow_template_dispatch.py` の dispatch 契約に限られていた。
+
+**`actionlint` を導入する。CI では必須、ローカルでは任意。既存の pytest は置き換えず併存させる。**
+
+| 対象 | 実測（`actionlint` 1.7.12） |
+|---|---|
+| `.github/workflows/test.yml` | 0 件 |
+| 配布テンプレート 2 本（`deploy.yml` / `review-issue-close-sync.yml`） | 0 件 |
+| `review-issue-close-sync.yml` のコピーに Issue #830 のバグを注入 | **1 件を行つきで検出し exit 1** |
+
+**最後の行が、上 2 行の「0 件」が no-op ではないことの裏付けである。**
+
+**併存させる理由**: `actionlint` は空の式を含む構文エラー全般を見るため機能的には上位互換だが、バイナリが無い環境では何も残らない。既存 pytest は依存ゼロの最低保証として常に走り、Issue #830 が実際に踏んだクラスだけは `actionlint` の有無に関わらず必ず止まる。**skip の危険（入れていない環境で黙って通る）はこの最低保証と、`main` に到達する前に PR の CI が必ず 1 回は全クラスを検査することの 2 つで塞がれている。**
+
+**残る穴**: CI が使えずローカル検証へ落ちたとき（課金枠切れ等）、`actionlint` を入れていない環境では上乗せ分が消え、残るのは既存 pytest の 1 クラスのみになる。**この経路だけは CI と等価にならない。** ローカル検証の手順自体は `actionlint` があれば併せて実行する形にしてあるので、穴が残るのは**バイナリが無い環境に限る** — 手順が存在を知らないために埋められない、という状態ではない。
+
+**`shellcheck` の有無で結果が割れる**。`actionlint` は `shellcheck` / `pyflakes` が `PATH` にあれば `run:` 本文をそれらにも掛けるため、ローカル（通常は不在）と CI（`ubuntu-latest` は `shellcheck` を同梱）で答えが変わる。Issue #862 の起票時の実測では当時の 3 本に差が出なかったが、**同 Issue の実装中に 1 度実際に割れた** — CI へ `actionlint` 自身の取得を足した行が `SC2016`（単一引用符の中の `$` は展開されない）を踏み、ローカルは緑・CI だけ赤という形になった（`bash -c '...'` をシェル関数へ置き換えて解消）。したがって **`.github/workflows/` の `run:` を触ったときは `shellcheck` を `PATH` に置いて `actionlint` を回すこと** — ローカル検証だけでは見えない。
+
+走査対象の探索は `tests/_workflows.py` が持ち、既存の式展開テストと共有する。2 つの写しを持つと drift し、その drift は「狭い方のガードは緑のまま、広い方だけが黙ってファイルを見なくなる」という最悪の形で現れるため。公開サブセットの境界（`tests/` は公開・`.github/` は恒久除外）の扱いは `_publication.is_development_repository()` に委ねる既存の規約をそのまま使う。
+
+**取得方法は公式インストールスクリプトではなくリリースの tarball を直接引く**。スクリプトは `main` ブランチから取得するため版を固定できず、この表の実測がどの版に対するものかを言えなくなる。
+
+**取得先は作業ツリーの外（`RUNNER_TEMP`）にして `PATH` に載せる**。`./actionlint` として作業ツリーへ落とすと 2 つ壊れる — (1) `tests/test_workflow_actionlint.py` は `shutil.which()` で探すため **CI でも skip** され、そのテストだけが持つ範囲（`*.yaml` 拡張子。CI の明示 glob は `*.yml` しか拾わない）がどこからも検査されないまま、テスト自身も一度も実行されずに `main` へ入る。(2) untracked のバイナリが残り、後段の `check_publication_subset.sh` が「作業ツリーが汚れている」警告を毎回出す — あれは「いま直したものは検査されていない」を人に伝えるための警告であり、常時点灯させると意味を失う。
+
+**版のリテラルを他所へ書き写さない**。`.github/workflows/test.yml` の `ACTIONLINT_VERSION` が正本であり、テストの skip メッセージのような「実際に打つ手順」に版を写すと、bump のたびに古い版の導入を案内することになる — CI とローカルで別の版が走るのは、この節が上で警告している `shellcheck` の非対称とまったく同じ形の割れ方である。この表の `1.7.12` は実測がどの版に対するものかという**過去の記録**なので、これは対象外。
 
 ---
 
@@ -269,6 +302,8 @@ Issue #104 で導入し（Issue #233 で対象を読み取り系 5 Skill へ再�
 ### S1・S2 を廃止した理由
 
 **削除ではなく記録として残す。** 「LLM 駆動部分の検証を試みて、強制力のない手動ハーネスは回らないと分かった」こと自体が、次に同じものを作ろうとする人にとって必要な情報である。
+
+> **この節だけは、公開スナップショットに含まれない 2 つの開発用 Skill を名前で挙げている**（下記「なぜ回らなかったか」の 2）。本ドキュメント群は原則としてそれを避ける — 公開側の読者が名前を頼りに探しても、そのリポジトリには存在しないためである（Issue #938）。ここで例外にしているのは、この節が述べているのが**このリポジトリ自身の開発の回し方**であり、名前を伏せても公開側の読者にとって対象の無い文であることが変わらないからである。匿名化は問題の半分しか解かない。**節ごと `dev/` へ移すか、`docs/DesignDoc-TestSpec.md` 自体の公開可否を決め直すかは、本節に限らない大きな判断であり別 Issue とする。**
 
 #### 実測: 導入・再設計の Issue の中でしか実行されていない
 

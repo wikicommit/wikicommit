@@ -1,6 +1,6 @@
 ---
 name: wikicommit-search
-description: Search wiki pages by keyword using FTS5 trigram full-text search
+description: Search the wiki's pages by keyword, expanding synonyms and searching each configured language. Use this whenever someone asks what the wiki says about something, wants to find a page, asks whether a topic is already covered, or asks which pages mention a term — even if they do not say "search". In a repository with a .wikicommit/ directory, prefer this over grep — it ranks results, handles CJK without word breaks, expands synonyms and abbreviations, and finds the same page written in another language.
 ---
 
 # wikicommit-search

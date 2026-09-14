@@ -1078,3 +1078,164 @@ def test_add_config_keys_leaves_the_file_parseable(tmp_path):
     assert run(["--add-config-keys", "theme"], cwd=repo).returncode == 0
     parsed = yaml.safe_load(config.read_text(encoding="utf-8"))
     assert {"wikicommit_version", "translation", "theme", "generate", "schema"} <= set(parsed)
+
+
+# --- --exclude-living-persons (Issue #837) -----------------------------------
+#
+# The switch lives in a file that is nine parts commented-out worked example to
+# one part frontmatter, so the thing worth testing is not only that the value
+# flips but that nothing else in the file moves. A YAML round-trip would pass a
+# "the value is true" assertion and still destroy the body — which is the whole
+# reason init.py rewrites the line textually (Issue #713's lesson, one file over).
+
+ENTITY_POLICY = ".wikicommit/entity-policy.md"
+TEMPLATE_ENTITY_POLICY = (
+    SCRIPT.parent / "templates" / "entity-policy.md"
+)
+
+
+def _policy_lines(repo: Path) -> list[str]:
+    return (repo / ENTITY_POLICY).read_text(encoding="utf-8").splitlines()
+
+
+def test_exclude_living_persons_defaults_to_false(tmp_path):
+    run(["--repo-root", str(tmp_path)], cwd=tmp_path)
+    assert "  exclude_living_persons: false" in _policy_lines(tmp_path)
+
+
+def test_exclude_living_persons_flag_flips_the_switch(tmp_path):
+    result = run(["--repo-root", str(tmp_path), "--exclude-living-persons"], cwd=tmp_path)
+    assert "  exclude_living_persons: true" in _policy_lines(tmp_path)
+    assert "exclude_living_persons: true" in result.stdout
+
+
+def test_exclude_living_persons_changes_nothing_but_that_one_line(tmp_path):
+    """The commented-out body is the file — losing it loses the warnings it carries."""
+    run(["--repo-root", str(tmp_path), "--exclude-living-persons"], cwd=tmp_path)
+    written = _policy_lines(tmp_path)
+    template = TEMPLATE_ENTITY_POLICY.read_text(encoding="utf-8").splitlines()
+
+    assert len(written) == len(template)
+    differing = [i for i, (a, b) in enumerate(zip(written, template)) if a != b]
+    assert differing == [
+        template.index("  exclude_living_persons: false")
+    ], f"lines other than the switch changed: {differing}"
+
+    # The prose the template exists to deliver is still there, verbatim.
+    body = (tmp_path / ENTITY_POLICY).read_text(encoding="utf-8")
+    assert "Do not over-exclude." in body
+    assert "whether someone is a public figure" in body
+
+
+def test_exclude_living_persons_leaves_an_existing_file_alone(tmp_path):
+    """A re-init must not overwrite a decision (or prose) already in the file."""
+    run(["--repo-root", str(tmp_path)], cwd=tmp_path)
+    path = tmp_path / ENTITY_POLICY
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\nOur own prose policy.\n", encoding="utf-8"
+    )
+    before = path.read_text(encoding="utf-8")
+
+    result = run(
+        ["--repo-root", str(tmp_path), "--no-overwrite", "--exclude-living-persons"],
+        cwd=tmp_path,
+    )
+
+    assert path.read_text(encoding="utf-8") == before
+    assert "  exclude_living_persons: false" in before
+    assert "was not applied" in result.stdout
+
+
+def test_exclude_living_persons_keeps_the_frontmatter_parseable(tmp_path):
+    run(["--repo-root", str(tmp_path), "--exclude-living-persons"], cwd=tmp_path)
+    text = (tmp_path / ENTITY_POLICY).read_text(encoding="utf-8")
+    _, front, _ = text.split("---", 2)
+    assert yaml.safe_load(front)["wikicommit"]["exclude_living_persons"] is True
+
+
+# ── GITIGNORE_READY: 基盤コミットの提案が安全かの判定材料（Issue #873）──────────
+#
+# 判定は「この実行が .gitignore を書いたか」ではなく「このリポジトリの .gitignore に
+# WikiCommit のパターンが揃っているか」である。前者は .gitignore が always_skip_existing
+# であるために**再 init では常に「書かなかった」になり**、WikiCommit 自身が作った
+# リポジトリで提案が永久に止まっていた（git add -A は初回と同じだけ安全であるにも
+# かかわらず）。下の 3 件は Issue #873 の表の 3 行に対応する。
+
+
+def test_a_fresh_repository_reports_the_gitignore_as_ready(tmp_path):
+    """表 1 行目: 新規リポジトリ・初回 init。"""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    result = run(["--primary-lang", "ja"], cwd=repo)
+    assert "GITIGNORE_READY: yes" in result.stdout
+
+
+def test_a_reinit_still_reports_the_gitignore_as_ready(tmp_path):
+    """表 3 行目 — 直したのはここである。
+
+    `.gitignore` は `update="review"` ＝ `always_skip_existing` なので、再 init は
+    必ず `SKIPPED: .gitignore (already exists)` を出す。その行を条件にしていた間、
+    WikiCommit 自身が作ったリポジトリの再 init が常に止まっていた。
+    """
+    repo = _init_repo(tmp_path)
+    result = run(["--primary-lang", "ja", "--no-overwrite"], cwd=repo)
+    assert "SKIPPED: .gitignore (already exists)" in result.stdout, (
+        "前提が変わっている: この行が出なくなったなら、直した条件の対象そのものが無い"
+    )
+    assert "GITIGNORE_READY: yes" in result.stdout
+
+
+def test_a_pre_existing_gitignore_reports_what_is_missing(tmp_path):
+    """表 2 行目 — ここは動かない。動かないことが完了条件の主眼である。
+
+    無関係なリポジトリの `.gitignore` が `.wikicommit/.cache/` や `.wikicommit/run/`
+    を含むことは事実上なく、判定を内容へ移しても既存リポジトリの未追跡物を巻き込む
+    経路は増えない。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".gitignore").write_text("# my project\n*.log\nbuild/\n", encoding="utf-8")
+    result = run(["--primary-lang", "ja"], cwd=repo)
+    assert "GITIGNORE_READY: no (missing:" in result.stdout
+    # 欠けているものを名指しするのは、それがそのまま対処になるため。
+    assert "node_modules/" in result.stdout
+    assert ".wikicommit/run/" in result.stdout
+
+
+def test_the_first_quartz_run_is_ready_despite_the_append_order(tmp_path):
+    """判定は Quartz セクション追記より**後**に出なければならない。
+
+    `copy_file()` が既存の `.gitignore` をスキップした後で init が Quartz セクションを
+    追記するため、1 回の実行が同じパスについて `SKIPPED:` と `UPDATED:` を両方印字
+    しうる。ログを読む条件は前者だけを見て「書かなかった」と判定していた。
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    result = run(["--primary-lang", "ja", "--quartz"], cwd=repo)
+    assert "UPDATED: .gitignore (Quartz ignore patterns)" in result.stdout
+    assert "GITIGNORE_READY: yes" in result.stdout
+    ready_at = result.stdout.index("GITIGNORE_READY:")
+    appended_at = result.stdout.index("UPDATED: .gitignore")
+    assert appended_at < ready_at, (
+        "GITIGNORE_READY を Quartz 追記より前で判定すると、初回 --quartz が必ず no になる"
+    )
+
+
+def test_a_repository_predating_a_pattern_reports_it_missing(tmp_path):
+    """テンプレートに後から入ったパターン（`.wikicommit/run/` は Issue #790）を
+    欠いたリポジトリは `no` になる。
+
+    **誤判定ではなく正しい判定である** — `always_skip_existing` なので再 init でも
+    追加されず、そこで `git add -A` を打つと実行記録が実際に stage される。
+    """
+    repo = _init_repo(tmp_path)
+    gitignore = repo / ".gitignore"
+    gitignore.write_text(
+        "\n".join(
+            ln for ln in gitignore.read_text(encoding="utf-8").splitlines()
+            if ln.strip() != ".wikicommit/run/"
+        ) + "\n",
+        encoding="utf-8",
+    )
+    result = run(["--primary-lang", "ja", "--no-overwrite"], cwd=repo)
+    assert "GITIGNORE_READY: no (missing: .wikicommit/run/)" in result.stdout

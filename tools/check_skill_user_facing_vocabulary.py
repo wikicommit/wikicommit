@@ -13,7 +13,8 @@ in one Issue and a later one introduced a fresh violation into
 wikicommit-status's result template. This script is the regression guard the
 prose could not be.
 
-What it scans: fenced code blocks in .claude/skills/wikicommit-*/SKILL.md whose
+What it scans: fenced code blocks in every instruction .md under
+.claude/skills/wikicommit-*/ (SKILL.md and its siblings -- Issue #887) whose
 info string is absent or `markdown` — those are the blocks a Skill prints to
 the user verbatim. Blocks tagged `bash`/`json`/`yaml` (and any other language)
 are commands and data formats, not user-facing prose, and are skipped.
@@ -43,6 +44,10 @@ import re
 import sys
 from pathlib import Path
 
+# Same directory; `python tools/<script>.py` puts it on sys.path, the way
+# .wikicommit/scripts/ imports _wikilink.py.
+from check_skill_md_lines import instruction_files
+
 SKILLS_DIR = Path(".claude/skills")
 
 # Info strings whose blocks are user-facing prose. Everything else (bash, json,
@@ -63,12 +68,34 @@ EXCEPTION_RE = re.compile(r"<!--\s*skill-vocabulary-exception:\s*(.*?)\s*-->")
 
 
 def collect_skill_md_files() -> list[Path]:
+    """Every instruction `.md` in a `wikicommit-*` Skill directory, not just
+    `SKILL.md`.
+
+    Widened in Issue #887, which moved one mode's procedure into a sibling file
+    (`wikicommit-generate/references/regenerate.md`). Scanning only `SKILL.md` would have
+    dropped that prose out of this check the moment it moved — the same way the
+    size guard would have reported the move as an improvement.
+
+    Which `.md` counts as instructions is decided in one place —
+    `check_skill_md_lines.instruction_files()` — rather than restated here:
+    `scripts/` holds `.py` and drops out on its own, `CHANGELOG.md` /
+    `changelog/` is a distribution payload and `scripts/templates/` is expanded
+    into a wiki repository, so neither is instructions read from here. Three
+    copies of that rule is how the three checks would come to disagree about
+    what a Skill's instructions are.
+
+    `wikicommit-*` only, and that is a prefix match rather than a list of
+    exclusions. A Skill whose name falls outside the prefix is a developer
+    tool whose reader is the developer running it.
+    """
     if not SKILLS_DIR.exists():
         return []
-    # wikicommit-* only: the internal-only Skills (implement-issue,
-    # review-and-merge) are developer tools, and their reader is the developer
-    # running them.
-    return sorted(SKILLS_DIR.glob("wikicommit-*/SKILL.md"))
+    found: list[Path] = []
+    for skill_dir in sorted(SKILLS_DIR.glob("wikicommit-*")):
+        if not (skill_dir / "SKILL.md").exists():
+            continue
+        found.extend(instruction_files(skill_dir))
+    return found
 
 
 def iter_user_facing_blocks(lines: list[str]):

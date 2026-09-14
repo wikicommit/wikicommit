@@ -293,15 +293,18 @@ plugins:
   #
   # DISABLED BY DEFAULT, and turning it on takes four values this template
   # deliberately does not ship as empty keys — a placeholder nobody fills is
-  # worse than an absent one. See the wikicommit-init SKILL.md section
-  # "Enabling comments (giscus)" for how to obtain them.
+  # worse than an absent one.
   #
-  # Prerequisites, all three of them giscus's own:
-  #   - the repository is PUBLIC (otherwise visitors cannot see the discussion)
-  #   - the giscus GitHub App is installed on it (otherwise they cannot post)
-  #   - Discussions is turned on
-  # Use an ANNOUNCEMENTS-type Discussion category: giscus recommends it because
-  # only maintainers and giscus itself can then open new discussions there.
+  # HOW TO ENABLE IT: .wikicommit/guides/enabling-comments.md — prerequisites,
+  # the two `gh` calls that produce the values, what to paste here, and the two
+  # exclude lists to check. Kept there rather than inline because it is a
+  # procedure a person follows once, and a procedure needs to be somewhere a
+  # person is willing to open (Issue #846). Note that its three prerequisites
+  # are giscus's own and a missed one fails at READ time, not at build time —
+  # the site builds and the box simply does not work.
+  #
+  # WHAT STAYS HERE is the design decision, because this is the file you are
+  # editing when you might be tempted to undo it:
   #
   # Reactions and discussions are deliberately NOT wired to review_status. A 👍
   # means "this was good", not "I read this and had nothing to report"; there is
@@ -310,21 +313,6 @@ plugins:
   # only exists once someone reacts, so "pages nobody has looked at yet" would
   # stop being listable. This axis measures how far a page reached, and is kept
   # apart from whether it reached anyone at all.
-  #
-  # To enable: set enabled to true and fill in the four values below.
-  #
-  #   options:
-  #     provider: giscus
-  #     options:
-  #       repo: <owner>/<repo>
-  #       repoId: <the repository's GraphQL node ID>
-  #       category: <the Discussion category's name>
-  #       categoryId: <that category's GraphQL node ID>
-  #       lang: <the reader-facing UI language>
-  #
-  # `lang` is a single static value (default en) and does not follow a page's
-  # own `lang` frontmatter, so on a multilingual wiki it will not match every
-  # reader. primary_lang is the sensible choice.
   #
   # Build-generated navigation pages are already excluded two ways, and both are
   # needed. The ones WikiCommit writes carry `comments: false` in their own

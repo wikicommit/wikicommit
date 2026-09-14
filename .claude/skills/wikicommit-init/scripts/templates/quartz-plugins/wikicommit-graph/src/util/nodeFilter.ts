@@ -106,6 +106,39 @@ export function computeDegrees(ids: Set<string>, links: GraphLink[]): Map<string
   return degrees;
 }
 
+/** Count, per node id, the links that reach an **entity** node still in `ids`.
+ *
+ * The prune below asks "does this tag or source still reach a visible page?",
+ * and a plain degree cannot answer it: the published source tree is internally
+ * linked. `convert_wikilinks.py` links every source page from
+ * `content/sources/index.md` (`_write_sources_index()`) and again from its
+ * directory index (`_write_source_dir_indexes()`), and the root index links
+ * `sources` itself. Those neighbours are all `kind === "source"`, so they
+ * survive every language and type selection — leaving every source node at
+ * degree ≥ 1 no matter what is selected, which is exactly the 100+ node cloud
+ * Issue #839 is about. Counting only entity neighbours is the measurable form of
+ * the rule's own one-line justification: a tag and a source exist only through
+ * the pages they belong to.
+ *
+ * Self-links are ignored for the same reason a source's sibling index is: they
+ * are not a page this node reaches.
+ */
+export function computeEntityDegrees(ids: Set<string>, links: GraphLink[]): Map<string, number> {
+  const degrees = new Map<string, number>();
+  ids.forEach((id) => degrees.set(id, 0));
+  for (const link of links) {
+    if (!ids.has(link.source) || !ids.has(link.target)) continue;
+    if (link.source === link.target) continue;
+    if (classifyNode(link.target).kind === "entity") {
+      degrees.set(link.source, (degrees.get(link.source) ?? 0) + 1);
+    }
+    if (classifyNode(link.source).kind === "entity") {
+      degrees.set(link.target, (degrees.get(link.target) ?? 0) + 1);
+    }
+  }
+  return degrees;
+}
+
 /** True when `type` (a published type name, `custom/` already dropped) is one
  *  of the selected names.
  *
@@ -127,6 +160,16 @@ function typeMatches(types: Set<string>, type: string): boolean {
  * narrowing to one language must not silently take them away. Tags are removed
  * through the existing `showTags` config key instead, and sources through
  * `showSources`.
+ *
+ * What *is* taken away is a tag or source node the filter just cut off from every
+ * page it belonged to (Issue #839). Links are only
+ * drawn when both ends survive, so those render as a field of unlinked dots, and
+ * a reader sees "the links broke" rather than "nodes were hidden" — at
+ * `ai-driven-dev-wiki`'s scale (100+ source pages) that is most of the canvas.
+ * The rule above is not weakened by this: it protects tags that still reach a
+ * visible page, which is what Issue #584 was defending. A tag bridging two
+ * languages still reaches the language that stayed, so narrowing to one language
+ * never costs it.
  */
 export function filterNodes(
   ids: Iterable<string>,
@@ -137,8 +180,13 @@ export function filterNodes(
   const types = config.types && config.types.length > 0 ? new Set(config.types) : undefined;
   const showSources = config.showSources !== false;
 
+  // Materialized up front because it is walked twice: once to apply the
+  // selections, and once as the "before" degree baseline below. An Iterable may
+  // be a generator, which a second pass would find empty.
+  const all = new Set(ids);
+
   const kept = new Set<string>();
-  for (const id of ids) {
+  for (const id of all) {
     const info = classifyNode(id);
     if (info.kind === "source" && !showSources) continue;
     if (info.kind === "entity") {
@@ -152,12 +200,48 @@ export function filterNodes(
 
   const minDegree = config.minDegree ?? 0;
   const maxDegree = config.maxDegree ?? 0;
-  if (minDegree <= 0 && maxDegree <= 0) return kept;
 
+  // Nothing was taken away, so nothing can have been *disconnected* either: the
+  // two degree maps below would be equal and the prune's predicate (0 now,
+  // non-0 before) is unsatisfiable. With no degree bound set either, that leaves
+  // the whole walk with nothing to do — the default global graph config
+  // (`minDegree: 0` / `maxDegree: 0`, no selection) goes down this path on every
+  // re-render, and renderGraph() re-runs on every control-bar change.
+  const narrowed = kept.size !== all.size;
+  if (!narrowed && minDegree <= 0 && maxDegree <= 0) return kept;
+
+  // One snapshot each, all taken against `kept` — before the prune and before
+  // the degree bounds — and every test below is read off them. Recomputing after
+  // the prune would cascade for the reason computeDegrees() already states, and
+  // is also why the bounds cannot be applied first: they would change the
+  // baseline the prune reads.
+  //
+  // The bounds keep using the plain degree: that is the control bar's
+  // "Links per node", and it means every link the reader can see.
   const degrees = computeDegrees(kept, links);
+  // The prune uses the entity-only degree instead — see computeEntityDegrees()
+  // for why a plain degree cannot answer its question for source nodes.
+  const pageDegrees = narrowed ? computeEntityDegrees(kept, links) : undefined;
+  // "Did it reach a page before the selection narrowed things?" A node that
+  // reaches none in the unfiltered graph reaches none for its own reasons, and
+  // those reasons are information WikiCommit reports on purpose — a source that
+  // generated no page (`status: failed` / `excluded`), an orphan page
+  // (`check_orphans.py`, Issue #340 / #547). The graph must not be the layer
+  // that quietly hides them, so the prune only claims nodes this filter
+  // disconnected. When the selection kept everything nothing can have been
+  // disconnected, so neither map is computed at all.
+  const pageDegreesBefore = narrowed ? computeEntityDegrees(all, links) : undefined;
+
   const result = new Set<string>();
   kept.forEach((id) => {
     const degree = degrees.get(id) ?? 0;
+    if (pageDegrees && pageDegreesBefore && (pageDegrees.get(id) ?? 0) === 0) {
+      const kind = classifyNode(id).kind;
+      // Entity nodes are never pruned: a page of the selected type reaching
+      // nothing is not a reason to hide it — it is an orphan, which is exactly
+      // what the reader should be able to see.
+      if ((kind === "tag" || kind === "source") && (pageDegreesBefore.get(id) ?? 0) > 0) return;
+    }
     if (minDegree > 0 && degree < minDegree) return;
     if (maxDegree > 0 && degree > maxDegree) return;
     result.add(id);

@@ -1,6 +1,6 @@
 ---
 name: wikicommit-serve
-description: Build and locally preview the published wiki via Quartz v5, without waiting for a GitHub Pages deploy
+description: Build the published wiki with Quartz v5 and preview it locally, instead of waiting for a GitHub Pages deploy. Use this when someone asks to see, preview, or check how the wiki looks when published, or wants to confirm a page renders before it goes out. It runs a real npm build, so invoke it when a preview is actually wanted rather than to answer a question about page content — wikicommit-search or wikicommit-ask do that without a build.
 ---
 
 # wikicommit-serve

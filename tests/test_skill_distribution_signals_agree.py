@@ -1,9 +1,9 @@
 """Skill の配布可否を判定する 3 つのシグナルが互いに整合することを検証する (Issue #660)。
 
 `.claude/skills/` には配布対象の Skill と、WikiCommit 本体の開発専用で配布しない
-内部 Skill（`implement-issue` / `review-and-merge`）が同居している。Claude Code が
-Skill の配置場所を `.claude/skills/<name>/` に固定するため、この 2 種類を物理的に
-別ディレクトリへ分けることはできない。
+内部 Skill が同居している。Claude Code が Skill の配置場所を
+`.claude/skills/<name>/` に固定するため、この 2 種類を物理的に別ディレクトリへ
+分けることはできない。
 
 代わりに、区別は 3 通りの方法で機械的に付く:
 

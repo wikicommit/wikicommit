@@ -3194,3 +3194,68 @@ def test_verdict_is_withheld_when_a_source_it_rested_on_changed(tmp_path):
     published = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
     assert "ai_review_model" not in published
     assert "ai_review_at" not in published
+
+
+def test_source_page_never_renders_generation_notes(tmp_path):
+    """Issue #831: `## Generation Notes` は公開ソースページに出ない。
+
+    除外理由（`exclude_note`）と `coverage_gap_note` はかつて `## Summary` に
+    追記されていた（Issue #284 / #314）。当時の前提は「ソース管理ファイルは
+    内部用」だったが、Issue #476 が管理ファイル 1 件につき公開ページ 1 枚を
+    作るようにした時点でその前提は偽になり、**ページ化しないと決めた実在の
+    人物の名前が、その判断の理由と内部識別子（`entity-policy.md` /
+    `exclude_living_persons`）とともに公開サイトに出ていた**。
+
+    行き先を `## Generation Notes` に分けたことで、`_write_source_page()` が
+    公開する節をホワイトリストで持っている（`## User Notes` と
+    `## Failure Reason` を描画しない）性質により自動的に非公開になる。
+    **その性質はこのテストでしか固定されていない** — ホワイトリストに 1 行
+    足せば公開側へ戻り、しかも戻ったことはテンプレートを読んでも分からず、
+    公開サイトを人間が見るまで気づけない（Issue #831 の発見経緯そのもの）。
+    `tests/test_view_tree.py` が除外を固定しているのと同じ形で止める。
+    """
+    write_config(tmp_path)
+    write_source(
+        tmp_path, "url/example.com/article.md",
+        textwrap.dedent("""\
+            ---
+            source:
+              type: url
+              url: https://example.com/article
+              hash: sha256:abc123
+            status: partial
+            generated_pages: []
+            ---
+
+            ## Summary
+
+            Introduces the article.
+
+            ## Generation Notes
+
+            "Jane Doe" (privacy): a living individual, excluded under
+            .wikicommit/entity-policy.md (exclude_living_persons).
+
+            ## User Notes
+
+            Hand-written operator note.
+            """),
+    )
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    out = (tmp_path / "content" / "sources" / "url" / "example.com" / "article.md").read_text(
+        encoding="utf-8"
+    )
+    # 節そのものが出ないこと。
+    assert "Generation Notes" not in out
+    # 中身も出ないこと（見出しだけを落として本文が漏れる形を防ぐ）。
+    assert "Jane Doe" not in out
+    assert "exclude_living_persons" not in out
+    assert "entity-policy.md" not in out
+    # 既に非公開である 2 節も併せて固定する（同じホワイトリストが根拠のため）。
+    assert "User Notes" not in out
+    assert "Hand-written operator note." not in out
+    # `## Summary` は従来どおり公開され、後続の節を巻き込まないこと。
+    assert "Introduces the article." in out

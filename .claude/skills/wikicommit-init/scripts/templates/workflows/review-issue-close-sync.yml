@@ -329,10 +329,14 @@ jobs:
           # The body is free text written by whoever closed the Issue, so it is
           # never interpolated into a command line: it is selected in Python,
           # written straight to a file, and handed to record_review.py as
-          # --note-file. It passes through neither ${{ }} nor a shell expansion,
-          # which is the same rule the rest of this workflow applies to
-          # github.event.* values. The login is read from the environment rather
-          # than spliced into the program for the same reason.
+          # --note-file. It passes through neither GitHub expression
+          # interpolation nor a shell expansion, which is the same rule the rest
+          # of this workflow applies to github.event.* values. (Do not spell that
+          # interpolation out literally here: GitHub expands expressions in a
+          # `run:` body before the shell ever sees it, so an empty one is a parse
+          # error that takes the whole workflow file down — Issue #830.)
+          # The login is read from the environment rather than spliced into the
+          # program for the same reason.
           set +e
           python - "${COMMENTS_JSON}" "${NOTE_FILE}" <<'PY'
           import json

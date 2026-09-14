@@ -44,15 +44,42 @@ Both trees are scanned. A view page carries `derived_from` rather than
 `sources[]`, so it can never match directly, but it is not therefore safe:
 it is built out of entity pages, and one of those may be the page resting on
 the retracted source. That indirection is out of scope here —
-`check_derivation_freshness.py` is the script that follows `derived_from`, and
-it fires when a grounding page is actually rewritten.
+`check_derivation_freshness.py` is the script that follows `derived_from`. Its
+coverage of this case is conditional, though, and saying so matters: that
+script fires when a grounding page is actually *rewritten*, and a retraction
+rewrites nothing. So it reaches the indirection only once a human has acted on
+the retraction (a `--regenerate` changes the grounding page, and the view page
+goes STALE); a grounding page still standing on a retracted source with nobody
+having done anything is not something it can see. The reason to leave the case
+alone is a different one: covering it would have `wikicommit-synthesize` read
+each grounding page's `sources[]` and interpret `status`, putting a third
+interpreter of that vocabulary on the reference side (Issue #553) for a
+two-hop indirection whose direct half this script already names.
+
+`--list` serves a second caller entirely (Issue #928). `/wikicommit-review` and
+`/wikicommit-fix` both re-fetch a page's `sources[]` and read the documents —
+the former to judge whether the page is faithful to them, the latter to ground
+a fix. Neither goes through `resolve_source_cache_path.py`, so the guard Issue
+#918 added there does not reach them, and a source a human withdrew was being
+read as ground truth. `--list` prints the same table step 1 builds and stops;
+the callers match their own `sources[]` against it, before fetching anything.
+
+Matching in the caller rather than answering a lookup here is deliberate. It
+keeps this script the shape every `check_*` has (walk, report, exit 0), and it
+costs one subprocess call per run rather than one per source — the scan reads
+all of `.wikicommit/source/` either way.
 
 Usage:
     python .wikicommit/scripts/check_retracted_sources.py
+    python .wikicommit/scripts/check_retracted_sources.py --list
 
-Exit code: always 0 (informational, non-blocking).
+Exit code: always 0 (informational, non-blocking) — in both modes. A retraction
+existing is not an error, and `--list` deliberately does not signal one through
+the exit code: that is `resolve_source_cache_path.py`'s job (exit 2), and it
+can do it because it answers about a single identifier.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -118,8 +145,44 @@ def page_source_entries(fm: dict) -> list[list[str]]:
     return entries
 
 
+def print_list(retracted: dict[str, str]) -> None:
+    """Print the retracted-source table for `--list` (Issue #928).
+
+    The line shape matches `resolve_source_cache_path.py`'s `RETRACTED:` so all
+    three reference-side paths read one form, and it names the management file
+    because that is where the human wrote `## Retraction Reason` — the only
+    place the *why* exists.
+
+    No `affected_pages` count here: this mode reads no page, and printing a
+    zero would read as a scan that found nothing.
+    """
+    for identity in sorted(retracted):
+        print(f"RETRACTED: {identity} ({retracted[identity]})")
+    print(f"SUMMARY: retracted_sources={len(retracted)}")
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Report pages still resting on a retracted source (Issue #737)."
+    )
+    parser.add_argument(
+        "--list",
+        dest="list_only",
+        action="store_true",
+        help=(
+            "Print the retracted sources themselves and stop, without scanning any "
+            "page. Used by /wikicommit-review and /wikicommit-fix before they fetch "
+            "source documents (Issue #928)."
+        ),
+    )
+    args = parser.parse_args()
+
     retracted = collect_retracted_sources()
+
+    if args.list_only:
+        print_list(retracted)
+        return 0
+
     if not retracted:
         # Say so rather than printing a bare zero: on a wiki that has never
         # retracted anything, "0 affected pages" and "nothing was retracted"

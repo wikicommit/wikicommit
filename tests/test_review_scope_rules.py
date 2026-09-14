@@ -27,15 +27,35 @@ registration candidates into its Completion Notice across retry rounds, while
 `wikicommit-review` has no retry loop and reports one finding.
 """
 
+import sys
 from pathlib import Path
 
 REPO = Path(__file__).parent.parent
 SKILLS = REPO / ".claude" / "skills"
 RULES = SKILLS / "wikicommit-init" / "scripts" / "templates" / "review-rules.md"
 
+sys.path.insert(0, str(REPO / "tools"))
+from check_skill_md_lines import instruction_files  # noqa: E402
+
 
 def read_skill(name: str) -> str:
-    return (SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+    """Every instruction `.md` the Skill can reach, concatenated.
+
+    `SKILL.md` alone is not the Skill's instructions any more: Issue #887 moved
+    `--regenerate` into a sibling file and Issue #894 moved the Completion Notice
+    and the extraction routing table, so a rule asserted here can be alive and in
+    the right place while a `SKILL.md`-only read says it is gone. That already
+    happened — the Completion Notice roll-up assertion below broke on a move that
+    changed nothing about the rule.
+
+    `instruction_files()` is imported rather than restated for the reason it was
+    made a single definition in the first place: the size metric and the two
+    blocking scanners must not come to disagree about what a Skill's instructions
+    are, and a test that decides it independently is a third answer.
+    """
+    return "\n".join(
+        p.read_text(encoding="utf-8") for p in instruction_files(SKILLS / name)
+    )
 
 
 def rules() -> str:

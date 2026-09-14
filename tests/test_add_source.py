@@ -1568,3 +1568,206 @@ def test_parse_retraction_reason_stops_at_the_next_heading():
 
 def test_parse_retraction_reason_absent_returns_empty_string():
     assert add_source.parse_retraction_reason("---\nstatus: retracted\n---\n") == ""
+
+
+# ── extract_cache_path / check_path_cache / print_path_cache_path (#885) ─────
+
+def _path_source(tmp_path: Path, rel: str, content: bytes = b"raw bytes\n") -> Path:
+    """Register a `type: path` source by hand and return its management file."""
+    raw = tmp_path / rel
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_bytes(content)
+    digest = add_source.sha256_file(str(raw))
+    mgmt = tmp_path / ".wikicommit" / "source" / "path" / (rel + ".md")
+    mgmt.parent.mkdir(parents=True, exist_ok=True)
+    mgmt.write_text(
+        "---\n"
+        "source:\n"
+        "  type: path\n"
+        f"  path: {rel}\n"
+        f"  hash: {digest}\n"
+        "status: pending\n"
+        "---\n"
+        "\n"
+        "## Summary\n",
+        encoding="utf-8",
+    )
+    return mgmt
+
+
+def test_extract_cache_path_keeps_the_trailing_md(tmp_path):
+    """Issue #573's collision-freedom is inherited, not re-derived.
+
+    Stripping and re-adding the extension would send `paper.pdf` and
+    `paper.docx` to the same cache file — exactly the silent wrong-source that
+    Issue closed at the management-file layer.
+    """
+    pdf = _path_source(tmp_path, "raw/paper.pdf", b"pdf\n")
+    docx = _path_source(tmp_path, "raw/paper.docx", b"docx\n")
+
+    pdf_cache = add_source.extract_cache_path(pdf, tmp_path)
+    docx_cache = add_source.extract_cache_path(docx, tmp_path)
+
+    assert pdf_cache == tmp_path / ".wikicommit/.cache/extract-path/raw/paper.pdf.md"
+    assert docx_cache == tmp_path / ".wikicommit/.cache/extract-path/raw/paper.docx.md"
+    assert pdf_cache != docx_cache
+
+
+def test_extract_cache_path_is_a_different_tree_from_the_url_scratch_files(tmp_path):
+    """One tree would collide: a url scratch path is `<host>/<path>`, which a
+    repository file named `example.com/article` also produces."""
+    mgmt = _path_source(tmp_path, "example.com/article")
+    cache = add_source.extract_cache_path(mgmt, tmp_path)
+    assert "extract-path" in cache.parts
+    assert "ingest-fetch" not in cache.parts
+
+
+def test_check_path_cache_is_stale_before_anything_is_written(tmp_path):
+    mgmt = _path_source(tmp_path, "raw/paper.pdf")
+    rel = mgmt.relative_to(tmp_path).as_posix()
+
+    result, path, msg = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_STALE"
+    assert path == ".wikicommit/.cache/extract-path/raw/paper.pdf.md"
+    assert "no extraction cache" in msg
+
+
+def test_check_path_cache_is_valid_when_the_file_is_unchanged(tmp_path):
+    mgmt = _path_source(tmp_path, "raw/paper.pdf")
+    rel = mgmt.relative_to(tmp_path).as_posix()
+    cache = add_source.extract_cache_path(mgmt, tmp_path)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("extracted text\n", encoding="utf-8")
+
+    result, _path, _msg = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_VALID"
+
+
+def test_check_path_cache_goes_stale_when_the_raw_file_changes(tmp_path):
+    """Validity is decided on the *raw* file, because that is what `source.hash`
+    holds for a `type: path` source — the cache's own hash has nothing to be
+    compared against."""
+    mgmt = _path_source(tmp_path, "raw/paper.pdf")
+    rel = mgmt.relative_to(tmp_path).as_posix()
+    cache = add_source.extract_cache_path(mgmt, tmp_path)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("extracted text\n", encoding="utf-8")
+    (tmp_path / "raw/paper.pdf").write_bytes(b"different bytes\n")
+
+    result, _path, msg = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_STALE"
+    assert "changed since it was registered" in msg
+
+
+def test_check_path_cache_goes_stale_when_the_raw_file_is_gone(tmp_path):
+    mgmt = _path_source(tmp_path, "raw/paper.pdf")
+    rel = mgmt.relative_to(tmp_path).as_posix()
+    (tmp_path / "raw/paper.pdf").unlink()
+
+    result, _path, msg = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_STALE"
+    assert "no longer exists" in msg
+
+
+def test_check_path_cache_never_rewrites_source_hash(tmp_path):
+    """The one thing this must not do.
+
+    For `type: path`, `source.hash` is the raw file's hash and the reference
+    point `check_ingest_freshness.py` compares against the file on disk. Writing
+    an extracted-text hash there would make freshness detection report "no
+    change" for a file that had changed.
+    """
+    mgmt = _path_source(tmp_path, "raw/paper.pdf")
+    rel = mgmt.relative_to(tmp_path).as_posix()
+    cache = add_source.extract_cache_path(mgmt, tmp_path)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text("extracted text\n", encoding="utf-8")
+    before = mgmt.read_text(encoding="utf-8")
+
+    add_source.check_path_cache(rel, tmp_path)
+    add_source.print_path_cache_path(rel, tmp_path)
+
+    assert mgmt.read_text(encoding="utf-8") == before
+
+
+def test_check_path_cache_rejects_a_url_source(tmp_path):
+    mgmt = tmp_path / ".wikicommit/source/url/example.com/article.md"
+    mgmt.parent.mkdir(parents=True, exist_ok=True)
+    mgmt.write_text(
+        "---\nsource:\n  type: url\n  url: https://example.com/article\n  hash: \"\"\n---\n",
+        encoding="utf-8",
+    )
+    result, _path, msg = add_source.check_path_cache(
+        mgmt.relative_to(tmp_path).as_posix(), tmp_path
+    )
+    assert result == "ERROR"
+    assert "not path" in msg
+
+
+def test_check_path_cache_errors_on_a_missing_management_file(tmp_path):
+    result, _path, msg = add_source.check_path_cache(
+        ".wikicommit/source/path/raw/nope.pdf.md", tmp_path
+    )
+    assert result == "ERROR"
+    assert "does not exist" in msg
+
+
+def test_print_path_cache_path_creates_the_parent_but_not_the_file(tmp_path):
+    """It is asked *before* the extraction is written, so the file must not exist
+    yet — only somewhere to put it."""
+    mgmt = _path_source(tmp_path, "raw/deep/nested/paper.pdf")
+    rel = mgmt.relative_to(tmp_path).as_posix()
+
+    result, path, _msg = add_source.print_path_cache_path(rel, tmp_path)
+    assert result == "CACHE_PATH"
+    assert path == ".wikicommit/.cache/extract-path/raw/deep/nested/paper.pdf.md"
+    assert (tmp_path / path).parent.is_dir()
+    assert not (tmp_path / path).exists()
+
+
+def test_a_management_file_outside_the_path_root_reports_error_not_a_traceback(tmp_path):
+    """Pre-Issue-#476 repositories still carry `.wikicommit/ingest/path/` — that
+    rename is never auto-migrated.
+
+    Deriving the cache path there has no answer, and the first implementation let
+    `relative_to` raise, which stopped the whole run with a traceback instead of
+    returning the `ERROR:` the instructions say to treat as a cache miss. The
+    cache is an optimization; it must never be what stops a source from being
+    processed.
+    """
+    raw = tmp_path / "raw/paper.pdf"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_bytes(b"pdf\n")
+    mgmt = tmp_path / ".wikicommit/ingest/path/raw/paper.pdf.md"
+    mgmt.parent.mkdir(parents=True, exist_ok=True)
+    mgmt.write_text(
+        "---\nsource:\n  type: path\n  path: raw/paper.pdf\n  hash: sha256:ab12\n---\n",
+        encoding="utf-8",
+    )
+    rel = mgmt.relative_to(tmp_path).as_posix()
+
+    assert add_source.extract_cache_path(mgmt, tmp_path) is None
+    for fn in (add_source.check_path_cache, add_source.print_path_cache_path):
+        result, path, msg = fn(rel, tmp_path)
+        assert result == "ERROR", fn.__name__
+        assert path == rel
+        assert ".wikicommit/source/path/" in msg
+
+
+def test_the_skill_skips_the_cache_commands_for_md_and_txt_sources():
+    """Stated at the check *and* the write step, not only in its own paragraph.
+
+    Following either step in isolation would otherwise cache a `.md` source — a
+    byte-identical second copy of a file that is already readable, in the category
+    where sources run largest.
+    """
+    # Pass 1 moved out of SKILL.md into references/pass1-extract.md (Issue #911).
+    text = (
+        Path(__file__).parent.parent
+        / ".claude/skills/wikicommit-generate/references/pass1-extract.md"
+    ).read_text(encoding="utf-8")
+    block = text.split("**Extraction cache** (`type: path`)", 1)[1]
+    block = block.split("- `type: path`, `.pdf` (scanned)", 1)[0]
+    check_step, write_step = block.split("After a route below produces text successfully", 1)
+    assert "`.md` / `.txt`" in check_step.split("Before dispatching to a route below", 1)[1].split("```", 1)[0]
+    assert "`.md` / `.txt` source is not cached at all" in write_step[:400]

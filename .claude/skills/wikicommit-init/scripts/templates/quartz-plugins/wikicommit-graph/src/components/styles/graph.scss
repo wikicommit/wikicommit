@@ -51,40 +51,72 @@
       display: inline-block;
     }
 
-    // The control bar (Issue #584) cannot live inside .global-graph-container
-    // — renderGraph() calls removeAllChildren() on it every render — so it is
-    // a sibling, and has to be positioned against the same centred rectangle
-    // by hand rather than by flow.
-    & > .global-graph-controls {
+    // The modal rectangle, defined once (Issue #838). The control bar and the
+    // graph are its flow children, so the bar takes the height its contents
+    // need and the graph takes what is left. Before this both were fixed and
+    // measured against the same centred box by hand — `height: 80vh` here and
+    // `calc(50% - 40vh)` there — which left the bar a 10vh strip it had to
+    // scroll inside, and made a change to either height silently wrong until
+    // the other was changed to match.
+    & > .global-graph-inner {
       position: fixed;
-      top: calc(50% - 40vh);
+      top: 50%;
       left: 50%;
-      transform: translate(-50%, -100%);
+      transform: translate(-50%, -50%);
+      height: 80vh;
       width: 80vw;
       box-sizing: border-box;
-      // The bar sits wholly inside the strip above the container, and that
-      // strip is all there is: .global-graph-outer has a backdrop-filter, so
-      // it is the containing block for these fixed children *and* its
-      // overflow: hidden clips them. Without a cap, a bar taller than the
-      // strip (a size="4" multi-select plus its caption is ~90px, more than
-      // 10vh on any viewport shorter than ~900px) has its top row silently
-      // cut off. Capping it at the strip keeps every control reachable.
-      max-height: calc(50% - 40vh);
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+
+      @media all and (max-width: 800px) {
+        width: 90%;
+      }
+    }
+
+    // The control bar (Issue #584) cannot live inside .global-graph-container
+    // — renderGraph() calls removeAllChildren() on it every render — so it is
+    // a sibling of it, inside the wrapper above.
+    .global-graph-controls {
+      flex: 0 0 auto;
+      box-sizing: border-box;
+      // Normally inert: the bar is a few hundred pixels and the wrapper is
+      // 80vh, so neither the cap nor the scrollbar shows up. They matter in the
+      // tail — a short viewport (a landscape phone, a half-height window, page
+      // zoom at 200%) where the bar's fields wrap onto two rows of `size="8"`
+      // lists and exceed 80vh. `flex-shrink: 0` means the bar would keep its
+      // full height there, leaving the graph 0px (its `min-height: 0` lets it
+      // collapse) and pushing the Reset button out through the bottom of
+      // `.global-graph-outer`'s `overflow: hidden`, with no way to scroll to
+      // it. Capping and scrolling keeps every control reachable, which is what
+      // the pre-Issue #838 `max-height` was for.
+      min-height: 0;
+      max-height: 50%;
       overflow-y: auto;
       display: flex;
       flex-wrap: wrap;
       align-items: flex-end;
       gap: 0.75rem;
-      padding: 0 0.2rem 0.4rem;
       font-size: 0.8rem;
       color: var(--dark);
 
+      // A surface of its own (Issue #840). The bar sits outside
+      // `.global-graph-container` — it has to, because `renderGraph()` empties
+      // that element on every render (Issue #584) — so without this it floats
+      // straight on top of whatever page the reader opened the modal from, seen
+      // through `.global-graph-outer`'s `backdrop-filter: blur(4px)`. Its
+      // background was therefore different every time, which is most of why the
+      // controls did not read as controls. These are the same three declarations
+      // `.global-graph-container` below already uses, so the bar and the graph
+      // read as two panels of one thing.
+      background-color: var(--light);
+      border: 1px solid var(--lightgray);
+      border-radius: 5px;
+      padding: 0.4rem 0.5rem;
+
       &:empty {
         display: none;
-      }
-
-      @media all and (max-width: 800px) {
-        width: 90%;
       }
 
       .global-graph-controls__field {
@@ -99,22 +131,144 @@
         }
       }
 
+      // The legend (Issue #841). Swatches are drawn from the same three theme
+      // colours the graph uses, and in the same two shapes, so the key and the
+      // thing it explains cannot drift apart by one being restyled.
+      .global-graph-controls__legend-items {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.1rem 0.6rem;
+      }
+
+      .global-graph-controls__legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        white-space: nowrap;
+      }
+
+      // Starts the colour half on a new line, so the two axes read as two
+      // groups rather than one six-item scale. Without it the reader is invited
+      // to compare a shape swatch against a colour one, which is the comparison
+      // the legend exists to say is meaningless.
+      .global-graph-controls__legend-break {
+        flex-basis: 100%;
+        height: 0;
+      }
+
+      .global-graph-controls__legend-swatch {
+        flex: 0 0 auto;
+        width: 0.55rem;
+        height: 0.55rem;
+        border-radius: 50%;
+        box-sizing: border-box;
+
+        // Shape carries the kind. These use --darkgray, which is *not* one of
+        // the three state colours, precisely so they cannot be read as a fourth
+        // state — and so that "Pages" is not the same mark as "Not visited",
+        // which it would be if both were a grey circle.
+        &--entity {
+          background-color: var(--darkgray);
+        }
+
+        &--tag {
+          background-color: var(--light);
+          border: 2px solid var(--tertiary);
+        }
+
+        &--source {
+          border-radius: 0;
+          background-color: var(--darkgray);
+        }
+
+        // Colour carries the visit state. All three stay circles: a square here
+        // would read as a fourth kind.
+        &--current {
+          background-color: var(--secondary);
+        }
+
+        &--visited {
+          background-color: var(--tertiary);
+        }
+
+        &--unvisited {
+          background-color: var(--gray);
+        }
+      }
+
       .global-graph-controls__range {
         display: flex;
         gap: 0.25rem;
 
-        input {
+        // Named by type for the same reason as the block below: the bar holds
+        // more than one kind of control, and a bare `input` says nothing about
+        // which it means.
+        input[type="number"] {
           width: 4rem;
         }
       }
 
+      // Type-limited on purpose (Issue #840). As a bare `select, input` this
+      // also matched the toggles' checkboxes, where `background-color` and
+      // `border` do nothing without `appearance: none` — so whether these
+      // declarations applied at all was engine-dependent, and reading the block
+      // gave no way to tell. The toggles are buttons now and these are the two
+      // control types actually left in the bar.
       select,
-      input {
+      input[type="number"] {
         font-size: 0.8rem;
         color: var(--dark);
         background-color: var(--light);
         border: 1px solid var(--lightgray);
         border-radius: 4px;
+      }
+
+      // Two-state buttons rather than checkboxes (Issue #840). The difference
+      // between on and off is a filled area instead of a check glyph, which is
+      // what makes it readable at 0.8rem — and it is the same visual vocabulary
+      // as Reset below, so the bar reads as one group of controls rather than
+      // some labels that happen to sit near a button.
+      //
+      // `aria-pressed` is what carries the state to assistive technology, and a
+      // native <button> keeps Tab, Space and Enter and the focus ring without
+      // any handler of our own — the things a checkbox gave for free and an
+      // element styled to look like a button would have to re-implement.
+      .global-graph-controls__toggle {
+        cursor: pointer;
+        font-size: 0.8rem;
+        color: var(--dark);
+        background-color: var(--light);
+        border: 1px solid var(--lightgray);
+        border-radius: 4px;
+        padding: 0.2rem 0.6rem;
+
+        &:hover {
+          background-color: var(--lightgray);
+        }
+
+        // On. --secondary against --light works in both themes because **both
+        // flip**: the shipped theme has secondary #284b63 / light #faf8f8 in
+        // light mode and #7b97aa / #161618 in dark, i.e. dark-on-light one way
+        // and light-on-dark the other. Measured contrast is 8.72:1 and 5.89:1.
+        &[aria-pressed="true"] {
+          background-color: var(--secondary);
+          border-color: var(--secondary);
+          color: var(--light);
+
+          // Keep the filled state filled on hover — reusing the off-state hover
+          // would make pointing at an enabled toggle look like turning it off.
+          //
+          // Darkened rather than swapped to another theme colour. --tertiary was
+          // the obvious candidate and is wrong: it is **#84a59d in both themes**
+          // while the text colour flips with the theme, so it cannot be legible
+          // in both — measured 2.53:1 against --light in light mode, under the
+          // 4.5:1 floor. A relative adjustment has no such asymmetry (9.55:1 and
+          // 5.01:1), and it keeps the hue the pressed state already established.
+          &:hover {
+            filter: brightness(0.92);
+          }
+        }
       }
 
       .global-graph-controls__reset {
@@ -132,21 +286,20 @@
       }
     }
 
-    & > .global-graph-container {
+    .global-graph-container {
       border: 1px solid var(--lightgray);
       background-color: var(--light);
       border-radius: 5px;
       box-sizing: border-box;
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      height: 80vh;
-      width: 80vw;
-
-      @media all and (max-width: 800px) {
-        width: 90%;
-      }
+      // Takes whatever the bar leaves. `min-height: 0` is load-bearing: a flex
+      // item defaults to `min-height: auto`, which refuses to shrink below its
+      // content and would push the graph out through the bottom of the wrapper
+      // once the bar grows. renderGraph() needs no change either way — it reads
+      // offsetWidth/offsetHeight, which flow gives it exactly as absolute
+      // positioning did.
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
     }
   }
 }

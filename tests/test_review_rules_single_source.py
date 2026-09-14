@@ -22,11 +22,16 @@ must NOT have moved are still in their Skill, because "move the discipline" and
 "move everything" are one careless cut apart.
 """
 
+import sys
 from pathlib import Path
 
 import yaml
 
 REPO = Path(__file__).parent.parent
+
+sys.path.insert(0, str(REPO / "tools"))
+from check_skill_md_lines import instruction_files  # noqa: E402
+
 RULES = REPO / ".claude/skills/wikicommit-init/scripts/templates/review-rules.md"
 
 REVIEW_SKILLS = {
@@ -105,15 +110,53 @@ def test_every_discipline_phrase_is_in_the_rules_file():
         assert _flat(phrase) in text, f"{phrase!r} is not in the rules file; this test's premise is stale"
 
 
+def skill_instruction_files(skill_md: Path) -> list[Path]:
+    """`SKILL.md` and every instruction `.md` the Skill can reach.
+
+    Issue #887 moved one mode's procedure into a sibling `.md`, which is a
+    second place inside a review Skill where the discipline could be restated —
+    and one nothing would have looked at, the same gap that Issue had to close
+    in the two Skill scanners under tools/. This walked only the directory's top
+    level, on the stated grounds that no Skill kept a procedure a directory
+    deeper; Issue #911 made that false by moving those siblings into
+    `references/`, which took all three back out of this guard's sight.
+
+    So the rule is imported from `check_skill_md_lines.instruction_files()` —
+    the single definition of "which `.md` under a Skill is instructions", shared
+    with the size metric and the two blocking scanners — rather than restated
+    here, where the next relocation would silently shrink it again.
+    """
+    return instruction_files(skill_md.parent)
+
+
+def skill_instructions(name: str) -> str:
+    """Every instruction file the Skill can reach, concatenated.
+
+    `REVIEW_SKILLS` maps to `SKILL.md` because that is the file whose *placement*
+    some assertions below are about. The choreography assertions are not: Issue
+    #752 moved the discipline out of the Skill and left launching, retrying,
+    writing and status in it — and "in it" has meant more than `SKILL.md` since
+    Issue #887, and spans six files since Issue #911 put each pass in
+    `references/`. Reading only `SKILL.md` would have reported that move as the
+    choreography going missing, which is the opposite of what happened.
+    """
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in skill_instruction_files(REVIEW_SKILLS[name])
+    )
+
+
 def test_the_discipline_is_not_restated_in_any_skill():
-    for name, path in REVIEW_SKILLS.items():
-        text = _flat(path.read_text(encoding="utf-8"))
-        for phrase in DISCIPLINE_PHRASES:
-            assert _flat(phrase) not in text, (
-                f"{name}/SKILL.md restates the review discipline ({phrase!r}). "
-                f"It belongs in .wikicommit/review-rules.md only — a second copy is "
-                f"how the three drifted apart in the first place."
-            )
+    for name, skill_md in REVIEW_SKILLS.items():
+        for path in skill_instruction_files(skill_md):
+            rel = path.relative_to(skill_md.parent)
+            text = _flat(path.read_text(encoding="utf-8"))
+            for phrase in DISCIPLINE_PHRASES:
+                assert _flat(phrase) not in text, (
+                    f"{name}/{rel} restates the review discipline ({phrase!r}). "
+                    f"It belongs in .wikicommit/review-rules.md only — a second copy is "
+                    f"how the three drifted apart in the first place."
+                )
 
 
 def test_each_skill_points_at_the_rules_file():
@@ -134,15 +177,34 @@ def test_each_skill_stops_when_the_rules_file_is_missing():
         )
 
 
+def test_each_skill_checks_for_the_rules_file_at_the_start_of_the_run():
+    """Where the check sits is the whole of Issue #888, and it lives only in prose.
+
+    The check is cheap, needs no page and no source, and its absence is knowable
+    from the first moment — so deferring it to the review step spends whatever
+    that Skill does first (a batch of fetching and generation on two paths, and
+    the reviewer's own answers on the third) on a review that was never going to
+    run. `wikicommit-review` had drifted to exactly that and was moved back; with
+    nothing pinning the placement, the next edit can drift again and leave the
+    suite green, which is how this Issue's two earlier premises went stale.
+    """
+    for name, path in REVIEW_SKILLS.items():
+        text = _flat(path.read_text(encoding="utf-8"))
+        assert "at the start of the run" in text, (
+            f"{name}/SKILL.md no longer says to check for the rules file at the start "
+            f"of the run, so the check can sit behind work it makes pointless"
+        )
+
+
 def test_the_two_subagent_paths_verify_the_echoed_rules_version():
     """wikicommit-review reads the rules itself, so it has nothing to verify."""
     for name in ("wikicommit-generate", "wikicommit-synthesize"):
-        text = REVIEW_SKILLS[name].read_text(encoding="utf-8")
-        assert "rules_version" in text, f"{name}/SKILL.md does not check the echo"
+        text = skill_instructions(name)
+        assert "rules_version" in text, f"{name} does not check the echo"
         # Not a bare "once": that matches incidental prose ("once per run") in a
         # thousand-line file, so the assertion could never fail for its own reason.
         assert "Relaunch" in text, (
-            f"{name}/SKILL.md no longer says to relaunch the subagent when the echo "
+            f"{name} no longer says to relaunch the subagent when the echo "
             f"is missing or wrong"
         )
 
@@ -158,9 +220,9 @@ def test_the_two_subagent_paths_hand_the_subagent_its_path_label():
         ("wikicommit-generate", "generate-pass4"),
         ("wikicommit-synthesize", "synthesize-step5.5"),
     ):
-        text = REVIEW_SKILLS[name].read_text(encoding="utf-8")
+        text = skill_instructions(name)
         assert stage in text, (
-            f"{name}/SKILL.md never names the path label {stage!r}, so nothing "
+            f"{name} never names the path label {stage!r}, so nothing "
             f"tells the subagent which of the rules file's per-path sections is its own"
         )
 
@@ -176,19 +238,19 @@ def test_the_rules_file_says_where_the_path_label_comes_from():
 def test_the_two_subagent_paths_state_the_sender_side_contract():
     """The receiver-side rule cannot stop the sender from over-sharing."""
     for name in ("wikicommit-generate", "wikicommit-synthesize"):
-        text = REVIEW_SKILLS[name].read_text(encoding="utf-8")
+        text = skill_instructions(name)
         assert "and nothing else" in text, (
-            f"{name}/SKILL.md does not bound what goes into the subagent's prompt"
+            f"{name} does not bound what goes into the subagent's prompt"
         )
         assert "SOURCE" in text
 
 
 def test_the_choreography_did_not_move():
     for name, markers in CHOREOGRAPHY.items():
-        text = REVIEW_SKILLS[name].read_text(encoding="utf-8")
+        text = skill_instructions(name)
         for marker in markers:
             assert marker in text, (
-                f"{name}/SKILL.md lost {marker!r}. Issue #752 moved the discipline only; "
+                f"{name} lost {marker!r}. Issue #752 moved the discipline only; "
                 f"retries, failure handling, writing and status updates stay in the Skill."
             )
 
@@ -207,3 +269,57 @@ def test_the_rules_file_carries_the_receiver_side_defense():
     # The specific things a generator would otherwise leak into the prompt.
     for leak in ("summary", "analysis JSON", "previous review round"):
         assert leak in text, f"the rules file does not name {leak!r} as non-evidence"
+
+
+def test_the_review_skill_states_what_its_start_of_run_gate_costs():
+    """Issue #917: the gate stops pages that would never have read the rules.
+
+    `wikicommit-review`'s no-ground-truth branch (`type: manual`, a failed fetch,
+    an empty `sources`, an unresolvable `derived_from`) skips the one item that
+    reads the rules file and goes straight to the full-text fallback — and
+    `type: manual` is this Skill's main case, not an edge one. So the gate stops
+    the thing the Skill is mostly for, on the strength of a file that case does
+    not use.
+
+    That is the right call, but only for reasons that are not visible from the
+    gate itself, which is why all three have to be written down: a conditional
+    gate could not sit any earlier than the end of item 1 (two of the four
+    conditions need a fetch to settle), mixed records would be indistinguishable
+    to `check_review_coverage.py`, and the wall clears with one
+    `/wikicommit-init --no-overwrite`. Stating only the first invites exactly the
+    "isn't this pointless?" review comment that produced this Issue.
+    """
+    text = _flat(REVIEW_SKILLS["wikicommit-review"].read_text(encoding="utf-8"))
+    assert _flat("This stops pages that would never have read the rules at all, and that is "
+                 "deliberate (Issue #917)") in text, (
+        "the gate no longer says that it stops the no-ground-truth branch, so the "
+        "cost it imposes reads as an oversight"
+    )
+    for fragment, missing in (
+        ("Whether a page has ground truth is not knowable this early",
+         "why a conditional gate cannot sit earlier"),
+        ("Mixed records would be indistinguishable in the aggregate",
+         "why the record side rules the exception out"),
+        ("The wall is one command wide",
+         "that the block clears with one /wikicommit-init --no-overwrite"),
+    ):
+        assert _flat(fragment) in text, f"the gate no longer says {missing}"
+
+
+def test_no_instruction_file_blames_an_uncommitted_file_for_a_hash_failure():
+    """`git hash-object` exits 0 on an untracked file and outside a git repository
+    alike; it fails only when the file cannot be read (measured, Issue #917).
+
+    Naming a cause that cannot occur sends whoever hits the real one — an
+    unreadable file — looking for a commit to make.
+
+    Matched through `_flat` like every other scan here: this is a *negative*
+    assertion, so a phrase that came back wrapped across a line break would pass
+    it silently, which is the one direction that must not be possible.
+    """
+    for skill in REVIEW_SKILLS:
+        text = _flat(skill_instructions(skill))
+        assert _flat("present but not yet committed") not in text, (
+            f"{skill} explains a `git hash-object` failure as an uncommitted file, "
+            f"which cannot happen — it fails only when the file cannot be read"
+        )

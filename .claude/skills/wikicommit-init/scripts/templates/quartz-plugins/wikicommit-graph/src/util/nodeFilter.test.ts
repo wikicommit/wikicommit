@@ -198,6 +198,182 @@ describe("filterNodes", () => {
   });
 });
 
+// Issue #839: a selection that leaves a tag or source with nothing to link to
+// turns it into an unlinked dot, and a field of those reads as "the links broke"
+// rather than "nodes were hidden". The prune claims exactly the nodes *this
+// filter* disconnected — never one that was already isolated, because that is
+// something WikiCommit reports on purpose.
+describe("filterNodes prunes what the filter disconnected", () => {
+  it("keeps a tag bridging two languages when one language is selected", () => {
+    // The case Issue #584 was defending: tags are language-neutral, so they are
+    // the only edges between language clusters. The tag still reaches the
+    // language that stayed, so it is connected and survives.
+    const links = [
+      { source: "ja/Person/yamada-taro", target: "tags/engineer" },
+      { source: "en/Person/yamada-taro", target: "tags/engineer" },
+    ];
+    const kept = filterNodes(
+      ["ja/Person/yamada-taro", "en/Person/yamada-taro", "tags/engineer"],
+      links,
+      { langs: ["ja"] },
+    );
+    expect(kept.has("tags/engineer")).toBe(true);
+    expect(kept.has("en/Person/yamada-taro")).toBe(false);
+  });
+
+  it("drops a tag with no page of the selected type", () => {
+    const links = [
+      { source: "ja/Person/yamada-taro", target: "tags/engineer" },
+      { source: "ja/Place/tokyo", target: "tags/city" },
+    ];
+    const kept = filterNodes(
+      ["ja/Person/yamada-taro", "ja/Place/tokyo", "tags/engineer", "tags/city"],
+      links,
+      { types: ["Person"] },
+    );
+    expect(kept.has("tags/engineer")).toBe(true);
+    expect(kept.has("tags/city")).toBe(false);
+  });
+
+  it("keeps a source that was already isolated before any filter", () => {
+    // A source that generated no page (`status: failed` / `excluded`) has no
+    // links of its own. Hiding it would make the graph the layer that conceals
+    // what check_orphans.py and the source pages report (Issue #340 / #547).
+    const links = [{ source: "ja/Person/yamada-taro", target: "sources/url/a" }];
+    const kept = filterNodes(
+      ["ja/Person/yamada-taro", "sources/url/a", "sources/url/never-used"],
+      links,
+      { types: ["Person"] },
+    );
+    expect(kept.has("sources/url/never-used")).toBe(true);
+    expect(kept.has("sources/url/a")).toBe(true);
+  });
+
+  it("does not cascade when a hub is filtered out", () => {
+    // Degrees are taken once, against the set the selection kept. Recomputing
+    // after the prune would let one removal pull its neighbours out too, which
+    // is the collapse computeDegrees() already refuses to do for minDegree.
+    const links = [
+      { source: "ja/Person/hub", target: "tags/a" },
+      { source: "ja/Person/hub", target: "sources/url/s" },
+      { source: "ja/Place/tokyo", target: "tags/a" },
+      { source: "ja/Place/tokyo", target: "sources/url/s" },
+    ];
+    const kept = filterNodes(
+      ["ja/Person/hub", "ja/Place/tokyo", "tags/a", "sources/url/s"],
+      links,
+      { types: ["Place"] },
+    );
+    // The hub went with the type selection; its neighbours still reach the
+    // Place page, so nothing follows it out.
+    expect(kept.has("ja/Person/hub")).toBe(false);
+    expect([...kept].sort()).toEqual(["ja/Place/tokyo", "sources/url/s", "tags/a"]);
+  });
+
+  it("never prunes an entity node, however isolated the filter leaves it", () => {
+    // An orphan page of the selected type is information, not clutter.
+    const links = [{ source: "ja/Person/yamada-taro", target: "ja/Place/tokyo" }];
+    const kept = filterNodes(["ja/Person/yamada-taro", "ja/Place/tokyo"], links, {
+      types: ["Person"],
+    });
+    expect(kept.has("ja/Person/yamada-taro")).toBe(true);
+  });
+
+  it("applies the degree bounds from the same snapshot as the prune", () => {
+    // minDegree reads the pre-prune degrees too, so turning it on cannot make a
+    // node disappear that the prune had already accounted for, nor revive one.
+    const links = [
+      { source: "ja/Person/a", target: "tags/t" },
+      { source: "ja/Place/b", target: "tags/t" },
+    ];
+    const ids = ["ja/Person/a", "ja/Place/b", "tags/t"];
+    expect([...filterNodes(ids, links, { types: ["Person"], minDegree: 1 })].sort()).toEqual([
+      "ja/Person/a",
+      "tags/t",
+    ]);
+  });
+
+  it("drops source nodes on a real published shape, where the source tree is self-linked", () => {
+    // The shape every published wiki has and the fixtures above did not:
+    // convert_wikilinks.py links each source page from content/sources/index.md
+    // and again from its directory index, and the root index links `sources`.
+    // Those neighbours are all kind === "source", so they survive every
+    // selection — a plain degree therefore never reaches 0 and the prune could
+    // not fire at all. This is the 100+ node cloud Issue #839 is about.
+    const links = [
+      { source: "index", target: "sources" },
+      { source: "sources", target: "sources/url/a" },
+      { source: "sources", target: "sources/url/b" },
+      { source: "sources", target: "sources/url/never-used" },
+      { source: "sources/url", target: "sources/url/a" },
+      { source: "sources/url", target: "sources/url/b" },
+      { source: "sources/url", target: "sources/url/never-used" },
+      { source: "sources/url/a", target: "ja/Person/yamada-taro" },
+      { source: "sources/url/b", target: "ja/Place/tokyo" },
+      { source: "ja/Person/yamada-taro", target: "tags/engineer" },
+      { source: "ja/Place/tokyo", target: "tags/city" },
+    ];
+    const ids = [
+      "index",
+      "ja",
+      "ja/Person/yamada-taro",
+      "ja/Place/tokyo",
+      "tags/engineer",
+      "tags/city",
+      "sources",
+      "sources/url",
+      "sources/url/a",
+      "sources/url/b",
+      "sources/url/never-used",
+    ];
+
+    const kept = filterNodes(ids, links, { types: ["Person"] });
+
+    // Reaches the Person page that stayed.
+    expect(kept.has("sources/url/a")).toBe(true);
+    expect(kept.has("tags/engineer")).toBe(true);
+    // Reached only the Place page, which the selection hid.
+    expect(kept.has("sources/url/b")).toBe(false);
+    expect(kept.has("tags/city")).toBe(false);
+    // Generated no page at all (`status: failed` / `excluded`): it reached none
+    // before the selection either, so it is isolated for its own reasons and
+    // stays visible.
+    expect(kept.has("sources/url/never-used")).toBe(true);
+  });
+
+  it("does not count a source's sibling index pages as reaching a page", () => {
+    // The specific reason the plain degree cannot answer this: the index nodes
+    // classify as sources themselves, so they are never filtered away.
+    const links = [
+      { source: "sources", target: "sources/url/b" },
+      { source: "sources/url", target: "sources/url/b" },
+      { source: "sources/url/b", target: "ja/Place/tokyo" },
+    ];
+    const kept = filterNodes(
+      ["ja/Person/a", "ja/Place/tokyo", "sources", "sources/url", "sources/url/b"],
+      links,
+      { types: ["Person"] },
+    );
+    expect(kept.has("sources/url/b")).toBe(false);
+    // The index nodes themselves reached no page even before the selection, so
+    // they are not the prune's business either way.
+    expect(kept.has("sources")).toBe(true);
+  });
+
+  it("accepts a generator for ids", () => {
+    // The pre-filter baseline walks the ids a second time; a generator would be
+    // empty by then if it were not materialized first.
+    function* gen() {
+      yield "ja/Person/a";
+      yield "tags/t";
+    }
+    const kept = filterNodes(gen(), [{ source: "ja/Person/a", target: "tags/t" }], {
+      types: ["Person"],
+    });
+    expect([...kept].sort()).toEqual(["ja/Person/a", "tags/t"]);
+  });
+});
+
 describe("collectFacets", () => {
   it("lists the languages and types actually present, sorted", () => {
     expect(

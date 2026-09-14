@@ -31,7 +31,7 @@ wikicommit:
   rejected:
 ---
 
-<!--
+<!-- wikicommit:example
 What belongs in this file: which sources this wiki takes in, and which it does not.
 What does not: which *entities* to write pages about once a source is in — that is
 `theme` in .wikicommit/config.yml, and mixing the two makes the entity judgment

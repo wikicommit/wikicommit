@@ -77,6 +77,13 @@ def parse_args() -> argparse.Namespace:
         "exclude judgment (default: empty, which disables the judgment)",
     )
     parser.add_argument(
+        "--exclude-living-persons",
+        action="store_true",
+        help="Set exclude_living_persons: true in the entity-policy.md this run writes "
+        "(Issue #837; default false, which generates every entity as before). Applies "
+        "only to a freshly created file — a re-init never rewrites an existing one.",
+    )
+    parser.add_argument(
         "--no-overwrite",
         action="store_true",
         help="Skip files that already exist",
@@ -268,6 +275,41 @@ _THEME_LINE_RE = re.compile(r"^theme:.*$", re.MULTILINE)
 
 
 _VERSION_LINE_RE = re.compile(r"^wikicommit_version:.*$", re.MULTILINE)
+
+# The one switch in entity-policy.md, matched as a line rather than as YAML.
+# That file is nine parts commented-out worked example to one part frontmatter,
+# and a yaml.safe_load + yaml.dump round-trip drops every one of those comments
+# — the same way it drops config.yml's commented-out site_description example
+# (Issue #713). What is lost here is worse: the comment block is the file's
+# entire body, including the warning about over-excluding that the template
+# exists to deliver. So this is a textual one-line rewrite, like _update_theme().
+_EXCLUDE_LIVING_PERSONS_LINE_RE = re.compile(
+    r"^(\s*)exclude_living_persons:.*$", re.MULTILINE
+)
+
+
+def _set_exclude_living_persons(policy_path: Path) -> bool:
+    """Flip the freshly-written entity-policy.md's switch to true (Issue #837).
+
+    Only ever called on a file this run just created. A re-init must not touch
+    an existing one: it is `update: review` in _root_outputs.py because the user
+    writes prose into it, and unlike `theme` there is deliberately no
+    `--update-<field>` path to overwrite that decision later.
+    """
+    try:
+        content = policy_path.read_text(encoding="utf-8")
+        if not _EXCLUDE_LIVING_PERSONS_LINE_RE.search(content):
+            return False
+        # A lambda replacement, not a raw string: re.sub would interpret
+        # backslash escapes in the replacement text (same reason as
+        # _update_theme() above, Issue #371).
+        content = _EXCLUDE_LIVING_PERSONS_LINE_RE.sub(
+            lambda m: f"{m.group(1)}exclude_living_persons: true", content, count=1
+        )
+        policy_path.write_text(content, encoding="utf-8")
+        return True
+    except OSError:
+        return False
 
 
 def _read_config(repo_root: Path) -> tuple[Path, str] | None:
@@ -695,6 +737,18 @@ def main() -> int:
             return 1
         copy_tree(schema_src, repo_root / ".wikicommit" / "schema", **_flags(".wikicommit/schema"))
 
+        # Human-facing how-to documents (Issue #846). update="overwrite" per
+        # _root_outputs.py, for the same reason as review-rules.md and the scripts tree
+        # below: these are WikiCommit's own instructions, not prose the user authors, so a
+        # re-init refreshes them. That is the whole point of putting the shelf here rather
+        # than in the development repository's docs/ — an installed wiki never sees a change
+        # made there, and §11.9 forbids a distributed file from pointing at it either.
+        guides_src = templates_dir / "guides"
+        if not guides_src.is_dir():
+            print(f"ERROR: templates/guides/ not found at {guides_src}", file=sys.stderr)
+            return 1
+        copy_tree(guides_src, repo_root / ".wikicommit" / "guides", **_flags(".wikicommit/guides"))
+
         dirs = [
             repo_root / ".wikicommit" / "source" / "path",
             repo_root / ".wikicommit" / "source" / "url",
@@ -754,6 +808,35 @@ def main() -> int:
         # created with a .gitkeep.
         for template_rel, dest_rel in _root_outputs.plain_copies(variant):
             copy_file(templates_dir / template_rel, repo_root / dest_rel, **_flags(dest_rel))
+
+        # Flip entity-policy.md's one switch, but only on the copy this run just
+        # made (Issue #837). `.wikicommit/entity-policy.md` is always_skip_existing,
+        # so on a re-init copy_file() left the user's own file alone and `created`
+        # will not list it — rewriting it here anyway would overwrite prose and a
+        # decision the user already made, which is exactly what that flag protects.
+        if args.exclude_living_persons:
+            policy_rel = ".wikicommit/entity-policy.md"
+            # Compare through rel() rather than against the literal: `created`
+            # holds str(Path.relative_to(...)), which uses the platform separator,
+            # so a literal "/" path never matches on native Windows Python (the
+            # interpreter Git Bash invokes, which these scripts are expected to run
+            # under). Comparing the literal would silently take the "already existed"
+            # branch on a brand-new repository — dropping the user's answer and
+            # blaming the wrong cause.
+            if rel(repo_root / policy_rel) in created:
+                if _set_exclude_living_persons(repo_root / policy_rel):
+                    print(f"UPDATED: {policy_rel} (exclude_living_persons: true)")
+                else:
+                    print(
+                        f"WARNING: could not set exclude_living_persons in {policy_rel}; "
+                        "edit it by hand",
+                        file=sys.stderr,
+                    )
+            else:
+                print(
+                    f"NOTE: {policy_rel} already existed, so --exclude-living-persons "
+                    "was not applied. Edit the file directly to change the switch."
+                )
 
         if args.quartz:
             quartz_plugins_src = templates_dir / "quartz-plugins"
@@ -829,6 +912,31 @@ def main() -> int:
                 exclude=_root_outputs.is_quartz_plugin_dev_artifact,
                 **_flags("quartz-plugins"),
             )
+
+        # 基盤コミットの提案（SKILL.md step 3）を出してよいかの判定材料。**printed after the
+        # Quartz append above**, deliberately: that append does not branch on whether the copy
+        # happened, so reading the log would make the first --quartz run report `no` even
+        # though the file is complete by the time it finishes (Issue #873).
+        #
+        # 判定はファイルの内容であって、この実行が書いたかどうかではない。.gitignore は
+        # always_skip_existing なので、一度 init したリポジトリは以後すべての再 init で
+        # SKIPPED を出す — そこを条件にすると、WikiCommit 自身が作ったリポジトリの再 init が
+        # 常に止まる（git add -A は初回と同じだけ安全であるにもかかわらず）。
+        #
+        # SKILL.md 側はこの 1 行を読むだけで .gitignore の中身を読まない（Issue #474）。
+        # 欠けているパターンを名指しするのは、それがそのまま対処になるため（1 行足せば通る）。
+        #
+        # 判定できなかった場合は yes ではなく no に倒す。要求集合が空になると「全部揃っている」と
+        # 区別が付かず、壊れたインストールが黙ってガードを常時 yes にしてしまう。
+        try:
+            missing_ignores = _root_outputs.missing_gitignore_patterns(repo_root, variant)
+        except OSError as e:
+            print(f"GITIGNORE_READY: no (could not read the ignore template: {e})")
+        else:
+            if missing_ignores:
+                print(f"GITIGNORE_READY: no (missing: {', '.join(missing_ignores)})")
+            else:
+                print("GITIGNORE_READY: yes")
 
         notice = ui_language_notice(args.primary_lang)
         if notice:

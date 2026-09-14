@@ -16,7 +16,7 @@ Runs quality checks against the uncommitted changes under `.wikicommit/` (wiki p
 
 ## Processing Flow
 
-### Step 0: Open a Run Record and Resolve Default Branch
+### Step 0: Open a Run Record, Check Distribution Freshness, and Resolve Default Branch
 
 ```bash
 python .wikicommit/scripts/record_run.py start --skill wikicommit-merge \
@@ -24,6 +24,15 @@ python .wikicommit/scripts/record_run.py start --skill wikicommit-merge \
 ```
 
 Keep the path it prints; Step 10 closes it. A record with a start and no end is what says a run did not finish, and this Skill has more ways to stop partway than any other here — a blocking quality check in Step 3, a PR that never reaches a mergeable state in Step 7, a rate-limited Issue creation in Step 8 — several of which leave a branch and a PR behind with nothing recording that a run was underway (Issue #790). Leaving the record open is that signal, not a failure state to avoid.
+
+**Check that `.wikicommit/scripts/` is in step with this Skill (Issue #930).**
+
+```bash
+python .claude/skills/wikicommit-init/scripts/templates/scripts/check_distribution_freshness.py \
+    --only .wikicommit/scripts
+```
+
+Report every `OUTDATED:`, `MISSING:`, `ORPHAN:` and `WARNING:` line it prints, and **carry on — this does not stop the run**. Report all four rather than the `OUTDATED:` lines alone: `MISSING:` means there is no scripts tree at all, so Step 3's gates cannot run; `ORPHAN:` means a script renamed upstream still sits there under its old name (Issue #583); and `WARNING:` is how the check says it did not actually compare anything — a mistyped path, or one renamed in `_root_outputs.py`, otherwise prints a clean `SUMMARY:` that reads exactly like "in step". A silent clean result is the failure this check exists to remove. Those scripts are the quality gates Step 3 runs, and they are refreshed by `/wikicommit-update` while this Skill is refreshed by `npx skills add`; a gate older than the rule it is meant to enforce does not fail loudly, it passes what the current one would block — and this is the last check before the default branch. It warns rather than blocks because nothing here can tell which differences bear on this run. **Run the copy under `.claude/skills/`**, not the one under `.wikicommit/scripts/` — the latter is the half that may be stale, and a detector shipped in the stale half is the very bug it is looking for. If that path does not exist, skip it and say nothing.
 
 Then:
 
@@ -171,6 +180,8 @@ Run these as direct Bash-tool invocations exactly as shown above. Do not write a
 | `check_orphans.py` | Any `DUPLICATE:` output (duplicate pages) | Any `ORPHAN:` output |
 
 If all checks finish with no blocking errors but some warnings remain, present the warnings to the user and confirm whether to proceed. If the user chooses not to proceed, abort (no branch has been created yet at this point, so the working tree changes remain as-is).
+
+**In a non-interactive run, where no answer will arrive, abort — and say that is why** (Issue #910). Aborting here is the deferring answer, not the destructive one, for the reason the sentence above already gives: no branch exists yet, so the working tree is left exactly as it is and a later run with a person present picks up the same changes and asks the same question. Proceeding is the choice that cannot be taken back — this Skill squash-merges what it builds, so reading silence as a yes publishes warnings nobody saw. Aborting is safe **because** nothing has been committed; do not carry this rule past that point. Say in the report that the run stopped on warnings with no one to ask, and list them, so the next run knows what it is being asked about.
 
 ### Step 4: Create Branch
 
@@ -670,8 +681,12 @@ for path in sorted(Path('.wikicommit/source').rglob('*.md')):
     failed = fm.get('failed_pages') or []
     if isinstance(failed, list) and failed:
         print(path)
+    elif fm.get('status') == 'failed':
+        print(path)
 "
 ```
+
+**`status: failed` is a second target condition, not a redundant one (Issue #910).** `failed_pages` is written by Pass 4, so it is only ever non-empty when page generation was actually attempted. A source that fails in Pass 1 — a known JS-shell domain, an empty or unreadable extraction — never reaches Pass 4, so its `failed_pages` is empty and the original condition here missed it entirely. Nothing else caught it either: Pass 1 does not collect `failed`, and `check_ingest_freshness.py`'s `CHECKABLE_STATUSES` does not include it. The only trace was the `## Failure Reason` section and the output of the run that wrote it, so a source could drop out of the pipeline with no report anywhere. The two conditions do not overlap in practice — Pass 4 step 7 writes `status: failed` only on a branch where every entity was attempted and failed, and that branch fills `failed_pages` — but the `elif` makes one Issue per management file regardless.
 
 Same `FRONTMATTER_RE` and `try`/`except` resilience as Step 8's extraction script, for the same reason: one management file anywhere in the tree with malformed frontmatter must not abort the scan before every other target file is found. Relay any `WARNING:` lines to the user in the Step 10 completion report, same as Step 8.
 
@@ -692,7 +707,7 @@ gh issue list --label wikicommit-generation-failure --state open --json number,b
 
 #### Issue Generation (repeat per target management file)
 
-Read the management file's `source.type`, `source.path`/`source.url`, `failed_pages`, and `last_generated_at` fields, and its `## Failure Reason` section body (write "unknown" in the Issue body for `last_generated_at` if unset, and "unknown" for the failure reason if the section is absent — same "unknown" fallback Step 8 uses for missing `generated_at`/`generated_by`).
+Read the management file's `source.type`, `source.path`/`source.url`, `failed_pages`, and `last_generated_at` fields, and its `## Failure Reason` section body (write "unknown" in the Issue body for `last_generated_at` if unset, and "unknown" for the failure reason if the section is absent — same "unknown" fallback Step 8 uses for missing `generated_at`/`generated_by`). For a source caught by `status: failed` with an empty `failed_pages`, say so where the list would go — the failure happened before any page was attempted, and an empty list with no explanation reads as data that went missing.
 
 ```bash
 # 1. Create the tracking Issue

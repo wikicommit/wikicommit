@@ -26,6 +26,8 @@ Exit code: always 0. Argument errors (e.g. missing --variant) exit 2 via argpars
 
 import argparse
 import sys
+import textwrap
+from pathlib import Path
 
 import _root_outputs
 
@@ -101,18 +103,156 @@ _MARKITDOWN_STEP = (
 
 _REGISTER_STEP = "Register a source with /wikicommit-generate <file path or URL>."
 
+# The intro no longer tells the user these are theirs *alone* to run (Issue #843). Both reasons
+# it gave for that were already broken. `.wikicommit/schema/` is written by init.py, which the
+# agent launches, and step 3's obvious-type judgment has the agent write a schema file directly
+# (Issue #490) — what is forbidden there is *authoring*, not committing what one just authored.
+# And `main` is not the invariant either: CLAUDE.md's rule is that an LLM's commits go through a
+# PR, and `wikicommit-merge` branches, commits, pushes and squash merges under exactly that rule.
+# The foundational commit has no PR route available (init is often a repository's first commit,
+# so there may be no base branch and no remote), and its content carries no LLM-authored
+# knowledge — deterministic template expansion plus type files the user approved with Enter. So
+# the agent offers to run them, asking first with the same strength the `--quartz-pages` Pages
+# activation asks, and this printed guidance stays exactly as it is for the decline /
+# non-interactive / failure paths (Issue #86's remedy is not weakened).
+#
+# The wording has to hold in all of those paths, including when this script is re-run standalone
+# later to reprint the guidance, so it states what `/wikicommit-init` does rather than assuming
+# who is reading it or what they already answered. That is why it reads "run them yourself
+# unless ... you accepted" rather than "it asks once": SKILL.md also withholds the offer in two
+# cases that are not a decline — a repository that already had its own `.gitignore` (skipped
+# outright), and a still-pending "Set up Quartz v5" step, which is every first --quartz run
+# (deferred until the user finishes that step, after which the guidance is reprinted without it
+# and the offer applies to the reprint — Issue #865). So promising a prompt would still be false
+# on a standalone re-run of this script, and on the Quartz path it would be premature rather than
+# wrong; the wording has to hold for a reader of either.
 _COMMIT_STEP_INTRO = (
     'Commit the generated foundational files (`/wikicommit-merge` only targets\n'
     '   "changes" under `.wikicommit/entity/` and `.wikicommit/source/`, so\n'
     "   `.claude/skills/`, `.wikicommit/config.yml`, `.wikicommit/schema/`,\n"
     "   `.wikicommit/scripts/`, `.wikicommit/entity/`, `.wikicommit/source/`,\n"
     "   {extra_files}will never get committed anywhere\n"
-    "   in the pipeline unless committed here. This command is meant for the user to run\n"
-    "   themselves — the agent must not run it on the user's behalf (writes to main are prohibited):\n"
-    "   {git_add}\n"
+    "   in the pipeline unless committed here. Run them yourself unless `/wikicommit-init` offered\n"
+    "   to run them for you and you accepted: it asks at most once, only where it can stage exactly\n"
+    "   its own output, and it says so whenever it is leaving them to you. `-A` is the right\n"
+    "   default in a repository created for this wiki; if WikiCommit was added to a repository\n"
+    "   that already had files of its own, read the note under the commands before running it:\n"
+    "   git add -A\n"
     '   git commit -m "{commit_msg}"\n'
     "   git push"
+    "{selective_note}"
 )
+
+# `git add -A` rather than the per-path list this used to print (Issue #842). `.gitignore`
+# is written by this same run — and extended with a Quartz section under --quartz — so in a
+# repository created for this wiki the two stage exactly the same set. What differs is the
+# failure mode: `git add` aborts the *whole* command on a pathspec that does not exist
+# (measured: exit 128, zero files staged), and the printed list carries two paths nobody
+# generates — `.gitmodules` and `quartz`, which the user creates with `git submodule add` in
+# an earlier step. Copying the printed commands in order, or coming back to Quartz later,
+# therefore took the entire foundational commit down with it, which is the state Issue #86
+# added this step to prevent. The list is kept below for the one case where it is actually
+# the right tool.
+#
+# "the two stage the same set" holds only where `.gitignore` actually carries WikiCommit's
+# patterns. It carries update="review" in _root_outputs.py, so init.py skips it outright when
+# the repository already has one (only the Quartz section is appended), and none of
+# node_modules/, .wikicommit/.cache/ or .wikicommit/run/ is then ignored — `-A` after the
+# guidance's own `npm install` step would commit node_modules/ wholesale.
+#
+# This used to be stated as prose covering both cases, because "print_next_steps.py is handed
+# flags, not the repository, and there is no --gitignore-skipped flag to condition on". That
+# reasoning had the same false premise the foundational-commit offer had (Issue #873): the
+# question is what is *in* the file, not who wrote it, and that is readable from disk without
+# any flag. This script runs after init.py, so the `.gitignore` it reads is the final one —
+# Quartz section included. Both callers now ask _root_outputs.missing_gitignore_patterns(),
+# so the note and the offer cannot disagree about the same repository — provided they are given
+# the same one, which is why --repo-root exists here too rather than assuming the working
+# directory is the repository init.py wrote to.
+_SELECTIVE_ADD_NOTE_READY = (
+    "\n\n"
+    "   `-A` stages everything not excluded by `.gitignore`, and this repository's `.gitignore`\n"
+    "   already carries WikiCommit's patterns — node_modules/, .wikicommit/.cache/ and\n"
+    "   .wikicommit/run/ among them — so that is WikiCommit's own output and nothing else.\n"
+    "   If this repository also has files of its own, `-A` stages those untracked files and any\n"
+    "   uncommitted change to a tracked one too, so check `git status --short` first. Or stage\n"
+    "   only what this run produced:\n"
+    "   {git_add}{submodule_caveat}"
+)
+
+_SELECTIVE_ADD_NOTE_MISSING = (
+    "\n\n"
+    "   `-A` stages everything not excluded by `.gitignore`, and this repository's `.gitignore`\n"
+    "   does not yet ignore\n"
+    "{missing}\n"
+    "   An existing `.gitignore` is never overwritten (only a Quartz section is appended to it),\n"
+    "   so add those patterns before running `-A` — otherwise they go into the commit, and the\n"
+    "   guidance's own `npm install` step above means node_modules/ would go in wholesale.\n"
+    "   `-A` also stages this repository's own untracked files and any uncommitted change to a\n"
+    "   tracked one, so check `git status --short` first either way. Or stage only what this run\n"
+    "   produced:\n"
+    "   {git_add}{submodule_caveat}"
+)
+
+# The selective list still carries the paths nobody generates (`.gitmodules` / `quartz` — the
+# user's own `git submodule add`), and `git add` still aborts on a pathspec that does not
+# exist. The default no longer does, but the note above sends exactly the repository shape
+# most likely to have deferred Quartz setup down this path, so say it here rather than leave
+# them to interpret exit 128 — `wikicommit-update` prints the same caveat for the same reason.
+# Derived from _root_outputs.py so that a change to the submodule entries carries here too.
+_SUBMODULE_PATHSPEC_CAVEAT = (
+    "\n\n"
+    "   (drop {paths} from that list if you have not run `git submodule add` yet —\n"
+    "   `git add` aborts on a pathspec that does not exist and stages nothing.)"
+)
+
+
+def build_selective_add_note(variant: str, vocab_cache_created: bool, repo_root: Path | None = None) -> str:
+    """The note under the printed `git add -A`, in whichever of its two shapes applies.
+
+    Reads the repository's `.gitignore` rather than taking a "did this run write it" flag, for
+    the reason in the comment above the two templates: what matters is which patterns are in
+    the file, and this script runs after init.py has finished writing it. `repo_root` says
+    *which* repository — it has to be the one init.py was pointed at, not whatever the working
+    directory happens to be, or the note and the offer answer about different files.
+    """
+    try:
+        missing = _root_outputs.missing_gitignore_patterns(
+            repo_root if repo_root is not None else Path.cwd(), variant
+        )
+    except OSError:
+        # The templates this is read from ship alongside this script, so failing to read them
+        # means the installation is broken rather than that the repository is fine. Print the
+        # cautious note instead of the confident one — this script always exits 0, and a note
+        # that overstates what `.gitignore` covers is the one outcome it must not produce.
+        missing = ["WikiCommit's own ignore patterns (the shipped template could not be read)"]
+    template = _SELECTIVE_ADD_NOTE_MISSING if missing else _SELECTIVE_ADD_NOTE_READY
+    return template.format(
+        git_add=build_git_add(variant, vocab_cache_created),
+        submodule_caveat=build_submodule_caveat(variant),
+        # Wrapped rather than joined into one line: a repository whose `.gitignore` is missing
+        # every pattern lists ten or more of them, and every other line of this guidance is
+        # hand-wrapped to roughly this width.
+        missing=textwrap.fill(
+            ", ".join(missing) + ".",
+            width=95,
+            initial_indent="     ",
+            subsequent_indent="     ",
+            break_long_words=False,
+            break_on_hyphens=False,
+        ),
+    )
+
+
+def build_submodule_caveat(variant: str) -> str:
+    paths = [
+        entry.path
+        for entry in _root_outputs.for_variant(variant)
+        if entry.origin == "submodule" and entry.in_git_add
+    ]
+    if not paths:
+        return ""
+    return _SUBMODULE_PATHSPEC_CAVEAT.format(paths=", ".join(f"`{path}`" for path in paths))
 
 _QUARTZ_PAGES_EXTRA_FILES = (
     "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"
@@ -131,25 +271,25 @@ _NONE_EXTRA_FILES = (
     "   review flow), and the quality gate configuration files "
 )
 
-# package-lock.json は上の `git add` 行に含めず、別コマンドとして案内する（Issue #556 の
-# 対応方針3の結論）。init.py の生成物ではなく Quartz セットアップ手順の `npm install` の
-# 副産物であり、npm install が失敗した場合・ユーザーがその手順を飛ばした場合には存在しない。
-# `git add` は存在しない pathspec を渡されるとコマンド全体が異常終了するため（_root_outputs.py が
-# .wikicommit/schemaorg-vocab.json を condition="vocab_cache" にしているのと同じ理由）、同じ行に
-# 足すと基盤ファイルのコミットそのものが丸ごと失敗しうる。deploy.yml は `npm ci`
-# ではなく `npm install` を使うため lock file は必須ではなく（Issue #556 が扱う CI 失敗の
-# 原因でもない）、CI とローカルで解決される依存バージョンを揃えるための任意の推奨に留める。
+# package-lock.json は `_root_outputs.py` 上 `in_git_add=False` であり、上の選択的な列挙には
+# 含まれない（Issue #556 の対応方針3の結論）。init.py の生成物ではなく Quartz セットアップ手順の
+# `npm install` の副産物であり、npm install が失敗した場合・ユーザーがその手順を飛ばした場合には
+# 存在しないため、列挙に足すと `git add` の abort-on-missing で基盤コミットそのものが落ちる。
+# Issue #842 で既定が `git add -A` になったため、**既定の経路ではこの注記は不要になった** —
+# 存在すれば -A が拾い、存在しなければ何も起きない。それでも残すのは 2 つの理由による:
+# (1) 選択的な列挙を使うユーザーには依然として漏れる、(2) なぜコミットする価値があるのかは
+# -A では伝わらない。`in_git_add=False` 自体も残す — あれは「これは決定であって漏れではない」を
+# 記録するフィールドであり（Issue #556 の再発防止）、削るとその記録が失われる。
 # 案内文からは手順番号（「step 1 の npm install」等）を参照しない: build_quartz_setup_step が
 # None / _INSTALL_PLUGINS_STEP を返す分岐では npm install 手順そのものが番号付きリストから
 # 消え、番号がずれる。--quartz 単体（deploy.yml なし）でも成り立つ書き方にしておく。
 _PACKAGE_LOCK_NOTE = (
     "\n\n"
-    "   Also commit the root `package-lock.json` once `npm install` has created one — it pins the\n"
-    "   dependency versions a fresh clone resolves, including the GitHub Pages build workflow if\n"
-    "   this repository has (or later enables) one. It is deliberately kept out of the command\n"
-    "   above because `git add` aborts on a pathspec that does not exist, which would take the\n"
-    "   whole foundational commit down with it if `npm install` had not run yet:\n"
-    "   git add package-lock.json && git commit -m \"chore: add package-lock.json\" && git push"
+    "   The root `package-lock.json` is worth committing too once `npm install` has created one —\n"
+    "   it pins the dependency versions a fresh clone resolves, including the GitHub Pages build\n"
+    "   workflow if this repository has (or later enables) one. `git add -A` above picks it up on\n"
+    "   its own; if you staged selectively instead, add it by hand:\n"
+    "   git add package-lock.json"
 )
 
 # The `git add` line is built from _root_outputs.py rather than written out per
@@ -215,6 +355,21 @@ _README_STEP_NO_URL = (
 # _README_STEP_WITH_URL above, which already asks rather than writes, for the same
 # reason. Layer 2 (site-wide) is not here: convert_wikilinks.py puts it on the
 # generated root index and sources index, which need no operator action.
+# The only place a human reliably reads right after init, which is why the pointer to the
+# guides shelf goes here (Issue #846). Shown for every variant since Issue #867 added a guide
+# that has nothing to do with Quartz: the condition that used to gate this existed only
+# because the single guide then on the shelf was about a Quartz plugin, and a line nobody can
+# act on teaches people to skim the list. Adding a guide means naming it here — this string is
+# not generated from the directory, and `tests/test_guides_tree.py` fails until it matches.
+_GUIDES_STEP = (
+    "Longer how-to walkthroughs live in `.wikicommit/guides/` — one per task, written for a\n"
+    "   person rather than for an agent, and refreshed by later inits. Two so far:\n"
+    "   `applying-entity-policy-to-existing-pages.md` (what to do after changing\n"
+    "   `.wikicommit/entity-policy.md`, since the policy is read only while a page is being\n"
+    "   generated) and `enabling-comments.md` (turning on the giscus comment box, which is off\n"
+    "   by default — `--quartz` wikis only)."
+)
+
 _LICENSING_STEP = (
     "Decide how this repository is licensed — nothing was generated for you (a WikiCommit repo\n"
     "   mixes code with content derived from third-party sources, and those sources' terms can\n"
@@ -294,10 +449,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--install-plugins-status", choices=["ok", "failed"])
     parser.add_argument("--pages-html-url")
     parser.add_argument("--vocab-cache-created", action="store_true")
+    # The repository this guidance is about. init.py takes the same flag, and the note under
+    # the printed `git add -A` now reads that repository's `.gitignore` — so if the two are
+    # handed different roots they answer about different files, which is exactly the
+    # disagreement sharing missing_gitignore_patterns() was meant to rule out. Defaults to the
+    # working directory, which is what init.py's own --repo-root defaults to.
+    parser.add_argument("--repo-root", default=".")
     return parser.parse_args()
 
 
-def build_commit_step(variant: str, vocab_cache_created: bool) -> str:
+def build_commit_step(variant: str, vocab_cache_created: bool, repo_root: Path | None = None) -> str:
     # .wikicommit/schemaorg-vocab.json (Issue #319) is committed like any other WikiCommit
     # output, but it is only ever created when a type-proposal step actually ran and hit the
     # network — listing it unconditionally would make this printed `git add` fail outright
@@ -305,22 +466,24 @@ def build_commit_step(variant: str, vocab_cache_created: bool) -> str:
     # wikicommit-init step able to create this file; wikicommit-generate/wikicommit-collect
     # created it before, but their output is committed later via wikicommit-merge, not here).
     # _root_outputs.py carries that condition, so it is passed through rather than handled here.
-    git_add = build_git_add(variant, vocab_cache_created)
+    # Since Issue #842 the condition only governs the selective fallback list below; the default
+    # `git add -A` needs no such special case, because a file that is not there is simply not staged.
+    selective_note = build_selective_add_note(variant, vocab_cache_created, repo_root)
     if variant == "none":
         return _COMMIT_STEP_INTRO.format(
             extra_files=_NONE_EXTRA_FILES,
-            git_add=git_add,
+            selective_note=selective_note,
             commit_msg="chore: add WikiCommit foundational files",
         )
     if variant == "quartz_only":
         return _COMMIT_STEP_INTRO.format(
             extra_files=_QUARTZ_ONLY_EXTRA_FILES,
-            git_add=git_add,
+            selective_note=selective_note,
             commit_msg="chore: add WikiCommit foundational files and Quartz v5 local build config",
         ) + _PACKAGE_LOCK_NOTE
     return _COMMIT_STEP_INTRO.format(
         extra_files=_QUARTZ_PAGES_EXTRA_FILES,
-        git_add=git_add,
+        selective_note=selective_note,
         commit_msg="chore: add WikiCommit foundational files and Quartz v5 publishing config",
     ) + _PACKAGE_LOCK_NOTE
 
@@ -383,7 +546,7 @@ def build_steps(args: argparse.Namespace) -> list[str]:
         steps.append(_LYCHEE_STEP)
     if not args.markitdown_installed:
         steps.append(_MARKITDOWN_STEP)
-    steps.append(build_commit_step(args.variant, args.vocab_cache_created))
+    steps.append(build_commit_step(args.variant, args.vocab_cache_created, Path(args.repo_root)))
     steps.append(_REGISTER_STEP)
     steps.append(_MERGE_STEP_PAGES if args.variant == "quartz_pages" else _MERGE_STEP_PLAIN)
     if args.variant == "quartz_pages":
@@ -391,6 +554,7 @@ def build_steps(args: argparse.Namespace) -> list[str]:
             steps.append(_README_STEP_WITH_URL.format(html_url=args.pages_html_url))
         else:
             steps.append(_README_STEP_NO_URL)
+    steps.append(_GUIDES_STEP)
     steps.append(_LICENSING_STEP)
     return steps
 
@@ -404,7 +568,18 @@ def render(args: argparse.Namespace) -> str:
     lines.append("")
     lines.append("Next steps:")
     for i, step in enumerate(build_steps(args), start=1):
-        lines.append(f"{i}. {step}")
+        prefix = f"{i}. "
+        # Every step embeds its own 3-space continuation indent, which lines up under
+        # `"N. "` only while N is a single digit. Issue #846 made a ten-step list
+        # reachable for the first time (quartz_pages with neither lychee nor markitdown
+        # installed), so pad the extra column here rather than restating the indent in
+        # every step string. Blank lines are left alone so padding never becomes
+        # trailing whitespace.
+        head, *rest = step.split("\n")
+        if len(prefix) > 3 and rest:
+            pad = " " * (len(prefix) - 3)
+            step = "\n".join([head] + [pad + line if line else line for line in rest])
+        lines.append(prefix + step)
         lines.append("")
     if args.variant == "quartz_only":
         lines.append(_QUARTZ_ONLY_TRAILING_NOTE)

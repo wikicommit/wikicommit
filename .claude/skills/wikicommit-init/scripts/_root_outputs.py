@@ -27,6 +27,14 @@ site:
     reason — `print_next_steps.py` guides it as its own command (Issue #556).
     `in_git_add=False` records that this is a decision, not an omission.
 
+Since Issue #842 the printed default is `git add -A`, so neither of the last two
+cases can take the foundational commit down any more: a file that is not there is
+simply not staged. Both mechanisms stay, because the rendered list did not go away
+— it is printed underneath as the fallback for a repository that WikiCommit was
+added to rather than made for, and it is a list of individual pathspecs there, with
+the same abort-on-missing behaviour. `in_git_add=False` is kept for the second
+reason above as well: it is the record that the omission was decided.
+
 `.claude/` is listed too though `install.sh` (not `init.py`) puts it there: the
 list describes what the first commit must contain, and that is the question the
 guidance answers.
@@ -137,7 +145,11 @@ class RootOutput:
     when a type-proposal step created the Schema.org vocabulary cache."""
 
     in_git_add: bool = True
-    """False for a path the guidance covers with its own separate command."""
+    """False for a path the guidance covers with its own separate command.
+
+    This governs the selective fallback list, not the printed default — that is
+    `git add -A` since Issue #842, which stages such a path whenever it exists.
+    """
 
     update: str = "review"
     """One of UPDATE_POLICIES. Defaults to the protective end: an entry added without an
@@ -199,6 +211,30 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         template="review-rules.md",
         update="overwrite",
     ),
+    # How a type file is written, in one place (Issue #886). Four paths add types and each
+    # held the whole procedure; what actually differs between them is the judgment — how
+    # strong the evidence has to be, how approval is obtained, which `provenance` is
+    # stamped — and that stays in each Skill. `overwrite` for the same reason as
+    # review-rules.md above: this is WikiCommit's procedure, not the user's prose, and a
+    # repository that could edit it could quietly change how its own types are defined.
+    RootOutput(
+        ".wikicommit/schema-authoring.md",
+        ALL,
+        origin="init",
+        template="schema-authoring.md",
+        update="overwrite",
+    ),
+    # Human-facing how-to documents (Issue #846). The shelf these go on did not exist:
+    # the only giscus walkthrough lived at the end of a 600-line agent instruction file
+    # that says of itself "show it when they ask for it", so there was nowhere to point a
+    # person at. `docs/` cannot be that shelf — it never reaches an installed repository,
+    # and §11.9 forbids a distributed file from referencing it — while a tree here is
+    # already under the user's nose while they work, and `overwrite` means an upstream
+    # rewrite reaches every wiki on its next init with check_distribution_freshness.py
+    # reporting the staleness in between. `overwrite` for the same reason as
+    # review-rules.md above: these are WikiCommit's instructions, not the user's prose.
+    # Started with one file, but registered as a tree so the second one changes nothing.
+    RootOutput(".wikicommit/guides", ALL, origin="init", update="overwrite", compare_template="guides"),
     # Directory trees and created-with-.gitkeep directories.
     RootOutput(".wikicommit/schema", ALL, origin="init", compare_template="schema"),
     RootOutput(
@@ -424,6 +460,105 @@ def by_path(path: str) -> "RootOutput | None":
 def template_source(entry: "RootOutput") -> str | None:
     """The `templates/`-relative path this entry is compared against, if any."""
     return entry.template if entry.template is not None else entry.compare_template
+
+
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# The template files whose patterns have to be present before `git add -A` is safe to
+# suggest. The Quartz one is variant-dependent because init only appends it under
+# --quartz: a repository that is not publishing with Quartz has no content/ of
+# WikiCommit's making, and ignoring one there would hide a directory of the user's.
+_GITIGNORE_TEMPLATE = ".gitignore"
+_GITIGNORE_QUARTZ_TEMPLATE = "gitignore-quartz.txt"
+
+
+def _ignore_patterns(path: Path) -> list[str]:
+    """Non-blank, non-comment lines, in file order.
+
+    The same reduction `check_distribution_freshness.py`'s `_meaningful_lines()` applies
+    to this file, for the same reason: `.gitignore` is appended to rather than replaced,
+    so the question that can be asked of it is containment, not equality. That copy stays
+    where it is — it lives under `.wikicommit/scripts/`, and a Skill-side script importing
+    from there is the cross-tree dependency `add_source.py` deliberately does not have.
+    Order is kept here (a set is enough for the other caller) so a report can name what is
+    missing in the order the template writes it.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        # Only the repository's own `.gitignore` is read this way, and there "unreadable" and
+        # "absent" mean the same thing to the caller: nothing is ignored, so every pattern is
+        # missing and the offer is withheld. The templates go through _template_patterns()
+        # instead, where the same swallow would fail *open* — see there.
+        return []
+    return [stripped for line in lines if (stripped := line.strip()) and not stripped.startswith("#")]
+
+
+def _template_patterns(path: Path) -> list[str]:
+    """`_ignore_patterns()` for a template, where an unreadable file must not read as empty.
+
+    An empty required set makes `missing_gitignore_patterns()` return `[]`, which every caller
+    reads as "the patterns are all there" — a broken install would silently turn the guard into
+    an unconditional yes. A fresh init already fails loudly on a missing template (`copy_file()`
+    raises), but a re-init never touches it: `.gitignore` is `always_skip_existing`, so the copy
+    returns before the source is opened. So the error has to surface here, and both callers turn
+    it into a withheld offer rather than a crash.
+    """
+    patterns = _ignore_patterns(path)
+    if not patterns:
+        raise OSError(f"no ignore patterns read from the template {path}")
+    return patterns
+
+
+def required_gitignore_patterns(variant: str, *, templates_dir: Path | None = None) -> list[str]:
+    """Every ignore pattern init puts in a repository of this variant, in order.
+
+    Raises `OSError` if a template it needs cannot be read (see `_template_patterns()`).
+    """
+    if variant not in VARIANTS:
+        raise ValueError(f"unknown variant: {variant!r}")
+    base = templates_dir if templates_dir is not None else TEMPLATES_DIR
+    patterns = _template_patterns(base / _GITIGNORE_TEMPLATE)
+    if variant != "none":
+        patterns += _template_patterns(base / _GITIGNORE_QUARTZ_TEMPLATE)
+    return patterns
+
+
+def missing_gitignore_patterns(
+    repo_root: Path, variant: str, *, templates_dir: Path | None = None
+) -> list[str]:
+    """Patterns this variant needs that `repo_root/.gitignore` does not have.
+
+    **This is the question, and "did this run write the file" was standing in for it**
+    (Issue #873). `.gitignore` is `update="review"` — `always_skip_existing` — so after the
+    first init every later one logs `SKIPPED: .gitignore (already exists)`, and a condition
+    keyed on that log stops the foundational-commit offer in a repository WikiCommit made
+    itself, where `git add -A` is exactly as safe as it was the first time. The fact worth
+    protecting is whether the patterns are *there*, not who put them there.
+
+    The same run can also print `SKIPPED: .gitignore (already exists)` and
+    `UPDATED: .gitignore (Quartz ignore patterns)` for one path, because the Quartz append
+    does not branch on whether the copy happened — a second way the log was the wrong thing
+    to read.
+
+    **An empty result does not widen what `-A` can stage.** A repository WikiCommit was
+    added to keeps its own `.gitignore`, and `.wikicommit/.cache/` and `.wikicommit/run/`
+    are WikiCommit-specific paths that an unrelated one has no reason to carry — so it
+    still comes back non-empty and the offer is still withheld. The one exception is a user
+    who followed the printed guidance and added those patterns by hand, which is the state
+    that guidance asks for.
+
+    A repository initialized before a pattern entered the template (e.g. `.wikicommit/run/`,
+    added in Issue #790) comes back non-empty, and **that is correct rather than a false
+    positive**: `always_skip_existing` means a re-init does not add it, so `-A` really would
+    stage the run records. `check_distribution_freshness.py` reports the same gap as
+    `OUTDATED`.
+
+    Raises `OSError` if a template it needs cannot be read, rather than reporting nothing
+    missing (see `_template_patterns()`).
+    """
+    present = set(_ignore_patterns(repo_root / ".gitignore"))
+    return [p for p in required_gitignore_patterns(variant, templates_dir=templates_dir) if p not in present]
 
 
 def plain_copies(variant: str) -> list[tuple[str, str]]:

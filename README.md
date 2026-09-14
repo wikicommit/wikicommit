@@ -119,24 +119,29 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 
 ### Context window
 
-WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract. That contract has a context requirement, and `/wikicommit-generate` is the command that sets it: it loads a fixed overhead before it reads a single source, then adds the extracted text of each source on top.
+WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract. That contract has a context requirement, and `/wikicommit-generate` is the command that sets it: it loads a fixed overhead that does not depend on how many sources you give it, then adds the extracted text of each source on top.
 
 ```text
-context needed  ≈  51K (fixed)  +  ~15K x (sources processed in one run)
+context needed  ≈  49K (fixed)  +  ~22K x (sources processed in one run)
 
   the fixed part:
-    wikicommit-generate/SKILL.md, loaded in full        ~47K
-    the Schema.org type names (--list-type-names)       ~3.4K
+    wikicommit-generate/SKILL.md, loaded in full        ~40K
+    the Schema.org type names (--list-type-names)       ~3.3K
+    two sibling instruction files every run reads       ~6K
 ```
 
-| Context window | Sources per run |
+Only the first two lines are loaded before the first source is read. The sibling files — the text-extraction routing table and the completion notice — are read as the run needs them, and neither is optional.
+
+| Context window | Sources in one run |
 |---|---|
-| 200K | up to 5 (the guard's own limit) |
-| 1M | up to 5 (the same limit) |
+| 200K | about 7 |
+| 1M | about 43 |
 
-`/wikicommit-generate` already asks before processing more than 5 sources in one run, so both rows are that existing guard rather than a new one. The fixed part used to be ~84K, because the full Schema.org type list — every one of the 933 types *with its description* — was loaded on every run; it now loads the names alone and reads the descriptions of only the handful of types actually being considered. That put a 200K window below the guard's own limit; it no longer does.
+**Those are the points where a run stops fitting, not a setting you can raise.** `/wikicommit-generate` asks before processing more than 5 in one run, but that is a prompt rather than a limit — answering "process all" is supported, and the table is what it costs. Past those numbers the session compacts mid-run, and only the opening part of the Skill is re-attached afterwards: the run carries on without the rest of its instructions, and **its output still looks normal**. Splitting the work across separate runs is the reliable way past them, and it is what the guard's other answer — "process only the first 5" — is for: the sources you leave keep their state, and the next run picks them up.
 
-**The 15K per source is an estimate, and you can measure your own.** `/wikicommit-generate` writes `extracted_tokens` into every source management file under `.wikicommit/source/`, so after one run `grep extracted_tokens .wikicommit/source/**/*.md` gives you the real figure for the kind of source you actually feed it. 15K is what a Japanese Wikipedia article came to; a short blog post is far less, a PDF report far more.
+**The ~22K per source is measured, and you can measure your own.** It is back-calculated from a real 30-source run that finished at about 70% of a 1M window, so it covers everything a source costs and not just its text: the page that text produces is held in the same conversation to be reviewed. The earlier estimate of ~15K per source came from a single Japanese Wikipedia article — a short blog post is far less, a PDF report far more — and the table uses the higher, measured figure; at 15K per source the same two windows hold about 10 and about 63. `/wikicommit-generate` writes `extracted_tokens` into every source management file under `.wikicommit/source/`, so after one run `grep extracted_tokens .wikicommit/source/**/*.md` tells you how heavy your own sources are — that field counts the extraction alone, so expect it to read lower than the 22K in the formula.
+
+**The fixed part used to be ~84K**, because the full Schema.org type list — every one of the 933 types *with its description* — was loaded on every run; it now loads the names alone and reads the descriptions of only the handful of types actually being considered. `/wikicommit-generate` has since moved its completion notice, its `--regenerate` mode and its text-extraction routing table out of SKILL.md into separate files, which takes about 7K off what is loaded up front — but a run that processes a source reads two of those files anyway, so the total above fell by much less than SKILL.md itself did.
 
 **Where 200K comes from.** In Claude Code, Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 default to a 200K window; Sonnet 5 and Fable 5 / 5.1 are natively 1M. Opus reaches 1M with the `[1m]` suffix (`/model opus[1m]`) or an environment variable, and whether that is available depends on your plan — Max, Team and Enterprise get it automatically, Pro needs usage credits, and metered API access can use it. These are the figures as of 2026-09; see [Claude Code's model configuration docs](https://code.claude.com/docs/en/model-config) for the current ones.
 
@@ -191,6 +196,36 @@ After installation, run this in the repository where you want to initialize the 
 /wikicommit-init
 ```
 
+> **Updating later**: the same commands install a newer WikiCommit, but they refresh only
+> `.claude/skills/`. The scripts under `.wikicommit/scripts/` are the other half of the same
+> release and update on a command of their own, so **run `/wikicommit-update` after every
+> `npx skills add` or `install.sh`** (`/wikicommit-init --no-overwrite` refreshes them too). A
+> repository carrying new Skills next to old scripts goes wrong in a way that is easy to
+> misread: the Skills call a script in a way the older copy understands differently, so what
+> you get is either a plain wrong answer or an error that points at the wrong thing. Either
+> way the cause is the skew, and refreshing the scripts is the fix.
+
+## Guides
+
+Some setup is a procedure a person follows once, not something a Skill does. Those walkthroughs
+are installed into your own repository at `.wikicommit/guides/` — one file per task, in English,
+refreshed whenever you re-init or run `/wikicommit-update`. They are not in this repository's
+`docs/`, because a change made there would never reach a wiki that is already installed.
+
+Two so far:
+
+- `applying-entity-policy-to-existing-pages.md` — what to do after changing
+  `.wikicommit/entity-policy.md`. That policy is read only while a page is being generated, so a
+  switch you flip afterwards reaches nothing you already have; one command puts the affected
+  sources back in the queue, and the guide is mostly about what that command still leaves to you.
+- `enabling-comments.md` — turning on the giscus comment box (off by default, and its
+  prerequisites fail silently if you miss one), so this one only has something to say on a wiki
+  initialized with `--quartz`.
+
+The directory is WikiCommit's rather than yours: a refresh overwrites what is there, and a file
+of your own added alongside them is reported as an orphan by `/wikicommit-status` and offered
+for deletion by `/wikicommit-update`. Keep your own notes somewhere else in the repository.
+
 ## Changelog
 
 [CHANGELOG.md](CHANGELOG.md) records what changed in each version of WikiCommit itself — the Skills and the template tree they expand. The distribution repository carries no development history, so this file is the only way to learn what changed since the version you last installed, and it is what `/wikicommit-update` reads when it syncs a repository with a newer release.
@@ -215,6 +250,7 @@ After installation, run this in the repository where you want to initialize the 
 | 14 | Operations/Preview | `/wikicommit-status` | Health check (orphans, unreviewed, expired) |
 | 15 | Operations/Preview | `/wikicommit-serve [--build]` | Build and preview the wiki locally |
 | 16 | Operations/Preview | `/wikicommit-update` | Bring the repository in step with the installed distribution (PR, not auto-merged) |
+| 17 | Operations/Preview | `/wikicommit-reconcile <--source <path\|url>\|--type <Type>\|--all>` | Put sources back in the queue after a policy, type template or generation rule changed |
 
 ---
 

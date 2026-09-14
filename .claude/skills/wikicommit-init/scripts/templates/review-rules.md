@@ -1,5 +1,5 @@
 ---
-rules_version: 1
+rules_version: 3
 wikicommit:
   # Machine-readable header only. The rules themselves are the prose below.
   # `rules_version` is bumped whenever any rule in this file changes; a review
@@ -120,6 +120,43 @@ Each `issues` entry carries `type` (one of `HALLUCINATION` / `CONTRADICTION` /
 `.wikicommit/entity/` or `.wikicommit/view/` means the conflict is with a page,
 anything else means a source document.
 
+### 5. Observations that do not make it a FAIL
+
+Not everything worth saying is a defect. If, while deciding PASS, you noticed
+something about how the page is written that a person re-reading it later would
+want to know, return it in an `observations` array of plain strings alongside
+`issues`. **Returning one changes nothing else**: `result` stays `PASS`, and an
+observation never becomes an `issues` entry — but it never removes one either.
+If this review also has a `page_at_fault: "other"` entry, that entry still goes
+in `issues` exactly as its check says. The two fields are independent, as those
+entries already demonstrate from the other side (a `PASS` that nonetheless
+carries `issues`).
+
+Without this, an observation exists only in the console of the session that
+produced it. A run recorded `result: pass` with `findings: []` for a page whose
+review had just said its `featureList` collapsed two distinct things into one
+phrase — and a page reviewed with a remark and a page reviewed in silence then
+sit on disk looking exactly alike. That is the same shape as a page that failed
+once and was fixed looking like one that never failed, one scale smaller.
+
+**Two limits, and they are what keep this from becoming noise:**
+
+- **Only what you noticed while judging what the page says.** This is not an
+  opening for completeness — rule 2 above is unchanged and still absolute, so
+  "the evidence covers more than this" is not an observation any more than it
+  is a finding. Something the page *states* that struck you as imprecise,
+  lumped-together, or easy to misread is.
+- **Say nothing when you noticed nothing.** Omit the key, or return an empty
+  array. There is no quota, and a remark attached to every page is a remark
+  nobody reads.
+
+On the two paths that run a subagent these are recorded as the review record's
+prose body, not as findings, so they do not count toward the sampling list a
+person works from. **On `review-skill` there is no subagent and no separate body
+to write** — that record's body is the line the reviewer writes back — so report
+them to the reviewer alongside the findings instead, which is where everything
+else this path produces goes.
+
 ---
 
 ## Part 2 — The checks
@@ -141,6 +178,19 @@ any other: the evidence must state that exact date (or, where several deadlines
 are stated, the earliest of them) for an entity this page covers. An
 `expires_at` invented or misread fails review the same way a fabricated
 body-text claim would.
+
+**A fact the evidence states as its own subject is supported here, even when
+that fact concerns another document** — a coinage, a publication, a release.
+Check 4 takes the other half of that split: a specifically dated or titled
+document that the evidence only names *in passing* while writing about
+something else, and any document the page *cites* for a fact while the evidence
+does not contain it — that one stays check 4's however squarely the evidence is
+about the fact. The two halves are written as a pair on purpose, because a
+boundary written on one side only gets applied on one side only (Issue #550's
+lesson about `granularity`, in a different file). Neither check owns the whole
+space of "the page mentions another document"; which one applies turns on
+whether the evidence is *about* that fact or merely mentions it, and on whether
+the page states the fact or cites a document for it.
 
 ### 2. Granular fact verification — all paths
 
@@ -191,6 +241,43 @@ Read that as the assembled evidence, never as the page's own `sources` field.
 A translation carries no `sources` of its own and inherits its parent's, so
 matching against the field would flag every document it names — starting with
 the one it was translated from.
+
+**But not when the evidence treats that fact as its own subject.** Everything
+above turns on a *passing mention*; the opposite case — the evidence being
+*about* the fact in question — is check 1's to decide, and it passes there only
+if the evidence literally states the claim, with checks 2 and 3 still applying
+to the date and to *coined* versus *invented*. Apply the same subject-matter
+test check 7 uses between two sources, here inside one: does this evidence
+treat that fact's subject as its own subject (its title, or a central claim, is
+about it), or does it name it once while writing about something else? Only the
+second is yours.
+
+**The carve-out covers the page *stating* such a fact, not citing a document
+for it.** If the page names or links a specific document as where the fact came
+from — a title, a URL, a dated post — and that document is not among the
+evidence, this check still applies however squarely the evidence is about the
+same fact. A document the wiki does not hold is missing whether or not
+something else in front of you says the same thing, which is the whole of the
+first paragraph above; the carve-out does not reach it.
+
+Without that boundary the two checks answer the same input differently, and in
+a pilot they did. One source produced two pages that both carried "Martin
+Fowler coined *semantic diffusion* in 2006". On the page about that term it
+passed check 1 — the evidence says so, and saying so is what that document is
+for. On a neighbouring page the same sentence failed this check twice: a dated
+publication event whose document is not here. Same evidence, same run, opposite
+verdicts, and the wiki ended up stating the fact on one page and withholding it
+on the other — a split that no later check catches, because two pages where
+only one carries a fact do not *contradict* each other (check 8) and are not
+duplicates of each other either. It is normally invisible only because the same
+claim usually appears on just one page.
+
+**The boundary does not loosen what this check was written to catch.** A page
+citing "the March 19 post" while the evidence holds only a later article by the
+same author still fails: that post is something the later article *mentions*,
+not what it is about. Where you cannot tell which side a fact falls on, it is
+the passing mention — fail it, and say in `instruction` that the document
+itself would settle it.
 
 **On `synthesize-step5.5` this check does not apply**, and `MISSING_SOURCE`
 means something different there — see Part 3. **It does not apply to a page

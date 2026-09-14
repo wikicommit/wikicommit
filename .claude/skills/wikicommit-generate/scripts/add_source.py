@@ -985,6 +985,131 @@ def check_hash(mgmt_rel: str, content_file: str, repo_root: Path) -> tuple[str, 
     return ("HASH_MISMATCH", mgmt_rel, "hash mismatch (the source changed and needs re-fetching)")
 
 
+def extract_cache_path(mgmt_path: Path, repo_root: Path) -> Path | None:
+    """`type: path` の抽出テキストキャッシュの置き場（Issue #885）。
+
+    `.wikicommit/.cache/extract-path/` ＋ 管理ファイルの `.wikicommit/source/path/`
+    相対パスをそのまま使う。**末尾の `.md` を落として付け直さない** — 管理ファイル名は
+    元の拡張子を保持して `.md` を付す形（`raw/paper.pdf.md`。Issue #573）なので、
+    そのまま使えば `paper.pdf` と `paper.docx` が同じキャッシュへ解決する衝突が
+    構造的に起こらない。`with_suffix(".md")` で付け直すとまさにその衝突が戻る。
+
+    `type: url` 側の scratch（`.wikicommit/.cache/ingest-fetch/`）とディレクトリを
+    分けるのは、両者を同じ木に置くと衝突しうるためである — URL 側の scratch path は
+    `.wikicommit/source/url/` 相対なので、リポジトリに `example.com/article` という
+    パスが実在すれば同じ位置を指す。既存の URL キャッシュを一斉失効させずに衝突を
+    構造的に無くせる側を採った（Issue #583 が改名を見送ったのと同じ代償計算）。
+
+    `.wikicommit/source/path/` の外を指す管理ファイルには `None` を返す。実際に起こる
+    のは Issue #476 以前に登録されたリポジトリで、あの改名は自動移行されないため
+    `.wikicommit/ingest/path/` のままの管理ファイルが残る。導出だけを試みて例外を
+    投げると、呼び出し側が `ERROR:` として報告する経路を通らずトレースバックで実行
+    全体が落ちる — このキャッシュは最適化であり、ソースの処理を止める理由になっては
+    ならない。
+    """
+    mgmt_root = repo_root / ".wikicommit" / "source" / "path"
+    try:
+        rel = mgmt_path.resolve().relative_to(mgmt_root.resolve())
+    except ValueError:
+        return None
+    return repo_root / ".wikicommit" / ".cache" / "extract-path" / rel
+
+
+def check_path_cache(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str]:
+    """`type: path` の抽出テキストキャッシュが今のファイルの版に対して有効か確認する
+    （Issue #885）。read-only。
+
+    `type: url` の `--check-hash` と**判定の向きが違う**。あちらは `source.hash` が
+    抽出テキストのハッシュなので、キャッシュ自身をハッシュして突き合わせられる。
+    `type: path` の `source.hash` は**生ファイル**の SHA-256（`add_source.py` が登録時に
+    計算し、`check_ingest_freshness.py` が現物と突き合わせる正本）なので、キャッシュを
+    ハッシュしても比べる相手がいない。代わりに**生ファイル側で判定する**: 現在の
+    ファイルの SHA-256 が `source.hash` と一致し、かつキャッシュが存在すれば、その
+    キャッシュはその版の抽出結果であるとみなす。`check_ingest_freshness.py` が既に
+    行っている比較そのものなので、新しいハッシュフィールドは要らない。
+
+    **`source.hash` には一切触れない。** キャッシュファイルを `--content-file` として
+    `--write-hash` に渡すと、意味の違うハッシュ（抽出テキスト）で生ファイルのハッシュを
+    上書きしてしまい、`check_ingest_freshness.py` の鮮度判定が壊れる。
+
+    残る限界は「抽出ツールの版が変わってもキャッシュは失効しない」ことだが、これは
+    `type: url` 側とまったく同じ性質であり、新しく持ち込むものではない。
+
+    Returns:
+        (result_code, cache_path_str, message)
+        result_code: "CACHE_VALID" | "CACHE_STALE" | "ERROR"
+    """
+    mgmt_path = repo_root / mgmt_rel
+    if not mgmt_path.is_file():
+        return ("ERROR", mgmt_rel, "the management file does not exist")
+
+    existing = mgmt_path.read_text(encoding="utf-8-sig")
+    source_type = parse_frontmatter_source_type(existing)
+    if source_type != "path":
+        return ("ERROR", mgmt_rel, f"source.type is not path (currently: {source_type})")
+
+    source_path = parse_frontmatter_source_path(existing)
+    if not source_path:
+        return ("ERROR", mgmt_rel, "source.path is not set")
+
+    cache_path = extract_cache_path(mgmt_path, repo_root)
+    if cache_path is None:
+        return (
+            "ERROR",
+            mgmt_rel,
+            "the management file is not under .wikicommit/source/path/, so no cache path "
+            "can be derived for it (a pre-Issue-#476 .wikicommit/ingest/ tree is never "
+            "auto-migrated)",
+        )
+    cache_rel = cache_path.relative_to(repo_root.resolve()).as_posix()
+
+    raw_path = repo_root / source_path
+    if not raw_path.is_file():
+        return ("CACHE_STALE", cache_rel, f"the source file no longer exists: {source_path}")
+
+    recorded = parse_frontmatter_hash(existing)
+    if not recorded or recorded == '""':
+        return ("CACHE_STALE", cache_rel, "source.hash is not set")
+
+    current = sha256_file(str(raw_path))
+    if current != recorded:
+        return (
+            "CACHE_STALE",
+            cache_rel,
+            "the source file changed since it was registered, so any cache is for an older version",
+        )
+
+    if not cache_path.is_file():
+        return ("CACHE_STALE", cache_rel, "no extraction cache has been written for this source yet")
+
+    return ("CACHE_VALID", cache_rel, current)
+
+
+def print_path_cache_path(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str]:
+    """キャッシュの置き場だけを印字する（抽出後の書き込み先を知るため。Issue #885）。
+
+    存在は問わない — これから書く先を尋ねる呼び出しがあるため。
+    """
+    mgmt_path = repo_root / mgmt_rel
+    if not mgmt_path.is_file():
+        return ("ERROR", mgmt_rel, "the management file does not exist")
+    existing = mgmt_path.read_text(encoding="utf-8-sig")
+    source_type = parse_frontmatter_source_type(existing)
+    if source_type != "path":
+        return ("ERROR", mgmt_rel, f"source.type is not path (currently: {source_type})")
+    cache_path = extract_cache_path(mgmt_path, repo_root)
+    if cache_path is None:
+        return (
+            "ERROR",
+            mgmt_rel,
+            "the management file is not under .wikicommit/source/path/, so no cache path "
+            "can be derived for it (a pre-Issue-#476 .wikicommit/ingest/ tree is never "
+            "auto-migrated)",
+        )
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    return ("CACHE_PATH", cache_path.relative_to(repo_root.resolve()).as_posix(), "")
+
+
 def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
     """
     URL を WikiCommit 独自 User-Agent で `markitdown` の Python API 経由でフェッチ・変換し、
@@ -1063,6 +1188,20 @@ def main_from_args(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--content-file",
         help="Path to a file holding fetched content; required with --write-hash or --check-hash",
+    )
+    parser.add_argument(
+        "--check-path-cache",
+        metavar="INGEST_FILE",
+        help="For a type: path source, check whether its extraction cache is still valid for the "
+        "file's current version (read-only; never touches source.hash). Prints CACHE_VALID with "
+        "the cache path, or CACHE_STALE with the reason. Ignores the positional 'source' argument.",
+    )
+    parser.add_argument(
+        "--path-cache-path",
+        metavar="INGEST_FILE",
+        help="Print where a type: path source's extraction cache belongs, creating the parent "
+        "directory. Does not require the cache to exist — this is asked before writing it. "
+        "Ignores the positional 'source' argument.",
     )
     parser.add_argument(
         "--fetch-url",
@@ -1165,11 +1304,31 @@ def main_from_args(argv: list[str] | None = None) -> int:
         print(f"ERROR: {path}: {msg}", file=sys.stderr)
         return 1
 
+    if args.check_path_cache:
+        result, path, msg = check_path_cache(args.check_path_cache, repo_root)
+        if result == "CACHE_VALID":
+            print(f"CACHE_VALID: {path} ({msg})")
+            return 0
+        if result == "CACHE_STALE":
+            print(f"CACHE_STALE: {path} ({msg})")
+            return 1
+        print(f"ERROR: {path}: {msg}", file=sys.stderr)
+        return 1
+
+    if args.path_cache_path:
+        result, path, msg = print_path_cache_path(args.path_cache_path, repo_root)
+        if result == "CACHE_PATH":
+            print(f"CACHE_PATH: {path}")
+            return 0
+        print(f"ERROR: {path}: {msg}", file=sys.stderr)
+        return 1
+
     source = args.source
     if not source:
         print(
-            "ERROR: source is required unless "
-            "--write-hash/--check-hash/--fetch-url/--license-for-url is given",
+            "ERROR: source is required unless one of "
+            "--write-hash/--check-hash/--check-path-cache/--path-cache-path/"
+            "--fetch-url/--license-for-url is given",
             file=sys.stderr,
         )
         return 1

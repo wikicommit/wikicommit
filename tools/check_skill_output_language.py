@@ -18,13 +18,14 @@ What none of those rules produces is Japanese hard-coded into a SKILL.md. Issue
 #808 nevertheless found six such places, so the rule held only as long as
 someone happened to look. This script is the guard that prose alone was not.
 
-What it scans: every line of .claude/skills/wikicommit-*/SKILL.md -- both prose
+What it scans: every line of every instruction .md under
+.claude/skills/wikicommit-*/ (SKILL.md and its siblings -- Issue #887) -- both prose
 and fenced blocks. Restricting it to fenced blocks (as
 check_skill_user_facing_vocabulary.py does) would have caught one of #808's six
 findings; the other five were quoted strings sitting in ordinary instruction
-prose. The internal-only Skills (implement-issue, review-and-merge) are excluded
-for the same reason that script excludes them: their reader is the developer
-running them.
+prose. The `wikicommit-*` prefix is the scope, shared with that script -- and it
+is a prefix match, not a list of exclusions. A Skill whose name falls outside it
+is a developer tool whose reader is the developer running it.
 
 What it looks for: Japanese sentence punctuation and corner brackets
 (``。、？！「」``). It deliberately does *not* flag CJK characters as such. A
@@ -74,6 +75,10 @@ import re
 import sys
 from pathlib import Path
 
+# Same directory; `python tools/<script>.py` puts it on sys.path, the way
+# .wikicommit/scripts/ imports _wikilink.py.
+from check_skill_md_lines import instruction_files
+
 SKILLS_DIR = Path(".claude/skills")
 
 # Japanese sentence punctuation and corner brackets. See the module docstring
@@ -84,9 +89,30 @@ EXCEPTION_RE = re.compile(r"<!--\s*skill-language-exception:\s*(.*?)\s*-->")
 
 
 def collect_skill_md_files() -> list[Path]:
+    """Every instruction `.md` in a `wikicommit-*` Skill directory, not just
+    `SKILL.md`.
+
+    Widened in Issue #887, which moved one mode's procedure into a sibling file
+    (`wikicommit-generate/references/regenerate.md`). Scanning only `SKILL.md` would have
+    dropped that prose out of this check the moment it moved — the same way the
+    size guard would have reported the move as an improvement.
+
+    Which `.md` counts as instructions is decided in one place —
+    `check_skill_md_lines.instruction_files()` — rather than restated here:
+    `scripts/` holds `.py` and drops out on its own, `CHANGELOG.md` /
+    `changelog/` is a distribution payload and `scripts/templates/` is expanded
+    into a wiki repository, so neither is instructions read from here. Three
+    copies of that rule is how the three checks would come to disagree about
+    what a Skill's instructions are.
+    """
     if not SKILLS_DIR.exists():
         return []
-    return sorted(SKILLS_DIR.glob("wikicommit-*/SKILL.md"))
+    found: list[Path] = []
+    for skill_dir in sorted(SKILLS_DIR.glob("wikicommit-*")):
+        if not (skill_dir / "SKILL.md").exists():
+            continue
+        found.extend(instruction_files(skill_dir))
+    return found
 
 
 def exception_reason(lines: list[str], index: int) -> str | None:

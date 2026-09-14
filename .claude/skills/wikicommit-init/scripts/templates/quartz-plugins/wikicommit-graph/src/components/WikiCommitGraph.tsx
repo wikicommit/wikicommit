@@ -130,16 +130,23 @@ export default ((userOpts?: Partial<GraphOptions>) => {
           </button>
         </div>
         <div class="global-graph-outer">
-          {/* Left empty on purpose: the bar's contents (the language, type and
-              tag option lists) are derived from contentIndex, which only the
-              inline script has. It is a sibling of .global-graph-container
-              rather than a child because renderGraph() calls
-              removeAllChildren() on that container on every render. */}
-          <div
-            class="global-graph-controls"
-            data-labels={JSON.stringify(i18n(cfg.locale ?? "en-US").components.graph.controls)}
-          ></div>
-          <div class="global-graph-container" data-cfg={JSON.stringify(globalGraph)}></div>
+          {/* .global-graph-inner is the modal rectangle. The bar and the graph
+              are laid out inside it by flow, so the rectangle is defined once
+              (Issue #838); before this they were both fixed-positioned against
+              the same centred box by hand, which left the bar a 10vh strip and
+              meant a change to one height had to be mirrored in the other. */}
+          <div class="global-graph-inner">
+            {/* Left empty on purpose: the bar's contents (the language, type and
+                tag option lists) are derived from contentIndex, which only the
+                inline script has. It is a sibling of .global-graph-container
+                rather than a child because renderGraph() calls
+                removeAllChildren() on that container on every render. */}
+            <div
+              class="global-graph-controls"
+              data-labels={JSON.stringify(i18n(cfg.locale ?? "en-US").components.graph.controls)}
+            ></div>
+            <div class="global-graph-container" data-cfg={JSON.stringify(globalGraph)}></div>
+          </div>
         </div>
       </div>
     );

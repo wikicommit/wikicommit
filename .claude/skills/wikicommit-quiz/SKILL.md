@@ -1,6 +1,6 @@
 ---
 name: wikicommit-quiz
-description: Generate a quiz from wiki content, with adjustable difficulty
+description: Generate a quiz from the wiki's own pages, at an adjustable difficulty. Use this when someone wants to test or review what the wiki covers, asks to be quizzed, wants practice questions or flashcards on a topic the wiki holds, or wants to check how much of a subject they have retained — even if they do not use the word "quiz".
 ---
 
 # wikicommit-quiz

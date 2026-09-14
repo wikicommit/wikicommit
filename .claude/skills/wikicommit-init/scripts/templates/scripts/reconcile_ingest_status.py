@@ -23,6 +23,50 @@ sets them to `status: generated` — never `partial`/`excluded`/`failed`,
 since distinguishing those requires per-entity Pass 2/4 results that do not
 exist on disk.
 
+**And only files whose own `generated_pages` is empty** (Issue #874). That is
+the state described above — the pages were written, the batch moved on, and
+this file's `status`/`generated_pages` were never written back. The condition
+was not written down originally because nothing put a file back into `pending`
+*in order to have its pages rebuilt*. The one other writer of that value —
+`add_source.py`, flipping an `outdated` file back when its hash matches the
+source again — leaves the earlier run's `generated_pages` in place, so this
+clause covers that path too, and rightly so: the source was restored on
+purpose, and Pass 1 should pick the file up rather than have it flipped
+straight back to `generated`. Something now sets `pending` on purpose as well.
+A requeue Skill sets `status: pending` on a source so that the next
+`wikicommit-generate` runs Pass 2c against it again, which is the only way a
+change to a policy, a type template or a generation rule can reach pages that
+already exist. Without this clause those files match all three tests above —
+they have to, since a source that made pages has its hash cited by them — and
+get written straight back to `generated`. The report
+is `RECONCILED:`, a success line, so the queue would empty silently, and the
+5-source guard makes that the normal case rather than an edge one: requeue 50,
+generate processes 5, and the end-of-run call here returns the other 45.
+
+**The requeue origins are protected by different clauses**, which is worth
+saying because none of them is visible from the others' code:
+
+  - from `generated` / `partial` — the source made pages, so `generated_pages`
+    is non-empty and the clause above catches it;
+  - from `excluded`, never having made a page — its hash appears in no page's
+    `sources[]`, so the existing match test catches it. This is the origin
+    behind turning a policy switch back *off*, which is the case the requeue
+    Skill exists for;
+  - from `excluded`, having made pages under an earlier, looser policy — this
+    one clears *both* of the above and needs a clause of its own (below). Pass 4
+    step 7's `excluded` branch writes no `generated_pages`, while the pages the
+    source made earlier stay on disk — nothing in the generate path removes a
+    page — still citing its unchanged hash. It is reached by the cycle the
+    requeue Skill exists for, run twice: tighten a policy, requeue, generate
+    (everything excluded), loosen it again, requeue.
+
+The third clause is `last_generated_at`, and it is a test of *whether this file
+ever finished a run* rather than of what it produced. `add_source.py` writes the
+key empty at creation and only a completed run fills it, so a date means the
+`pending` this file carries now was written after that run, on purpose. Issue
+#474's state has no date by construction: its pages were written under another
+management file's run and this one was never written back at all.
+
 Usage:
     python .wikicommit/scripts/reconcile_ingest_status.py [--today=YYYY-MM-DD]
 
@@ -128,6 +172,36 @@ def main() -> int:
             print(f"WARNING: {mgmt_file}: {err} — skipping", file=sys.stderr)
             continue
         if (fm or {}).get("status") != "pending":
+            continue
+
+        # A file this script is meant to rescue has `generated_pages: []` — that
+        # is the state Issue #474 describes: the pages were written, the batch
+        # moved on, and this file's own `status`/`generated_pages` were never
+        # written back. A `pending` file that *does* list pages was put back in
+        # the queue on purpose (Issue #874) and must stay there.
+        if (fm or {}).get("generated_pages"):
+            continue
+
+        # And a file that has finished a run before. `add_source.py` writes an
+        # empty `last_generated_at:` at creation and only a completed run fills
+        # it, so a date here means this file reached the end of Pass 4 at least
+        # once — and therefore that whatever `pending` it carries now was put
+        # there afterwards, on purpose. Issue #474's state has no date: those
+        # pages were written under *another* management file's run, and this one
+        # was never written back at all.
+        #
+        # This is the third requeue shape, and the only one the clause above
+        # misses. A source that made pages and was later excluded in full sits at
+        # `status: excluded` with `generated_pages` cleared (Pass 4 step 7's
+        # `excluded` branch writes none) while the pages it made earlier stay on
+        # disk — nothing in the generate path removes a page — still citing its
+        # unchanged hash. Requeue it and it clears both the clause above and the
+        # match test below, and a generate run that does not reach it writes it
+        # back to `generated` under a `RECONCILED:` line, which reads as success.
+        # That is reached by the switch-off-then-on cycle the requeue Skill
+        # exists for, so it is not a corner: tighten a policy, requeue, generate
+        # (everything excluded), loosen it again, requeue.
+        if (fm or {}).get("last_generated_at"):
             continue
 
         source = (fm or {}).get("source") or {}

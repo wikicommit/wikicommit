@@ -54,7 +54,7 @@ If no argument was given, or nothing remains after removing the `--index` flags,
 
 ### Step 2.5: Read the Source Policy (Issue #564)
 
-Read `.wikicommit/source-policy.md`. It is this wiki's standing answer to "which sources do we take in", where `theme` answers "which entities get pages" — two questions that used to share one field because there was nowhere else to put the first. If the file is absent, or its body is empty or still the shipped comment, there is no prose policy; carry on with `theme` alone.
+Read `.wikicommit/source-policy.md`. It is this wiki's standing answer to "which sources do we take in", where `theme` answers "which entities get pages" — two questions that used to share one field because there was nowhere else to put the first. **Get the prose from `python .wikicommit/scripts/read_policy.py .wikicommit/source-policy.md` rather than reading the body yourself** (Issue #844): a `POLICY:` line is followed by the prose, a `NONE:` line means there is none and you carry on with `theme` alone. It strips the worked example the file ships with, so the example's own suggestions — all of which argue for turning candidates down — never get applied as if this wiki had chosen them. The frontmatter keys below are read separately, straight from the file.
 
 Hold three things for the rest of this run:
 
@@ -281,9 +281,9 @@ Zero candidates is the expected common outcome — do not force one to justify r
    )"
    ```
 
-   Each candidate name goes through its own quote-delimited heredoc, for the same reason step 4's
-   `--property` values do — these are names this step itself just proposed, not values an earlier
-   script already verified. Drop any candidate whose actual definition does not fit, and any name
+   Each candidate name goes through its own quote-delimited heredoc, for the same reason the
+   `--property` values in `.wikicommit/schema-authoring.md` do — these are names this step itself
+   just proposed, not values an earlier script already verified. Drop any candidate whose actual definition does not fit, and any name
    that comes back as `ERROR:` (a name not in the vocabulary was invented rather than recalled).
 
 For each candidate type that does qualify:
@@ -297,22 +297,15 @@ For each candidate type that does qualify:
    Add this type now? [y/N]
    ```
 
-4. For each approved type, re-verify it still exists in the vocabulary and pick 2-5 candidate properties for the new type's `properties:` block, verifying each the same way `wikicommit-generate` Pass 2b / `wikicommit-schema-propose` Step 4 do:
+4. **For each approved type, read `.wikicommit/schema-authoring.md` and follow it** to re-verify the type, pick and verify its properties, and write `.wikicommit/schema/<Type>.md` (Issue #886). That file holds the whole procedure — browsing `--list-properties`, verifying each candidate with `--property` heredocs, dropping what comes back `ERROR:`, the standard-type file format with `.wikicommit/schema/default.md` and `.wikicommit/schema/Person.md` as the fixed style references, and how to write `granularity`. Four paths write type files and only the judgment differs between them, so the procedure lives in one place rather than four.
 
-   ```bash
-   python .wikicommit/scripts/check_schema_org_type.py --type <Type> \
-     --property "$(cat <<'EOF'
-   <Prop1>
-   EOF
-   )" \
-     --property "$(cat <<'EOF'
-   <Prop2>
-   EOF
-   )" \
-     ...
-   ```
+   What this step supplies on top of it: **`provenance: collect`** (do not copy `Person.md`'s own `provenance: default` — each write site stamps its own origin), and the evidence this step actually has, which is the candidate titles and search summaries from step 6 rather than the full text of any source.
 
-   Each `--property` value goes through its own quote-delimited heredoc — these are candidate names this step itself just proposed, not values an earlier script already verified. If the script reports `<Type>` itself as `ERROR:` (not just a property), abort this candidate entirely — do not write a schema file for it, and tell the user the proposed type name did not resolve in the vocabulary (this should be rare given the `--list-type-names` grounding in step 1 and the `--describe` confirmation in step 2, but is not impossible if the LLM misread a type name from that list). Otherwise, drop any individual property the script reports as `ERROR:` — never put an unverified property into the new schema file's `properties:` block. Then write `.wikicommit/schema/<Type>.md` directly with the Write tool, in the standard-type format (Issue #495's `properties:`-nested layout), using `.wikicommit/schema/default.md` and `.wikicommit/schema/Person.md` as the fixed style references — identical process to `wikicommit-generate` Pass 2b step 4 / `wikicommit-schema-propose` Step 4. **Where another installed type is the better home for a recognizable class of subject, say so as its own `granularity` rule and name that type** — e.g. `Prefer schema:HowTo when the source's substance is an ordered set of steps the reader performs`. `granularity` is where cross-type deference lives (there is no separate field for it), and `wikicommit-generate` Pass 2c is instructed to follow such a line over its own read of the fit (Issue #569). It is not the same as the `Boundary` rule: `Boundary` says what the type is not, this says who should have it instead. Name only types that are actually installed — a line pointing at a type this wiki does not have cannot be acted on. Every `granularity` bullet has to survive YAML parsing as a plain **string**: write a boundary rule as `Boundary — …` with an em dash rather than `Boundary: …`, and keep ` #` out of the middle of an unquoted bullet. The two fail differently. A `": "` turns the bullet into a one-key mapping, which consumers that filter on `isinstance(g, str)` skip entirely — `check_property_wikilink_reinforcement.py` at least warns that it did so. A ` #` opens a YAML comment and truncates the rest of the line; the bullet is still a string, so nothing warns at all and the dropped half is simply gone. Nothing validates a schema file and no Skill can edit it afterwards, so either shape is merged and stays broken (Issue #649). Wrap the whole bullet in double quotes if the wording needs either character. Set `wikicommit.provenance: collect` in the new file's `wikicommit:` block (do not copy `Person.md`'s own `provenance: default` value — each write site stamps its own origin). This is the one narrow exception to this Skill's "no writes to `.wikicommit/schema/`" rule (see Prohibited Actions below): it only ever *adds* a file that isn't there yet, never edits or deletes an existing one. No commit or PR happens here — the new file is left on disk like any other file `wikicommit-generate` writes, and `wikicommit-merge` picks it up later in the normal batch.
+   Three things this step is accountable for even if that Read is skipped: **every property goes through `check_schema_org_type.py` before it enters `properties:`**, **one `granularity` rule starts with `Boundary —`** (em dash, not a colon), and **`provenance` is `collect`**.
+
+   **If `.wikicommit/schema-authoring.md` is not present** (a wiki initialized before it shipped, or Skills updated without re-running init), **read the copy in the Skill tree instead** — `.claude/skills/wikicommit-init/scripts/templates/schema-authoring.md`, the same file `init.py` expands, which `install.sh` and `npx skills add` carry into every installation of these Skills (the route `/wikicommit-update` already takes for a script an older repository does not have yet). Say which copy you read. **Only if neither is readable**, do not write the file: drop this candidate, name the missing file and `/wikicommit-init --no-overwrite` as the way to get it, and carry on with the rest of this step. Candidates are still registered in Step 8 either way — the only loss is the type, which `check_schema_coverage.py` reports once pages start using it.
+
+   Writing the file is the one narrow exception to this Skill's "no writes to `.wikicommit/schema/`" rule (see Prohibited Actions below): it only ever *adds* a file that is not there yet, never edits or deletes an existing one. No commit or PR happens here — the new file is left on disk like any other file `wikicommit-generate` writes, and `wikicommit-merge` picks it up later in the normal batch.
 
 5. Rejected or no-candidate types are simply not added — no persistence of a declined candidate anywhere, same reasoning as `wikicommit-generate` Pass 2b. `wikicommit-schema-propose` remains the post-hoc safety net for anything missed here.
 

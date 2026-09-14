@@ -135,7 +135,7 @@ def test_node_modules_is_skipped(tmp_path):
 
 
 def test_non_distributed_skill_is_out_of_scope(tmp_path):
-    write(tmp_path, ".claude/skills/implement-issue/SKILL.md",
+    write(tmp_path, ".claude/skills/not-a-distributed-skill/SKILL.md",
           "Follow docs/DesignDoc-skills.md §11.7.\n")
 
     result = run(tmp_path)

@@ -10,7 +10,7 @@ wikicommit:
   exclude_living_persons: false
 ---
 
-<!--
+<!-- wikicommit:example
 What belongs in this file: whether an entity may be written about at all.
 What does not: whether it is *relevant* — that is `theme` in .wikicommit/config.yml.
 
@@ -60,9 +60,14 @@ Two things do not belong here, because they already have a home:
   license and the share-alike warning at registration time. Writing it again here
   splits one decision across two files.
 
-This policy applies when a page is generated, and does not reach back. Turning the
-switch on, or adding a category, does not remove pages that already exist — the
-regeneration mode does not re-run the entity-extraction pass, so nothing re-judges
-them. To take an existing page down, use /wikicommit-remove (with
-`removed_reason: gdpr` where that is the reason).
+This policy applies when a page is generated, and nothing here reaches back on its
+own. Turning the switch on, or adding a category, does not remove pages that already
+exist, and the regeneration mode does not re-judge them either — it never re-runs the
+entity-extraction pass. Having them re-judged takes a deliberate requeue (below);
+taking one down is /wikicommit-remove (with `removed_reason: gdpr` where that is the
+reason), and nothing else deletes a page at all.
+
+To have a changed policy reach the pages you already have — in either direction,
+including loosening it back — see
+.wikicommit/guides/applying-entity-policy-to-existing-pages.md.
 -->

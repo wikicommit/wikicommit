@@ -23,7 +23,8 @@ drives init.py's copies and print_next_steps.py's `git add` guidance. Keeping a 
 copy of the classification here is exactly the drift that list exists to remove.
 
 Usage:
-    python .wikicommit/scripts/check_distribution_freshness.py [--variant <variant>]
+    python .wikicommit/scripts/check_distribution_freshness.py
+        [--variant <variant>] [--repo-root <path>] [--only <root output path>]
 
 Exit code: always 0 (report only, like the rest of /wikicommit-status).
 """
@@ -45,6 +46,30 @@ _PRUNED_DIRS = {"node_modules", "__pycache__"}
 
 # The update policies this script knows how to act on; see check() for why.
 _HANDLED_POLICIES = frozenset(("overwrite", "review", "skip"))
+
+# Appended to `.wikicommit/scripts` alone (Issue #930). A stale copy there means the
+# instructions a Skill is executing right now were written against newer scripts, and the
+# mismatch does not always announce itself: when only the inside of an existing option
+# changed, the old script can fail in a way that names the wrong cause. For quartz-plugins
+# or the workflows a stale copy means a stale published site or CI job instead, so a
+# suffix shared by every OUTDATED line would be wrong on most of them.
+#
+# It states the consequence and stops there (Issue #935). It used to end with
+# "Run /wikicommit-update.", which is wrong at one of the six places that run this check
+# and redundant at two more: three of them belong to /wikicommit-update itself, and the
+# one in its last step runs *after* the update, so a line there reports that the update
+# just made did not take — prescribing the command that has only now failed. The
+# consequence holds at every call site; what to do about it is what each SKILL.md already
+# says in context, which is why this string carries the first and not the second.
+_SCRIPTS_CONSEQUENCE = (
+    ". The installed Skills were refreshed and these scripts were not, so an instruction "
+    "written against the new scripts can meet an older one here and fail in a way that "
+    "names the wrong cause."
+)
+
+
+def _consequence(path: str) -> str:
+    return _SCRIPTS_CONSEQUENCE if path == ".wikicommit/scripts" else ""
 
 
 def _load_root_outputs(repo_root: Path):
@@ -245,7 +270,7 @@ def _same_bytes(a: Path, b: Path) -> bool:
         return False
 
 
-def check(repo_root: Path, variant: str | None) -> int:
+def check(repo_root: Path, variant: str | None, only: str | None = None) -> int:
     root_outputs = _load_root_outputs(repo_root)
     templates_dir = repo_root / TEMPLATES_REL / "templates"
     module_path = repo_root / TEMPLATES_REL / "_root_outputs.py"
@@ -269,11 +294,26 @@ def check(repo_root: Path, variant: str | None) -> int:
         return 0
 
     variant = variant or detect_variant(repo_root)
-    print(f"VERSION: synced={_synced_version(repo_root)}, installed={_installed_version(repo_root)}")
+    entries = list(root_outputs.for_variant(variant))
+    if only is not None:
+        # A typo would otherwise compare nothing and report a clean result — the same
+        # shape of silent wrong answer this flag exists to catch, so it has to be said.
+        # Naming a real entry this script never looks at (`update: skip`, or one that
+        # ships no template) produces the identical clean summary, so it gets the same
+        # treatment: the point is that a quiet run has to mean "compared and in step".
+        if not any(e.path == only for e in entries):
+            print(f"WARNING: --only {only} names no root output in this variant.")
+        entries = [e for e in entries if e.path == only]
+    else:
+        # Suppressed under --only: `synced` is config.yml's wikicommit_version, which only
+        # /wikicommit-update writes, so it stays behind on a repository that re-ran init and
+        # is genuinely in step. Harmless in a full report beside the byte comparison; in a
+        # one-line narrowed check it would be the loudest thing printed and it would be wrong.
+        print(f"VERSION: synced={_synced_version(repo_root)}, installed={_installed_version(repo_root)}")
 
-    outdated = missing = orphan = 0
+    outdated = missing = orphan = compared = 0
 
-    for entry in root_outputs.for_variant(variant):
+    for entry in entries:
         # Normalized against the policies *this script* has a branch for, not just the
         # ones the imported list recognizes. `npx skills add` refreshes .claude/skills/
         # while .wikicommit/scripts/ only catches up on the next init, so this script can
@@ -292,6 +332,7 @@ def check(repo_root: Path, variant: str | None) -> int:
         local_path = repo_root / entry.path
         if not template_path.exists():
             continue
+        compared += 1
 
         if template_path.is_dir():
             # quartz-plugins ships vitest/eslint config and *.test.ts that init
@@ -316,7 +357,7 @@ def check(repo_root: Path, variant: str | None) -> int:
             if differing:
                 print(
                     f"OUTDATED: {entry.path} ({policy}) — "
-                    f"{differing} file(s) differ from the template"
+                    f"{differing} file(s) differ from the template{_consequence(entry.path)}"
                 )
                 outdated += 1
             # Orphans are only meaningful where the whole tree is WikiCommit's: a file
@@ -363,6 +404,16 @@ def check(repo_root: Path, variant: str | None) -> int:
             )
             outdated += 1
 
+    if only is not None and entries and not compared:
+        # Reached only when --only named a real entry that has no comparison behind it,
+        # so the counts below were never computed for it. Saying nothing here would let
+        # `SUMMARY: outdated=0` stand in for "in step", which it does not.
+        print(
+            f"WARNING: --only {only} names a root output this script does not compare "
+            "(its update policy is `skip`, or it ships no template), so the summary "
+            "below says nothing about whether it is in step."
+        )
+
     print(f"SUMMARY: outdated={outdated}, missing={missing}, orphan={orphan}")
     return 0
 
@@ -381,8 +432,14 @@ def main() -> int:
         metavar="PATH",
         help="Repository root (default: the current directory)",
     )
+    parser.add_argument(
+        "--only",
+        metavar="PATH",
+        default=None,
+        help="Compare this one root output only (e.g. .wikicommit/scripts)",
+    )
     args = parser.parse_args()
-    return check(Path(args.repo_root).resolve(), args.variant)
+    return check(Path(args.repo_root).resolve(), args.variant, args.only)
 
 
 if __name__ == "__main__":

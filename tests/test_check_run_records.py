@@ -179,22 +179,58 @@ def _stamps(*names: str) -> list[dict]:
     return [{"pass": n, "at": "2026-09-07T10:44:02+09:00", "token": "unchecked"} for n in names]
 
 
-def test_a_record_with_no_stamps_says_nothing_about_passes(tmp_path):
+def test_a_record_predating_checkpoints_says_nothing_about_passes(tmp_path):
     """Records written before checkpoints existed have no `passes` key at all,
-    and there is nothing honest to report for them."""
-    _record(tmp_path, "20260907-104233-generate.md", ended_at="2026-09-07T11:05:12+09:00")
+    and there is nothing honest to report for them.
+
+    The work fields are populated here on purpose: this must stay silent because
+    the key is absent, not because the run looks like a no-op — that is the whole
+    distinction the gate rests on (Issue #864).
+    """
+    path = _record(tmp_path, "20260907-104233-generate.md",
+                   ended_at="2026-09-07T11:05:12+09:00",
+                   sources=["a.md"], pages=["p.md"], outcome={"generated": 1})
+    assert "passes:" not in path.read_text(encoding="utf-8")
     result = _run(tmp_path)
     assert "pass(es)" not in result.stdout
     assert "MISSING_PASS:" not in result.stdout
     assert "SUMMARY: runs=1, incomplete=0, missing_pass=0" in result.stdout
 
 
-def test_an_empty_passes_list_is_also_silent(tmp_path):
-    """"Stamped nothing" reads the same as "predates stamping" — both mean the
-    reader has no basis to say a pass was skipped."""
+def test_a_run_that_did_work_and_stamped_nothing_is_reported(tmp_path):
+    """The worst case, and the one the gate used to hide (Issue #864).
+
+    `passes: []` is not "predates stamping": `start` writes the key empty on
+    purpose, so a run that lost *every* stamping instruction is distinguishable
+    from one that could not have stamped. Reporting only partial gaps had the
+    line fall silent exactly where the failure was total.
+    """
     _record(tmp_path, "20260907-104233-generate.md",
-            ended_at="2026-09-07T11:05:12+09:00", passes=[])
-    assert "MISSING_PASS:" not in _run(tmp_path).stdout
+            ended_at="2026-09-07T11:05:12+09:00", passes=[],
+            sources=["a.md"], pages=["p.md"], outcome={"generated": 1})
+    result = _run(tmp_path)
+    assert "MISSING_PASS:" in result.stdout
+    assert "stamped no pass at all" in result.stdout
+    # The evidence is on the line: it is why this is reported rather than taken
+    # for a run that had nothing to do.
+    assert "1 source(s), 1 page(s)" in result.stdout
+    assert "pass1-extract, pass2b-type, pass2c-entities, pass3-generate, pass4-review " \
+        "never ran" in result.stdout
+    assert "missing_pass=1" in result.stdout
+
+
+def test_a_run_that_stamped_nothing_and_did_nothing_is_silent(tmp_path):
+    """A bare `/wikicommit-generate` on a current wiki finds no management file,
+    says so and exits — a legitimate finish with no stamp, and the usual one.
+
+    Reporting it would put the line on most runs, and a line that is always on
+    stops being read (Issue #562's force). An all-zero outcome is not work.
+    """
+    _record(tmp_path, "20260907-104233-generate.md",
+            ended_at="2026-09-07T11:05:12+09:00", passes=[], outcome={"generated": 0})
+    result = _run(tmp_path)
+    assert "MISSING_PASS:" not in result.stdout
+    assert "missing_pass=0" in result.stdout
 
 
 def test_last_run_reports_how_many_passes_were_stamped(tmp_path):
@@ -274,3 +310,124 @@ def test_a_malformed_passes_value_does_not_take_down_the_report(tmp_path):
     assert result.returncode == 0
     assert "Traceback" not in result.stderr
     assert "SUMMARY: runs=1, incomplete=0, missing_pass=0" in result.stdout
+
+
+def test_every_record_reported_for_zero_stamps_states_its_evidence():
+    """`work_recorded()` and `_work_summary()` must agree on what counts as work.
+
+    The zero-stamp line is printed *because* the record shows work, and the
+    summary is the only place that reason appears. `work_recorded()` accepts the
+    loose shapes a hand-edited record can hold on purpose (a bare scalar where a
+    list belongs, a non-mapping `outcome`), so a summary that counted only
+    well-formed lists and mappings would print the strongest finding this line
+    produces with no stated basis at all.
+
+    Checked as an invariant over combinations rather than through one record,
+    because the two functions are separate and nothing else ties them together.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    import check_run_records as c
+
+    values = [None, [], {}, "", 0, False, "s.md", ["a"], ["a", "b"], [""],
+              {"g": 0}, {"g": 1}, {"g": "x"}, {"g": 0, "f": 2}, {"g": []}, 5]
+    unexplained = [
+        {"sources": s, "pages": p, "outcome": o}
+        for s in values for p in values for o in values
+        if c.work_recorded({"sources": s, "pages": p, "outcome": o})
+        and not c._work_summary({"sources": s, "pages": p, "outcome": o})
+    ]
+    assert unexplained == []
+
+
+# --- halt して閉じた実行（Issue #872）------------------------------------------
+#
+# halt は `record_run.py end --halted-reason` で記録を閉じるため `ended_at` を
+# 持つ。`ended_at` を「完走したか」の代理指標にしていた間、halt は完走側に落ち、
+# `MISSING_PASS:` に "finished, but" として出るか、1 行も出ないかのどちらかだった
+# （後者は `missing_passes()` が空になる場合 — とくに `EXPECTED_PASSES` を持たない
+# Skill では原理的にそうなる）。下の 3 件は Issue #872 の実測 3 件に対応する。
+
+
+def test_a_halt_is_not_reported_as_finished(tmp_path):
+    """実測 1 件目: ガード C の halt（打点は pass1-extract のみ）。
+
+    以前は `MISSING_PASS: ... (finished, but ...)` に出ていた。halt に対して
+    "finished" は偽であり、Pass 2c 以降に到達しないのは halt の意味そのもので
+    あって「飛ばした」ではない。
+    """
+    _record(tmp_path, "20260910-100000-generate.md",
+            started_at="2026-09-10T10:00:00+09:00", ended_at="2026-09-10T10:00:20+09:00",
+            halted_reason="missing package: youtube-transcript-api",
+            passes=_stamps("pass1-extract"))
+    result = _run(tmp_path)
+    assert "finished" not in result.stdout
+    assert "MISSING_PASS:" not in result.stdout
+    assert "INCOMPLETE_RUN:" in result.stdout
+    assert "halted: missing package: youtube-transcript-api" in result.stdout
+    assert "SUMMARY: runs=1, incomplete=1, missing_pass=0" in result.stdout
+
+
+def test_a_halt_that_stamped_every_pass_is_still_reported(tmp_path):
+    """実測 2 件目: Pass 4 の `rules_version` 不一致で halt（5 種すべて打点済み）。
+
+    `missing_passes()` が空になるため `MISSING_PASS:` 側をどう直しても届かず、
+    以前は 1 行も出なかった。
+    """
+    _record(tmp_path, "20260910-110000-generate.md",
+            started_at="2026-09-10T11:00:00+09:00", ended_at="2026-09-10T11:03:00+09:00",
+            halted_reason="rules_version mismatch",
+            passes=_stamps("pass1-extract", "pass2b-type", "pass2c-entities",
+                           "pass3-generate", "pass4-review"))
+    result = _run(tmp_path)
+    assert "INCOMPLETE_RUN: 2026-09-10 11:00 wikicommit-generate " \
+        "(halted: rules_version mismatch (3m00s) — reached pass4-review)" in result.stdout
+    assert "SUMMARY: runs=1, incomplete=1, missing_pass=0" in result.stdout
+
+
+def test_a_halt_in_a_skill_with_no_expected_passes_is_reported(tmp_path):
+    """実測 3 件目: `wikicommit-synthesize` の halt。
+
+    `EXPECTED_PASSES` は `wikicommit-generate` の 1 エントリしか持たないため、
+    この Skill の期待パスは空・欠落も空になり、`MISSING_PASS:` に出る余地が
+    原理的に無い。判定を `halted_reason` に移したことで同じ 1 行が覆う。
+    """
+    _record(tmp_path, "20260910-120000-synthesize.md", skill="wikicommit-synthesize",
+            started_at="2026-09-10T12:00:00+09:00", ended_at="2026-09-10T12:05:00+09:00",
+            halted_reason="rules_version mismatch", passes=[])
+    result = _run(tmp_path)
+    assert "INCOMPLETE_RUN: 2026-09-10 12:00 wikicommit-synthesize " \
+        "(halted: rules_version mismatch (5m00s))" in result.stdout
+    assert "SUMMARY: runs=1, incomplete=1, missing_pass=0" in result.stdout
+
+
+def test_last_run_names_a_halt(tmp_path):
+    """`LAST_RUN:` は 1 件しか出ないため、そこに halt が来たときに
+    「5 分かかった実行」としか読めないままにしない。"""
+    _record(tmp_path, "20260910-120000-synthesize.md", skill="wikicommit-synthesize",
+            started_at="2026-09-10T12:00:00+09:00", ended_at="2026-09-10T12:05:00+09:00",
+            halted_reason="rules_version mismatch", passes=[])
+    result = _run(tmp_path)
+    assert "LAST_RUN: 2026-09-10 12:00 wikicommit-synthesize " \
+        "(halted: rules_version mismatch, 5m00s)" in result.stdout
+
+
+def test_a_run_that_was_never_closed_still_says_no_ended_at(tmp_path):
+    """halt 側の文面へ寄せた結果、打刻忘れの側が失われていないこと。
+
+    両者を分ける値は `halted_reason` だけであり、行はそれぞれ自分がどちらかを
+    述べる（Step 17 の 1 行がこの 2 つを同時に数えるため）。
+    """
+    _record(tmp_path, "20260905-140300-generate.md",
+            started_at="2026-09-05T14:03:00+09:00", passes=_stamps("pass1-extract"))
+    result = _run(tmp_path)
+    assert "INCOMPLETE_RUN: 2026-09-05 14:03 wikicommit-generate (no ended_at" in result.stdout
+    assert "halted:" not in result.stdout
+
+
+def test_a_record_that_is_both_halted_and_unclosed_says_both(tmp_path):
+    """手編集の記録はこの組み合わせを持ちうる。どちらかを落とすと記録を
+    誤って説明することになるため両方を出す。"""
+    _record(tmp_path, "20260905-140300-generate.md",
+            started_at="2026-09-05T14:03:00+09:00", halted_reason="rules_version mismatch")
+    result = _run(tmp_path)
+    assert "(no ended_at — halted: rules_version mismatch)" in result.stdout

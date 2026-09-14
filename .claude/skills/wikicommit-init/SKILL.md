@@ -28,6 +28,57 @@ Confirm the following with the user (use the default value if there is no answer
    it can't run here yet: this repository's root path isn't confirmed until prerequisite 3 below, and
    `.wikicommit/schema/` doesn't exist until `init.py` runs in step 2).
 
+   Then ask the one switch that lives in the second of those two files, immediately after, as part of
+   the same exchange rather than as a step of its own:
+
+   ```
+   Skip pages about living individuals? [y/N]
+   Public figures acting in their public capacity, and historical figures, are normally
+   in scope — this is about people who happen to be named in your sources, not about
+   everyone alive. You can add finer rules to .wikicommit/entity-policy.md afterwards.
+   ```
+
+   **A blank Enter is no**, which is the current behaviour and what every repository created so far has.
+   On a yes, pass `--exclude-living-persons` to `init.py` in step 2.
+
+   **Why this one question and not the prose**: the two policy files are prose read afresh on every run,
+   so writing them after init works — the next run picks them up. A switch does not behave that way. It
+   has a default, it acts without saying so, and the window it acts in is the first `/wikicommit-generate`,
+   which is the first thing a user does after init and the run whose pages most other pages end up linking
+   to. Neither direction can be undone afterwards: pages already written survive a change of the switch
+   (the regeneration mode does not re-run the entity-extraction pass), and entities already excluded are
+   not revisited by re-registering the same source (its hash still matches, so the later passes never run).
+   Asking is the only way the value reflects a decision (Issue #837).
+
+   **Say who is in, not only who is out.** The wording above is deliberate: the switch turns on "living",
+   while what actually separates risk is whether someone is a public figure, and `entity-policy.md`'s own
+   template warns about this. In one pilot, keeping people out via `theme` alone left the wiki with zero
+   `Person` pages — including three historical figures (died 1486, 1738 and 1830) named repeatedly in its
+   own body text. A question that does not say this invites the same over-exclusion.
+
+   **Non-interactive runs do not ask.** Do not pass the flag, and say so once instead, the same way this
+   Skill handles a type proposal it cannot get an answer for:
+
+   ```
+   NOTE: exclude_living_persons is false in .wikicommit/entity-policy.md (the default).
+   Decide it before the first /wikicommit-generate — afterwards, turning it on does not
+   remove pages that already exist.
+   ```
+
+   **A re-init never rewrites the file.** `.wikicommit/entity-policy.md` holds prose the user has been
+   writing, so it is skipped whenever it already exists, and there is deliberately no `--update-<field>`
+   path for this switch the way `--update-theme` exists for `theme`: that flag exists because `config.yml`
+   is generated wholesale and re-init skips it, whereas here the whole file is the user's to edit and the
+   one-line change is trivial to make by hand. Passing `--exclude-living-persons` against an existing file
+   prints a `NOTE:` and changes nothing.
+
+   **You will still ask the question on a re-init, and that is fine** — whether `.wikicommit/` already
+   exists is only determined in Processing Flow step 1, after this exchange (the same ordering that keeps
+   the obvious-type judgment in step 3 rather than here). Ask it, pass the flag on a yes in both forms of
+   step 2, and relay the `NOTE:` if it appears: a repository predating `entity-policy.md` gets the switch
+   set, and one that already has the file keeps its own decision. What must not happen is the user
+   answering yes and hearing nothing back, so step 2 spells out which lines to relay.
+
 3. **Repository root path**: current directory (default)
 4. **Publish with Quartz v5**: confirm in two stages (Issue #335 — local build/preview and automatic
    GitHub Pages publishing are independent choices; a user who only wants to preview the wiki locally
@@ -79,6 +130,7 @@ Confirm the following with the user (use the default value if there is no answer
    ```bash
    python .claude/skills/wikicommit-init/scripts/init.py \
      --primary-lang <primary_lang> \
+     [--exclude-living-persons] \
      [--quartz] \
      [--quartz-pages] \
      [--repo-url="$(gh repo view --json url -q .url)"]
@@ -90,6 +142,7 @@ Confirm the following with the user (use the default value if there is no answer
    python .claude/skills/wikicommit-init/scripts/init.py \
      --primary-lang <primary_lang> \
      --no-overwrite \
+     [--exclude-living-persons] \
      [--quartz] \
      [--quartz-pages] \
      [--repo-url="$(gh repo view --json url -q .url)"]
@@ -129,6 +182,27 @@ Confirm the following with the user (use the default value if there is no answer
    EOF
    )" [--repo-root <path>]
    ```
+
+   Pass `--exclude-living-persons` if, and only if, the user answered Y to the living-individuals switch in
+   Prerequisite 2 — in **both** forms above, unlike `--theme`. It behaves differently from `--theme` on an
+   existing repository because it writes a different file: `.wikicommit/entity-policy.md` is copied with
+   `always_skip_existing`, so a repository that already has one keeps it untouched (`init.py` says so and
+   changes nothing), while a repository initialized before that file existed gets one with the switch
+   already set. Leave the flag off on a blank Enter — omitting it is what produces the `false` default, and
+   there is no flag that sets it back.
+
+   **Relay two lines from `init.py`'s output whenever you passed this flag**, because both mean the answer
+   you collected did not take effect and neither one fails the run:
+
+   - `NOTE: .wikicommit/entity-policy.md already existed, so --exclude-living-persons was not applied.` —
+     tell the user, and that the one-line change is theirs to make in that file. This is the expected
+     outcome on a repository that already has the file; the Prerequisite 2 question is asked before the
+     existence check in step 1 above, so it does get asked in that case.
+   - `WARNING: could not set exclude_living_persons in ...` (stderr) — tell the user the switch is still
+     `false` and the file needs editing by hand.
+
+   Both matter more than they look: by the time the user notices, the first `/wikicommit-generate` has
+   usually already run, and turning the switch on afterwards does not remove pages that already exist.
 
    Do not pass `--targets` — it is no longer collected in the Prerequisites step, so `config.yml` is always
    generated with `targets: []`. The translation pipeline itself is Phase 4 scope and not yet
@@ -203,8 +277,10 @@ Confirm the following with the user (use the default value if there is no answer
       Non-zero exit (vocabulary fetch failed, e.g. no network) → skip the rest of this sub-step.
       Zero exit → record that the vocabulary cache now exists on disk (`.wikicommit/schemaorg-vocab.json`)
       — this becomes the `--vocab-cache-created` flag passed to `print_next_steps.py` at the end of this
-      step, so the printed `git add` command actually includes this new file (it is committed like any
-      other WikiCommit output, per that script's own docstring).
+      step. The default printed command is `git add -A`, which picks this file up whether or not it was
+      created; the flag governs the selective fallback list printed beneath it, which lists paths
+      individually and would abort on one that does not exist (Issue #842). It is committed like any
+      other WikiCommit output, per that script's own docstring.
 
    ii. Using the `--list-type-names` output and the theme text alone, judge whether a Schema.org standard
       type — beyond the 6 always-generated base types (Person/Place/Organization/Event/HowTo/DefinedTerm)
@@ -254,50 +330,50 @@ Confirm the following with the user (use the default value if there is no answer
       Add this type now? [y/N]
       ```
 
-   iv. For each approved type, verify it still exists in the vocabulary and pick 2–5 candidate
-      properties for the new type's `properties:` block, verifying each the same way `wikicommit-generate`
-      Pass 2b / `wikicommit-collect`'s Type Proposal step / `wikicommit-schema-propose` Step 4 do:
+   iv. **For each approved type, read `.wikicommit/schema-authoring.md` and follow it** to verify the
+      type, pick and verify its properties, and write `.wikicommit/schema/<Type>.md` (Issue #886).
+      `init.py` expanded that file in step 2, so it is already on disk here — the same reason
+      `.wikicommit/schema/` itself is (this step is ordered after step 2 deliberately). It holds the
+      whole procedure: browsing `--list-properties`, verifying each candidate with `--property`
+      heredocs, dropping what comes back `ERROR:`, the standard-type file format with
+      `.wikicommit/schema/default.md` and `.wikicommit/schema/Person.md` (both just written by
+      `init.py`) as the fixed style references, and how to write `granularity`. Four paths write type
+      files and only the judgment differs between them, so the procedure lives in one place.
 
-      ```bash
-      python .wikicommit/scripts/check_schema_org_type.py --type <Type> \
-        --property "$(cat <<'EOF'
-      <Prop1>
-      EOF
-      )" \
-        --property "$(cat <<'EOF'
-      <Prop2>
-      EOF
-      )" \
-        ...
-      ```
+      What this step supplies on top of it:
 
-      Each `--property` value goes through its own quote-delimited heredoc — these are candidate names this step itself just proposed, not values an earlier script
-      already verified.
+      - **`provenance: init-theme`** — do not copy `Person.md`'s own `provenance: default`; each write
+        site stamps its own origin.
+      - **"Installed" here means what exists at this moment**: a base type `init.py` just wrote, or a
+        type approved earlier in this same step. The shared procedure tells you to name only installed
+        types in a deference rule; this is what that set is, right now.
+      - **The deference rule written at this exact step is the one that went unfollowed in a real
+        pilot wiki** — the theme-driven proposal added `GovernmentService` with a rule deferring to
+        `HowTo`, and the entity-extraction pass then chose `GovernmentService` six times and `HowTo`
+        never. Write it where it applies, and know that it only works if that pass honors it.
 
-      If the script reports `<Type>` itself as `ERROR:`, drop this type silently and move to the next
-      approved type — do not write a schema file for it. Otherwise, drop any individual property the
-      script reports as `ERROR:` — never put an unverified property into the new schema file's `properties:` block.
+      Three things this step is accountable for even if that Read is skipped: **every property goes
+      through `check_schema_org_type.py` before it enters `properties:`**, **one `granularity` rule
+      starts with `Boundary —`** (em dash, not a colon), and **`provenance` is `init-theme`**.
 
-   v. Write `.wikicommit/schema/<Type>.md` directly with the Write tool, in the standard-type format
-      (Issue #495's `properties:`-nested layout), using `.wikicommit/schema/default.md` and
-      `.wikicommit/schema/Person.md` (both just written by `init.py`) as the fixed style references. Set
-      `wikicommit.provenance: init-theme` in the new file's `wikicommit:` block (do not copy
-      `Person.md`'s own `provenance: default` value — each write site stamps its own origin). Where
-      another **installed** type — a base type `init.py` just wrote, or one approved earlier in this same
-      step — is the better home for a recognizable class of subject, say so
-      as its own `granularity` rule and name that type — e.g. `Prefer schema:HowTo when the source's
-      substance is an ordered set of steps the resident performs`. `granularity` is where cross-type
-      deference lives (there is no separate field for it) and `wikicommit-generate` Pass 2c follows such a
-      line over its own read of the fit (Issue #569); it is not the same as the `Boundary` rule, which
-      says what the type is *not* rather than who should have it instead. **This exact line, written at
-      this exact step, is the one that went unfollowed in `wikicommit/saitama-city-wiki`** — so write it
-      where it applies, and know that it only works if Pass 2c honors it. Every `granularity` bullet has to survive YAML parsing as a plain **string**: write a boundary rule as `Boundary — …` with an em dash rather than `Boundary: …`, and keep ` #` out of the middle of an unquoted bullet. The two fail differently. A `": "` turns the bullet into a one-key mapping, which consumers that filter on `isinstance(g, str)` skip entirely — `check_property_wikilink_reinforcement.py` at least warns that it did so. A ` #` opens a YAML comment and truncates the rest of the line; the bullet is still a string, so nothing warns at all and the dropped half is simply gone. Nothing validates a schema file and no Skill can edit it afterwards, so either shape is merged and stays broken (Issue #649). Wrap the whole bullet in double quotes if the wording needs either character. This
-      is the one narrow exception to the "the agent must not write to `.wikicommit/schema/` directly"
-      rule in Notes below — it only ever *adds* a file that isn't there yet (step ii's on-disk re-scan is
-      what makes this guarantee actually hold), never edits or overwrites one `init.py` wrote. No PR is
-      involved (same as every other file `wikicommit-init` produces): the new file just becomes part of
-      the `git add` command in the "Commit the generated foundational files" step of the guidance printed
-      at the end of this step — do not run `git add`/`commit`/`push` yourself here either.
+      **If `.wikicommit/schema-authoring.md` is not present** — which here means `init.py` did not
+      finish writing the template tree, since it is `update: overwrite` and arrives on every init —
+      read `.claude/skills/wikicommit-init/scripts/templates/schema-authoring.md` instead: that is
+      the source `init.py` copies from, so it is there whenever this Skill itself is. Say that the
+      template tree looks incomplete and name the file that is missing under `.wikicommit/`, and go
+      on with the procedure from the Skill-tree copy. Only if neither copy is readable, drop the
+      approved types and carry on with the rest of step 3 — the base types `init.py` wrote are still
+      there, so the wiki is usable, and `/wikicommit-status` reports the missing file as
+      distribution drift afterwards.
+
+   v. Writing the file is the one narrow exception to the "the agent must not write to
+      `.wikicommit/schema/` directly" rule in Notes below — it only ever *adds* a file that is not
+      there yet (step ii's on-disk re-scan is what makes that guarantee actually hold), and never
+      edits or overwrites one `init.py` wrote. No PR is involved (same as every other file `wikicommit-init`
+      produces): the new file just becomes part of the "Commit the generated foundational files" step
+      of the guidance printed at the end of this step, which stages it with `git add -A`. **Do not
+      commit it here and now** — that commit happens once, at the end of step 3, where it is offered
+      to the user as a whole.
 
    First, attempt to auto-install `lychee` (used for external link validation). This runs
    regardless of whether `--quartz` was specified — `.lychee.toml` is always generated either way.
@@ -523,11 +599,16 @@ Confirm the following with the user (use the default value if there is no answer
      [--actions-pr-permission-enabled] \
      [--package-json-skipped] [--quartz-status <status>] \
      [--install-plugins-status <ok|failed>] \
-     [--pages-html-url <url>] [--vocab-cache-created]
+     [--pages-html-url <url>] [--vocab-cache-created] [--repo-root <path>]
    ```
 
    - `--variant`: `none` if `--quartz` was not passed to `init.py` in step 2; `quartz_only` if
      `--quartz` was passed without `--quartz-pages`; `quartz_pages` if both were passed.
+   - `--repo-root`: pass the same value you passed to `init.py` in step 2, whenever a non-default
+     repository root was specified there. The note under the printed `git add -A` reads that
+     repository's `.gitignore` to decide which of its two shapes to print (Issue #873), so pointing
+     this script at a different root than `init.py` makes that note and the `GITIGNORE_READY:` line
+     answer about two different files. Omit it whenever you omitted it for `init.py`.
    - `--vocab-cache-created`: pass this whenever the obvious-type judgment's step i above got a zero
      exit from `--list-type-names` (regardless of whether any type ended up approved in step iii — the
      vocabulary cache file is written to disk as soon as that call succeeds); omit it if that call was
@@ -552,53 +633,149 @@ Confirm the following with the user (use the default value if there is no answer
    `✅`/`⚠️` announcement lines, the numbered "Next steps" list, and the `quartz_only` variant's
    trailing note about GitHub Pages not being set up, where applicable). It always exits 0.
 
+   Finally, **offer to run that guidance's "Commit the generated foundational files" commands**
+   (Issue #843) — you already hold every value they depend on, so handing them back for the user
+   to reconstruct costs something and buys nothing. The Notes at the end of this file say why this
+   is not a prohibited write. **Hold the offer back** in the cases below, saying which one applied.
+   None of them is about permission. The first three end it — the printed guidance is then the
+   answer, as it was before this offer existed; the last one only postpones it, and the last
+   sub-step of this step says how it resumes:
+
+   - **Non-interactive run.** Silence is not consent; do not commit unasked.
+   - **The `.gitignore` does not carry WikiCommit's patterns** (`init.py` printed
+     `GITIGNORE_READY: no (missing: ...)`, i.e. WikiCommit was added to a repository that already
+     had files of its own, or the repository predates a pattern the template gained later). Then
+     `node_modules/`, `.wikicommit/.cache/` or `.wikicommit/run/` may not be ignored and
+     `git add -A` would sweep in that repository's own untracked work. The printed guidance
+     already explains this and offers the selective path; leave the choice to whoever knows what
+     else is in the tree. **Read the printed line rather than the `.gitignore` itself** — the
+     condition is about what is in the file, and `init.py` has already answered that
+     deterministically, including the Quartz section it appends after the copy (Issue #873).
+     Do not key this on `SKIPPED: .gitignore (already exists)`: that logs on **every** re-init,
+     because `.gitignore` is `always_skip_existing`, so it would stop the offer in a repository
+     WikiCommit made itself — where `-A` is exactly as safe as it was the first time.
+   - **The working tree already has uncommitted wiki pages in it** — run
+
+     ```bash
+     git status --porcelain -uall -- '.wikicommit/entity/**/*.md' '.wikicommit/view/**/*.md' '.wikicommit/source/**/*.md'
+     ```
+
+     and hold the offer back if it reports anything at all. This case only became reachable when the
+     condition above moved onto the file's contents (Issue #873): a re-init in a repository
+     WikiCommit made itself now answers `GITIGNORE_READY: yes`, and by then those directories can
+     hold pages `/wikicommit-generate` wrote and `/wikicommit-merge` has not taken yet. `git add -A`
+     would sweep them into this commit and `git push` would put them on the current branch, which is
+     the one route the whole justification for this offer rules out: it rests on the commit holding
+     no LLM-authored knowledge, and generated pages are exactly that. Say that `/wikicommit-merge`
+     owns those files and leave the printed guidance as the answer, the same as the two cases above.
+     This is not about `.gitignore` — those paths are tracked on purpose — so the `GITIGNORE_READY:`
+     line says nothing about it.
+
+     **Both halves of that command matter.** Scoping to `*.md` is what keeps a *first* init — the
+     case this whole offer was built for — from tripping it: `init.py` creates those three trees
+     holding nothing but `.gitkeep`, so a directory-level `git status --porcelain` reports
+     `?? .wikicommit/entity/` and would withhold the offer every single time. And `-uall` is what
+     makes the `*.md` scope work at all: without it git collapses an untracked directory into one
+     `?? dir/` line that the pathspec then does not match, so a brand-new page under a brand-new
+     `Person/` would go unseen — the case this condition exists for.
+   - **The printed list still has a "Set up Quartz v5" step above the commit step** (the
+     `--quartz`/`--quartz-pages` variants where `check_quartz_setup.py` did not report Quartz as
+     fully set up). Committing ahead of that `git submodule add` / `npm install` splits the
+     foundational commit, leaving `.gitmodules`, `quartz` and `package-lock.json` for a second
+     one. **This case is deferred rather than skipped — see the last sub-step of this step**
+     (Issue #865):
+     on a first `--quartz` run it always holds, so skipping outright means Quartz users never
+     reach the offer at all.
+
+   With none of those in the way show `git status --short --untracked-files=all` and ask **once**
+   — not per command, and not again after a no — naming the commit message the guidance just
+   printed (`Run the
+   foundational commit for you? It stages everything not excluded by .gitignore, shown above,
+   commits it as "…", and pushes.`). `--untracked-files=all` is what makes "shown above" true:
+   plain `git status --short` collapses an untracked directory into one `?? dir/` line, so a fresh
+   wiki repository shows three lines for the ~769 files `-A` would stage, and nothing of the tree's
+   own untracked work inside those directories is visible either.
+   **Default to no**: this is outward-facing and hard to undo, the same reason the GitHub Pages
+   activation earlier in this step asks before acting.
+
+   On a yes, run `git add -A`, then `git commit` with that message, then `git push`, stopping at
+   the first failure. **Do not also run the `package-lock.json` command the guidance prints** — that
+   line is the selective path's substitute for `-A`, which already staged the file, and running a
+   `git add` after the commit could only leave something staged and uncommitted. Give the commit the
+   same two trailers `wikicommit-merge` writes (`Co-Authored-By:
+   <Claude display name> <noreply@anthropic.com>` and `Generated-By:   <current model ID>`, passed
+   through a quoted heredoc), with the same placeholder rules: the running model's own
+   self-reported ID spelled as the runtime reports it and never shortened, the plain word `Claude`
+   when its display name is not known with confidence, `<noreply@anthropic.com>` fixed. Carrying
+   them is the point — most of this commit is deterministic template output, but step 3's
+   obvious-type judgment may have put a `.wikicommit/schema/<Type>.md` into it, and that file the
+   model did author.
+
+   **Best-effort end to end.** Any failure — no remote, no upstream, branch protection,
+   unauthenticated, a pre-commit hook — is reported with its own output and handed back to the
+   printed guidance; `wikicommit-init` never aborts over it. Say how far it got: a `git push` that
+   fails after a successful `git commit` leaves the commit in place, so what remains is the push
+   alone, not the whole block.
+
+   **When that last case is the only thing in the way, wait for Quartz and come back to the
+   offer** (Issue #865). This is not an extra courtesy — without it the offer is unreachable for
+   every `--quartz`/`--quartz-pages` user: `check_quartz_setup.py` can only report Quartz as fully
+   set up when `quartz/` already exists, which on a first run it never does, so `_QUARTZ_SETUP_FULL`
+   is always printed and the condition always holds. Re-running `/wikicommit-init` afterwards now
+   does reach it (Issue #873 moved the second case above off "did this run write the `.gitignore`"
+   and onto what the file contains, so a repository WikiCommit made itself keeps answering
+   `GITIGNORE_READY: yes`). **Keep waiting here rather than sending the user away to re-run**:
+   finishing Quartz setup and coming back within the same session is one continuous action, and
+   re-running `/wikicommit-init` is a second invocation the user has to think to make.
+
+   **One exception ends this case rather than deferring it: `--package-json-skipped`.** When step 2's
+   `init.py` logged `SKIPPED: package.json (already exists)`, step 3.e never ran on purpose — and
+   re-running `check_quartz_setup.py` here would run `npm install` against that repository's own
+   pre-existing `package.json`, installing and executing its dependencies and lifecycle scripts
+   unasked, which is precisely what step 3.d refuses to do. The reprint could not drop the step
+   anyway: with that flag `print_next_steps.py` keeps "Set up Quartz v5" whatever the status says.
+   So treat this like the cases that end the offer above — leave the printed guidance as the
+   answer and say that
+   the `package.json` merge is what the commit is waiting on.
+
+   Ask them to run the printed "Set up Quartz v5" commands now and to say when they are done —
+   **you do not run them** (`git submodule add` stays with the user; see the Notes). On a no or a
+   "later", leave the printed guidance as the answer exactly as the skip cases above do and do not
+   press — but the hold is not spent: if they come back later in this session saying Quartz setup is
+   done, resume from the steps below then (the intervening work is usually the policy files, so
+   "later" here is the common answer, not a decline). On a yes:
+
+   1. Re-run `check_quartz_setup.py` (step 3.e above). It is safe to re-run: with `node_modules/`
+      and `quartz/node_modules/` both present it skips `npm install` and reports `fully_set_up`,
+      and its `npm run install-plugins` attempt is a fast no-op once the plugins are in place.
+   2. Re-run `print_next_steps.py` with **exactly the flags you passed before, except
+      `--quartz-status` and `--install-plugins-status`**, which take the values just recorded.
+      Nothing else has changed in the minutes since — you still hold all of it, so do not re-derive
+      it and do not ask the user to supply it. Print the output verbatim, as before.
+   3. The "Set up Quartz v5" step is now gone from that output, so
+      **apply the offer above to this reprinted guidance** (a standalone "Install Quartz community
+      plugins" step may remain above the commit step if that attempt failed — that is not the
+      condition above and does not hold the offer back) — the single `git status --short
+      --untracked-files=all` confirmation, default no, the same commands and trailers.
+
+   If the re-check still reports Quartz as not fully set up (their `git submodule add` or
+   `npm install` failed), print the reprinted guidance, say that the commit is still waiting on
+   that step, and stop. Do not ask again and do not loop.
+
 4. If `init.py` fails (exit code 1), display the stdout and stderr output to the user and stop.
 
 ## Enabling comments (giscus)
 
-Off by default, and this is a manual, one-time setup a human performs — not a step `init.py` runs. Nothing below is done on the user's behalf; show it when they ask for it.
+Off by default, and this is a manual, one-time setup a human performs — not a step `init.py` runs. Nothing here is done on the user's behalf.
 
-It gives a reader somewhere to put a thought they are not yet sure enough about to open an Issue over — "these two pages don't quite agree" being the one that matters most, since a contradiction between pages generated in different batches is out of reach of every automated check by design (Issue #741).
+**Point them at `.wikicommit/guides/enabling-comments.md`** rather than walking them through it (Issue #846). That guide is written for a human, ships with every init, and is refreshed by later ones; this file is not — it is agent instructions, it loads in full on every Skill invocation, and its own advice was only ever shown "when they ask for it", which meant nobody found it.
 
-**Existing wikis do not get this by re-initializing.** `quartz.config.yaml` is never overwritten once it exists — it holds this repository's own `pageTitle`, `baseUrl` and links — so the commented block below reaches a repository only on its *first* init. On an older one, copy the block out of `.claude/skills/wikicommit-init/scripts/templates/quartz.config.yaml` by hand — along with the `comments` entry in the `layout.byPageType.folder.exclude` and `layout.byPageType.tag.exclude` lists (see below).
+What is worth knowing here, because it shapes what the agent should and should not offer to do:
 
-Three prerequisites, all giscus's own. Check them before touching the config, because a missed one fails silently at read time rather than at build time:
-
-1. **The repository is public.** Otherwise visitors cannot see the discussion at all. A wiki published on GitHub Pages under a free plan already satisfies this.
-2. **The giscus GitHub App is installed on it** — <https://github.com/apps/giscus>. Otherwise visitors can see comments but cannot post or react.
-3. **Discussions is turned on** (Settings → General → Features → Discussions), with a category to hold the threads. Use an **Announcements**-type category: giscus recommends it because only maintainers and giscus itself can then open new discussions there.
-
-Then collect four values:
-
-```bash
-gh api "repos/<owner>/<repo>" --jq .node_id          # repoId
-gh api graphql -f query='
-  query { repository(owner: "<owner>", name: "<repo>") {
-    discussionCategories(first: 20) { nodes { id name } } } }'   # categoryId
-```
-
-Set them in `quartz.config.yaml`, and flip `enabled` to `true`:
-
-```yaml
-  - source: github:quartz-community/comments
-    enabled: true
-    options:
-      provider: giscus
-      options:
-        repo: <owner>/<repo>
-        repoId: <node_id from above>
-        category: <the category's name>
-        categoryId: <that category's id from above>
-        lang: <primary_lang>
-```
-
-`lang` is one static value for the whole site and does not follow a page's own `lang` frontmatter, so on a multilingual wiki it will not match every reader; `primary_lang` is the sensible choice.
-
-**Build-generated navigation pages are kept out of the comment box two different ways, and a wiki needs both.** The pages WikiCommit writes — Type indexes, the view-tree index, the root index, `content/sources/`, `content/overview/` — carry `comments: false` in their own frontmatter, and the plugin skips them. The pages *Quartz* synthesises have no `.md` behind them to stamp: no `index.md` is written at `content/<lang>/`, so the language top (`/ja/` and the like) is a folder page Quartz builds itself, and every `/tags/<tag>` page is the same. Those are excluded by listing `comments` in `layout.byPageType.folder.exclude` and `layout.byPageType.tag.exclude`, next to `wikicommit-banner`, which is there for exactly this reason. Check both are in place before enabling — an older `quartz.config.yaml` predates the `comments` entry in those two lists.
-
-**Do not wire reactions or discussions to `review_status`.** A 👍 means "this was good", not "I read this and had nothing to report"; there is no principled threshold on a running count for a two-valued field; `reviewed` is a claim this wiki makes to its readers and closing a tracking Issue needs write access, which reacting does not; and a discussion only comes into existence once someone reacts, so "pages nobody has looked at yet" would stop being listable.
-
-Two costs, both accepted: this adds a dependency on a `github:quartz-community/*` plugin, and an empty comment box looks empty on every page in a way a report link does not.
+- **It gives a reader somewhere to put a thought they are not yet sure enough about to open an Issue over** — "these two pages don't quite agree" being the one that matters most, since a contradiction between pages generated in different batches is out of reach of every automated check by design (Issue #741).
+- **Three prerequisites are giscus's own** (a public repository, the giscus GitHub App installed, Discussions on with an Announcements-type category) and a missed one **fails at read time, not at build time** — the site builds, the box just does not work. The App step in particular cannot be confirmed from the command line, so never report the setup as complete on the strength of the config alone.
+- **Existing wikis do not get the config block by re-initializing.** `quartz.config.yaml` carries the repository's own `pageTitle`/`baseUrl`/links, so it is never overwritten; the guide says how to copy the block in by hand.
+- **Do not wire reactions or discussions to `review_status`.** A 👍 means "this was good", not "I read this and had nothing to report"; there is no principled threshold on a running count for a two-valued field; `reviewed` is a claim this wiki makes to its readers and closing a tracking Issue needs write access, which reacting does not; and a discussion only comes into existence once someone reacts, so "pages nobody has looked at yet" would stop being listable.
 
 ## Notes
 
@@ -606,7 +783,8 @@ Two costs, both accepted: this adds a dependency on a `github:quartz-community/*
 - Call `init.py`. Do not manually create directories in the agent itself (script delegation pattern)
 - Writing to `.wikicommit/schema/` is done by `init.py`. The agent must not write to it directly, with one narrow exception: step 3's obvious-type judgment (Issue #490, reviving a narrower version of the Issue #286 step Issue #404 removed) may write a new `.wikicommit/schema/<Type>.md` file the user approved there — it only ever adds a file that isn't already there, never edits or overwrites one `init.py` wrote. This is the first and weakest of three type-proposal entry points — it judges from the `theme` sentence alone, before any source has been read, so its approval bar is the strictest of the three; `wikicommit-collect`'s Type Proposal step (Issue #489) judges from candidate titles and search summaries, and `wikicommit-generate` Pass 2b (Issue #315) judges from the full source text. All three skip types that already have a file under `.wikicommit/schema/`, so they are not redundant with each other
 - `init.py` does not fetch the Quartz v5 core (`quartz/` directory) automatically. Adding the git submodule involves network and git operations, so the user must run it manually per the next-steps guidance above
-- The `git add` / `git commit` / `git push` commands shown in the next-steps guidance above are display commands meant for the user to copy and run themselves. The agent must never run them on the user's behalf (writes to `main` and `.wikicommit/schema/` are prohibited for the LLM)
+- **The foundational commit: the agent offers to run it, after asking once (Issue #843).** This bullet used to forbid it outright, on two grounds that were both already broken. `.wikicommit/schema/` is written by `init.py`, which the agent launches, and step 3's obvious-type judgment has the agent write a schema file directly (Issue #490) — so what that rule forbids is *authoring*, not committing what one just authored; forbidding both produces "you may write it, but you may not record that you wrote it". And `main` is not the invariant either. CLAUDE.md's actual rule is that **an LLM's commits go through a PR**: `wikicommit-merge` branches, commits, pushes and squash merges under it, and the design intent behind requiring a PR is the trust ladder — every LLM-*authored* page reaches `main` through a diff a person can review. The foundational commit contains no LLM-authored knowledge (deterministic `init.py` template expansion, plus type files the user approved with Enter), and **no PR route is available to it**: `/wikicommit-init` is often a repository's first commit, so there may be no base branch to open a PR against, and possibly no remote at all. Meanwhile the agent already runs `gh api .../pages` — a setting that publishes the site to the world — directly. So: ask once, default no, run on a yes, and fall back to the printed guidance on a no, on a non-interactive run, or on any failure (Issue #86's remedy is untouched). The offer is skipped outright in one more case, not about permission either: when the repository's `.gitignore` does not carry WikiCommit's patterns (`init.py` prints `GITIGNORE_READY: no (missing: ...)`), because `git add -A` would then reach beyond WikiCommit's own output. **That condition used to read "this run did not write the `.gitignore`"**, which is a different question and got the answer wrong in one of the three cases: `.gitignore` is `update: review` ＝ `always_skip_existing`, so every re-init logs `SKIPPED: .gitignore (already exists)` and the offer was withheld even in a repository WikiCommit made itself, where `-A` is exactly as safe as it was the first time (Issue #873). The same run could also print that `SKIPPED:` line **and** `UPDATED: .gitignore (Quartz ignore patterns)` for the same path, since the Quartz append does not branch on whether the copy happened — a second sign the log was the wrong thing to read. `init.py` now answers the real question from the file's contents (`_root_outputs.missing_gitignore_patterns()`, shared with `print_next_steps.py` so the offer and the printed note can never disagree), and the widening is confined to that third case: a repository WikiCommit was *added* to keeps its own `.gitignore`, and `.wikicommit/.cache/` / `.wikicommit/run/` are WikiCommit-specific paths an unrelated repository has no reason to carry. **That third case needs one guard the first two never did**, and it is a fourth hold-back condition rather than a `.gitignore` question: a repository WikiCommit made itself has been *used* since, so `.wikicommit/entity/` / `.wikicommit/view/` / `.wikicommit/source/` may hold pages `/wikicommit-merge` has not taken yet — tracked paths, so nothing in `.gitignore` keeps `-A` off them. Sweeping those in would put LLM-authored pages on the current branch with no PR, which is the premise this whole bullet rests on being false. A pending "Set up Quartz v5" step above the commit step also holds the offer back — committing ahead of `git submodule add` splits the foundational commit in two — but that one is **deferred, not skipped** (Issue #865): it holds on every first `--quartz` run, and waiting within the session is one continuous action where re-running `/wikicommit-init` is a second invocation the user has to think to make. The agent instead asks the user to finish Quartz setup, re-checks the status, reprints the guidance without that step, and makes the offer against the reprint. The one sub-case that still ends it rather than deferring is `--package-json-skipped`: the re-check is the same `npm install` step 3.d refuses to run against a repository's own `package.json`, and the reprint keeps the setup step regardless of status there. See step 3's final sub-step for the commands and the trailers
+- **`git submodule add` stays with the user, and the reason is not the one above.** The same "the agent already runs `gh api` and `cargo install`" argument would apply, but a submodule changes the repository's structure and fails in its own way, with its own recovery; it is out of scope here rather than settled by it (Issue #843, item 5)
 - The `gh api repos/{owner}/{repo}/pages` call in step 3 only runs when `--quartz-pages` was specified (Issue #335 — `--quartz` alone sets up local build/preview only and never touches GitHub Pages). It is a GitHub *repository setting* change (enabling Pages), not a write to `main` or to the wiki content, so the agent runs it directly — unlike the `git add`/`commit`/`push` commands above, it does not need to be deferred to the user. It is unconditionally best-effort: any failure (missing remote, unauthenticated `gh`, plan restriction, permissions) falls back to printed manual instructions and never aborts `wikicommit-init`
 - The `gh api repos/{owner}/{repo}/actions/permissions/workflow` calls in step 3 (enabling "Allow GitHub Actions to create and approve pull requests") run unconditionally, regardless of `--quartz`/`--quartz-pages` — unlike the Pages setting immediately above, this one backs `review-issue-close-sync.yml`, which every variant generates (Issue #313). It is the same kind of GitHub *repository setting* change as the Pages call, not a write to `main` or the wiki content, so the agent runs it directly and does not defer it to the user. It is unconditionally best-effort (Issue #403 — discovered via a repository where the review-Issue-close auto-merge flow had never once completed successfully; this was one of three compounding causes, alongside the `closed_by` webhook payload and missing `issues: read` permission fixed directly in the `review-issue-close-sync.yml` template): any failure (missing remote, unauthenticated `gh`, insufficient token scope) falls back to printed manual instructions and never aborts `wikicommit-init`. The GET-before-PUT check exists to make the change idempotent and to avoid silently overwriting the unrelated `default_workflow_permissions` field the same API endpoint also controls
 - The `lychee --version` / `cargo install lychee` calls in step 3 only install a local dev tool — they touch neither Git nor `main` — so the agent runs them directly and unconditionally (no prior user confirmation needed, unlike the Quartz Y/n prerequisite). Like the GitHub Pages step, this is best-effort: any failure (`cargo` missing, network unreachable) falls back to the printed manual instructions and never aborts `wikicommit-init`

@@ -159,26 +159,60 @@ _VARIANT_ARGS = {
 }
 
 
-def extract_git_add_paths(*, variant: str) -> list[str]:
-    """print_next_steps.py が出力する「次のステップ」案内から git add 対象パスを抽出する。
-
-    ハードコードした固定リストと突き合わせるのではなく、実際にユーザーへ提示される
-    案内文言そのものをパースすることで、init.py の生成物と案内文が将来ズレた場合
-    （Issue #86 と同種の配布漏れ）にこのテストが追従して検知できる。
-
-    variant: "quartz_pages"（--quartz --quartz-pages）/ "quartz_only"（--quartz のみ）/
-    "none"（--quartz なし）のいずれか。
-    """
+def render_next_steps(*, variant: str) -> str:
     result = subprocess.run(
         [sys.executable, str(PRINT_NEXT_STEPS_PY), *_VARIANT_ARGS[variant]],
         capture_output=True,
         text=True,
         check=True,
     )
-    joined = result.stdout.replace("\\\n", " ")  # 行継続バックスラッシュを解消し1行に結合
-    m = re.search(r"^\s*git add (.+)$", joined, re.MULTILINE)
-    assert m, f"print_next_steps.py の出力に git add コマンドが見つかりません（variant={variant}）"
-    return m.group(1).split()
+    return result.stdout
+
+
+def extract_git_add_paths(*, variant: str) -> list[str]:
+    """print_next_steps.py が案内する**選択的な** git add の対象パスを抽出する。
+
+    ハードコードした固定リストと突き合わせるのではなく、実際にユーザーへ提示される
+    案内文言そのものをパースすることで、init.py の生成物と案内文が将来ズレた場合
+    （Issue #86 と同種の配布漏れ）にこのテストが追従して検知できる。
+
+    既定のコマンドは `git add -A` であり（Issue #842）、これは定義上あらゆる生成物を
+    拾うのでドリフトの検出には使えない。ドリフトが残りうるのは既存リポジトリ向けの
+    フォールバックとして残した列挙の側なので、**そちらを取る** — `-A` の行を拾って
+    しまわないよう、パスを 1 つ以上伴う `git add` 行に限って探す。
+
+    variant: "quartz_pages"（--quartz --quartz-pages）/ "quartz_only"（--quartz のみ）/
+    "none"（--quartz なし）のいずれか。
+    """
+    joined = render_next_steps(variant=variant).replace("\\\n", " ")  # 行継続を解消し1行に結合
+    matches = [
+        m.group(1)
+        for m in re.finditer(r"^\s*git add (?!-A\b)(.+)$", joined, re.MULTILINE)
+        # package-lock.json の別コマンド案内（`in_git_add=False`）は列挙ではない。
+        if m.group(1).split() != ["package-lock.json"]
+    ]
+    assert len(matches) == 1, (
+        f"print_next_steps.py の出力から選択的な git add の列挙を一意に特定できません"
+        f"（variant={variant}, 一致 {len(matches)} 件）"
+    )
+    return matches[0].split()
+
+
+def test_commit_step_defaults_to_git_add_all() -> None:
+    """既定のコマンドが `git add -A` であることを固定する（Issue #842）。
+
+    列挙に戻すと、`.gitmodules` / `quartz` という**誰も生成しないパス**が常に載る
+    ため、submodule をまだ追加していない状態で案内どおり打つと `git add` が
+    pathspec エラーでコマンド全体を中断し（実測: exit 128・staged 0 件）、基盤
+    ファイルのコミットが丸ごと落ちる — Issue #86 がこのステップを足して防いだ状態
+    そのものに戻る。下の `_assert_git_add_guidance_covers_every_generated_file()` は
+    フォールバック側の列挙を検証するので、既定が列挙へ戻ってもそちらは緑のままになる。
+    """
+    for name in ("none", "quartz_only", "quartz_pages"):
+        rendered = render_next_steps(variant=name)
+        assert "\n   git add -A\n" in rendered, (
+            f"既定のコミットコマンドが `git add -A` ではありません（variant={name}）"
+        )
 
 
 def test_full_local_pipeline_commits_foundational_files_and_generated_pages(tmp_path):
@@ -453,10 +487,19 @@ def _assert_git_add_guidance_covers_every_generated_file(repo: Path, paths: list
     MODULE_NOT_FOUND で必ず失敗していた（Issue #556。decameron-wiki / saitama-city-wiki の
     2 例で再現）。非 --quartz 経路にだけ存在した `git status --porcelain == ""` の逆向き
     検証を --quartz 経路にも移植する。
+
+    **検証先は既定のコマンドではなく、既存リポジトリ向けに残したフォールバックの列挙で
+    ある**（Issue #842）。既定は `git add -A` になったので、そちらに対してこの検証を
+    掛けても定義上つねに真であり何も守らない — ドリフトが残りうるのは列挙の側だけなので、
+    `extract_git_add_paths()` はそちらを取る。既定が `-A` であること自体は
+    `test_commit_step_defaults_to_git_add_all()` が別に固定する。
     """
     # .gitmodules / quartz は init.py の生成物ではなくユーザーが `git submodule add` で
     # 手動追加する想定のため（_QUARTZ_MANUAL_SUBMODULE_PATHS）、この時点では存在せず
     # git add に渡すと pathspec エラーでコマンド全体が落ちる。除いて add する。
+    # **この除外が必要であること自体が Issue #842 の出発点だった** — 印字された列挙は
+    # 印字された状態のリポジトリでは verbatim に実行できず、テストはそれを回避して
+    # 通っていた。既定が `-A` になったことで、案内どおり打つ利用者はこの罠を踏まない。
     addable = [rel_path for rel_path in paths if rel_path not in _QUARTZ_MANUAL_SUBMODULE_PATHS]
     git(["add", *addable], repo, check=True)
     git(["commit", "-q", "-m", "chore: add WikiCommit foundational files"], repo, check=True)

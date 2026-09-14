@@ -49,7 +49,7 @@ DISTRIBUTED_SKILLS = [
     "wikicommit-remove", "wikicommit-fix", "wikicommit-status", "wikicommit-collect",
     "wikicommit-search", "wikicommit-ask", "wikicommit-quiz", "wikicommit-synthesize",
     "wikicommit-serve", "wikicommit-translate", "wikicommit-schema-propose",
-    "wikicommit-update",
+    "wikicommit-update", "wikicommit-reconcile",
 ]
 
 # Directories that only exist in this development repository. `docs/` is

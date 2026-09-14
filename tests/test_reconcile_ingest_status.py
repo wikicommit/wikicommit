@@ -25,18 +25,21 @@ def run(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
 def write_ingest_file(root: Path, rel_path: str, source_hash: str, status: str, extra_frontmatter: str = "") -> Path:
     mgmt_file = root / ".wikicommit" / "source" / "path" / rel_path
     mgmt_file.parent.mkdir(parents=True, exist_ok=True)
-    mgmt_file.write_text(
-        textwrap.dedent(f"""\
-            ---
-            source:
-              type: path
-              path: raw/paper.txt
-              hash: {source_hash}
-            status: {status}
-            {extra_frontmatter}---
-            """),
-        encoding="utf-8",
-    )
+    # Dedent *before* interpolating. `textwrap.dedent` strips the longest common
+    # indent across all lines, so a caller-supplied `extra_frontmatter` starting
+    # at column 0 would drop the common prefix to "" and leave the whole block
+    # indented — which is not frontmatter at all, and the test would then pass
+    # because the file parses as having no `status` rather than because the
+    # script decided anything. The parameter had no callers until Issue #874.
+    frontmatter = textwrap.dedent("""\
+        ---
+        source:
+          type: path
+          path: raw/paper.txt
+          hash: {source_hash}
+        status: {status}
+        """).format(source_hash=source_hash, status=status)
+    mgmt_file.write_text(frontmatter + extra_frontmatter + "---\n", encoding="utf-8")
     return mgmt_file
 
 
@@ -163,6 +166,98 @@ def test_multiple_pages_citing_same_hash_all_listed_sorted(tmp_path):
         'generated_pages: [".wikicommit/entity/ja/Organization/companya.md", '
         '".wikicommit/entity/ja/Person/yamada-taro.md"]' in updated
     )
+
+
+# ── ポリシー起点の requeue を黙って取り消さない（Issue #874）──────────────────
+#
+# 新しい requeue Skill は「ポリシー・型テンプレート・生成ルールが変わったので
+# Pass 2c をもう一度通したい」ソースを `status: pending` に戻す。ここを素通り
+# させると、generate が実行の最後にこのスクリプトを呼んだ時点で `generated` へ
+# 書き戻され、**しかも出力は成功系の `RECONCILED:` である**。5 件ガードと
+# 組み合わさると 1 回の実行でキューが壊滅する（50 件戻す → 5 件処理 → 残り 45 件が
+# generated へ戻り、二度と拾われない）。
+#
+# 2 つの起点を守るのは別々の条件であり、片方のコードからもう片方は見えない。
+
+
+def test_a_requeued_source_that_made_pages_is_left_alone(tmp_path):
+    """`generated` / `partial` 起点 — 新しい `generated_pages` の条件が守る。
+
+    ページを作ったソースの hash は定義上そのページの `sources[]` に現れるため、
+    既存の 3 条件だけでは必ず一致してしまう。
+    """
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "sha256:abc123")
+    mgmt_file = write_ingest_file(
+        tmp_path, "paper.md", "sha256:abc123", "pending",
+        extra_frontmatter='generated_pages: [".wikicommit/entity/ja/Person/yamada-taro.md"]\n',
+    )
+
+    result = run([], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "SUMMARY: reconciled=0" in result.stdout
+    assert "status: pending" in mgmt_file.read_text(encoding="utf-8")
+
+
+def test_a_requeued_source_that_made_no_page_is_left_alone(tmp_path):
+    """`excluded` 起点 — 既存のハッシュ条件が守る。
+
+    こちらはスイッチを off に戻す経路そのもの（Issue #874 の本題）であり、
+    ページを 1 枚も作っていない以上その hash はどのページにも現れない。
+    この 1 件が無いと、次に読む人が「除外起点は無防備では」と同じ調査を
+    やり直すことになる。
+    """
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "sha256:other")
+    mgmt_file = write_ingest_file(
+        tmp_path, "excluded-source.md", "sha256:abc123", "pending",
+        extra_frontmatter="generated_pages: []\n",
+    )
+
+    result = run([], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "SUMMARY: reconciled=0" in result.stdout
+    assert "status: pending" in mgmt_file.read_text(encoding="utf-8")
+
+
+def test_a_requeued_source_excluded_after_making_pages_is_left_alone(tmp_path):
+    """3 つ目の requeue 起点 — `last_generated_at` の条件だけが守る。
+
+    ポリシーを厳しくして requeue → generate で全件除外、という一度の往復で到達する。
+    Pass 4 step 7 の `excluded` 分岐は `generated_pages` を書かない一方、以前の
+    ゆるいポリシーで作られたページはディスクに残り（生成経路にページを消す手段は
+    無い）、変わっていない hash を引用し続ける。つまりこのファイルは
+    `generated_pages` の条件も hash 一致の条件も**両方すり抜ける** — その状態で
+    requeue すると、届かなかった generate の末尾でここが `generated` に書き戻し、
+    しかも `RECONCILED:` は成功行なので、キューから消えたことが誰にも見えない。
+    """
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "sha256:abc123")
+    mgmt_file = write_ingest_file(
+        tmp_path, "paper.md", "sha256:abc123", "pending",
+        extra_frontmatter='last_generated_at: "2026-09-01"\ngenerated_pages: []\n',
+    )
+
+    result = run([], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "SUMMARY: reconciled=0" in result.stdout
+    assert "status: pending" in mgmt_file.read_text(encoding="utf-8")
+
+
+def test_the_issue_474_case_still_reconciles(tmp_path):
+    """条件を狭めた結果、元々救おうとしていた形まで落ちていないこと。
+
+    Issue #474 の対象は「ページは書かれたが、この管理ファイル自身の
+    `status` / `generated_pages` が書き戻されなかった」= `generated_pages` が
+    空のまま残ったファイルである。
+    """
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "sha256:abc123")
+    mgmt_file = write_ingest_file(
+        tmp_path, "paper.md", "sha256:abc123", "pending",
+        extra_frontmatter="generated_pages: []\n",
+    )
+
+    result = run([], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "SUMMARY: reconciled=1" in result.stdout
+    assert "status: generated" in mgmt_file.read_text(encoding="utf-8")
 
 
 # ── wikicommit-init template stays in sync with the canonical script (#71〜#75, #231) ──

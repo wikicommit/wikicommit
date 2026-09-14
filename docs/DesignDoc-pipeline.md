@@ -32,15 +32,21 @@
 対応する .wikicommit/source/ パスに管理ファイルが存在するか確認
   ├─ 存在しない → ハッシュを計算して新規作成（status: pending）
   └─ 存在する
-      ├─ ハッシュ一致かつ status が outdated → status を generated にリセット（ソースが元に戻った）
+      ├─ ハッシュ一致かつ status が outdated → status を pending に戻す（ソースが元に戻った。
+      │                                        Pass 1 が拾って作り直す — 出自が戻っただけで
+      │                                        生成をやり直していない状態を generated と呼ばない）
       ├─ ハッシュ一致 → スキップ（変更なし）
       └─ ハッシュ不一致 → hash を更新・status を pending に変更
   ↓
 処理対象の管理ファイルに対してページ生成を実行（§11.6 多段生成アルゴリズム）
   ※ 対象は status が pending / outdated、および partial かつ failed_pages が非空のもの（Issue #567。下記 callout 参照）
+  ※ 非対話実行が保留したソースは status を書き換えないので、この条件にそのまま残る（Issue #910）
   ↓（管理ファイルごとに順次処理）
 source.type に基づいてソースを取得
-  ├─ type: path → ファイル直接読み込み
+  ├─ type: path → 抽出キャッシュ（.wikicommit/.cache/extract-path/）が
+  │              今のファイルの版に対して有効なら抽出せずそれを読む（Issue #885。
+  │              .md/.txt は対象外 — 生ファイルが抽出テキストそのもの）→
+  │              無効ならファイル直接読み込み
   ├─ type: url → 既知JS-shellドメインチェック（ガードB）→ 取得能力チェック（ガードC。下記 callout 参照）→ OK なら独自UA付きでmarkitdown（下記 callout 参照）
   └─ type: wikicommit → 同上（独自UA付きmarkitdown・フェデレーション取得）
   ↓ 抽出 Skill でテキスト変換
@@ -64,7 +70,10 @@ LLM が分析 JSON を生成（§11.6 パス 2）。エンティティごとに 
       ※ theme が空なら theme_mismatch の判定のみ行わない。entity-policy.md が
         空・未設定なら privacy の判定のみ行わない（両方なら従来通り全生成）
   ↓
-分析 JSON の summary を管理ファイル body の ## Summary に書き込む（exclude したエンティティがあれば理由も含める）
+分析 JSON の summary を管理ファイル body の ## Summary に書き込む（ソースの内容だけ）
+  ↓
+exclude したエンティティの理由と coverage_gap_note は ## Generation Notes に分けて書く
+  ※ ## Summary は content/sources/ の公開ページに載る唯一の節であるため（Issue #831）
   ↓（create / update のエンティティのみ）
 [レビューサブエージェント] 各ページをソース元文書と照合
   ├─ PASS → ローカルに書き出し
@@ -81,7 +90,21 @@ LLM が分析 JSON を生成（§11.6 パス 2）。エンティティごとに 
   └─ 全エンティティが生成失敗                  → status: failed
 ```
 
+> **Pass 2c を通る入口は 3 つになった（Issue #874）**: 上のフローと `/wikicommit-generate <path|url>` はどちらも**ソースの内容が変わったときにしか開かない**。ページ 1 枚を決める入力のうち**ポリシー**（`theme` / `entity-policy.md` / `source-policy.md`）・**型テンプレート**・**生成ルール**の 3 種はページ側に識別子を持たず、それらを読むのはいずれも Pass 2c であるため、変更しても既存ページへ届く経路が無かった（`--regenerate` は Pass 2c を実行しない。下記）。
+>
+> 3 つ目の入口が `/wikicommit-reconcile` である。**生成は行わず**、対象ソースの管理ファイルを `status: pending` に戻すだけで、上のフローの既存の収集条件がそれを拾う — `check_ingest_freshness.py` が hash ずれを `status: outdated` に書き換えて同じ収集条件に拾わせるのと同じ形の一般化であり、**`wikicommit-generate` 側は 1 行も変わらない**。
+>
+> とくに**スイッチを off に戻した**場合、既存のどのコマンドでも到達できなかった: `status: excluded` のソースは `/wikicommit-generate <url>` が再フェッチして `HASH_MATCH`（「変更なし」）で止まり、`<path>` は `SKIP` で Pass 1 にすら到達せず、引数なしの収集条件は `excluded` を含まない。**3 経路とも出力は成功系のメッセージである。**
+>
+> requeue されたソースが Pass 1 の通常経路（非 forced-recheck）に入るため、`source.hash` は書き換わらず `HASH_MATCH` になり、**フェッチは丸ごとスキップされる** — ポリシー変更のたびに全 URL を取り直すことにはならない（キャッシュが `.gitignore` 配下である以上、clone 直後やキャッシュ削除後は通常どおり再フェッチになる）。また実行末尾の `reconcile_ingest_status.py` が requeue を黙って取り消さないことは、同スクリプト側の条件が担保する（`docs/DesignDoc-ScriptSpec.md`）。
+>
+> **非対話実行が保留したソースは、この収集条件が拾う（Issue #910）**: ガード A の `LOW_DENSITY:` と Pass 2b の閾値未達は、非対話実行では `status: failed` / declined ではなく**保留**になる — `status` を書き換えず `## Deferred Reason` を書いて次のソースへ進む。したがって上の収集条件に新しい分岐は要らない。**これが「保留は `status` に値を足さずに表現する」（`docs/DesignDoc-data.md` §4.3）の実装上の意味である。**
+>
+> **`ambiguous` だけは収集条件に乗せない**。`status: partial` かつ `failed_pages` が空という組は、Issue #567 以降この条件から外れている。Issue #910 が `ambiguous_entities` を足したことで**区別はできるようになった**が、収集するようにはしていない — 同じソースを読み直しても同じエンティティが同じ `ambiguous: true` を返すだけで、人間が決めた型を次の実行が読める場所はどこにも無いためである。解除は `/wikicommit-reconcile`（Issue #874）が `status: pending` に戻すことで行い、そこから先は上の収集条件が普通に拾う。
+
 #### 再生成モード（`--regenerate`。Issue #578）
+
+> **手順の置き場は `.claude/skills/wikicommit-generate/references/regenerate.md` である（Issue #887）**。`SKILL.md` 側には `--regenerate` が来たときの分岐とそのファイルを読む指示だけが残る — `SKILL.md` は Skill 起動のたびに全文がコンテキストに載る一方、この 19,381 B は通常の `/wikicommit-generate` では 1 バイトも読まれず、逆にこのモードでは `SKILL.md` の 40%（Step 0・Pass 2a/2b/2c・Completion Notice）が読まれない。**Skill は割っていない** — Pass 1 / 3 / 4 は通常生成と共有しており、Issue #578 が新規 Skill にしなかった論拠は変わらない。ファイルが読めない場合は**停止して報告する**（改稿の材料が無く、読み飛ばしが静かな失敗にならない）。本節の以下の記述はそのファイルの内容の正本である。
 
 既に生成済みの Wiki ページを、現在のスキーマテンプレート・生成ルールで作り直すモード。上記の通常フローがソース起点（ソース管理ファイルの `status` が `pending`/`outdated`、および `partial` かつ `failed_pages` が非空のものだけを処理し、`generated` は `SKIP` する）である以上、「ソースは変わっていないが生成ルールが変わったので作り直したい」という要求は通常フローでは表現できない。
 
@@ -102,6 +125,9 @@ LLM が分析 JSON を生成（§11.6 パス 2）。エンティティごとに 
   │                          （管理ファイルは source.url の実走査で特定する。
   │                            add_source.py --check-hash は管理ファイル側の
   │                            現在の hash と比較するため、この用途には使わない）
+  ├─ type: path → 抽出キャッシュ（.wikicommit/.cache/extract-path/）が有効なら
+  │              抽出をやり直さない（Issue #885。--regenerate はこのモードが
+  │              最も効く経路の 1 つ — ソースは変わっておらず、変わったのは生成ルールである）
   └─ 再取得結果の hash がページ記録の hash と食い違う
         → そのページは再生成しない。既存の outdated フロー（/wikicommit-generate <path|url>）へ誘導
   ↓
@@ -176,6 +202,27 @@ rebuild_index.py（title が変わりうるため）
 > **`gh` 経由の取得経路は作らない**。本 Issue の対象は「今の経路が黙って壊れること」に限り、`gh` 経路を作ることは Issue / PR の取り込みを**機能として設計する**ことにあたる（Issue #715 が明示的にスコープ外とした範囲）。未解決の論点が 3 つあり、いずれも別の設計を要する: (1) **認証の前提** — `gh auth` が通らない環境では使えず、取得の可否が利用者ごとに変わる。`add_source.py` は `.wikicommit/scripts/` からの import すら持たない自己完結スクリプトであり、外部 CLI への依存はその設計とも噛み合わない、(2) **hash の意味** — Issue はコメントが増え続ける living resource であり、hash が毎回変わって `outdated` が立ち続ける（`docs/DesignDoc-skills.md` Pass 2a は既に living resource を source-as-entity から除外している）。Closed / Merged に限れば実質凍結されるが、その線を引くこと自体が設計判断である、(3) **議論は覆る** — コメントには撤回された案・誤った前提が混ざっており、そのままページ化すると Pass 4 が「ソースに書いてある」として通してしまう。Issue #553 / #564 が繰り返し確立した「消費者と同時に足す・受け皿だけ先に作らない」に従い、取り込みを機能として設計する段で扱う。なお `source.type` は仮に経路を作るとしても `type: url` のままが正しい（Issue #352 が確立した「`source.type` はコンテンツの種類ではなくソースをどう識別するかで分ける」という軸に従えば、取得経路の分岐は `source.type` に出さない）。
 >
 > **`wikicommit-collect` の候補提示には注記を出さない**。同 Skill は候補 1 件あたりの subprocess 呼び出し数と一覧の可読性を明示的に予算として管理しており（`check-domain` とライセンス照会の 2 回）、3 回目を足すことになる。そしてこの事実は候補の**可否を変えない** — `check-domain` と違って候補を落とせないため、フィルタとしては何もしない。人間が選んだ候補は Step 8 が `wikicommit-generate` Step 0 経由で登録するので、通知はそこで確実に届く。Issue #646 が ShareAlike を候補提示まで前倒しした先例はあるが、あちらの帰結は**公開後は取り返しがつかない法的義務**であるのに対し、落ちたコメントスレッドはそうではない — 登録後に気づいてもソースを外せば済む。
+>
+> **抽出テキストの置き場は、ソース種別で 2 つに分かれるが役目は 1 つである（Issue #885）**: `type: url` の抽出結果は Issue #278 以降 `.wikicommit/.cache/ingest-fetch/` に残り、同じソースを再処理するとき再フェッチの代わりに読まれる。**`type: path` にはこれが無く、再処理のたびに抽出をやり直していた** — しかも高いのはこちらである（スキャン PDF の OCR・EPUB 抽出は、ネットワーク 1 往復より重く、専用 Skill のインストールを要する）。非対称に理由は書かれていなかった。
+>
+> 現在は `.wikicommit/.cache/extract-path/` が同じ役目を持つ。**「抽出テキスト」という 1 つの概念に対して木が 2 つある**ことになるが、これは統合しない:
+>
+> | | 木 | 相対パスの基準 | 末尾の `.md` |
+> |---|---|---|---|
+> | `type: url` / `wikicommit` | `.wikicommit/.cache/ingest-fetch/` | `.wikicommit/source/url/` | 落として付け直す |
+> | `type: path` | `.wikicommit/.cache/extract-path/` | `.wikicommit/source/path/` | **そのまま残す** |
+>
+> 1 つの木に寄せると**衝突しうる** — `url` 側の相対パスは `example.com/article` の形なので、リポジトリに `example.com/article` というファイルが実在すれば同じ位置を指す。既存の URL キャッシュを一斉失効させる（＝全 URL ソースの再フェッチ）代償を払ってまで統合する利得が無いため、木を分ける側を採った（Issue #583 が `.wikicommit/.cache/ingest-fetch/` の改名を同じ理由で見送ったのと同じ計算）。
+>
+> **末尾の `.md` を残すのは、Issue #573 の衝突回避をそのまま継ぐためである**。管理ファイル名は元の拡張子を保持して `.md` を付す形（`raw/paper.pdf.md`）なので、そのまま使えば `paper.pdf` と `paper.docx` が別のキャッシュに解決する。`with_suffix(".md")` で付け直すと、あの Issue が塞いだ silent wrong-source がキャッシュの層で再び開く。
+>
+> **鮮度の判定の向きも 2 つで違う**。`type: url` の `source.hash` は抽出テキストのハッシュなので、キャッシュ自身をハッシュして突き合わせられる。`type: path` のそれは**生ファイル**のハッシュ（`check_ingest_freshness.py` が現物と比較する正本）なので、キャッシュをハッシュしても比べる相手がいない — 代わりに生ファイル側で判定する（現在の SHA-256 が `source.hash` と一致し、かつキャッシュが在れば有効）。**したがってキャッシュを `--write-hash` に渡してはならない**: 意味の違うハッシュで生ファイルのハッシュを上書きし、そのソースの鮮度検出が以後「変わっていない」と誤って報告し続ける。`add_source.py` の `--check-path-cache` は read-only であり `source.hash` に触れない。
+>
+> **`.md` / `.txt` は意図的にキャッシュしない**。そこでは生ファイルが抽出テキストそのものなので、キャッシュはバイト単位の第 2 の写しになる — ソースが最も大きくなる分類（小説 1 冊分の `.txt`）でディスクを倍にしながら、何の限界も解消しない（キャッシュを読めるものは元ファイルも読める）。読み手の側でも損が無い: clean checkout や別マシンにはどのソースのキャッシュも無いため、「このソースにはキャッシュが無い」分岐は元から必要である。
+>
+> **読み手は `resolve_source_cache_path.py` に一本化する**（`--type path`）。キャッシュを書いても読む主体が居なければ、Issue #553 が禁じた「受け皿だけ先に配る」形になる。`/wikicommit-ask --include-source`（Issue #470）は `type: path` のソースについて**生ファイルを Read していた**ため、`.docx`/`.pptx`/`.xlsx`/`.epub`/スキャン画像では読めないテキストになる、という既知の限界を自ら明記していた — キャッシュがあればそこが解消する（無いときは従来どおりの限界に戻る）。
+>
+> **引き継ぐ限界は 2 つで、どちらも新設ではない**。抽出**ツールの版**が変わってもキャッシュは失効しない（`type: url` 側が Issue #278 以来持つ性質と同一）。そしてキャッシュは `.gitignore` 配下なのでマシンごとであり、clone 直後は 1 回ずつ抽出し直す。
 
 ### 6.2 Merge（`/wikicommit-merge`）
 
@@ -803,6 +850,18 @@ Reviewed-by:    Taro Yamada <taro@users.noreply.github.com>    # レビュー追
 | 内容 | 合成ページ（view ページ）と grounding ページ群の照合（裏付けの無い主張の検出・grounding ページ同士の食い違いの報告。Issue #674）、および `kind` の `Boundary` 検査（Issue #675 — 検査が無ければ `kind` は誰も見ないラベルになって drift する） | `wikicommit-synthesize` Step 5.5 のレビューサブエージェント（同上） |
 
 > **検査の内容は `.wikicommit/review-rules.md` にある（Issue #752）**: 上表の「内容」2 行が指す検査項目は、以前は 3 つの SKILL.md に書き分けられており、**既に食い違っていた**。現在は 1 ファイルにまとまり、「全経路共通の規律」と「経路ごとの差分」が構造的に分かれている。**検査の内容自体は変わっていない** — 移動と食い違いの解消であり、規律を足しも引きもしていない（3 箇所の食い違いを揃えた分だけ、弱い側が強い側に揃う）。段取り（リトライ・`failed_pages`・書き出し・`status` 更新）は各 Skill に残っている。
+>
+> **そして 1 ファイルに集めたことで、同じファイルの中の 2 つの規律が衝突していることが見えた（Issue #832）**: 「ソースが自分の主題として述べた、別文書についての事実」に対し、check 1（claim support。「evidence の literal text がそう述べているか」）と check 4（cited documents the page does not hold。「日付・タイトルを持つ別文書が evidence の中に無いなら FAIL」）が**逆の判定を下していた**。`dev/pilot-ai-driven-dev-wiki-round6.md` では 1 つのソースが 2 ページを同時に生み、両方が「Martin Fowler が 2006 年に semantic diffusion を造語した」という同じ 1 文を含んだため、**同一実行・同一 evidence で PASS と 2 ラウンド連続 FAIL が並んだ**。結果として日付付きの記述は片方のページにだけ残る。**これは移動によって生じた欠陥ではなく、移動によって観測可能になった既存の欠陥である**（Issue #752 が解消したのは 3 ファイル間の食い違いであり、1 ファイル内の衝突はそのまま残っていた）。
+>
+> **決着は「主題性」の境界を check 4 に書くこと**（Issue #832 の案 A）。ソース自身がその事実を**自分の主題として**述べているなら、それは「別文書についての伝聞」ではなく「このソースが述べた事実」であり check 1 の範囲である。check 4 が対象とするのは、ソースが**別のことを書きながら 1 度名前を出しただけ**（passing mention）の文書に限る。**この軸は新設ではない** — check 7（ソース間の食い違い）が既に「その事実の主題を自分の主題として扱っている側を採る」として使っており、同じテストをソース間ではなくソース内部に当てるだけである。しかも check 4 は元から "a source's own **passing mention** of a different document" と条件の片側を書いており、足したのはその反対側にあたる。**例外が覆うのはページがその事実を「述べる」場合に限る** — 事実の出どころとしてタイトル・URL・日付付きの投稿を**引用している**場合は、evidence がその事実を主題として扱っていても引き続き check 4 の対象である（そうしないと、check 4 の 1 文目が名指ししている "a body claim cites, names, or clearly implies a specific document" の "cites / names" 側まで例外が飲み込み、Issue #473 が塞いだ穴が evidence の構成違いで再び開く）。
+>
+> **境界は片側だけに書かない**（Issue #550 が `granularity` について示した非対称の回避）。check 1 側にも対の記述を置き、どちらの check がどちらの半分を持つかを両方から読めるようにしてある。
+>
+> **Issue #473 が踏んだ実例は引き続き FAIL になる**（Issue #832 の検討事項 2）。`en/Person/simon-willison.md` が「2025年3月19日の投稿」を引用しながら手元には後日の記事しか無かったケースでは、その投稿は後日の記事が**言及しただけ**の文書であり、記事の主題ではない。判別が付かない場合は passing mention として FAIL に倒す旨も明記した（境界が緩む側へ倒れないため）。
+>
+> **採らなかった案**: 日付を伴う造語・出版イベントを一律 FAIL にする（案 B。ソースが自分の主題として明示している事実を Wiki が書けなくなり、まさにその出典を扱うページに書くことが残らない）／判定の分裂そのものを検出する（案 C。命題は正規名を持たず claim の同一性判定が成立しない — Issue #673 が `custom/Claim` を退けたのと同じ壁。検出できてもどちらが正しいかは言えない）／孫引き元のソースを登録して運用で解く（案 D。本件には効くが、登録の有無で規律の適用結果が変わってよいわけではない）。
+>
+> **代償**: この種の主張は今後 PASS になるため、`MISSING_SOURCE` の登録候補ロールアップ（Issue #722）に挙がらなくなる。今回 `martinfowler.com` が候補として浮上したのはこの FAIL のおかげだった。**「FAIL に至らない観察」を挙げる器は別途要る**という論点として残す。判定自体も LLM に委ねる非決定論的なものであり、分裂を減らすが無くしはしない — それでも「同じ入力に 2 つの規律が逆の答えを出す」状態よりは良い、という判断である。**`rules_version` は 1 → 2 に上げた**（記録側の `skill_blob` は自動で変わるが、こちらは手で上げないと記録が嘘をつく。Issue #752）。
 >
 > **判定が記録されるようになった（Issue #750）**: 上表の「内容」2 行が掛ける検査は、以前はどのページについても結果が残らなかった — Pass 4 の返す JSON は「ディスクにも Git にも残さない」と定義されており（`docs/DesignDoc-data.md` §4.6）、**1 回目で通ったページと 2 回目で通ったページがディスク上で同一に見えた**。残るのは `failed_pages`（＝一度も書き出されなかったページ）だけで、これは「レビューが機能した記録」ではなく「レビューが救えなかった記録」である。
 >

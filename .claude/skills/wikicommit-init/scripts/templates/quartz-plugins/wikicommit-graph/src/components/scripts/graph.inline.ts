@@ -1,8 +1,9 @@
 // @ts-nocheck
 // Fork of github:quartz-community/graph's graph.inline.ts (Issue #584).
 //
-// The upstream file is left alone apart from four insertions, all marked
-// "WikiCommit:" below:
+// The upstream file is left alone apart from the insertions marked
+// "WikiCommit:" below. The first four leave the D3 force simulation and the
+// PixiJS drawing code untouched; (6) is the first that does not.
 //   1. filter config read out of dataset.cfg alongside the upstream keys
 //   2. the filter applied to `neighbourhood` once it is settled and before
 //      `nodes` is built — the single chokepoint downstream of which node
@@ -10,12 +11,18 @@
 //      drawing all fall into place on their own
 //   3. the control bar, built here rather than in the component because the
 //      option lists come from contentIndex
-//   4. .global-graph-controls added to the click-outside exclusion list, so
-//      operating the bar does not dismiss the modal
+//   4. .global-graph-controls and .global-graph-inner added to the
+//      click-outside exclusion list, so operating the bar — or clicking the
+//      padding between it and the graph — does not dismiss the modal
+//   5. a legend in the bar, so the shapes and colours below mean something
+//   6. node shape by kind — sources draw as squares (Issue #841). This one is
+//      in the drawing code, which the other five are not: the wiki gained a
+//      third kind of node that upstream has no concept of, and there is no
+//      other layer where a node can be told apart from the node next to it.
 //
-// The D3 force simulation and the PixiJS drawing code are untouched.
+// The D3 force simulation is untouched.
 import { controlsSignature } from "../../util/controlBar";
-import { collectFacets, filterNodes } from "../../util/nodeFilter";
+import { classifyNode, collectFacets, filterNodes } from "../../util/nodeFilter";
 
 import {
   removeAllChildren,
@@ -154,7 +161,11 @@ import {
 
       var select = document.createElement("select");
       select.multiple = true;
-      select.size = Math.min(Math.max(values.length, 2), 4);
+      // The bar is laid out by flow inside .global-graph-inner and grows to fit
+      // (Issue #838), so this cap is now about how tall a list is worth being
+      // rather than about what the old 10vh strip could hold. A wiki with twenty
+      // types was being filtered through a four-row window.
+      select.size = Math.min(Math.max(values.length, 2), 8);
       for (var i = 0; i < values.length; i++) {
         var option = document.createElement("option");
         option.value = values[i];
@@ -192,23 +203,39 @@ import {
       };
     }
 
+    // A two-state button, not a checkbox (Issue #840). A bare
+    // `<input type="checkbox">` renders as the engine's own control, and the
+    // only difference between its states is the check glyph — at the bar's
+    // 0.8rem, against a surface the modal only just gained, readers could not
+    // tell which way a toggle was set. `aria-pressed` carries the state, the
+    // fill carries it visually, and a native <button> keeps Tab / Space / Enter
+    // and the focus ring without re-implementing any of them.
+    //
+    // The `{field, sync}` contract is unchanged, so the write-back path that
+    // updates the bar in place rather than rebuilding it (Issue #651) does not
+    // know this changed.
     function buildToggle(labelText, checked, onChange) {
-      var wrapper = document.createElement("label");
+      var wrapper = document.createElement("span");
       wrapper.className = "global-graph-controls__field global-graph-controls__field--inline";
-      var input = document.createElement("input");
-      input.type = "checkbox";
-      input.checked = checked;
-      input.addEventListener("change", function () {
-        onChange(input.checked);
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "global-graph-controls__toggle";
+      button.textContent = labelText;
+      var pressed = checked;
+      function apply(next) {
+        pressed = next;
+        button.setAttribute("aria-pressed", next ? "true" : "false");
+      }
+      apply(checked);
+      button.addEventListener("click", function () {
+        apply(!pressed);
+        onChange(pressed);
       });
-      wrapper.appendChild(input);
-      var caption = document.createElement("span");
-      caption.textContent = labelText;
-      wrapper.appendChild(caption);
+      wrapper.appendChild(button);
       return {
         field: wrapper,
         sync: function (checked2) {
-          input.checked = checked2;
+          apply(checked2);
         },
       };
     }
@@ -259,6 +286,53 @@ import {
           if (maxInput.value !== nextMax) maxInput.value = nextMax;
         },
       };
+    }
+
+    // WikiCommit (5): the legend (Issue #841). Static — it has no state to sync
+    // and nothing to write back — so it is built like any other field and then
+    // left alone. Both halves are shown because they are read together: a node
+    // says what it is by its shape and where you have been by its colour, and
+    // neither is guessable from the graph.
+    function buildLegend(labels) {
+      var wrapper = document.createElement("div");
+      wrapper.className = "global-graph-controls__field global-graph-controls__legend";
+
+      var caption = document.createElement("span");
+      caption.textContent = labels.legend || "Legend";
+      wrapper.appendChild(caption);
+
+      var items = document.createElement("div");
+      items.className = "global-graph-controls__legend-items";
+
+      function addItem(modifier, text) {
+        var item = document.createElement("span");
+        item.className = "global-graph-controls__legend-item";
+        var swatch = document.createElement("span");
+        swatch.className =
+          "global-graph-controls__legend-swatch global-graph-controls__legend-swatch--" + modifier;
+        // The swatches repeat what the graph already shows, so a screen reader
+        // reading "square Sources" would be reading decoration.
+        swatch.setAttribute("aria-hidden", "true");
+        item.appendChild(swatch);
+        item.appendChild(document.createTextNode(text));
+        items.appendChild(item);
+      }
+
+      addItem("entity", labels.legendPages || "Pages");
+      addItem("tag", labels.tags || "Tags");
+      addItem("source", labels.sources || "Sources");
+
+      var wrap = document.createElement("span");
+      wrap.className = "global-graph-controls__legend-break";
+      wrap.setAttribute("aria-hidden", "true");
+      items.appendChild(wrap);
+
+      addItem("current", labels.legendCurrent || "Current page");
+      addItem("visited", labels.legendVisited || "Visited");
+      addItem("unvisited", labels.legendUnvisited || "Not visited");
+
+      wrapper.appendChild(items);
+      return wrapper;
     }
 
     function renderControls(graphContainer, config, facets) {
@@ -398,6 +472,8 @@ import {
       });
       bar.appendChild(reset);
 
+      bar.appendChild(buildLegend(labels));
+
       controlBarStates.set(bar, {
         signature: signature,
         graphContainer: graphContainer,
@@ -454,9 +530,6 @@ import {
         console.error("[Graph] Error loading data:", err);
         return function () {};
       }
-
-      var width = graph.offsetWidth;
-      var height = Math.max(graph.offsetHeight, 250);
 
       var links = [];
       var allTags = [];
@@ -538,6 +611,18 @@ import {
         });
         renderControls(graph, config, collectFacets(unfiltered));
       }
+
+      // Measured *after* the bar is built, not before (Issue #838). The graph
+      // is a flex item that takes whatever the bar leaves, so its height now
+      // depends on the bar's — and on the first open of the modal the bar is
+      // still the empty placeholder the component rendered, which
+      // `.global-graph-controls:empty { display: none }` collapses to nothing.
+      // Measuring there hands PixiJS the full 80vh, and the canvas then hangs
+      // out the bottom of the container by exactly the bar's height once
+      // renderControls() fills it. Nothing between here and the previous
+      // position reads either value.
+      var width = graph.offsetWidth;
+      var height = Math.max(graph.offsetHeight, 250);
 
       var nodes = [];
       var nodeMap = new Map();
@@ -650,7 +735,7 @@ import {
         var isCurrent = d.id === slug;
         if (isCurrent) {
           return secondary;
-        } else if (visited.has(d.id) || d.id.startsWith("tags/")) {
+        } else if (visited.has(d.id) || classifyNode(d.id).kind === "tag") {
           return tertiary;
         } else {
           return gray;
@@ -741,7 +826,17 @@ import {
       for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         var nodeId = node.id;
-        var isTagNode = nodeId.startsWith("tags/");
+        // WikiCommit (6): shape carries the kind, colour carries the visit
+        // state (Issue #841). Upstream already drew tags as a hollow circle, so
+        // this extends that split rather than introducing one: sources become a
+        // square and everything else stays a filled circle. Colour was not
+        // available for this — the theme has two accent colours plus grey, all
+        // three already spoken for by current/visited/unvisited, and in dark
+        // mode the two accents are near neighbours. Shape also survives colour
+        // blindness, which a hue scale would not.
+        var nodeKind = classifyNode(nodeId).kind;
+        var isTagNode = nodeKind === "tag";
+        var isSourceNode = nodeKind === "source";
         var radius = nodeRadius(node);
         var color = nodeColor(node);
 
@@ -760,7 +855,15 @@ import {
         labelsContainer.addChild(label);
 
         var gfx = new PIXI.Graphics();
-        gfx.circle(0, 0, radius);
+        if (isSourceNode) {
+          // 0.9 rather than 1: a square whose half-side equals the radius reads
+          // noticeably heavier than the circle beside it, because it covers
+          // 4/pi times the area. This lands the two at roughly equal ink.
+          var half = radius * 0.9;
+          gfx.rect(-half, -half, half * 2, half * 2);
+        } else {
+          gfx.circle(0, 0, radius);
+        }
         gfx.fill({ color: isTagNode ? light : color });
         if (isTagNode) {
           gfx.stroke({ width: 2, color: tertiary });
@@ -1139,9 +1242,14 @@ import {
           // WikiCommit (4): the control bar is a sibling of
           // .global-graph-container (it has to be — renderGraph() empties that
           // container on every render), so without this every click on the bar
-          // counts as a click outside and dismisses the modal.
+          // counts as a click outside and dismisses the modal. The wrapper that
+          // holds the two goes in the list for the same reason (Issue #838):
+          // the gap between the bar and the graph is inside the modal, and
+          // closing it because someone clicked a few pixels of padding would be
+          // the same surprise one click short.
           var inControls = e.target.closest(".global-graph-controls");
-          if (!inContainer && !inIcon && !inControls) {
+          var inInner = e.target.closest(".global-graph-inner");
+          if (!inContainer && !inIcon && !inControls && !inInner) {
             hideGlobalGraph();
           }
         }

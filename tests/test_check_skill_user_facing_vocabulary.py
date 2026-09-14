@@ -197,9 +197,10 @@ def test_unterminated_fence_body_is_not_scanned(tmp_path):
 
 
 def test_non_wikicommit_skills_are_not_scanned(tmp_path):
-    """implement-issue / review-and-merge are developer tools; their reader is
-    the developer running them."""
-    write_skill_md(tmp_path, "implement-issue", """
+    """The scope is a `wikicommit-*` prefix match, not a list of exclusions. A
+    Skill outside the prefix is a developer tool whose reader is the developer
+    running it."""
+    write_skill_md(tmp_path, "not-a-wikicommit-skill", """
         ```
         Implemented Issue #123 in Step 4.
         ```
@@ -216,3 +217,53 @@ def test_repository_skills_are_clean():
     result = run(cwd=repo_root)
     assert result.returncode == 0, result.stdout
     assert "errors=0" in result.stdout
+
+
+# ── Sibling instruction files (Issue #887) ───────────────────────────────────
+
+def write_sibling(root: Path, skill_name: str, rel: str, body: str) -> Path:
+    path = root / ".claude" / "skills" / skill_name / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(textwrap.dedent(body), encoding="utf-8")
+    return path
+
+
+def test_a_sibling_instruction_file_is_scanned(tmp_path):
+    """A mode's procedure moved out of SKILL.md must not leave this check.
+
+    Issue #887 moved Regeneration Mode into `references/regenerate.md`; scanning only
+    SKILL.md silently took two fenced blocks out of scope, so a violation
+    written there would ship unflagged.
+    """
+    write_skill_md(tmp_path, "wikicommit-generate", """
+        Nothing user-facing here.
+    """)
+    write_sibling(tmp_path, "wikicommit-generate", "regenerate.md", """
+        ```
+        Rebuilt in Step 4.
+        ```
+    """)
+    result = run(cwd=tmp_path)
+    assert result.returncode == 1
+    assert "regenerate.md:" in result.stdout
+    assert "internal step number" in result.stdout
+
+
+def test_payload_and_template_md_are_not_scanned(tmp_path):
+    """`CHANGELOG.md` / `changelog/` ship to an installed wiki and
+    `scripts/templates/` is expanded there; neither is instructions read from
+    here, so both stay out of scope however wide the glob gets."""
+    write_skill_md(tmp_path, "wikicommit-init", """
+        Nothing user-facing here.
+    """)
+    violation = """
+        ```
+        Added in Step 9 (Issue #123).
+        ```
+    """
+    write_sibling(tmp_path, "wikicommit-init", "CHANGELOG.md", violation)
+    write_sibling(tmp_path, "wikicommit-init", "changelog/0.4.0.md", violation)
+    write_sibling(tmp_path, "wikicommit-init", "scripts/templates/review-rules.md", violation)
+    result = run(cwd=tmp_path)
+    assert result.returncode == 0
+    assert "SUMMARY: blocks=0, exceptions=0, errors=0" in result.stdout

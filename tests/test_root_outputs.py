@@ -179,6 +179,11 @@ EXPECTED_UPDATE_POLICIES = {
     "repair-plugin-builds.cjs": ("overwrite", "pure build script"),
     "install-local-plugins.cjs": ("overwrite", "pure build script — the Issue #556 file"),
     ".wikicommit/review-rules.md": ("overwrite", "WikiCommit's review discipline, not the user's"),
+    ".wikicommit/schema-authoring.md": (
+        "overwrite",
+        "WikiCommit's procedure for writing a type file, not the user's",
+    ),
+    ".wikicommit/guides": ("overwrite", "WikiCommit's how-to documents, not the user's prose"),
     # The user holds values, prose or local adjustments here; init must never clobber it.
     ".wikicommit/config.yml": ("review", "holds theme/targets the user set"),
     "quartz.config.yaml": ("review", "pageTitle and footer links are per-repository"),
@@ -293,3 +298,120 @@ def test_quartz_plugin_dev_artifacts_are_recognized_here():
     assert is_dev(Path("wikicommit-banner/src/components/WikiCommitBanner.test.tsx"))
     assert not is_dev(Path("wikicommit-banner/dist/index.js"))
     assert not is_dev(Path("wikicommit-banner/src/index.ts"))
+
+
+# ── .gitignore の包含判定（Issue #873）──────────────────────────────────────────
+
+
+def test_the_required_patterns_come_from_the_templates():
+    """要求集合はテンプレートから読む — ここに写しを持たない。
+
+    ハードコードすると、テンプレートがパターンを得たとき（`.wikicommit/run/` は
+    Issue #790）に判定だけが古いまま残り、ちょうどそのパターンを欠いたリポジトリを
+    ready と報告する。
+    """
+    base = _root_outputs.required_gitignore_patterns("none")
+    assert "node_modules/" in base
+    assert ".wikicommit/.cache/" in base
+    assert ".wikicommit/run/" in base
+    # コメント行・空行は落ちる（`check_distribution_freshness.py` の
+    # `_meaningful_lines()` と同じ簡約）。
+    assert not any(p.startswith("#") or not p for p in base)
+
+
+def test_quartz_variants_also_require_the_build_artifacts():
+    """variant で要求集合が変わる。揃っていなければ `-A` がビルド生成物を丸ごと
+    stage するため、基本の 3 つだけを見る判定は Quartz リポジトリでちょうど最も
+    大きいものを取りこぼす。"""
+    base = set(_root_outputs.required_gitignore_patterns("none"))
+    for variant in ("quartz_only", "quartz_pages"):
+        quartz = set(_root_outputs.required_gitignore_patterns(variant))
+        assert base < quartz
+        assert {"content/", ".quartz-cache/", "quartz/public/"} <= quartz
+
+
+def test_a_gitignore_holding_every_pattern_reports_nothing_missing(tmp_path):
+    template = (
+        _root_outputs.TEMPLATES_DIR / ".gitignore"
+    ).read_text(encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(template, encoding="utf-8")
+    assert _root_outputs.missing_gitignore_patterns(tmp_path, "none") == []
+
+
+def test_an_unrelated_gitignore_still_reports_the_wikicommit_paths(tmp_path):
+    """これが「既存リポジトリの未追跡物を巻き込む経路は増えない」の実体である。
+
+    `.wikicommit/.cache/` と `.wikicommit/run/` は WikiCommit 固有のパスであり、
+    無関係なリポジトリの `.gitignore` がこれらを含むことは事実上ない。
+    """
+    (tmp_path / ".gitignore").write_text(
+        "# my project\n*.log\nbuild/\nnode_modules/\n", encoding="utf-8"
+    )
+    missing = _root_outputs.missing_gitignore_patterns(tmp_path, "none")
+    assert ".wikicommit/.cache/" in missing
+    assert ".wikicommit/run/" in missing
+    # 既に持っているものは挙げない — 名指しがそのまま対処になるため。
+    assert "node_modules/" not in missing
+
+
+def test_a_missing_gitignore_reports_every_pattern(tmp_path):
+    """ファイルが無いのは「1 つも ignore されていない」であって ready ではない。"""
+    missing = _root_outputs.missing_gitignore_patterns(tmp_path, "none")
+    assert missing == _root_outputs.required_gitignore_patterns("none")
+
+
+def test_the_missing_list_keeps_template_order(tmp_path):
+    """報告は対処の手順でもあるため、テンプレートが書く順で並べる。"""
+    (tmp_path / ".gitignore").write_text("", encoding="utf-8")
+    required = _root_outputs.required_gitignore_patterns("quartz_pages")
+    assert _root_outputs.missing_gitignore_patterns(tmp_path, "quartz_pages") == required
+
+
+def test_an_unknown_variant_is_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        _root_outputs.required_gitignore_patterns("quartz")
+
+
+def test_an_unreadable_template_fails_closed_rather_than_reporting_nothing_missing(tmp_path):
+    """A missing template must not read as "this repository has every pattern".
+
+    The required set is what `missing_gitignore_patterns()` subtracts from; an empty one
+    makes it return `[]`, which both callers read as ready — so a broken install would turn
+    the guard into an unconditional yes and `git add -A` would be offered against a
+    repository nothing is ignored in. A fresh init fails loudly on a missing template
+    (`copy_file()` raises), but a re-init never opens it: `.gitignore` is
+    `always_skip_existing`, so the copy returns before the source is read.
+    """
+    empty_templates = tmp_path / "templates"
+    empty_templates.mkdir()
+    with pytest.raises(OSError):
+        _root_outputs.required_gitignore_patterns("none", templates_dir=empty_templates)
+    with pytest.raises(OSError):
+        _root_outputs.missing_gitignore_patterns(tmp_path, "none", templates_dir=empty_templates)
+
+
+def test_the_quartz_template_is_required_too_rather_than_skipped_when_absent(tmp_path):
+    """Same fail-closed rule for the variant-dependent half.
+
+    Swallowing this one would silently drop `content/` / `.quartz-cache/` / `quartz/public/`
+    from the required set — exactly the patterns whose absence lets `-A` stage a whole build
+    output tree.
+    """
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    assert _root_outputs.required_gitignore_patterns("none", templates_dir=templates) == ["node_modules/"]
+    with pytest.raises(OSError):
+        _root_outputs.required_gitignore_patterns("quartz_only", templates_dir=templates)
+
+
+def test_print_next_steps_is_told_which_repository_to_read():
+    """`--repo-root` has to exist on both scripts, and SKILL.md has to pass it on.
+
+    The note under the printed `git add -A` reads the repository's `.gitignore`, and so does
+    the `GITIGNORE_READY:` line the offer keys on. Pointed at different roots the two answer
+    about different files, which is the disagreement sharing
+    `missing_gitignore_patterns()` was meant to rule out.
+    """
+    assert '"--repo-root"' in (SCRIPTS_DIR / "print_next_steps.py").read_text(encoding="utf-8")
+    assert "[--repo-root <path>]" in SKILL_MD.read_text(encoding="utf-8")

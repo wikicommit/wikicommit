@@ -189,12 +189,41 @@ REGENERATE_PASSES = {
 # is fixed rather than configurable: the point of the check is that the script
 # resolves the location itself, and a caller that could also name the file could
 # name one it had just written.
-PASS_FILE_DIR = "passes"
+#
+# `references/` rather than a directory of this script's own invention (Issue
+# #911): that is where the Skill anatomy puts material read on demand, it is
+# already where this Skill's other instruction files live, and keeping pass files
+# there means one directory holds everything `SKILL.md` points at rather than two
+# that a reader has to learn to tell apart.
+#
+# **Do not move it again on the grounds that nothing sends a `--token` yet.** That
+# was the stated reason in Issue #911 and it was wrong (Issue #925): an installed
+# wiki refreshes `.claude/skills/` and `.wikicommit/scripts/` with two different
+# commands, so it can hold Skills that send a token next to a script still looking
+# in the old directory — and that combination stamps `token: missing` on passes
+# that ran exactly as instructed. Nor was that move safe for some other reason:
+# installed wikis already existed when it happened, carrying the release whose
+# scripts look in the old directory. What limits the damage is only that every
+# such repository moves forward through a procedure that refreshes both halves,
+# which makes the skew a window rather than a state — and a window a human has to
+# close, since the Skill that refreshes the scripts opens a pull request and does
+# not auto-merge it. Moving this constant reopens that window for everyone.
+PASS_FILE_DIR = "references"
 
 # What the `token:` field on a stamp can say. `unchecked` is what a caller that
 # passed no `--token` gets — written rather than omitted so every stamp has the
 # same shape, and so "nobody checked" is visibly different from "checked and
 # fine" for a reader scanning the list.
+#
+# Nothing machine-readable consumes these four: `check_run_records.py` never reads
+# `token`, and `MISSING_PASS:` looks only at whether a stamp exists. So a failed
+# check reaches exactly one place — this script's exit 1 — and the party that reads
+# it is the agent the check is about. `SKILL.md` states that a failing checkpoint
+# never stops the run, which leaves `mismatch` recorded but unreported. Giving
+# `token:` a consumer (`/wikicommit-status` reporting it to a human) is the open
+# half of that, deliberately not built while no run record has ever carried a
+# `mismatch`: there is nothing yet to size a report against. Revisit when such a
+# record exists (Issue #925).
 TOKEN_UNCHECKED = "unchecked"
 TOKEN_OK = "ok"
 TOKEN_MISSING = "missing"
@@ -355,7 +384,7 @@ def expected_passes(record: dict) -> tuple[str, ...]:
 
 
 def pass_file_for(skill: str, pass_name: str) -> Path:
-    """`.claude/skills/<skill>/passes/<pass>.md` — the file `--token` reads."""
+    """`.claude/skills/<skill>/references/<pass>.md` — the file `--token` reads."""
     return Path(".claude/skills") / skill / PASS_FILE_DIR / f"{pass_name}.md"
 
 

@@ -42,6 +42,13 @@ describe("built dist/index.js", () => {
       // here takes the whole graph down.
       expect(built).not.toMatch(/from\s*["'][^"']*controlBar["']/);
       expect(built).toContain("childElementCount");
+      // An identifier the script *calls without importing* is not a build error
+      // either: esbuild leaves it as a global lookup, `@ts-nocheck` keeps tsc
+      // quiet and eslint ignores the file, so the minified bundle is the only
+      // place the mistake shows. Every helper that did resolve gets renamed by
+      // the minifier, so a source-level name surviving into the output means it
+      // resolved to nothing and the browser will throw on the first node drawn.
+      expect(built).not.toContain("classifyNode(");
     } finally {
       rmSync(outDir, { recursive: true, force: true });
     }
