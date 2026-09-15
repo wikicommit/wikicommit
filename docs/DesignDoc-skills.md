@@ -880,7 +880,7 @@ Pass 2b が親に来るのは、summary だけで判断でき本文が要らな�
 
 ```json
 {
-  "summary": "本文書は CompanyA の技術ブログ記事。山田太郎氏の紹介と Project Alpha の概要を含む。なお「雑談先のXX社」への言及はテーマ（社内技術ナレッジ）と無関係のため除外した。",
+  "summary": "本文書は CompanyA の技術ブログ記事。山田太郎氏の紹介と Project Alpha の概要を含む。",
   "entities": [
     {
       "type": "schema:Person",

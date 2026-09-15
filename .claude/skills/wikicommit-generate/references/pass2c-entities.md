@@ -15,11 +15,11 @@ pass_token: "c41a7f6b"
 
 **Stamp `--pass pass2c-entities` on entry**, with `--source` naming this source's management file. **Pass `--token c41a7f6b` with it** — the value of this file's `pass_token`. `record_run.py` opens this file itself to compare, so the stamp records that this file was read rather than that the pass was improvised; without `--token` the stamp reads `token: unchecked`.
 
-Ask the LLM to analyze the extracted text and return **only** the following JSON (no Markdown code block wrapper):
+Ask the LLM to analyze the extracted text and return **only** the following JSON (no Markdown code block wrapper). **`summary` holds only a summary of the source's content — nothing about how this run treated any entity.** An excluded entity's reason belongs in that entity's own `exclude_reason`/`exclude_note` below, never folded into `summary` (Issue #943 — a `summary` field description that asked for the reason "here too" survived Issue #831's fix to the write-back step, so a model that just filled the field in kept putting exclusion reasons where `_write_source_page()` publishes them):
 
 ```json
 {
-  "summary": "2-3 sentence summary of the source's content, in <primary_lang>. If any entities were excluded (theme mismatch or entity policy), briefly note the reason here too.",
+  "summary": "2-3 sentence summary of the source's content, in <primary_lang>.",
   "entities": [
     {
       "type": "schema:Person",
