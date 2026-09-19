@@ -18,6 +18,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+import yaml
+
 from _frontmatter import parse_frontmatter_cached
 
 # Type may contain "/" for nested custom types (e.g. custom/Decision). Custom
@@ -335,3 +337,144 @@ def other_types_for_slug(
     what lets a human pick in one step.
     """
     return sorted(t for t in slug_index.get(slug, set()) if t != type_name)
+
+
+# ── Page-identity and link-resolution helpers ─────────────────────────────
+#
+# These six moved here from check_wikilinks.py when build_onehop_context.py
+# needed the same resolution (Issue #947). Three of them already had copies
+# elsewhere — load_primary_lang() had three, in check_wikilinks.py,
+# build_survey_view.py and convert_wikilinks.py — and a fourth copy is exactly
+# the cost Issue #677 consolidated this module to stop paying. The fallback
+# *order* was not a function at all: it lived inline in check_wikilinks.py's
+# main() loop, so a second caller could only reproduce it by reading that loop
+# and writing it out again, which is how the Type/slug extraction in Pass 4's
+# one-hop assembly came to be written from scratch (and wrong) in the first
+# place.
+
+
+def load_primary_lang(repo_root: Path = Path(".")) -> str:
+    """`.wikicommit/config.yml`'s `translation.primary_lang`, or "en".
+
+    The fallback matches init.py's --primary-lang default (Issue #159 changed
+    the tool-wide default from "ja"; Issue #376 brought this in line with it).
+    It is only reached for a config.yml missing, unreadable, or malformed
+    enough to lack an explicit primary_lang — every config.yml init.py
+    generates has one.
+    """
+    config_path = repo_root / ".wikicommit" / "config.yml"
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return "en"
+    if not isinstance(data, dict):
+        return "en"
+    translation = data.get("translation")
+    if not isinstance(translation, dict):
+        return "en"
+    return str(translation.get("primary_lang", "en") or "en")
+
+
+def page_lang(path: Path, primary_lang: str) -> str:
+    """The page's own `lang:`, falling back to `primary_lang`.
+
+    Named `page_lang` rather than check_wikilinks.py's original `get_lang` so
+    the name says what it reads at the call sites that now import it; the old
+    name is kept there as a thin alias for the tests that call it by name.
+    """
+    fm, err = parse_frontmatter_cached(path)
+    if err or not isinstance(fm, dict):
+        return primary_lang
+    return str(fm.get("lang", primary_lang))
+
+
+def is_removed(path: Path) -> bool:
+    """Whether the page carries `status: removed`.
+
+    A page whose frontmatter does not parse is reported as not-removed: the
+    honest reading is that nothing says it was removed, and the malformed
+    frontmatter is validate_frontmatter.py's finding to make, not this one's.
+    """
+    fm, err = parse_frontmatter_cached(path)
+    if err or not isinstance(fm, dict):
+        return False
+    return fm.get("status") == "removed"
+
+
+def link_target_path(
+    type_name: str,
+    slug: str,
+    lang: str,
+    entity_dir: Path = ENTITY_DIR,
+    view_dir: Path = VIEW_DIR,
+) -> Path:
+    """Where `[[<type_name>/<slug>]]` in `lang` would live on disk.
+
+    `View` is a reserved Type segment naming the view tree (Issue #675), whose
+    pages have no Type directory: `<view_dir>/<lang>/<slug>.md`. Everything
+    else keeps the entity layout. Resolving both here means existence,
+    removed-page and cross-language-fallback checks stay one code path.
+    """
+    if type_name == VIEW_TYPE_SEGMENT:
+        return view_page_path(lang, slug, view_dir)
+    return entity_dir / lang / type_name / f"{slug}.md"
+
+
+def resolve_wikilink(
+    type_name: str,
+    slug: str,
+    lang: str,
+    primary_lang: str,
+    entity_dir: Path = ENTITY_DIR,
+    view_dir: Path = VIEW_DIR,
+) -> Path | None:
+    """The existing page `[[<type_name>/<slug>]]` resolves to from `lang`.
+
+    The order is the cross-language fallback: the linking page's own language
+    first, then `primary_lang`, then unresolved. Returns None when neither
+    exists — a link to a page nobody has written yet is a normal, non-blocking
+    state (Issue #340), so the caller decides what to say about it.
+
+    This is the piece that was never a function: check_wikilinks.py ran the
+    same two attempts inline in its main() loop, which left a second caller
+    with nothing to import and the order to re-derive by reading that loop.
+    """
+    lang_path = link_target_path(type_name, slug, lang, entity_dir, view_dir)
+    if lang_path.exists():
+        return lang_path
+    if lang != primary_lang:
+        primary_path = link_target_path(type_name, slug, primary_lang, entity_dir, view_dir)
+        if primary_path.exists():
+            return primary_path
+    return None
+
+
+def type_slug_from_wiki_path(
+    path: Path, entity_dir: Path = ENTITY_DIR, view_dir: Path | None = VIEW_DIR
+) -> tuple[str, str] | None:
+    """Derive (Type, slug) from a page path in either tree.
+
+    Type may contain "/" for nested custom types (e.g. custom/Decision), and is
+    the reserved `View` segment for a page in the view tree (Issue #675) — the
+    same key a `[[View/<slug>]]` link builds, which is what a backlink index
+    keyed off this is keyed by.
+    """
+    resolved = parse_wiki_path(path, entity_dir)
+    if resolved is None and view_dir is not None:
+        resolved = parse_view_path(path, view_dir)
+    if resolved is None:
+        return None
+    _, type_name, slug = resolved
+    return type_name, slug
+
+
+def extract_wikilinks(content: str) -> list[tuple[str, str]]:
+    """Every `[[Type/slug]]` in `content`, in order of appearance.
+
+    Takes the text rather than a path because the one caller that most needs it
+    has no file to read: at Pass 4 the page under review has not been written
+    yet (`action: create`) or still holds its previous version on disk
+    (`action: update`), so reading the path would return the outbound links of
+    a version that is not the one being reviewed.
+    """
+    return [(m.group(1), m.group(2)) for m in WIKILINK_RE.finditer(content)]

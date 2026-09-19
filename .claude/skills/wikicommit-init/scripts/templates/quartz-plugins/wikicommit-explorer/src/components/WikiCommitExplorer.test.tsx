@@ -87,6 +87,79 @@ describe("explorerSortFn", () => {
     expect(nodes.map((n) => n.slugSegment)).toEqual(["sources", "zz-topic", "en"])
   })
 
+  it("sorts a root-level overview folder before Type folders (Issue #946)", () => {
+    const nodes = [folder("Organization"), folder("overview"), folder("DefinedTerm")]
+
+    nodes.sort(explorerSortFn)
+
+    expect(nodes.map((n) => n.slugSegment)).toEqual(["overview", "DefinedTerm", "Organization"])
+  })
+
+  it("sorts overview before View, and both before Type folders (Issue #946)", () => {
+    const nodes = [folder("Person"), folder("View"), folder("overview"), folder("DefinedTerm")]
+
+    nodes.sort(explorerSortFn)
+
+    expect(nodes.map((n) => n.slugSegment)).toEqual(["overview", "View", "DefinedTerm", "Person"])
+  })
+
+  it("does not depend on the overview folder's display name, which is localized", () => {
+    // The whole point of matching on the slug segment: the overview page's title comes from
+    // OVERVIEW_LABELS, so an en wiki reads "Overview" and a ja one reads something starting
+    // at W. Under display-name ordering those land in two different places (Issue #946).
+    const en = [folder("Person"), folder("overview", "Overview"), folder("DefinedTerm")]
+    const ja = [folder("Person"), folder("overview", "Wiki 全体の俯瞰"), folder("DefinedTerm")]
+
+    en.sort(explorerSortFn)
+    ja.sort(explorerSortFn)
+
+    expect(en.map((n) => n.slugSegment)).toEqual(ja.map((n) => n.slugSegment))
+    expect(en.map((n) => n.slugSegment)).toEqual(["overview", "DefinedTerm", "Person"])
+  })
+
+  it("leads a sibling language's Type folders with its View, which is not at the root", () => {
+    // View gets no depth guard, unlike overview and sources: foldLang.ts leaves node.slug
+    // alone when it lifts the current language to the root, so even a folded View still has
+    // slugSegments of length 2. Applying the tier at any depth is what makes both cases work.
+    const nested = folder("View", "View", ["en", "View"])
+    const nodes = [folder("Person", "Person", ["en", "Person"]), nested]
+
+    nodes.sort(explorerSortFn)
+
+    expect(nodes.map((n) => n.slugSegment)).toEqual(["View", "Person"])
+  })
+
+  it("puts overview and sources at opposite ends of the root listing (Issue #946)", () => {
+    const nodes = [
+      folder("sources"),
+      folder("Person"),
+      folder("en"),
+      folder("View"),
+      folder("DefinedTerm"),
+      folder("overview"),
+    ]
+
+    nodes.sort(explorerSortFn)
+
+    expect(nodes.map((n) => n.slugSegment)).toEqual([
+      "overview",
+      "View",
+      "DefinedTerm",
+      "Person",
+      "en",
+      "sources",
+    ])
+  })
+
+  it("does not apply the overview tier to a folder named overview nested below the root", () => {
+    const nested = folder("overview", "overview", ["HowTo", "overview"])
+    const nodes = [folder("Aa"), nested, folder("zz-topic")]
+
+    nodes.sort(explorerSortFn)
+
+    expect(nodes.map((n) => n.slugSegment)).toEqual(["Aa", "overview", "zz-topic"])
+  })
+
   it("is self-contained when serialized via toString (required for browser reconstruction)", () => {
     // WikiCommitExplorer serializes this via `.toString()` into the data-data-fns DOM
     // attribute, and wikicommit-explorer.inline.ts reconstructs it with `new Function(...)`,

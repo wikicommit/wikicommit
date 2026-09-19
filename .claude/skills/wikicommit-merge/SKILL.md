@@ -1,7 +1,6 @@
 ---
 name: wikicommit-merge
-description: Run quality gates on local WikiCommit changes, then branch, PR, merge to the repository's default branch, and open per-page post-review tracking Issues
-disable-model-invocation: true
+description: Run WikiCommit's quality gates over the uncommitted changes under .wikicommit/, then branch, open a PR, merge it into the repository's default branch, and file one review tracking Issue per page. Use this only to land WikiCommit's own output — the uncommitted changes another wikicommit Skill left under .wikicommit/ — including inside an unattended run that works through sources in batches. It squash-merges to the default branch and publishes, so do not use it as a general way to commit, push or open a PR for ordinary repository changes — use git and gh directly for those.
 ---
 
 # wikicommit-merge
@@ -181,7 +180,13 @@ Run these as direct Bash-tool invocations exactly as shown above. Do not write a
 
 If all checks finish with no blocking errors but some warnings remain, present the warnings to the user and confirm whether to proceed. If the user chooses not to proceed, abort (no branch has been created yet at this point, so the working tree changes remain as-is).
 
-**In a non-interactive run, where no answer will arrive, abort — and say that is why** (Issue #910). Aborting here is the deferring answer, not the destructive one, for the reason the sentence above already gives: no branch exists yet, so the working tree is left exactly as it is and a later run with a person present picks up the same changes and asks the same question. Proceeding is the choice that cannot be taken back — this Skill squash-merges what it builds, so reading silence as a yes publishes warnings nobody saw. Aborting is safe **because** nothing has been committed; do not carry this rule past that point. Say in the report that the run stopped on warnings with no one to ask, and list them, so the next run knows what it is being asked about.
+**In a non-interactive run, where no answer will arrive, do not abort — record the warnings and proceed** (Issue #945, which redefined the branch Issue #910 had put here). Carry the warning list forward to Step 6, which writes it into the PR body at the granularity that step specifies. Three things make proceeding the right default, and all three are about warnings specifically:
+
+- **The confirmation is not the gate on whether this may merge.** Every warning this step can produce is mergeable by design — orphan, unresolved WikiLink (Issue #340 lowered that one from ERROR deliberately), lychee, markdownlint — and the table above already says so for lychee and markdownlint ("None (always warning only)") while the rest are `WARNING:` lines in the blocking column's counterpart. Mergeability is settled before the question is asked; what the confirmation carries is showing a person the warnings, not deciding the outcome.
+- **The rule was already overridden by every prompt that drives an unattended run**, each of which told the model not to self-diagnose as non-interactive and to proceed when only warnings remain. A safety rule that the instructions covering its only use case cancel every time is de facto "proceed" already, resting on instruction-following. Writing it down is the safer of the two states.
+- **Little is lost by no one seeing them at this moment.** `ORPHAN:` and unresolved WikiLinks are standing state — `/wikicommit-status` reports them on every run until they are actually fixed. lychee and markdownlint findings leave this run's output but come back the moment the same checks run again. Be precise about what the PR body changes here: not whether anyone sees the warnings, but that they go from transient to durable. Step 7 auto-merges seconds later, so this PR is in practice read by no one.
+
+**Blocking is untouched.** `ERROR:` and `DUPLICATE:` still abort exactly as described above, interactive or not — and they abort before a branch exists, so the working tree is left as-is for a later run. Nothing about which finding is blocking changes here, and no quality-gate script changes at all.
 
 ### Step 4: Create Branch
 
@@ -216,9 +221,41 @@ Replace `<YYYY-MM-DD>` with the output of `date +%Y-%m-%d` (use the same date in
 git push origin <branch name>
 gh pr create \
   --title "wiki: bulk update $(date +%Y-%m-%d)" \
-  --body "Automatically generated PR by WikiCommit. Quality checks passed." \
+  --body "$(cat <<'EOF'
+<PR body, built from the template below>
+EOF
+)" \
   --base "<default branch>"
 ```
+
+**Pass the body through a quoted-delimiter heredoc, as shown** — never as a plain `--body "..."`. The body now carries warning text produced by the checking tools, which is free-form and not under this file's control (a lychee finding is a URL that routinely contains `&`, and markdownlint quotes the offending line verbatim). That is exactly the case the repository's rule for embedding free-form text in a shell command covers (Issue #375).
+
+Build the body from this template, filling it from the warnings Step 3 carried forward:
+
+```markdown
+Automatically generated PR by WikiCommit.
+
+Quality checks ran with no blocking errors. Warnings: <total count>.
+
+## Warnings
+
+### <tool or script name> (<count for that tool>)
+
+- <finding>
+- <finding>
+- <finding>
+- (+<N> more)
+
+Only the first few findings per tool are listed here. Re-running WikiCommit's quality checks reproduces the full list.
+```
+
+When no warnings remain, the body is just the first line plus `Quality checks ran with no blocking errors and no warnings.`, and the `## Warnings` section is omitted entirely.
+
+Three rules govern this body:
+
+- **It says what happened, not that everything is fine.** The previous fixed body claimed "Quality checks passed."; that was already false in an interactive run where warnings appeared and the person answered "proceed". State the two facts instead — no blocking errors, and how many warnings there were.
+- **The body is the same whether or not a person was present.** A PR is a record read later, and what it asserts should not depend on how the run happened to be driven.
+- **List a few findings per tool, not all of them.** Give each tool its count and its first 3–5 findings verbatim, then `(+N more)`. Reproducing everything puts dozens of lychee 4xx lines in the body, which is the shape Issue #562 named — a report that is always long stops being read. The count is what carries the signal; the samples are there so a reader can tell what kind of finding it is.
 
 Obtain `<PR number>` from the `gh pr create` output (the PR URL) or via `gh pr view --json number -q .number`, and record it for use in Step 7's cleanup procedure and the completion report.
 
@@ -707,7 +744,33 @@ gh issue list --label wikicommit-generation-failure --state open --json number,b
 
 #### Issue Generation (repeat per target management file)
 
-Read the management file's `source.type`, `source.path`/`source.url`, `failed_pages`, and `last_generated_at` fields, and its `## Failure Reason` section body (write "unknown" in the Issue body for `last_generated_at` if unset, and "unknown" for the failure reason if the section is absent — same "unknown" fallback Step 8 uses for missing `generated_at`/`generated_by`). For a source caught by `status: failed` with an empty `failed_pages`, say so where the list would go — the failure happened before any page was attempted, and an empty list with no explanation reads as data that went missing.
+Read the management file's `source.type`, `source.path`/`source.url`, `failed_pages`, and `last_generated_at` fields, and its `## Failure Reason` section body (write "unknown" in the Issue body for `last_generated_at` if unset — same "unknown" fallback Step 8 uses for missing `generated_at`/`generated_by`). For a source caught by `status: failed` with an empty `failed_pages`, say so where the list would go — the failure happened before any page was attempted, and an empty list with no explanation reads as data that went missing.
+
+**Then get the reason for each failed page from the review records** (Issue #969). Skip this command when `failed_pages` is empty — the `status: failed` source caught before any page was attempted has no page to ask about:
+
+```bash
+python .wikicommit/scripts/check_review_coverage.py --discarded-reason "$(cat <<'EOF'
+<failed_pages[0]>
+EOF
+)" "$(cat <<'EOF'
+<failed_pages[1]>
+EOF
+)"
+```
+
+Repeat the `"$(cat <<'EOF' … EOF)"` argument once per entry. It is the free-text-in-shell-argument form rather than a bare path for the same reason `--title` below is, and for the same reason Pass 4 uses it when it hands these very paths to `reset_review_on_content_change.py`: `<Type>` and `<slug>` are not validated anywhere in the pipeline, and both come out of Pass 2's reading of a source document.
+
+**This is not a second-best source for the reason — on most of these Issues it is the only one.** Pass 4 writes `## Failure Reason` only on the `status: failed` branch, and deletes it on `partial`; `partial` is what a source reaches when some of its entities succeeded, which is the ordinary shape of a generation failure. So on the Issues this step creates most often, that section is structurally absent and the reason reads `unknown` — while the run that discarded the page wrote a full account of why into `.wikicommit/review/`, a record Issue #750 calls the one most worth having precisely because a page that was never written leaves nothing else behind.
+
+Take the reason per failed page, in this order:
+
+1. `REASON:` lines from the command above — the finding type, where it was found, and the instruction the review gave, quoted as recorded
+2. the management file's `## Failure Reason` section, when present **and that page has no record of its own**. `status: failed` is written on two different paths and only one of them lands here: a Pass 1 failure leaves `failed_pages` empty, so there is nothing per-page to report and this section is the whole reason; a Pass 4 run in which every entity was attempted and failed fills `failed_pages` *and* leaves a record per page, so (1) still wins there even though the section is present
+3. `NO_RECORD:` or neither — write that no reason was recorded, **not `unknown`**. A failure predating the review-record tree (Issue #750), or a repository without `.wikicommit/review/`, genuinely has nothing to show; saying so is different from saying the reason is unknowable, and it tells the reader not to go looking
+
+**If that script does not exist or does not accept `--discarded-reason`, carry on without it** and fall back to (2) and (3). A repository whose `.wikicommit/scripts/` predates this mode is the normal case for a wiki that has not been updated recently, and a missing reason is not a reason to withhold the Issue.
+
+The instruction text is quoted **verbatim**. It was written to steer a regeneration rather than to be read by an operator, and it shows — it is phrased as a command. Summarizing it would mean rewriting a judgment this step did not make, at exactly the point where the record's value is its specificity; the record tree was designed to be read by people (Issue #750), and this text is the most specific thing that exists about why the page is missing. **The one field never quoted is `source_file`**: for a source document it holds a path under `.wikicommit/.cache/`, which is gitignored and machine-local, so it names nothing in another clone or after the cache is cleared. The script already drops it and says instead which *kind* of file the line numbers count into.
 
 ```bash
 # 1. Create the tracking Issue
@@ -748,11 +811,23 @@ If `gh issue create` fails for any other reason (API error, etc., after the labe
 
 ## Failure Reason
 
-<## Failure Reason section body from the source management file, or "unknown" if that section is absent>
+<One block per failed page, in the same order as the list above:>
+
+### `<failed_pages[0]>`
+
+<The review's findings for that page, one per line, as `<TYPE> <where>: <instruction verbatim>`.
+ Where no record exists, write: No reason was recorded for this page. — and nothing else.>
+
+<Only where `failed_pages` is empty — the `status: failed` source caught before any page was
+ attempted — there are no per-page blocks: drop the headings and quote the management file's
+ `## Failure Reason` section body here instead. When `failed_pages` is non-empty the per-page
+ blocks above are the reason, even if that section is also present.>
 
 ## How to Proceed
 
-This Issue is a visibility record, not an automation trigger — closing it does not change anything on its own (unlike a `wikicommit-review` tracking Issue, whose close is detected by `review-issue-close-sync.yml`). Investigate the failure reason above, then either fix the underlying issue (adjust the source content, or add guidance to the management file's `## User Notes`) and re-run `/wikicommit-generate` on this source to retry, or close this Issue with a note if the gap is acceptable as-is.
+This Issue is a visibility record, not an automation trigger — closing it does not change anything on its own (unlike a `wikicommit-review` tracking Issue, whose close is detected by `review-issue-close-sync.yml`). Read the failure reason above, then either fix the underlying issue (adjust the source content, or add guidance to the management file's `## User Notes`) and re-run `/wikicommit-generate` on this source to retry, or close this Issue with a note if the gap is acceptable as-is.
+
+**Closing it while `failed_pages` is still non-empty does not keep it closed** — the duplicate check above looks only at *open* Issues, so the next `/wikicommit-merge` creates this Issue again. To retire it for good, the underlying entry has to leave `failed_pages`.
 
 <!-- wikicommit-ingest: <source management file path> -->
 ```
@@ -773,6 +848,7 @@ python .wikicommit/scripts/record_run.py end <the path Step 0 printed> \
 Report its path and elapsed time along with the following:
 
 - The bulk update PR number and branch name created in Step 6
+- The warning total Step 3 carried forward, and that it was written into the PR body (omit if there were none)
 - The list of `<new source files>` included in the bulk update PR from Step 2 item 3 (omit if none)
 - The list of tracking Issues newly created in Step 8 (page path, Issue number)
 - Any pages skipped in Step 8, with reasons (frontmatter YAML parse failed during the extraction scan / an open tracking Issue already exists / issue creation error)

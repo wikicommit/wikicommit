@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -310,6 +311,70 @@ def _set_exclude_living_persons(policy_path: Path) -> bool:
         return True
     except OSError:
         return False
+
+
+def _merge_skill_overrides(settings_path: Path, template_path: Path) -> str:
+    """Add the template's `skillOverrides` keys to `.claude/settings.json` (Issue #953).
+
+    Returns one of "created" / "updated" / "unchanged" / "unreadable", which the caller
+    turns into the line it prints.
+
+    The three Skills named in the template lost `disable-model-invocation` in Issue #945,
+    which opened the unattended path and, with it, the possibility of a passing request
+    triggering them. `name-only` hides the description — the mechanism a model matches
+    against — while leaving `/wikicommit-generate` and the like working, so an unattended
+    run needs nothing flipped. The alternative, `user-invocable-only`, would have to be
+    turned back to `on` to run unattended at all, and that is an all-or-nothing switch:
+    the moment it is flipped, every Skill in the repository is auto-invocable again.
+
+    **A key that already has a value is never touched, under any flag.** An operator who
+    set one to `on` is running unattended on purpose, and a re-init quietly putting it
+    back would stop those runs while printing a success line. That is why this is a merge
+    rather than a copy, and why it does not go through copy_file(): the protection has to
+    hold per key, not per file, and the rest of the file (permissions, env, hooks) is the
+    user's.
+
+    An unparseable settings.json is left strictly alone. Rewriting it would destroy
+    settings this script cannot even read, and the caller says so rather than reporting a
+    protection that is not in place.
+    """
+    overrides = json.loads(template_path.read_text(encoding="utf-8"))["skillOverrides"]
+
+    if not settings_path.exists():
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps({"skillOverrides": overrides}, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        return "created"
+
+    try:
+        data = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "unreadable"
+    if not isinstance(data, dict):
+        return "unreadable"
+
+    existing = data.get("skillOverrides")
+    if existing is not None and not isinstance(existing, dict):
+        # The key is there but is not a mapping, so there is no per-key merge to make and
+        # replacing it would discard whatever the user meant by it.
+        return "unreadable"
+
+    section = existing if isinstance(existing, dict) else {}
+    added = {name: value for name, value in overrides.items() if name not in section}
+    if not added:
+        return "unchanged"
+
+    section.update(added)
+    data["skillOverrides"] = section
+    try:
+        settings_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+    except OSError:
+        return "unreadable"
+    return "updated"
 
 
 def _read_config(repo_root: Path) -> tuple[Path, str] | None:
@@ -808,6 +873,36 @@ def main() -> int:
         # created with a .gitkeep.
         for template_rel, dest_rel in _root_outputs.plain_copies(variant):
             copy_file(templates_dir / template_rel, repo_root / dest_rel, **_flags(dest_rel))
+
+        # `.claude/settings.json` is a per-key merge, not a copy, so it cannot go
+        # through plain_copies() above (Issue #953). The flags in _root_outputs.py
+        # are per file; the protection needed here is per key.
+        settings_rel = ".claude/settings.json"
+        settings_outcome = _merge_skill_overrides(
+            repo_root / settings_rel, templates_dir / "claude-settings.json"
+        )
+        if settings_outcome == "created":
+            created.append(rel(repo_root / settings_rel))
+            print(f"CREATED: {settings_rel} (skillOverrides: name-only)")
+        elif settings_outcome == "updated":
+            print(f"UPDATED: {settings_rel} (added the missing skillOverrides entries)")
+        elif settings_outcome == "unchanged":
+            # Appended to `skipped` like every other SKIPPED: line, so the SUMMARY
+            # count below accounts for what was printed. `UPDATED:` deliberately is
+            # not — that matches the other UPDATED: lines here, which sit outside the
+            # created/skipped tally.
+            print(f"SKIPPED: {settings_rel} (skillOverrides already set; left as it is)")
+            skipped.append(rel(repo_root / settings_rel))
+        else:
+            # Say what is not in place rather than reporting a protection that is not
+            # there. Rewriting the file would destroy settings this script cannot read.
+            print(
+                f"WARNING: {settings_rel} could not be read as a JSON object, so its "
+                "skillOverrides were left untouched. Until they are set, a model may "
+                "auto-invoke wikicommit-generate / -merge / -translate in this "
+                "repository; add them by hand to restore that guard.",
+                file=sys.stderr,
+            )
 
         # Flip entity-policy.md's one switch, but only on the copy this run just
         # made (Issue #837). `.wikicommit/entity-policy.md` is always_skip_existing,

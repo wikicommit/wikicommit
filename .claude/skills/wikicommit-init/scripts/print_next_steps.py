@@ -129,8 +129,10 @@ _REGISTER_STEP = "Register a source with /wikicommit-generate <file path or URL>
 _COMMIT_STEP_INTRO = (
     'Commit the generated foundational files (`/wikicommit-merge` only targets\n'
     '   "changes" under `.wikicommit/entity/` and `.wikicommit/source/`, so\n'
-    "   `.claude/skills/`, `.wikicommit/config.yml`, `.wikicommit/schema/`,\n"
-    "   `.wikicommit/scripts/`, `.wikicommit/entity/`, `.wikicommit/source/`,\n"
+    "   `.claude/skills/` (plus `.agents/`, which holds the Skills themselves whenever\n"
+    "   `.claude/skills/` is a tree of symlinks into it), `.wikicommit/config.yml`,\n"
+    "   `.wikicommit/schema/`, `.wikicommit/scripts/`, `.wikicommit/entity/`,\n"
+    "   `.wikicommit/source/`,\n"
     "   {extra_files}will never get committed anywhere\n"
     "   in the pipeline unless committed here. Run them yourself unless `/wikicommit-init` offered\n"
     "   to run them for you and you accepted: it asks at most once, only where it can stage exactly\n"
@@ -177,7 +179,7 @@ _SELECTIVE_ADD_NOTE_READY = (
     "   If this repository also has files of its own, `-A` stages those untracked files and any\n"
     "   uncommitted change to a tracked one too, so check `git status --short` first. Or stage\n"
     "   only what this run produced:\n"
-    "   {git_add}{submodule_caveat}"
+    "   {git_add}{absent_caveat}"
 )
 
 _SELECTIVE_ADD_NOTE_MISSING = (
@@ -191,19 +193,29 @@ _SELECTIVE_ADD_NOTE_MISSING = (
     "   `-A` also stages this repository's own untracked files and any uncommitted change to a\n"
     "   tracked one, so check `git status --short` first either way. Or stage only what this run\n"
     "   produced:\n"
-    "   {git_add}{submodule_caveat}"
+    "   {git_add}{absent_caveat}"
 )
 
-# The selective list still carries the paths nobody generates (`.gitmodules` / `quartz` — the
-# user's own `git submodule add`), and `git add` still aborts on a pathspec that does not
-# exist. The default no longer does, but the note above sends exactly the repository shape
-# most likely to have deferred Quartz setup down this path, so say it here rather than leave
-# them to interpret exit 128 — `wikicommit-update` prints the same caveat for the same reason.
-# Derived from _root_outputs.py so that a change to the submodule entries carries here too.
-_SUBMODULE_PATHSPEC_CAVEAT = (
-    "\n\n"
-    "   (drop {paths} from that list if you have not run `git submodule add` yet —\n"
-    "   `git add` aborts on a pathspec that does not exist and stages nothing.)"
+# The selective list carries paths that belong in the first commit but are not always on
+# disk, and `git add` still aborts on a pathspec that does not exist. The default no longer
+# does, but the note above sends exactly the repository shape most likely to be missing one
+# down this path, so say it here rather than leave them to interpret exit 128 —
+# `wikicommit-update` prints the same caveat for the same reason.
+#
+# Two kinds of path, one sentence: `.gitmodules` / `quartz` are the user's own
+# `git submodule add`, deferred or skipped; `.agents` / `skills-lock.json` depend on how
+# `npx skills add` placed the Skills, which this run never observed (Issue #948). The wording
+# is generic because the reader does not need the reason — they need to know to drop what
+# they do not have. Derived from _root_outputs.py so that adding another such path carries
+# here without a second list.
+#
+# Wrapped at render time rather than carrying its own newlines: the list grows whenever an
+# entry gains `may_be_absent`, and a hard-coded break placed for two paths overran to 124
+# columns as soon as there were four — in guidance every other line of which is held to
+# roughly this width. Same reason `build_selective_add_note()` fills the `missing` list.
+_ABSENT_PATHSPEC_CAVEAT = (
+    "(drop any of {paths} this repository does not have — `git add` aborts on a "
+    "pathspec that does not exist and stages nothing.)"
 )
 
 
@@ -229,7 +241,7 @@ def build_selective_add_note(variant: str, vocab_cache_created: bool, repo_root:
     template = _SELECTIVE_ADD_NOTE_MISSING if missing else _SELECTIVE_ADD_NOTE_READY
     return template.format(
         git_add=build_git_add(variant, vocab_cache_created),
-        submodule_caveat=build_submodule_caveat(variant),
+        absent_caveat=build_absent_pathspec_caveat(variant),
         # Wrapped rather than joined into one line: a repository whose `.gitignore` is missing
         # every pattern lists ten or more of them, and every other line of this guidance is
         # hand-wrapped to roughly this width.
@@ -244,15 +256,22 @@ def build_selective_add_note(variant: str, vocab_cache_created: bool, repo_root:
     )
 
 
-def build_submodule_caveat(variant: str) -> str:
+def build_absent_pathspec_caveat(variant: str) -> str:
     paths = [
         entry.path
         for entry in _root_outputs.for_variant(variant)
-        if entry.origin == "submodule" and entry.in_git_add
+        if entry.may_be_absent and entry.in_git_add
     ]
     if not paths:
         return ""
-    return _SUBMODULE_PATHSPEC_CAVEAT.format(paths=", ".join(f"`{path}`" for path in paths))
+    return "\n\n" + textwrap.fill(
+        _ABSENT_PATHSPEC_CAVEAT.format(paths=", ".join(f"`{path}`" for path in paths)),
+        width=95,
+        initial_indent="   ",
+        subsequent_indent="   ",
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
 
 _QUARTZ_PAGES_EXTRA_FILES = (
     "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"

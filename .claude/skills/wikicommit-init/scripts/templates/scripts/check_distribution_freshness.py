@@ -31,6 +31,7 @@ Exit code: always 0 (report only, like the rest of /wikicommit-status).
 
 import argparse
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -228,6 +229,32 @@ def _frontmatter_keys(path: Path) -> set[str]:
     return _key_paths(data.get("wikicommit"))
 
 
+def _json_keys(path: Path) -> set[str]:
+    """Key paths in a JSON object — for `.claude/settings.json` (Issue #953).
+
+    Additive like the two above, and for the same reason: init merges three
+    `skillOverrides` entries into a file whose other contents (permissions, env, hooks)
+    are entirely the user's, and whose values for those three they may have deliberately
+    changed. A byte comparison would report every initialized repository as OUTDATED
+    forever. What is worth knowing is only whether the template names a Skill this file
+    has no entry for at all.
+
+    Keys, never values. `"wikicommit-generate": "on"` is the user running unattended on
+    purpose, and reporting it as drift would push them toward undoing it.
+
+    An unreadable or non-object file yields an empty set. On the local side that reads as
+    "has no keys", so every template key is reported as missing — which is true, and init
+    prints its own warning about the same file.
+    """
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    return _key_paths(data)
+
+
 def _meaningful_lines(path: Path) -> set[str]:
     """Non-blank, non-comment lines — for files the local copy appends to.
 
@@ -390,6 +417,9 @@ def check(repo_root: Path, variant: str | None, only: str | None = None) -> int:
         elif entry.compare == "frontmatter_keys":
             gained = _frontmatter_keys(template_path) - _frontmatter_keys(local_path)
             label = "wikicommit: key(s)"
+        elif entry.compare == "json_keys":
+            gained = _json_keys(template_path) - _json_keys(local_path)
+            label = "JSON key(s)"
         elif entry.compare == "lines":
             gained = _meaningful_lines(template_path) - _meaningful_lines(local_path)
             label = "line(s)"

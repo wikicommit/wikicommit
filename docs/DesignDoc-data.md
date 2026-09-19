@@ -67,6 +67,7 @@
 │       └── check_ingest_freshness.py
 │
 ├── .claude/                    # Claude Code が認識するプロジェクト Skill 配置
+│   ├── settings.json           # skillOverrides（init.py が 3 キーだけをマージする。Issue #953）
 │   └── skills/                 # Skills の正本（Claude Code が直接読み込む）
 │       ├── wikicommit-init/
 │       │   └── SKILL.md
@@ -83,11 +84,34 @@
 
 既存リポジトリに対して `/wikicommit-init` を実行する場合、既存のファイルは移動・複製せずに保持し、`.wikicommit/` のみを追加する。Wiki ページの `sources.path` は `src/auth.py` のように既存ファイルを直接参照する。
 
+> **`.claude/settings.json` の `skillOverrides` — 自律起動を絞る 2 層のうち新規リポジトリ側（Issue #953）**: `/wikicommit-init` は `wikicommit-generate` / `wikicommit-merge` / `wikicommit-translate` の 3 本を **`name-only`** として書き込む。この 3 本は Issue #945 で `disable-model-invocation` を失った — 無人実行の経路がその 3 本で閉じるため — が、同時に通りすがりの依頼でモデルが自律起動しうるようになった。
+>
+> **2 層の分担は「届く先」で分かれる**（`docs/DesignDoc-skills.md` §11.1）:
+>
+> | 層 | 手段 | 届く先 |
+> |---|---|---|
+> | ① | `description` を絞る | **全リポジトリ**。`npx skills add` で既存の Wiki にも届く |
+> | ② | この `skillOverrides` | **これ以降に init したリポジトリだけ** |
+>
+> **したがって、説明文が唯一の防御になるのは既存リポジトリである** — この設定は遡及しない（本ドキュメント群が一貫して採る「新旧混在を許容する」方針）。**既存の Wiki を「保護されている」と読まないこと。**
+>
+> **`user-invocable-only` を採らない。** 無人実行したい運用者は `on` に戻す必要があり、その瞬間にそのリポジトリの全 Skill で自律トリガーが復活する（全か無かのスイッチになる）。`name-only` は説明文＝自律トリガーの主機構だけを隠して名指しの起動経路を残すので、**無人実行は切替なしで通る**。引き受ける代償は、説明文が担っていた抑止（「明示的に頼まれたときだけ使え」）も同時に消え、残る手掛かりが名前だけになることである。
+>
+> **既に値があるキーには一切触らない**（`--no-overwrite` の有無に関わらず）。`on` に戻しているのは無人実行を意図した運用者であり、再 init がそれを黙って戻すと**そのリポジトリの無人実行が次から静かに止まる**（しかも出力は成功系になる）。したがってこれは**ファイルのコピーではなくキー単位のマージ**であり、`_root_outputs.py` のフラグ（ファイル単位）では表現できないため `init.py` に専用の経路を持つ。`permissions` / `env` / `hooks` 等、利用者自身の他のキーもそのまま保つ。
+>
+> **JSON として読めない場合は何も書かず `WARNING:` を出す。** 読めない設定を上書きすると利用者の設定を失う一方、黙って進むと**無い保護を有るものとして報告する**ことになるため、その旨を明示する。
+>
+> **差分検出は `json_keys`**（`check_distribution_freshness.py`）。**値ではなくキーだけを見る** — `"wikicommit-generate": "on"` は運用者が意図して無人実行している状態であり、それを `OUTDATED` として報告すると、まさにその決定を取り消す方向へ押すことになる。上流が新しい Skill をこの表に足した場合にのみ報告される。
+>
+> **このリポジトリ自身（wikicommit-dev2）は `user-invocable-only`** であり、上の既定とは別である。ここには無人実行の必要が無く（クラウド自動化が使うのは `implement-issue` と `review-and-merge` である）、最も強い設定を選んでも失うものが無い一方、最も多くのエージェントセッションが走り常に未コミットの変更がある場所だからである。
+>
+> **`settings.local.json` には書かない。** `.gitignore` 済みでクラウド／Routine に届かず、追跡された `settings.json` より優先順位が上なので、保護の置き場としては逆である。
+
 `.claude/skills/` は Claude Code が固定配置を要求するため、`.wikicommit/` の外に置くプラットフォーム連携層とする。
 
 > **トップレベルディレクトリ名 `.wikicommit/wiki/` → `.wikicommit/entity/`（Issue #477）**: `content/sources/`（Issue #476）の導入により公開サイトが `.wikicommit/wiki/` 由来のentity/conceptページと `.wikicommit/source/` 由来のsourceページの両方から構成されるようになり、中核コンテンツディレクトリが引き続き `wiki/` と名乗ることが「wikiという名前のディレクトリが公開サイト全体の一部でしかない」という矛盾を生んでいたため、Pass 2 の分析JSON（`"entities": [...]`）で既に使われている `entity` という語彙に統一した。移行は自動リネームを行わず新旧混在を許容する（Issue #352 の `repository/`→`path/` 等リネーム時と同じ前例踏襲）。
 >
-> **`translated_from`/`derived_from[].path`/`generated_pages[]`/Issueマーカーに埋め込まれた旧パス文字列への後方互換**: 上記の「新旧混在を許容する」方針は、ディレクトリそのものの新旧混在だけでなく、ページの frontmatter やレビュー追跡 Issue の本文に**文字列として埋め込まれた**旧パス（例: `translated_from: .wikicommit/wiki/ja/Person/yamada-taro.md`）にも及ぶ — これらの値は自動移行されないため、リポジトリ側がディレクトリを `git mv` で完全移行した後もそのまま残り続ける。これを消費する側のスクリプト・Skill 指示はすべてこの後方互換を実装する必要がある: `.wikicommit/scripts/_wikilink.py` の `normalize_entity_prefix()`/`resolve_stored_entity_path()`（`validate_frontmatter.py`・`check_translation_status.py`・`check_derivation_freshness.py` が使用）、`convert_wikilinks.py` の `normalize_wiki_rel()`（`generated_pages[]` 用）、`WikiCommitSources.tsx`・`WikiCommitBanner.tsx`（Issue #528。両者とも同名の `entityPathToRelativePath()` を独立に複製 — 各 `quartz-plugins/` パッケージがそれぞれ独立ビルドのため、`WikiCommitSources.tsx` の同関数コメントが説明する理由でここも共有関数化していない。Issue #587 で `translatedFromToRelativePath()` から改名した — `WikiCommitSources.tsx` 側が `derived_from[].path` にも同じ変換を適用するようになり、フィールド名ではなく変換内容を表す名前にした。`WikiCommitBanner.tsx` 側の用途は `translated_from` のみのままだが、2つを対で見つけられる状態を保つため同時に改名している）の `entityPathToRelativePath()`（この2つは旧プレフィックスの吸収に加えて、Issue #576 の `custom/` フラット化にも対応する必要がある — 突き合わせ先の `relativePath` は `content/` 相対であり `custom/` を含まないため。ここを直さないと翻訳された custom 型ページの sources 継承と原文ページリンクが**例外にならず黙って**効かなくなる。同じことが `WikiCommitSources.tsx` の `derived_from[].path` 解決にも当てはまる — Issue #587）、`.claude/skills/wikicommit-remove/scripts/remove_page.py` の `normalize_entity_prefix()`（同名だが `_wikilink.py` からのインポートではなく複製 — このSkillスクリプトはサブプロセスとして実行され `.wikicommit/scripts/` が呼び出し元の cwd から解決可能とは限らないため）、`review-issue-close-sync.yml` のマーカー解決ロジック、`wikicommit-merge`/`wikicommit-review` SKILL.md のトラッキングIssueマーカー照合手順。新しい消費箇所を追加する際はこの一覧に加えること。
+> **`translated_from`/`derived_from[].path`/`generated_pages[]`/Issueマーカーに埋め込まれた旧パス文字列への後方互換**: 上記の「新旧混在を許容する」方針は、ディレクトリそのものの新旧混在だけでなく、ページの frontmatter やレビュー追跡 Issue の本文に**文字列として埋め込まれた**旧パス（例: `translated_from: .wikicommit/wiki/ja/Person/yamada-taro.md`）にも及ぶ — これらの値は自動移行されないため、リポジトリ側がディレクトリを `git mv` で完全移行した後もそのまま残り続ける。これを消費する側のスクリプト・Skill 指示はすべてこの後方互換を実装する必要がある: `.wikicommit/scripts/_wikilink.py` の `normalize_entity_prefix()`/`resolve_stored_entity_path()`（`validate_frontmatter.py`・`check_translation_status.py`・`check_derivation_freshness.py` が使用）、`convert_wikilinks.py` の `normalize_wiki_rel()`（`generated_pages[]` 用）、`WikiCommitSources.tsx`・`WikiCommitBanner.tsx`（Issue #528。両者とも同名の `entityPathToRelativePath()` を独立に複製 — 各 `quartz-plugins/` パッケージがそれぞれ独立ビルドのため、`WikiCommitSources.tsx` の同関数コメントが説明する理由でここも共有関数化していない。Issue #587 で `translatedFromToRelativePath()` から改名した — `WikiCommitSources.tsx` 側が `derived_from[].path` にも同じ変換を適用するようになり、フィールド名ではなく変換内容を表す名前にした。`WikiCommitBanner.tsx` 側の用途は `translated_from` のみのままだが、2つを対で見つけられる状態を保つため同時に改名している）の `entityPathToRelativePath()`（この2つは旧プレフィックスの吸収に加えて、Issue #576 の `custom/` フラット化にも対応する必要がある — 突き合わせ先の `relativePath` は `content/` 相対であり `custom/` を含まないため。ここを直さないと翻訳された custom 型ページの sources 継承と原文ページリンクが**例外にならず黙って**効かなくなる。同じことが `WikiCommitSources.tsx` の `derived_from[].path` 解決にも当てはまる — Issue #587）、`.claude/skills/wikicommit-remove/scripts/remove_page.py` の `normalize_entity_prefix()`（同名だが `_wikilink.py` からのインポートではなく複製 — **この Skill スクリプトを自己完結に保つという慣行による**。かつてここには「サブプロセスとして実行され `.wikicommit/scripts/` が呼び出し元の cwd から解決可能とは限らないため」と書いていたが、**その理由は成立しない**〈Issue #947〉: 全 SKILL.md の呼び出しは `python .claude/skills/<skill>/scripts/<x>.py` というリポジトリルート相対であり、cwd への同じ仮定を同じコマンドラインの 1 語手前で既に置いている。`wikicommit-ask` の `resolve_source_cache_path.py` は実際に `sys.path` 経由で import している。複製自体は残してある — 誤った理由を正すことと、それに基づいて書かれたコードを書き換えることは別の判断である。`docs/DesignDoc-skills.md` §11.5 冒頭のコールアウト参照）、`review-issue-close-sync.yml` のマーカー解決ロジック、`wikicommit-merge`/`wikicommit-review` SKILL.md のトラッキングIssueマーカー照合手順。新しい消費箇所を追加する際はこの一覧に加えること。
 
 ### 3.2 WikiCommit 開発リポジトリ
 
@@ -359,7 +383,48 @@ wikicommit:
 
 **推奨する組み合わせ**（3 案は排他ではない）: (1) 骨格は一次資料から取る、(2) 百科事典は索引として使う（`index_only`）、(3) 一次資料が存在しない対象だけ百科事典記事をソースとして明示登録する。神社の由緒・地域の文化的概念などネット上に一次資料が無い対象は必ず残るため、**「百科事典を一律禁止」という運用不能なルールにはしない** — ShareAlike 義務を負うページを意図的に少数に絞ることが目的である。この方針は `source-policy.md` テンプレートの本文コメントと README に書いた。
 
-**ShareAlike ソースの警告**（Issue #570 の対応方針 2）: `add_source.py` が既知ドメイン対応表（Issue #558）または `--license` から得たライセンスが ShareAlike 系（`is_share_alike()`。`CC-BY-SA`/`CC-SA`/`GFDL`/`ODbL`/`CC-BY-NC-SA` 接頭辞）なら、登録時のメッセージに一度だけその旨を添える。ライセンス値は自由記述なので完全な判定はできないが、対応表が返す値と SPDX の一般的な綴りは覆う — 取りこぼしの劣化は「注意書きが出ない」で済み、誤った注意書きは出ない側に倒してある。あわせて `wikicommit-generate` の Completion Notice が、`sources` が**全件** ShareAlike のページを列挙する（義務が実際に付くのはソースではなくページであるため）。
+**コピーレフト系ソースの警告**（Issue #570 の対応方針 2、Issue #951 で対象を拡張）: `add_source.py` が既知ドメイン対応表（Issue #558）または `--license` から得たライセンスがコピーレフト系（`is_share_alike()`）なら、登録時のメッセージに一度だけその旨を添える。ライセンス値は自由記述なので完全な判定はできないが、対応表が返す値と SPDX の一般的な綴りは覆う。あわせて `wikicommit-generate` の Completion Notice が、`sources` が**全件**コピーレフトのページを列挙する（義務が実際に付くのはソースではなくページであるため）。
+
+> **対象がソフトウェア側のコピーレフトへ広がった（Issue #951）**: 表は当初 `CC-BY-SA`/`CC-SA`/`GFDL`/`ODbL`/`CC-BY-NC-SA` の 5 つで、**Creative Commons 系と ODbL だけ・ソフトウェア側のコピーレフトが 1 つも入っていなかった**。`wikicommit/ai-driven-dev-wiki` で `--license GPL-3.0` として登録した GitHub リポジトリの README は、コピーレフトでありながら 4 つの消費者（`add_source.py` の `--license` 経路と既知ドメイン対応表経路・`--license-for-url`・Completion Notice のページ列挙）のどれからも警告が出なかった。**ライセンス値自体は最後まで正しく運ばれており**（レビュー記録の `reviewed_sources` に `license: GPL-3.0` が載っている）、欠けていたのは警告だけである。現在は `gpl`/`agpl`/`lgpl`/`mpl`/`epl`/`cddl`/`osl`/`sspl` に加え、Issue #958 で足した `eupl`/`cpl`/`ms-rl` を含む（下記コールアウト）。
+>
+> **弱いコピーレフト（LGPL / MPL / EPL / CDDL）も一律で入れた**。ソフトウェアでは「及ぶ範囲が狭い」ことに意味があるが、リンク境界もファイル境界も散文には対応物が無いため、その区別はここでは働かない。接頭辞照合なので `AGPL-3.0` は `gpl` に前方一致せず `agpl` が別に要る（逆に `LGPL-3.0` も `gpl` では一致しないので、落とすなら明示的な判断になる）。
+>
+> **末尾にハイフンを付けない**。SPDX 識別子は必ず付くので `gpl-` でも SPDX は覆えるが、この値は自由記述であり `GPLv3` や素の `GPL` は普通に書かれる綴りで、ハイフンを付けるとそのどちらも落ちる。下の非対称がここにもそのまま当たるうえ、`gpl` で始まる permissive なライセンスは無いので広げすぎにもならず、既存の 5 つが元からハイフン無しなのとも揃う。
+>
+> **Issue #570 が置いた非対称の評価は、ここでは向きが変わる**。あちらは「取りこぼしの劣化は注意書きが出ないで済み、誤った注意書きは出ない側に倒す」と書いていたが、その評価は「誤った注意書き」が実害を持つ場合にのみ成り立つ。ここで足した接頭辞はいずれも**実際にコピーレフト**なので誤った注意書きにはならず、一方で足りない場合の劣化は「利用者が義務に気づかないまま公開する」という、法的に取り返しのつかない側である。
+>
+> **表が表すのはライセンスの性質であって、そのページが二次的著作物に当たるかの判断ではない**。あるライセンスがコピーレフトかはライセンス自身の事実であり、それを読んで書かれた散文の要約が義務を負うかは別の問いである。WikiCommit はその問いに答えない（`docs/DesignDoc-publish.md` §8.10）ため、**注意書きの文面も「負いうる。確認すること」に弱めた** — 断定は、答えていないことを答えたふりをすることになる。弱めても信号は落ちない（利用者は「このソースはコピーレフトである」という事実を引き続き受け取る）。
+>
+> **`KNOWN_SOURCE_LICENSES` に `github.com` は足さない**。同表の条件は「そのサイトが自サイトのコンテンツ全体に対して明示しているライセンスのみを持つ」であり、GitHub は 1 ドメインに任意のライセンスが混在するためこれを満たさない。GPL-3.0 が `--license` 経由で入ったのは設計どおりである。
+>
+> **既に登録済みのソースは書き換えない**。`add_source.py` は新規作成時にしか `license` を書かず（Issue #558）、注意書きも登録時の一度きりなので、遡って警告は出ない。Completion Notice のページ列挙は次にそのページを生成したときに効く。
+>
+> **識別子の名前（`SHARE_ALIKE_LICENSE_PREFIXES` / `is_share_alike()`）と `--license-for-url` の `(share-alike)` マーカーは据え置く**。中身はコピーレフト系一般だが、マーカーは `wikicommit-collect` の SKILL.md に出力の契約として書かれている。
+>
+> **残っていた 3 族を足し、1 族は意図的に足さなかった（Issue #958）**: Issue #951 のレビューが挙げた残りである。**3 件とも評判ではなく本文の条項で確認した** — `KNOWN_JS_SHELL_DOMAINS`（Issue #425）が確立した「確認済みのものだけを決定論的な表に持つ」規律がここにも当たるため。
+>
+> | 接頭辞 | 巻き込む SPDX 識別子 | 本文で確認した根拠 |
+> |---|---|---|
+> | `eupl` | `EUPL-1.0`/`1.1`/`1.2` の 3 件のみ | **3 版とも "Copyleft clause" を持つ**（permissive な版は存在しない）。`EUPL-1.2` は `Original Work` を "the work **or software**" と定義しており、**この表で最もコードから遠い側の族である** — EU の公的機関がコードに限らない著作物に適用するため、行政文書を取り込む Wiki が実際に当たりうる |
+> | `cpl` | `CPL-1.0` の 1 件のみ | ソース形式での配布を "must be made available under this Agreement" と定める。`CPAL-1.0` は `cpa` で始まるため巻き込まない |
+> | `ms-rl` | `MS-RL` の 1 件のみ | 本文が "Reciprocal" を明示（ファイル単位のコピーレフト） |
+>
+> **`CPL` を「現れる見込みが低い」ことを理由に落とさない。** この表の規律は「確認済みのものだけを持つ」であって「よく使われるものだけを持つ」ではない。確認を経た以上、表の長さは規律の形骸化を意味しない — 形骸化するのは確認を省いたときである。
+>
+> **接頭辞は `ms-` ではなく `ms-rl` である。** SPDX には `MS-PL`（Public）・`MS-LPL`（Limited Public）・`MS-RL` の 3 つがあり、**reciprocal 条項を持つのは `MS-RL` だけ**である。`gpl` / `epl` のような族単位に揃えると permissive な `MS-PL` を巻き込む — **この表で唯一、族が permissive と copyleft に割れている箇所**であり、Issue #958 の起票時には見えていなかった点である。
+>
+> **CeCILL は足さない。沈黙は漏れではなく決定である。** 前方一致という実装の形が選択肢を縛る: `CeCILL` / `CeCILL-C` はコピーレフトだが `CeCILL-B` は帰属表示のみを求める permissive（§5.3.4。本文で確認済み）であり、`CeCILL-B` は `cecill` で始まるため、**「裸の `CeCILL` を拾う」と「`CeCILL-B` を拾わない」は純粋な前方一致では両立しない**。
+>
+> | 採らなかった案 | 採らない理由 |
+> |---|---|
+> | 版ごとに `cecill-1`/`cecill-2`/`cecill-c` を列挙 | **裸の `CeCILL` を取りこぼす**。末尾ハイフン無しの規約（Issue #951）が守ろうとしたのがまさにその自由記述の綴りであり、それを 1 族のために裏返すことになる |
+> | `cecill` を足し `cecill-b` を除外リストに置く | `is_share_alike()` が前方一致だけでなくなる。1 族のために 2 つ目の概念を関数に持ち込む代償が、`sources[].license` に CeCILL が現れる見込みに見合わない |
+>
+> `CeCILL-2.1` / `CeCILL-C` は**permissive 非検出リストには入れない** — あのリストは「permissive である」ことの表明であり、この 2 つはコピーレフトだからである。既知の沈黙であることを述べる独立したテストがその場に固定している。
+>
+> **既存の誤検知が 1 件見つかったが、直さない。** `mpl` は `mplus`（mplus Font License。permissive）にも前方一致する。誤りの向きが Issue #951 が意図的に選んだ側（注意書きが 1 行余計に出るだけ）であり、フォントのライセンスが `sources[].license` に現れる見込みも低い。ここに記録するのは 2 つの理由による — 次に表を見た人がこれを欠陥として起票し直さないため、そして**「足しすぎの劣化は 1 行で済む」という非対称が、仮定ではなく実例を持つ**ことを残すためである。
+>
+> **`CHANGELOG.md` は更新しない**（Issue #951 と同じ）。版を上げる契機は型テンプレート・ページ生成ルールの変更である。**既に登録済みのソースにも遡って警告は出ない**（同上）。
 
 **「骨格ソース先行」は検証すべき仮説**（同 3）。saitama で `check_orphans.py` が検出した orphan 6 件すべてが「骨格 2 ソースが 1 ページも作っていない」ページだった一方、1 記事 1 ページだった Wikipedia ソース 8 件のうち 5 件は骨格ソースが既に作ったページへの `action: update` として機能していた。ただし 1 リポジトリの観察であり、**骨格ソースは定義上あらゆるページにリンクする側なので、その由来ページが被リンクを得るのは半ば同語反復**である。次のパイロットで、骨格ソースを意図的に先に入れた場合と入れなかった場合で orphan 率が変わるかを検証する。それを可能にするため `check_orphans.py` の `ORPHAN:` 行に出自（そのページの `sources`）を添えた（同 3 の最後の候補。実装コストが小さく、運用中にも気づける）。
 
@@ -1257,6 +1322,12 @@ Pass 4 は最大 `generate.max_retries` 回まわり、**各ラウンドで別�
 
 集計・未レビュー・抜取候補・失効の列挙は `check_review_coverage.py` が行い、`wikicommit-status` が呼ぶ（仕様は `docs/DesignDoc-ScriptSpec.md`）。**閾値・合否判定・自動化は入れない** — 実測が無い状態で決めた閾値は推測にすぎない。人が `RISKY:` / `COVERAGE:` を読んで `/wikicommit-generate --regenerate`（Issue #578）を叩けばループは人力で閉じる。
 
+**読み手は 2 つある（Issue #969）。** 上記の集計は `wikicommit-status` が読むが、**`result: discarded` の記録には 2 人目の読み手がいる** — `wikicommit-merge` Step 9 の生成失敗トラッキング Issue である。同 Step は理由をソース管理ファイルの `## Failure Reason` から取るが、Pass 4 step 7 はその節を `partial` 分岐で削除する（`failed` ではないため。Issue #408）。そして `partial` こそが普通の失敗の形であるため、**Step 9 が最も多く立てる Issue では理由欄が構造的に必ず `unknown` になっていた**。
+
+**書く側は最初からそう設計されていて、読む側だけが繋がっていなかった。** 上の「`failed_pages` 行きの記録こそ本命」という設計判断（Pass 4 が PASS したページと破棄したページの両方を記録する理由）は、まさにこの用途を先取りしていた — Issue #452（Step 9 を作った Issue）が Issue #750 より前に入ったため、当時は読む先が存在しなかっただけである。現在は `check_review_coverage.py --discarded-reason` が両者を繋ぐ（`docs/DesignDoc-ScriptSpec.md` の同スクリプトの節）。
+
+**この用途のために記録の形は変えていない。** 足したのは読み出しモードだけであり、`FINDING_FIELDS` も射影の規則も 1 バイトも動いていない — 上の「本節の JSON そのもの」と「射影したもの」の区別（前者はフィールド追加が自由、後者は後方互換の対象）はそのまま保たれる。**印字しないフィールドがあることは記録しないことを意味しない**: `source_file` は記録には残り続け、Step 9 が印字しないだけである（gitignored なキャッシュを指すため）。
+
 #### 既存リポジトリへの遡及生成は行わない
 
 本ドキュメント群が一貫して採る「新旧混在を許容する」方針どおり、記録の欠如は「この機能追加より前に生成された」ことを意味する。**そして測定は遡って作れない** — 記録が無かった期間は永久に空白である。これは受け入れる代償であり、だからこそ記録を早く始めることに意味がある。
@@ -1637,6 +1708,29 @@ Pass 2c の分析 JSON の `entities` 配列は元から単一型に制限され
 ただし**各部分がそれ自体で主題として立つ場合に限る**。このルールを満たすために 2 つ目のエンティティをでっち上げない。
 
 **既存ページへの遡及適用はしない**。`/wikicommit-generate --regenerate` は Pass 2c を実行しない（ページ起点で型を所与とする）ため、既に 2 つの主題を抱えた 1 ページを分割することはできず、型の再分類と同じくスコープ外である（`docs/DesignDoc-pipeline.md` §6.1 の再生成モード節）。
+
+#### ソースがすれ違いに引用しただけの文書はエンティティにしない（Issue #968）
+
+ソースが別の話を書きながら 1 回だけ名前を出した文書（対比のための引用・関連研究の 1 行・参考文献リストの項目）は、Pass 2c が `entities` に出さない。逆に、ソースがその文書を**自分の主題として**扱っているものは通常のエンティティである。
+
+**この規律は既に 2 箇所にあったが、どちらもエンティティを切り出した後の段にしかなかった** — Pass 3 の Secondary citation discipline（Issue #473）と `review-rules.md` の check 4（Issue #832）である。結果として、passing mention された文書はエンティティとして切り出され、ページとして書かれ、**レビューで初めて却下される**。却下は正しいが、そこに至るまでに Pass 3 の生成 1 回分が無駄になる。`review-rules.md` の check 1 は「片側にしか書かれない境界は片側にしか適用されない」と自ら書いており、**その教訓が 1 段上でも当たっていた**（Issue #550）。
+
+**しかも 1 回の無駄で終わらない。** `wikicommit/ai-driven-dev-wiki` の arXiv 2602.06310 は、却下されたページが `failed_pages` に記録されるため `status: partial` かつ `failed_pages` 非空となり、Pass 1 の収集条件に**毎回一致する**。入力（ソース本文・`theme`・`entity-policy.md`・型テンプレート）が 1 バイトも変わらないので出力も毎回同じで、実行のたびに同じエンティティを切り出し・同じページを書き・同じ `MISSING_SOURCE` で却下する。Issue #567 は `failed_pages` の空／非空を「再試行に意味があるか」の代理指標として使ったが、**本件はその代理指標が外れる実例**である（意味としては off-`theme` 除外と同じく決定論的に再現するのに、記録先が `failed_pages` なので再試行側に入る）。本ルールが効くと次の実行で `failed_pages` が空になり、そのソースは収集条件から外れる — **移行作業も遡及処理も要らず、ループが自分で止まる**。
+
+**`exclude` としては表現できない。** `exclude_reason` は `theme_mismatch`（関連性）と `privacy`（許容性）の 2 値であり、本件が引っかかるのは**証拠**の軸（根拠となる文書が `sources` に無い）でどちらでもない。加えて Pass 2c は前回のレビュー記録を読まないため、判定が次の実行へ伝わる経路も無い。
+
+決定した 4 点（`docs/DesignDoc-skills.md` §11.6 に判定の文面がある）:
+
+| 論点 | 決定 |
+|---|---|
+| 判別がつかない場合 | **passing mention 側に倒して抽出しない。** check 4 が同じ引き分けを同じ側に倒すためであり、Pass 2c だけが寛容だとその差分が無駄な 1 周を構造的に保証する |
+| 登録簿を見るか | **見ない。** `.wikicommit/source/` は Pass 2c のコンテキストに元から無い。別途登録されていればそのソース自身の実行がページを作る |
+| 非抽出の記録 | **残さない**（無言のまま受け入れる）。3 つ目の `exclude_reason` は消費者のいない enum になる（Issue #553）。誤りの向きが安全なのは片方向だけである — passing mention を落とす側は「Pass 4 が却下していたページが 1 段手前で消える」に留まるが、主題として扱われている文書を誤って落とす側はレビューを通ったはずのページを無言で失い、書かれなかったページは orphan でも wanted page でもないので検出もされない。引き分けの倒し方は判別がつかない場合に限り、過剰適用しない |
+| Pass 3 の規律 | **残す。** 3 段が下している判断は別物であり（作るか／書くか／FAIL にするか）、同じ命題の言い換えではない。Issue #552 の「共通ルールを個別の場所で言い直さない」には当たらない |
+
+**Pass 2a の source-as-entity 判定（Issue #475）とは別物である** — あちらは「ソース文書**自身**をページ化するか」、こちらは「ソースが**引用した別の文書**をページ化するか」。上記 arXiv ソースでは 1 回の実行で両方が発火し、前者（論文自身のページ）は正しく、後者（対比のために引用された別論文）は誤っていた。
+
+**効果を測る手段は無い**（Issue #669 / #798 と同じ状況。抽出精度の eval 基盤がこのリポジトリに無い）。壊れ方が軽いことを根拠に採っており、**検証は次のパイロットの観察項目**とする。**既存ページへの遡及は行わない**（新旧混在を許容する方針）。既に書かれた passing-mention 由来のページは `/wikicommit-remove` で人が下ろす。
 
 ### 5.5 スキーマの進化とマイグレーション
 

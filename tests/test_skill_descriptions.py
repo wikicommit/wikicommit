@@ -1,5 +1,5 @@
-"""Every Skill's `description` parses, and the five distributed model-invocable
-ones say when to use them (Issue #912).
+"""Every Skill's `description` parses, and the eight distributed model-invocable
+ones say when to use them (Issue #912, widened by Issue #945).
 
 Two separate properties, in one file because they are both about the same three
 lines of frontmatter.
@@ -21,8 +21,8 @@ that the trap is named rather than surfacing as a bare `ScannerError`.
 The second property is what the official guidance calls the primary triggering
 mechanism: a description that says only what a Skill does gives a model nothing
 to match a request against, and the guidance's own note is that models
-*under*trigger. It applies only where a model can trigger at all. **Seven Skills
-lack `disable-model-invocation`, not five** — the set enforced below is the five
+*under*trigger. It applies only where a model can trigger at all. **Ten Skills
+lack `disable-model-invocation`, not eight** — the set enforced below is the eight
 *distributed* ones. The other two are the dev-only Skills, which are
 model-invocable for the reason Issue #927 settled, and whose descriptions do say
 when to use them; they are left unenforced rather than exempt (see the last
@@ -38,18 +38,40 @@ SKILLS = REPO / ".claude" / "skills"
 sys.path.insert(0, str(REPO / ".wikicommit" / "scripts"))
 from _frontmatter import parse_frontmatter  # noqa: E402
 
-# The *distributed* Skills a model may invoke on its own — read-only ones, by
-# deliberate design (see docs/DesignDoc-skills.md section 11.1). Not every
-# model-invocable Skill in the tree: the two internal ones lack the flag too, and
-# are covered by neither test (see the last one). Listed rather than derived so
-# that dropping `disable-model-invocation` from a distributed writing Skill fails
-# in this file instead of quietly widening what a model may start by itself.
+# The *distributed* Skills a model may invoke on its own. Five are read-only and
+# three write (see docs/DesignDoc-skills.md section 11.1) — the split is no longer
+# "read-only ones only", and the three writers are not an exception carved out of
+# that rule. `disable-model-invocation` was doing two jobs at once: keeping a
+# passing request from firing a Skill, and, as a side effect, closing every
+# non-human path at all — subagents, scheduled runs, one model invoking another.
+# The second job deleted the unattended pipeline outright, which is what Issue
+# #945 separated. Not every model-invocable Skill in the tree: the two internal
+# ones lack the flag too, and are covered by neither test (see the last one).
+# Listed rather than derived so that dropping `disable-model-invocation` from a
+# distributed writing Skill fails in this file instead of quietly widening what a
+# model may start by itself.
 MODEL_INVOCABLE = {
     "wikicommit-ask",
+    "wikicommit-generate",
+    "wikicommit-merge",
     "wikicommit-quiz",
     "wikicommit-search",
     "wikicommit-serve",
     "wikicommit-status",
+    "wikicommit-translate",
+}
+
+# The subset of MODEL_INVOCABLE that writes (Issue #945). These carry a second
+# load the read-only five do not: in a repository whose `.claude/settings.json`
+# has no `skillOverrides`, the description is the *only* brake on a Skill that
+# generates pages or squash-merges to the default branch, so it has to say when
+# not to use it as well as when to. Asserted separately below rather than left to
+# the docstring, because a rule that only the prose states is a rule nothing
+# stops a later edit from dropping.
+MODEL_INVOCABLE_WRITERS = {
+    "wikicommit-generate",
+    "wikicommit-merge",
+    "wikicommit-translate",
 }
 
 
@@ -115,9 +137,14 @@ def test_every_skill_frontmatter_parses_and_carries_the_two_required_keys():
 
 
 def test_the_model_invocable_skills_say_when_to_use_them():
-    """Not a style rule: for these five the description is the only thing a model
-    matches a request against, and among the distributed Skills only these five
-    can be matched at all (the two internal ones can too — see the last test)."""
+    """Not a style rule: for these eight the description is the only thing a model
+    matches a request against, and among the distributed Skills only these eight
+    can be matched at all (the two internal ones can too — see the last test).
+
+    For the three that write (Issue #945) the description carries a second load
+    the read-only five do not: it is the only brake that reaches a repository
+    whose `.claude/settings.json` has no `skillOverrides`, so it has to say when
+    *not* to use the Skill as well as when to."""
     for name in sorted(MODEL_INVOCABLE):
         fm = _frontmatter(SKILLS / name / "SKILL.md")
         assert "disable-model-invocation" not in fm, (
@@ -128,6 +155,13 @@ def test_the_model_invocable_skills_say_when_to_use_them():
             f"{name}'s description no longer says when to use it, only what it does. "
             f"That is the half a model matches a request against (Issue #912)."
         )
+        if name in MODEL_INVOCABLE_WRITERS:
+            assert "do not use it" in fm["description"], (
+                f"{name} writes to the repository and its description no longer says when "
+                f"*not* to use it. That half is the only brake reaching a repository with "
+                f"no skillOverrides (Issue #945), and the trigger-eval negatives recorded "
+                f"in dev/skill-trigger-evals/ were measured against a description that has it."
+            )
 
 
 def test_every_other_distributed_skill_still_disables_model_invocation():
@@ -144,7 +178,8 @@ def test_every_other_distributed_skill_still_disables_model_invocation():
     squash-merges to the default branch — set neither `metadata.internal`'s
     counterpart `disable-model-invocation` nor anything else, so both are
     model-invocable today: the two Skills with the most side effects in the tree
-    are the only ones this guard does not cover. Whether they should set it was
+    are the only ones *neither* test covers (this guard skips MODEL_INVOCABLE too,
+    but those are held to the "when to use" rule by the test above). Whether they should set it was
     settled in Issue #927, and the answer is no — `disable-model-invocation`
     blocks model invocation outright, and the sequential-loop prompt in
     dev/claude-code-web-setup.md section 2 has the model itself invoke both, once

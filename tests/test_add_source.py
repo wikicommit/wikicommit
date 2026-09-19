@@ -1267,18 +1267,185 @@ def test_is_share_alike(value, expected):
     assert add_source.is_share_alike(value) is expected
 
 
+# ── copyleft software licenses (Issue #951) ──────────────────────────────────
+#
+# The table held Creative Commons and ODbL only, so a source registered with
+# `--license GPL-3.0` — a real case in ai-driven — produced no notice at all,
+# while the value itself travelled all the way into a review record's
+# `reviewed_sources`. What was missing was the warning, not the data.
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # Strong copyleft.
+        "GPL-2.0",
+        "GPL-3.0",
+        "GPL-3.0-or-later",
+        "gpl-3.0",
+        "AGPL-3.0",
+        "AGPL-3.0-only",
+        "OSL-3.0",
+        "SSPL-1.0",
+        # Weak copyleft: added on the same line rather than held back, because the
+        # thing that makes these "weak" (a linking boundary, a file boundary) has no
+        # counterpart in a prose summary.
+        "LGPL-2.1",
+        "LGPL-3.0-or-later",
+        "MPL-2.0",
+        "EPL-2.0",
+        "CDDL-1.1",
+        # Not SPDX, but the spellings people actually type into a free-text field.
+        # The prefixes carry no trailing hyphen so that these land too.
+        "GPLv3",
+        "GPL",
+        "AGPLv3",
+        "LGPLv2.1",
+        # Issue #958. All three confirmed against the license *text*, not its
+        # reputation — the rule this table follows (Issue #425) is "only what has
+        # been checked", not "only what is common".
+        #
+        # EUPL is the closest of the three to this wiki: every version carries a
+        # "Copyleft clause" (there is no permissive EUPL), and EUPL-1.2 defines
+        # `Original Work` as "the work **or software**", so a wiki taking in
+        # government documents can actually meet it.
+        "EUPL-1.2",
+        "EUPL-1.1",
+        "EUPL-1.0",
+        "CPL-1.0",
+        "MS-RL",
+        # The free-text spellings again, for the family added last.
+        "EUPLv1.2",
+        "EUPL",
+    ],
+)
+def test_copyleft_software_licenses_are_recognized(value):
+    assert add_source.is_share_alike(value) is True
+
+
+def test_agpl_does_not_match_through_the_gpl_prefix():
+    """Prefix matching, so `agpl` has to be its own entry: dropping it would leave
+    the strongest copyleft license in the list silently uncovered."""
+    assert "AGPL-3.0".lower().startswith("gpl") is False
+    assert any(p == "agpl" for p in add_source.SHARE_ALIKE_LICENSE_PREFIXES)
+
+
+def test_lgpl_does_not_match_through_the_gpl_prefix_either():
+    """The same arithmetic in the other direction, and the reason dropping `lgpl`
+    would have been a decision rather than an oversight: it never matched `gpl`."""
+    assert "LGPL-3.0".lower().startswith("gpl") is False
+    assert any(p == "lgpl" for p in add_source.SHARE_ALIKE_LICENSE_PREFIXES)
+
+
+def test_the_microsoft_prefix_is_ms_rl_not_the_family():
+    """`ms-` would sweep in MS-PL and MS-LPL, which are permissive (Issue #958).
+
+    The parametrized non-detection list above already fails if this widens, but
+    it fails as "a permissive license got flagged" — true, and a step removed
+    from the cause. This says the thing directly, at the one place someone
+    shortening the entry would look.
+    """
+    assert "ms-rl" in add_source.SHARE_ALIKE_LICENSE_PREFIXES
+    assert "ms-" not in add_source.SHARE_ALIKE_LICENSE_PREFIXES
+    assert not any(
+        p != "ms-rl" and "ms-pl".startswith(p) for p in add_source.SHARE_ALIKE_LICENSE_PREFIXES
+    )
+
+
+def test_no_prefix_carries_a_trailing_hyphen():
+    """`sources[].license` is free text, so `GPLv3` and a bare `GPL` reach here as
+    often as the SPDX spelling. A trailing hyphen would drop both, which is the
+    direction Issue #951 decided not to err in — and the five pre-existing entries
+    never carried one either."""
+    for prefix in add_source.SHARE_ALIKE_LICENSE_PREFIXES:
+        assert not prefix.endswith("-"), prefix
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # Permissive licenses whose identifiers sit near the copyleft ones. None of
+        # them starts with a listed prefix, and this pins that the prefixes stayed
+        # narrow enough not to sweep them in.
+        "MIT",
+        "Apache-2.0",
+        "BSD-3-Clause",
+        "ISC",
+        "Unlicense",
+        "Zlib",
+        # Issue #958. These three are why two prefixes are narrower than the
+        # family they belong to, and pinning them here is what makes that a
+        # decision rather than something a later edit can widen by accident.
+        #
+        # MS-PL and MS-LPL are permissive; only MS-RL carries a reciprocal
+        # clause. A family-level `ms-` would sweep both of these in.
+        "MS-PL",
+        "MS-LPL",
+        # CeCILL-B asks for attribution only (§5.3.4, checked against the text),
+        # so `cecill` cannot be added as a family prefix — see the test below for
+        # what that costs.
+        "CeCILL-B",
+    ],
+)
+def test_permissive_software_licenses_are_not_flagged(value):
+    assert add_source.is_share_alike(value) is False
+
+
+@pytest.mark.parametrize("value", ["CeCILL-2.1", "CeCILL-C", "CeCILL"])
+def test_cecill_copyleft_versions_are_a_known_silence(value):
+    """These *are* copyleft and are deliberately not detected (Issue #958).
+
+    Kept out of the permissive list above on purpose: that list asserts "this
+    license is permissive", which would be false of these. What is asserted here
+    is narrower and is about the table, not the license — the silence is a
+    decision, so a later reader does not file it again as an oversight.
+
+    Prefix matching is what forces the choice. `CeCILL-B` starts with `cecill`,
+    so "match a bare CeCILL" and "do not match CeCILL-B" cannot both hold under a
+    pure prefix test. Enumerating versions (`cecill-1`/`cecill-2`/`cecill-c`)
+    would drop the bare `CeCILL` that free text actually carries — inverting, for
+    one family, the no-trailing-hyphen rule that exists for exactly that spelling
+    — and an exclusion list would make is_share_alike() more than a prefix test
+    for a family unlikely to appear in `sources[].license` at all.
+    """
+    assert add_source.is_share_alike(value) is False
+
+
+def test_created_note_warns_for_a_gpl_file_source(tmp_path):
+    """End to end on the path the ai-driven CEK source actually took: a type: path
+    source whose license came in through --license, where the known-domain table
+    cannot reach."""
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "README.md").write_text("x", encoding="utf-8")
+    result, _path, msg = add_source.process_file("raw/README.md", tmp_path, None, "GPL-3.0")
+    assert result == "CREATED"
+    assert "GPL-3.0" in msg
+    assert "copyleft license" in msg
+
+
+def test_the_notice_does_not_assert_that_the_obligation_applies(tmp_path):
+    """Issue #951 検討事項 2. Whether a prose summary of a copyleft document is a
+    derivative work is an open question, and DesignDoc-publish.md section 8.10 says
+    WikiCommit does not answer it — so the notice says the obligation *may* apply and
+    tells the reader to check, rather than stating it as settled."""
+    result, _path, msg = add_source.process_url("https://ja.wikipedia.org/wiki/X", tmp_path)
+    assert result == "CREATED"
+    assert "may have to be offered" in msg
+    assert "check before publishing" in msg
+    assert "must be offered" not in msg
+
+
 def test_created_note_warns_on_a_share_alike_source(tmp_path):
     result, _path, msg = add_source.process_url("https://ja.wikipedia.org/wiki/X", tmp_path)
     assert result == "CREATED"
     assert "CC-BY-SA-4.0" in msg
-    assert "share-alike license" in msg
+    assert "copyleft license" in msg
 
 
 def test_created_note_is_silent_for_a_non_share_alike_license(tmp_path):
     result, _path, msg = add_source.process_url("https://www.wikidata.org/wiki/Q1", tmp_path)
     assert result == "CREATED"
     assert "CC0-1.0" in msg
-    assert "share-alike" not in msg
+    assert "copyleft" not in msg
 
 
 def test_created_note_warns_for_an_explicit_share_alike_override(tmp_path):
@@ -1286,7 +1453,7 @@ def test_created_note_warns_for_an_explicit_share_alike_override(tmp_path):
         "https://example.com/a", tmp_path, license_override="CC-BY-SA-4.0"
     )
     assert result == "CREATED"
-    assert "share-alike license" in msg
+    assert "copyleft license" in msg
 
 
 def test_created_note_warns_for_a_share_alike_file_source(tmp_path):
@@ -1298,7 +1465,7 @@ def test_created_note_warns_for_a_share_alike_file_source(tmp_path):
         "raw/article.html", tmp_path, None, "CC-BY-SA-4.0"
     )
     assert result == "CREATED"
-    assert "share-alike license" in msg
+    assert "copyleft license" in msg
 
 
 def test_created_note_is_silent_for_a_non_share_alike_file_source(tmp_path):
@@ -1308,7 +1475,7 @@ def test_created_note_is_silent_for_a_non_share_alike_file_source(tmp_path):
         "raw/article.html", tmp_path, None, "CC-BY-4.0"
     )
     assert result == "CREATED"
-    assert "share-alike" not in msg
+    assert "copyleft" not in msg
 
 
 # ── --license-for-url: the known-domain table, queried one step before
@@ -1473,7 +1640,7 @@ def test_partial_extraction_notice_coexists_with_the_share_alike_notice(tmp_path
     )
 
     assert result == "CREATED"
-    assert "share-alike license" in msg
+    assert "copyleft license" in msg
     assert "partial extraction" in msg
 
 

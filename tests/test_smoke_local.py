@@ -16,6 +16,7 @@ Issue #106（ingest 対象の実ソースファイル自体のコミットタイ
 「未追跡の実ソースファイルのみを bulk update コミットに含める」ロジックも検証する。
 """
 
+import importlib.util
 import os
 import re
 import subprocess
@@ -33,6 +34,14 @@ ADD_SOURCE_PY = REPO_ROOT / ".claude" / "skills" / "wikicommit-generate" / "scri
 # tests/test_check_translation_status.py と同じ理由: 開発者/CI ランナーの
 # グローバル・システム git 設定（gpgsign・hooksPath 等）から使い捨てリポジトリを隔離する。
 _GIT_ENV = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+# tests/test_root_outputs.py と同じ読み込み方。`git add` の列挙を生む側の宣言を
+# そのまま読むためで、こちらに写しを置かないのが要点（Issue #948）。
+_ROOT_OUTPUTS_SPEC = importlib.util.spec_from_file_location(
+    "_root_outputs", INIT_PY.parent / "_root_outputs.py"
+)
+_root_outputs = importlib.util.module_from_spec(_ROOT_OUTPUTS_SPEC)
+_ROOT_OUTPUTS_SPEC.loader.exec_module(_root_outputs)
 
 
 def git(args: list[str], cwd: Path, **kwargs) -> subprocess.CompletedProcess:
@@ -236,7 +245,17 @@ def test_full_local_pipeline_commits_foundational_files_and_generated_pages(tmp_
     assert (tmp_path / ".wikicommit" / "scripts").is_dir()
 
     # ── 3. SKILL.md の「次のステップ」案内どおりの初回コミット（Issue #86 の恒久対応） ──
-    git(["add", *extract_git_add_paths(variant="none")], tmp_path, check=True)
+    # 存在しうるとは限らないパスは落とす（`_paths_that_may_be_absent()` の説明を参照）。
+    # この経路は install.sh でインストールするため `skills-lock.json` も `.agents` も
+    # 無く、案内文の caveat どおりに落とすのが正しい読み方である（Issue #948）。
+    git(
+        [
+            "add",
+            *(p for p in extract_git_add_paths(variant="none") if p not in _paths_that_may_be_absent()),
+        ],
+        tmp_path,
+        check=True,
+    )
     git(["commit", "-q", "-m", "chore: WikiCommit の基盤ファイルを追加"], tmp_path, check=True)
 
     # SKILL.md の案内どおりに git add した結果、init.py / install.sh が生成した
@@ -470,10 +489,17 @@ failed_pages: []
     assert classify_source_status(tmp_path, "raw/report2.pdf") == "new"
 
 
-# init.py が自動取得しない（SKILL.md 記載どおりユーザーが `git submodule add` で
-# 手動追加する）パス。--quartz の git add リストに含まれるが init.py の生成物としては
-# 存在しないため、下記の存在確認からは除外する。
-_QUARTZ_MANUAL_SUBMODULE_PATHS = {".gitmodules", "quartz"}
+# init.py が生成しないパス。列挙には含まれるが init 直後には存在しないため、下記の
+# 存在確認からは除外する。**一覧を持たず `_root_outputs.py` の `may_be_absent` から
+# 導く**（Issue #948）— ここに 2 つ目の写しを置くと、あちらに同種のパスが増えたときに
+# このテストだけが古いままになり、しかもその症状は「存在しないパスを git add に渡して
+# コマンド全体が落ちる」という、この検証が守っているものとは別の形で出る。
+#
+# 現在の内訳は 2 種類: `.gitmodules` / `quartz` はユーザー自身の `git submodule add`、
+# `.agents` / `skills-lock.json` は `npx skills add` の配置方式次第（Issue #555）で、
+# どちらも init.py の関知しないところで決まる。
+def _paths_that_may_be_absent() -> set[str]:
+    return {entry.path for entry in _root_outputs.ROOT_OUTPUTS if entry.may_be_absent}
 
 
 def _assert_git_add_guidance_covers_every_generated_file(repo: Path, paths: list[str]) -> None:
@@ -495,12 +521,12 @@ def _assert_git_add_guidance_covers_every_generated_file(repo: Path, paths: list
     `test_commit_step_defaults_to_git_add_all()` が別に固定する。
     """
     # .gitmodules / quartz は init.py の生成物ではなくユーザーが `git submodule add` で
-    # 手動追加する想定のため（_QUARTZ_MANUAL_SUBMODULE_PATHS）、この時点では存在せず
+    # 手動追加する想定であり（_paths_that_may_be_absent）、この時点では存在せず
     # git add に渡すと pathspec エラーでコマンド全体が落ちる。除いて add する。
     # **この除外が必要であること自体が Issue #842 の出発点だった** — 印字された列挙は
     # 印字された状態のリポジトリでは verbatim に実行できず、テストはそれを回避して
     # 通っていた。既定が `-A` になったことで、案内どおり打つ利用者はこの罠を踏まない。
-    addable = [rel_path for rel_path in paths if rel_path not in _QUARTZ_MANUAL_SUBMODULE_PATHS]
+    addable = [rel_path for rel_path in paths if rel_path not in _paths_that_may_be_absent()]
     git(["add", *addable], repo, check=True)
     git(["commit", "-q", "-m", "chore: add WikiCommit foundational files"], repo, check=True)
     leftover = _git_status_porcelain(repo, [])
@@ -538,7 +564,7 @@ def test_quartz_only_git_add_paths_match_generated_files(tmp_path):
     assert "quartz-plugins" in paths  # マーカー境界が正しく他の変種の行を拾っていないことの確認
     assert ".github/workflows/deploy.yml" not in paths
     for rel_path in paths:
-        if rel_path in _QUARTZ_MANUAL_SUBMODULE_PATHS:
+        if rel_path in _paths_that_may_be_absent():
             continue
         assert (tmp_path / rel_path).exists(), f"{rel_path} が init.py --quartz で生成されていません"
 
@@ -566,7 +592,7 @@ def test_quartz_pages_git_add_paths_match_generated_files(tmp_path):
     assert "quartz-plugins" in paths
     assert ".github/workflows/deploy.yml" in paths
     for rel_path in paths:
-        if rel_path in _QUARTZ_MANUAL_SUBMODULE_PATHS:
+        if rel_path in _paths_that_may_be_absent():
             continue
         assert (tmp_path / rel_path).exists(), (
             f"{rel_path} が init.py --quartz --quartz-pages で生成されていません"

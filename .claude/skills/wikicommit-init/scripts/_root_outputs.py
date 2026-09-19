@@ -89,6 +89,7 @@ COMPARISONS = (
     "bytes",            # byte-for-byte, file or directory tree
     "yaml_keys",        # top-level YAML keys the template has and the local file lacks
     "frontmatter_keys", # keys under `wikicommit:` in frontmatter, same additive test
+    "json_keys",        # JSON key paths the template has and the local file lacks
     "lines",            # template lines (ignoring blanks/comments) absent from the local file
     "none",             # not compared; the only valid choice for update="skip"
 )
@@ -130,7 +131,8 @@ class RootOutput:
     """Which `--variant` values include this path."""
 
     origin: str
-    """Who puts it there; one of ORIGINS: `init` (init.py), `install` (install.sh),
+    """Who puts it there; one of ORIGINS: `init` (init.py), `install` (the Skills
+    installation step — `install.sh` or `npx skills add`, whichever the user ran),
     `submodule` (the user's own `git submodule add`), or `npm` (`npm install`)."""
 
     template: str | None = None
@@ -149,6 +151,21 @@ class RootOutput:
 
     This governs the selective fallback list, not the printed default — that is
     `git add -A` since Issue #842, which stages such a path whenever it exists.
+    """
+
+    may_be_absent: bool = False
+    """True for a path that belongs in the first commit but is not always on disk.
+
+    `git add` aborts the whole command on a pathspec that does not exist, so the
+    selective fallback list has to tell the reader to drop these rather than leave
+    them to interpret exit 128. The printed default is unaffected: `-A` stages what
+    is there and says nothing about what is not.
+
+    Distinct from `condition`, which is evaluated: a caller knows whether the
+    vocabulary cache was created and `git_add_paths()` leaves that entry out
+    accordingly. These are paths whose presence nobody here can determine — the
+    user has not run `git submodule add` yet, or `npx skills add` chose a placement
+    this run never saw — so the list carries them and the caveat covers them.
     """
 
     update: str = "review"
@@ -170,6 +187,45 @@ class RootOutput:
 # Order is the order the `git add` line lists them in.
 ROOT_OUTPUTS: tuple[RootOutput, ...] = (
     RootOutput(".claude", ALL, origin="install", update="skip", compare="none"),
+    # The other half of where the Skills live, and the reason both are here rather than
+    # covered by `.claude` alone: `npx skills add` targeting two or more agents writes each
+    # Skill's real files to `.agents/skills/<name>/` and makes `.claude/skills/<name>` a
+    # relative symlink into it (Issue #555). Committing `.claude` without `.agents` gives
+    # every clone a `.claude/skills/` of links pointing at nothing. `skills-lock.json` records
+    # what was installed and does not resolve those links, so it is its own path.
+    #
+    # Both carry may_be_absent: install.sh produces neither, and a copy placement produces no
+    # `.agents`. Neither is init.py's to write, refresh or compare, hence origin=install and
+    # update=skip — the same answer `.claude` gets, for the same reason (Issue #948).
+    RootOutput(".agents", ALL, origin="install", update="skip", compare="none", may_be_absent=True),
+    RootOutput(
+        "skills-lock.json", ALL, origin="install", update="skip", compare="none", may_be_absent=True
+    ),
+    # The one part of `.claude/` init.py writes rather than install.sh (Issue #953). It
+    # carries `skillOverrides`, which narrows how Claude sees the three Skills that lost
+    # `disable-model-invocation` in Issue #945 — `name-only` hides the description, so a
+    # passing request cannot trigger them, while a prompt naming `/wikicommit-generate`
+    # still works and unattended runs need no setting flipped.
+    #
+    # Not a `template` copy: the file belongs to the user (permissions, env, hooks), so
+    # init merges the three keys in rather than writing the file over. `update` is the
+    # default `review` — an operator who deliberately set one of these to `on` is running
+    # unattended, and a re-init silently putting it back would stop that repository's
+    # unattended runs with a success-shaped message. `compare_template` exists so the
+    # freshness check can report a key added upstream without ever reporting the user's
+    # own value as drift.
+    #
+    # `in_git_add=False` because `.claude` above already stages it; listing both would
+    # put the same file in the guidance twice. Unlike package-lock.json, there is no
+    # separate command for it — the parent path is the command.
+    RootOutput(
+        ".claude/settings.json",
+        ALL,
+        origin="init",
+        compare="json_keys",
+        compare_template="claude-settings.json",
+        in_git_add=False,
+    ),
     RootOutput(".gitignore", ALL, origin="init", template=".gitignore", compare="lines"),
     # Placeholder substitution (version/targets/primary_lang/theme), not a copy.
     RootOutput(
@@ -327,8 +383,12 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         update="overwrite",
         compare_template="quartz-plugins",
     ),
-    RootOutput(".gitmodules", QUARTZ, origin="submodule", update="skip", compare="none"),
-    RootOutput("quartz", QUARTZ, origin="submodule", update="skip", compare="none"),
+    RootOutput(
+        ".gitmodules", QUARTZ, origin="submodule", update="skip", compare="none", may_be_absent=True
+    ),
+    RootOutput(
+        "quartz", QUARTZ, origin="submodule", update="skip", compare="none", may_be_absent=True
+    ),
     RootOutput(
         ".wikicommit/schemaorg-vocab.json",
         ALL,

@@ -58,6 +58,14 @@ export interface ExplorerOptions {
 // lower-priority-than-language group can be added without another orthogonal boolean-pair
 // comparison (Issue #494 — content/sources/ was sorting alphabetically among Type folders,
 // landing above the language folders instead of trailing after them at the very bottom).
+//
+// Issue #946 extended that in the other direction, with negative tiers for the two trees a
+// reader uses to look *across* the wiki rather than at one page: content/overview/ and View.
+// The principle the three tiers now express is "reserved trees go to the edges" — cross-wiki
+// views first, individual entities in the middle, the record of where they came from last —
+// generalized from the earlier "reserved trees go last". Negative values keep tiers 0/1/2
+// untouched, so every ordering test written for Issues #334 and #494 still passes unchanged,
+// which is what shows this added a tier rather than disturbed one.
 export const explorerSortFn = (a: FileTrieNode, b: FileTrieNode): number => {
   const LANG_SEGMENT_RE = /^[a-z]{2}$/
   const sortTier = (n: FileTrieNode): number => {
@@ -71,6 +79,29 @@ export const explorerSortFn = (a: FileTrieNode, b: FileTrieNode): number => {
     }
     if (n.isFolder && LANG_SEGMENT_RE.test(n.slugSegment || "")) {
       return 1
+    }
+    // Same root-level guard, and for the same reason: content/overview/ is written on every
+    // build and only ever exists at the root (Issue #585). Matching on the slug segment, not
+    // the display name, is the point — the overview page's title is localized, so a wiki with
+    // primary_lang: en lands it between Organization and Person while a ja one lands it at W.
+    if (n.isFolder && n.slugSegment === "overview" && (n.slugSegments?.length ?? 0) === 1) {
+      return -2
+    }
+    // No depth guard here, deliberately. foldLang.ts leaves node.slug alone when it lifts the
+    // current language's children to the root, so a folded View still carries slugSegments
+    // ["ja", "View"] — a length check would miss exactly the case this exists for. Without
+    // one, a sibling language's en/View also leads that language's Type folders, which is the
+    // same ordering one level down. "View" is a reserved Type segment (Issue #675), so under
+    // content/<lang>/ it cannot collide with a Type or a custom type.
+    //
+    // It can collide under content/sources/, which mirrors arbitrary repository paths and URL
+    // paths (convert_wikilinks.py: out_rel = Path("sources") / mgmt_rel), so a wiki that
+    // ingested e.g. src/View/ gets a folder that matches here and leads its siblings inside
+    // that subtree. Left as is: the effect is confined to the ordering within one already
+    // tier-2 subtree, and narrowing this to <lang>/View would re-introduce the depth
+    // assumption the paragraph above exists to avoid.
+    if (n.isFolder && n.slugSegment === "View") {
+      return -1
     }
     return 0
   }

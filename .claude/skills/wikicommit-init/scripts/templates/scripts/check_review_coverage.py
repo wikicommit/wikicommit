@@ -51,6 +51,12 @@ differs:
   is credited with its latest surviving verdict for a page rather than with
   every verdict it ever wrote for it.
 - `SUMMARY: human_reviewed` — the standing **human** record.
+- `SUMMARY: human_notes` — how many of those left a prose note (Issue #952).
+  It counts **presence, not content**: a one-word note and a paragraph are both
+  one, so this measures whether the ask reached anyone, not whether the page was
+  read. Closing with no comment is a legitimate way to close (Issue #762) and is
+  not reported as a defect anywhere — this number is the only place the
+  difference shows at all.
 - `UNREVIEWED:` — printed when there is no standing record of either kind.
 - `RISKY:` — the standing record of **any** kind (Issue #760).
 - `STALE_REVIEW:` / `RETRACTED_EVIDENCE:` — the standing **AI** record
@@ -104,16 +110,26 @@ every run in exchange for nothing anyone has asked for (Issue #750 検討事項 
 
 Usage:
     python .wikicommit/scripts/check_review_coverage.py
+    python .wikicommit/scripts/check_review_coverage.py --discarded-reason <page>...
+
+The second form answers one narrow question for `/wikicommit-merge` Step 9 —
+why a page in `failed_pages` was thrown away — and reports nothing else.
 
 Exit code: always 0 (informational, non-blocking).
 """
 
+import argparse
 import sys
 from pathlib import Path
 
-from _frontmatter import parse_frontmatter, parse_frontmatter_or_warn
+from _frontmatter import (
+    parse_frontmatter,
+    parse_frontmatter_and_body_text,
+    parse_frontmatter_or_warn,
+)
 from _wikilink import ENTITY_DIR, VIEW_DIR, collect_entity_pages, collect_view_pages
 from record_review import (
+    ACCEPTED_PREFIXES,
     REVIEW_DIR,
     RecordError,
     compute_page_content_hash,
@@ -131,15 +147,42 @@ def load_records(page_rel: str) -> list[dict]:
     suffix a same-second record gets (`...-ai-2.md`) sorts *before* the unsuffixed
     name, so plain lexical order would hand back the oldest record of that second
     as the newest.
+
+    Each record is read **once**, through `parse_frontmatter_and_body_text()`
+    rather than `parse_frontmatter_or_warn()`, because `human_notes` (Issue #952)
+    needs the prose body as well as the frontmatter — and returning both from one
+    split is the whole reason that function exists. Reaching for the body in a
+    second pass would open and YAML-parse the same file twice on every run,
+    including `--discarded-reason`, which never looks at a body at all; worse, a
+    read that succeeded the first time and failed the second would drop the note
+    silently and undercount, because there is nothing at that point that could
+    tell an absent body from an unreadable one. The warning text below is
+    `parse_frontmatter_or_warn()`'s, character for character, so a malformed
+    record still reports exactly as it did.
     """
     directory = record_dir_for(page_rel)
     if not directory.is_dir():
         return []
     records = []
     for record_file in sorted(directory.glob("*.md"), key=record_sort_key):
-        fm = parse_frontmatter_or_warn(record_file)
+        try:
+            text = record_file.read_text(encoding="utf-8-sig")
+        except OSError as e:
+            print(f"WARNING: {record_file}: could not be read: {e}")
+            continue
+        fm, err, body = parse_frontmatter_and_body_text(text)
+        if err:
+            print(f"WARNING: {record_file}: {err}")
+            continue
         if fm:
             fm["_file"] = str(record_file)
+            if fm.get("kind") == "human":
+                # Kept only for `kind: human`, and that restriction is about
+                # meaning rather than cost: a `kind: ai` body holds Pass 4's
+                # non-blocking observations (Issue #834), which are not a trace of
+                # a person having read the page. Counting both would make one
+                # number stand for two different things.
+                fm["_body"] = body.strip()
             records.append(fm)
     return records
 
@@ -283,11 +326,158 @@ def stale_reasons(page: Path, fm: dict, record: dict) -> list[str]:
     return reasons
 
 
+def latest_discarded(records: list[dict]) -> dict | None:
+    """The newest record whose page was never written, or None.
+
+    `standing_review()` deliberately skips these — a discarded record judged a
+    draft that no longer exists on disk. That is exactly what is wanted here:
+    a page listed in `failed_pages` was never written, so the discarded record
+    is the only thing that says why.
+    """
+    for record in reversed(records):
+        if record.get("result") == "discarded":
+            return record
+    return None
+
+
+def _one_line(value: object) -> str:
+    """Collapse a finding's free text onto one line.
+
+    Every line this mode prints is one record, so an embedded newline would
+    split it in two and a caller reading line by line would take the second
+    half for a separate finding.
+    """
+    return " ".join(str(value).split())
+
+
+def _where(finding: dict) -> str:
+    """Say what `source_lines` counts lines in, or nothing if it has none.
+
+    `source_file` itself is never printed: for a source document it holds a path
+    under `.wikicommit/.cache/`, which is gitignored and machine-local, so it
+    means nothing in another clone or after the cache is cleared. Which *kind* of
+    file it names is still worth saying, and that is decided the same way Issue
+    #566 decided it — a path inside the entity or view tree is another page,
+    anything else is the source text.
+    """
+    lines = finding.get("source_lines")
+    if not lines:
+        return ""
+    source_file = str(finding.get("source_file") or "")
+    # `ACCEPTED_PREFIXES` already carries the pre-Issue-#477 `.wikicommit/wiki/`
+    # prefix as its third entry, so this one test covers the legacy path too.
+    if source_file.startswith(ACCEPTED_PREFIXES):
+        return f" at lines {_one_line(lines)} of another page"
+    return f" at lines {_one_line(lines)} of the extracted source text"
+
+
+def print_discarded_reasons(page_rels: list[str]) -> int:
+    """Print why each page was discarded, for `/wikicommit-merge` Step 9.
+
+    The management file's `## Failure Reason` section is deleted on the `partial`
+    branch by design, and `partial` is the ordinary shape of a failure — so on
+    the tracking Issues Step 9 creates most often, that section is structurally
+    absent and the reason reads `unknown` (Issue #969). The reason does exist; it
+    is in the review record this same run wrote (Issue #750).
+
+    Reported separately from having no reason at all: `NO_RECORD:` says the
+    record tree holds nothing for this page, which is the normal state for a
+    failure that predates Issue #750 or a repository without `.wikicommit/review/`.
+    Collapsing the two into one silent `unknown` is what this mode exists to stop.
+    """
+    with_reason = 0
+    for page_rel in page_rels:
+        if not page_rel.startswith(ACCEPTED_PREFIXES):
+            # Same contract as `record_review.py` and
+            # `reset_review_on_content_change.py`: a path outside the two page trees
+            # is a caller error and must not come back as `NO_RECORD:`, which Step 9
+            # would write into an Issue as "no reason was recorded". It cannot simply
+            # be passed through either: `record_dir_for()` strips the `.wikicommit/`
+            # prefix *by length*, so a path that does not carry it resolves to a
+            # silently wrong directory, and one shorter than the prefix raises.
+            print(
+                f"ERROR: {page_rel}: expected a page under"
+                f" {ENTITY_DIR.as_posix()}/ or {VIEW_DIR.as_posix()}/"
+            )
+            continue
+        try:
+            records = load_records(page_rel)
+        except (RecordError, OSError, ValueError) as err:
+            # Still exit 0 with the other pages reported: one malformed
+            # `failed_pages` entry must not cost the whole Issue its reason.
+            print(f"WARNING: {page_rel}: {err}", file=sys.stderr)
+            print(f"NO_RECORD: {page_rel}")
+            continue
+        record = latest_discarded(records)
+        if record is None:
+            print(f"NO_RECORD: {page_rel}")
+            continue
+        with_reason += 1
+        reviewed_at = record.get("reviewed_at") or "unknown date"
+        attempts = record.get("attempts") or 1
+        print(f"REASON: {page_rel} (recorded {reviewed_at}, attempts={attempts})")
+        findings = record.get("findings")
+        if not isinstance(findings, list) or not findings:
+            # A discarded record with no findings still dates the discard, which
+            # is more than `unknown` said.
+            print("  (the record names no finding)")
+            continue
+        # A discarded record holds every round flattened together (Issue #571: each
+        # round can raise a *different* defect), so without the round number a page
+        # thrown away after three attempts reads as three simultaneous problems.
+        # Only said when there is more than one, so the ordinary single-round
+        # record stays as short as it was.
+        rounds = {f.get("round", 1) for f in findings if isinstance(f, dict)}
+        multi_round = len(rounds) > 1
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            kind = _one_line(finding.get("type") or "FINDING")
+            instruction = _one_line(finding.get("instruction") or "(no instruction recorded)")
+            prefix = f"round {_one_line(finding.get('round', 1))} " if multi_round else ""
+            print(f"  {prefix}{kind}{_where(finding)}: {instruction}")
+    print(f"SUMMARY: pages={len(page_rels)}, with_reason={with_reason}")
+    return 0
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Report review coverage across the wiki's pages (Issue #750)."
+    )
+    parser.add_argument(
+        "--discarded-reason",
+        dest="discarded_reason",
+        metavar="<page>",
+        # `*` rather than `+`: Step 9 also targets a source caught in Pass 1, whose
+        # `failed_pages` is empty (Issue #910), and there the caller's expansion
+        # leaves the flag with no values. `+` answers that with an argparse usage
+        # error and exit 2 — breaking the always-0 contract on a path the caller
+        # cannot distinguish from "this build has no such mode". Zero pages is a
+        # question with a real answer, and it is `pages=0`.
+        nargs="*",
+        help=(
+            "Print why each named page was discarded, taken from the newest "
+            "`result: discarded` review record, and stop without scanning "
+            "anything else. Used by /wikicommit-merge Step 9, whose only other "
+            "source of a reason is deleted on the `partial` branch (Issue #969)."
+        ),
+    )
+    args = parser.parse_args()
+
+    # `is not None`, not truthiness: with `nargs="*"` an empty list means the flag
+    # was given with no pages, which selects this mode just as much as a full list
+    # does. Falling through to the default full scan there would answer a different
+    # question than the one that was asked.
+    if args.discarded_reason is not None:
+        return print_discarded_reasons(args.discarded_reason)
+
     if not REVIEW_DIR.exists():
         # Distinguish "no wiki has been reviewed yet" from "everything came back
         # zero": only the first means there was nothing to look at.
-        print("SUMMARY: pages=0, ai_reviewed=0, human_reviewed=0, findings=0, models=0")
+        print(
+            "SUMMARY: pages=0, ai_reviewed=0, human_reviewed=0, human_notes=0,"
+            " findings=0, models=0"
+        )
         print(f"NOTE: {REVIEW_DIR.as_posix()}/ does not exist yet; no reviews have been recorded.")
         return 0
 
@@ -297,6 +487,7 @@ def main() -> int:
     total = 0
     ai_reviewed = 0
     human_reviewed = 0
+    human_notes = 0
     total_findings = 0
     # model -> [pages, findings, pages needing more than one attempt,
     #           pages whose newest AI record is a discarded one this model wrote]
@@ -369,8 +560,18 @@ def main() -> int:
             stats[1] += len(standing_ai.get("findings") or [])
             if int(standing_ai.get("attempts") or 1) >= 2:
                 stats[2] += 1
-        if standing_review(records, kind="human") is not None:
+        standing_human = standing_review(records, kind="human")
+        if standing_human is not None:
             human_reviewed += 1
+            # The note a closer left is the only artefact that backs up
+            # `Read by <login>` (Issue #952). Route A's close records
+            # `reviewed_by` and a `Reviewed-by:` trailer, but both say only who
+            # closed the Issue — neither is a trace of the page having been
+            # read, and §6.3 states outright that a delegated close cannot be
+            # vouched for by machine. What is counted here is presence, not
+            # content: a one-word note and a paragraph are both one.
+            if standing_human.get("_body"):
+                human_notes += 1
 
         # `RISKY:` reads exactly one record: the newest review that judged the page
         # as it now stands (Issue #760). Summing over the whole history instead —
@@ -417,8 +618,8 @@ def main() -> int:
 
     print(
         f"SUMMARY: pages={total}, ai_reviewed={ai_reviewed},"
-        f" human_reviewed={human_reviewed}, findings={total_findings},"
-        f" models={len(by_model)}"
+        f" human_reviewed={human_reviewed}, human_notes={human_notes},"
+        f" findings={total_findings}, models={len(by_model)}"
     )
     for model in sorted(by_model):
         page_count, finding_count, retried, discarded = by_model[model]

@@ -47,11 +47,84 @@ KNOWN_SOURCE_LICENSES = {
 }
 
 
-# ShareAlike 系ライセンスの識別子接頭辞（#570）。この表にあるライセンスのソース
-# 「だけ」から作られたページは、そのライセンスでの提供義務を継承する。値は自由記述
-# なので完全な判定はできないが、既知ドメイン対応表が返す値と SPDX の一般的な綴りは
-# 覆う。取りこぼしの劣化は「注意書きが出ない」で済み、誤った注意書きは出ない側に倒す。
-SHARE_ALIKE_LICENSE_PREFIXES = ("cc-by-sa", "cc-sa", "gfdl", "odbl", "cc-by-nc-sa")
+# コピーレフト系ライセンスの識別子接頭辞（#570・#951）。値は自由記述なので完全な判定は
+# できないが、既知ドメイン対応表が返す値と SPDX の一般的な綴りは覆う。
+#
+# **ここに載るのはそのライセンスの性質であって、あるページが二次的著作物に当たるかの
+# 判断ではない。** あるライセンスがコピーレフトかどうかはライセンス自身の事実であり、
+# それを読んで書かれた散文の要約が義務を負うかは別の問いである。WikiCommit はその問いに
+# 答えない（`is_share_alike()` の呼び出し側が出すのは通知であって拒否ではない）ので、
+# 表の中で解こうとしないこと。
+#
+# 名前が「ShareAlike」なのは Creative Commons 由来の歴史的経緯で、中身はコピーレフト系
+# 一般である。改名しないのは、`LICENSE: <id> (share-alike)` という出力が
+# `wikicommit-collect` の SKILL.md に契約として書かれているため。
+#
+# **弱いコピーレフト（LGPL / MPL / EPL / CDDL）も一律で入れる**（#951 の検討事項 1）。
+# ソフトウェアでは「及ぶ範囲が狭い」ことに意味があるが、リンク境界もファイル境界も
+# 散文には対応物が無いので、その区別はここでは働かない。誤りの向きも非対称で、
+# 足りなければ利用者は義務に気づかないまま公開し（取り返しがつかない側）、足しすぎても
+# 注意書きが 1 行余計に出るだけである。ここに挙げた接頭辞はいずれも実際にコピーレフト
+# なので、「誤った注意書き」にはならない。
+#
+# 接頭辞照合なので `AGPL-3.0` は `gpl` に前方一致せず `agpl` が別に要る。逆に
+# `LGPL-3.0` も `gpl` では一致しないため、`lgpl` を落としても意図しない取りこぼしには
+# ならない（落とすなら明示的な判断になる）。
+#
+# **末尾にハイフンを付けない**。SPDX 識別子は必ず付くので `gpl-` でも SPDX は覆えるが、
+# この値は自由記述であり `GPLv3` や素の `GPL` は普通に書かれる綴りで、ハイフンを付けると
+# そのどちらも落ちる。上の非対称（足りなければ気づかないまま公開する／足しすぎても 1 行
+# 余計に出るだけ）はここにもそのまま当たる。`gpl` で始まる permissive なライセンスは
+# 無いので広げすぎにもならず、既存の 5 つ（`cc-by-sa` 等）が元からハイフン無しなのとも
+# 揃う。
+SHARE_ALIKE_LICENSE_PREFIXES = (
+    # Creative Commons ほか（#570）
+    "cc-by-sa",
+    "cc-sa",
+    "cc-by-nc-sa",
+    "gfdl",
+    "odbl",
+    # 強いコピーレフト（#951）
+    "gpl",
+    "agpl",
+    "osl",
+    "sspl",
+    # 弱いコピーレフト（#951。上記のとおり一律で入れる）
+    "lgpl",
+    "mpl",
+    "epl",
+    "cddl",
+    # #958。3 件とも本文の条項で確認済み（評判ではなく条項で判定するのが #425 の規律）。
+    # `eupl` が巻き込む SPDX 識別子は `EUPL-1.0`/`1.1`/`1.2` の 3 件だけで、3 版とも
+    # "Copyleft clause" を持つ（permissive な版は存在しない）。`EUPL-1.2` は
+    # `Original Work` を "the work **or software**" と定義しており、行政文書を取り込む
+    # Wiki が実際に当たりうる — この表で最もコードから遠い側の族である。
+    "eupl",
+    # `CPL-1.0` の 1 件だけに一致する（`CPAL-1.0` は `cpa` で始まるので巻き込まない）。
+    # EPL に置き換えられた旧ライセンスであり新規採用はほぼ無いが、この表の規律は
+    # 「確認済みのものだけを持つ」（#425）であって「よく使われるものだけを持つ」では
+    # ないため、確認を経た以上は入れる。
+    "cpl",
+    # **`ms-` にしてはならない。** SPDX には `MS-PL`・`MS-LPL`・`MS-RL` の 3 つがあり、
+    # reciprocal 条項を持つのは `MS-RL` だけである。族単位の接頭辞に揃えると permissive な
+    # `MS-PL` を巻き込む — この表で唯一、族が permissive と copyleft に割れている箇所。
+    "ms-rl",
+)
+
+# **CeCILL は意図的に入れていない（#958）。漏れではない。**
+# 前方一致という実装の形が選択肢を縛る: `CeCILL`/`CeCILL-C` はコピーレフトだが
+# `CeCILL-B` は帰属表示のみを求める permissive（§5.3.4。本文で確認済み）であり、
+# `CeCILL-B` は `cecill` で始まるため「裸の `CeCILL` を拾う」と「`CeCILL-B` を拾わない」は
+# 純粋な前方一致では両立しない。版ごとの列挙（`cecill-1`/`cecill-2`/`cecill-c`）は
+# 裸の `CeCILL` を取りこぼし、末尾ハイフン無しの規約が守ろうとした自由記述の綴りを
+# 1 族のために裏返すことになる。除外リストを持ち込む案は `is_share_alike()` を
+# 前方一致だけでなくするため、`sources[].license` に CeCILL が現れる見込みに見合わない。
+# したがって `CeCILL`/`CeCILL-C` の沈黙は残る。
+#
+# 既知の誤検知が 1 件ある: `mpl` は `mplus`（mplus Font License。permissive）にも
+# 前方一致する。**直さない** — 誤りの向きが上の非対称の意図した側（注意書きが 1 行余計に
+# 出るだけ）であり、ここに書いておくのは次にこの表を見た人が欠陥として起票し直さない
+# ためと、「足しすぎの劣化は 1 行で済む」が仮定ではなく実例を持つことを残すためである。
 
 
 # 静的取得で「本文は取れるが、ページが載せている内容の一部が黙って落ちる」ことが
@@ -120,7 +193,11 @@ def partial_extraction_note(url: str) -> str:
 
 
 def is_share_alike(license_id: str) -> bool:
-    """ライセンス識別子が ShareAlike 系かどうかを返す（#570）。"""
+    """ライセンス識別子がコピーレフト系かどうかを返す（#570・#951）。
+
+    返すのはライセンスの性質だけである。そのソースから書かれたページが義務を負うか
+    どうかは判断しない（表の上のコメント参照）。
+    """
     normalized = license_id.strip().lower()
     return any(normalized.startswith(prefix) for prefix in SHARE_ALIKE_LICENSE_PREFIXES)
 
@@ -768,8 +845,8 @@ def process_file(
             # 効かないため入口は --license だけだが、義務の中身は URL ソースと変わらない。
             created_note = append_note(
                 created_note,
-                f"{license_override} is a share-alike license: a page written from this source "
-                f"alone must be offered under it too",
+                f"{license_override} is a copyleft license: a page written from this source "
+                f"alone may have to be offered under it too — check before publishing",
             )
         if index is not None:
             # Keep a caller-supplied index in step with what was just written,
@@ -863,12 +940,18 @@ def process_url(url: str, repo_root: Path, license_override: str = "") -> tuple[
                 created_note, f"license: {license_id} (from the known-domain table)"
             )
         if license_id and is_share_alike(license_id):
-            # ページがこのソース「だけ」から作られると、そのページは同じ
-            # ライセンスでの提供義務を負う（#570）。登録時に一度だけ知らせる。
+            # ページがこのソース「だけ」から作られると、そのページは同じライセンスでの
+            # 提供義務を負いうる（#570）。登録時に一度だけ知らせる。
+            #
+            # 「負いうる」と書くのは #951 の検討事項 2 の結論である。散文の要約が
+            # 二次的著作物に当たるかは開いた問いであり、WikiCommit はそこに答えない。
+            # 断定すると、答えていないことを答えたふりをすることになる。弱めても信号は
+            # 落ちない — 利用者は「このソースはコピーレフトである」という事実を
+            # 引き続き受け取る。
             created_note = append_note(
                 created_note,
-                f"{license_id} is a share-alike license: a page written from this source alone "
-                f"must be offered under it too",
+                f"{license_id} is a copyleft license: a page written from this source alone "
+                f"may have to be offered under it too — check before publishing",
             )
         partial_note = partial_extraction_note(url)
         if partial_note:

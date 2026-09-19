@@ -38,6 +38,8 @@
 
 **`validate_frontmatter.py` と `check_raw_html.py` は移行対象外**。この 2 本は `assets/` も `index.md` も除外せず全ファイルを検証する（前者は `index.md` の `sources` 必須を明示的に免除する分岐まで持つ）。対象は「グラフ・集計の対象となる本文ページ」ではなく「ディスク上の全 `.md`」であり、巻き込むとこのヘルパーの意味が薄まる。
 
+**ページの同一性と WikiLink 解決も同じ理由で寄せた（Issue #947）**。`load_primary_lang()`・`page_lang()`（旧 `get_lang()`）・`is_removed()`・`link_target_path()`・`type_slug_from_wiki_path()`・`extract_wikilinks()` が `check_wikilinks.py` から移り、あわせて**フォールバックの順序そのもの**が `resolve_wikilink()` として関数になった — それまでは `check_wikilinks.py` の `main()` ループに直書きされており、2 つ目の呼び出し元は import できるものを持たず、そのループを読んで書き直すしかなかった。`load_primary_lang()` は `check_wikilinks.py` / `build_survey_view.py` / `convert_wikilinks.py` の **3 箇所に複製されていた**ため、3 本とも import に切り替えてある。**移設であって挙動の変更ではない**ので、既存の `tests/test_check_wikilinks.py` / `test_convert_wikilinks.py` / `test_build_survey_view.py` が回帰の検出を兼ねる。
+
 `convert_wikilinks.py` の `is_in_assets()` はそのまま残す — publish 側で `output_dir` に対しても使われる（stale cleanup・`sync_assets()`）ため、entity ツリー専用の `collect_entity_pages()` では置き換えられない。同ファイルの `generate_overview_page()` は Type 取り違え判定を独自に持っていたが、`other_types_for_slug()` は index を引数で受け取る設計なので共有関数へ寄せた（走査は増えない — `page_stats` が既に持つ `type_raw` から index を組み立てるだけ）。
 
 **既存リポジトリへの遡及適用は行わない**。`.wikicommit/scripts/` は `init.py` が展開する配布物であり、変更が届くのは新規 init するリポジトリのみ（本ドキュメント群が繰り返し採る「新旧混在を許容する」方針）。上記のバグは「リポジトリの祖先ディレクトリ名に `assets` が含まれる」場合にのみ発火するため、既存リポジトリで実際に踏んでいる可能性は低い。
@@ -81,6 +83,7 @@ view ツリー（`.wikicommit/view/<lang>/<slug>.md`。Wiki 自身のページ�
 | `check_schema_coverage.py` | `.wikicommit/schema/` に専用ファイルのない `type:` 値の集計（`wikicommit-generate`・`wikicommit-schema-propose`・`wikicommit-status` 共有） | なし（常に 0） |
 | `check_schema_org_type.py` | Schema.org 語彙に対する型・プロパティの実在検証、型名一覧の取得と候補型の説明文の取得（2 段階。Issue #798）（`wikicommit-generate`・`wikicommit-schema-propose` 共有） | 型が語彙に存在しない、プロパティが型（祖先型含む）に属さない、語彙の取得・パースに失敗、または `--type`/`--list-type-names`/`--describe`/`--list-installed-hierarchy` のいずれも未指定 |
 | `build_survey_view.py` | Wiki 全体を1つのコンテキストに収まる縮約ビューへ落とす（`wikicommit-synthesize` の俯瞰モード〈Issue #586〉と `wikicommit-collect` の Step 3.5〈Issue #672〉が共有。`--include-view` を渡さない限り view ツリーは対象外。Issue #675） | なし（常に 0） |
+| `build_onehop_context.py` | Pass 4 の check 8 が要る 1 ホップ近傍の組み立て（`wikicommit-generate` の Pass 4 と `--regenerate` が共有。Issue #947） | `--page-path` が entity / view ツリーの外を指す |
 | `rebuild_index.py` | Type ディレクトリの `index.md`、および view ツリーの言語別 `index.md` を決定論的に再構築（`wikicommit-generate`・`wikicommit-translate`・`wikicommit-synthesize` 共有。Issue #406・#547・#675） | なし（常に 0） |
 | `check_extraction_quality.py` | 既知JS-shellドメイン判定（ブロッキング）・取得能力の事前チェック（ブロッキング。Issue #574）・抽出テキストの低情報密度判定（警告。Issue #562）（`wikicommit-generate`・`wikicommit-collect` 共有。Issue #425） | ドメインが既知不可リストに一致（`check-domain`）、必要な追加パッケージが未導入（`check-fetch-capability`）、抽出テキストが低密度（`check-density`）、または対象ファイルが読み込めない |
 | `reconcile_ingest_status.py` | `status: pending` のソース管理ファイルのうち内容が既に公開ページの `sources` に使われているものを検出し `status: generated` に是正（Issue #474。意図して requeue されたファイルは 3 つの条件が守る。Issue #874） | なし（常に 0） |
@@ -97,6 +100,105 @@ view ツリー（`.wikicommit/view/<lang>/<slug>.md`。Wiki 自身のページ�
 | `check_unlinked_entity_mentions.py` | エンティティ型を range に持つ `properties:` キーの値が、実在するページを指すのにプレーンテキストで書かれているものの検出（`check_wanted_pages.py` の鏡像。`wikicommit-status` 専用。Issue #561） | なし（常に 0） |
 | `check_property_wikilink_reinforcement.py` | 型テンプレートの Entity-only/Mixed な `properties:` キーのうち、WikiLink化への補強（`granularity` 言及・`[[Type/slug]]` プレースホルダー）を持たないものの検出（`wikicommit-status` 専用。Issue #539） | なし（常に 0） |
 | `check_schema_files.py` | 書かれた型ファイル自体が動く形になっているかの検証（`wikicommit-status` 専用。Issue #889） | なし（常に 0） |
+
+---
+
+## build_onehop_context.py
+
+### 目的
+
+Pass 4 の check 8（WikiLink 1 ホップ以内のページ間矛盾。Issue #566）は、レビューサブエージェントへ渡す追加コンテキストとして「このページが指す既存ページ」＋「このページを指すページ」を要求する。この集合を組み立てるのが本スクリプトである（Issue #947）。
+
+**それまでは散文の指示であり、しかも片側にしか書かれていなかった。** inbound 側は「`\[\[<Type>/<slug>\]\]` と**エスケープして** `Grep` せよ」と具体的で、ripgrep で `[[` が文字クラスになる罠まで名指ししていた一方、outbound 側は "the existing pages this page links to" という散文だけで、抽出方法を一切書いていなかった。
+
+`wikicommit/ai-driven-dev-wiki` の実行では、その空白が使い捨ての正規表現 `\[\[([A-Za-z0-9_/]+)\]\]` で埋められた。**この文字クラスは `-` を含まない。** WikiCommit の slug は Issue #193 の規約で英語のケバブケース（`vibe-coding` / `context-engineering` / `spec-driven-development`）であるため、このパターンは `]]` まで届かず、そうした slug への発リンクに**完全に不一致になる**。
+
+**そして誤りの向きが悪い** — 例外にはならず、**集合が静かに縮むだけで出力は正常に見える**。しかも 2 つの偶然が重なって気づきにくくなっていた: inbound 側が別実装で正しく動いたため集合は空にならず、ハイフンを含まない slug が 5 つ実在したため outbound もゼロにはならなかった。修正後に集合を再計算すると **27 件中 24 件で内容が変わった**。検出したのはレビュー側で、サブエージェントが「このページがリンクしている実在ページが one-hop コンテキストに渡されていない」と所見に書いた。
+
+**正規のパーサは既にあり、4 本のスクリプトが既にこれを使っている** — `_wikilink.py` の `WIKILINK_RE` は Type 部（PascalCase・ハイフン無し）と slug 部（`[A-Za-z0-9_-]+`・ハイフン有り）を別のクラスで扱い、同ファイルのコメントがその理由を述べている。`check_orphans.py`・`build_survey_view.py`・`check_wanted_pages.py`・`check_wikilinks.py` はいずれも `WIKILINK_RE` で WikiLink を取っている。Issue #474 が名指しした形そのもの（完全に決定論的に判定できる操作を instruction として表現したために、実行のたびに即興の正規表現が書かれる）である。
+
+**抽出だけでなく組み立て全体を委譲する。** 現在同じ段落が散文で LLM に委ねている 3 つの skip 判定（`index.md` / `status: removed` / レビュー対象ページの翻訳）・クロス言語フォールバック・outbound 優先の dedup・5 件上限も決定論的になる — これらはいずれも**集合を縮める操作**であり、同じ「静かに変わる」性質を持つ。
+
+### 置き場所が `.wikicommit/scripts/` である理由（Issue #947）
+
+`docs/DesignDoc-skills.md` §11.5 の置き場所ルール（呼び出し元 1 Skill なら Skill 内）に素直に従うと Skill 内になるが、**そのルール自体が実態と食い違っている**ことが実地確認で判明した（同節の該当コールアウト参照）。決め手は写しの数である — 本スクリプトが要するのは `WIKILINK_RE`・エンティティ / view 走査・`parse_wiki_path`・frontmatter 読み・クロス言語解決一式であり、Skill 内に置いて import を避けると **Issue #677 が集約したばかりのものの 3 つ目の写し**を作ることになる。共有側に置けば写しは 0 本で、既存 14 本（呼び出し元が 1 Skill だけの共有スクリプト）と同じ形に収まる。
+
+### 使用場面
+
+- `wikicommit-generate` Skill：Pass 4 step 1（`references/pass4-review.md`）
+- `wikicommit-generate --regenerate`：同じ step（`references/regenerate.md` step 3）。再生成モードでもページのパスは変わらないため、lang / Type / slug も 1 ホップの両方向も通常生成と同一であり、**同じスクリプトを同じ形で呼ぶ**
+
+### コマンド
+
+```bash
+python .wikicommit/scripts/build_onehop_context.py --page-path "$(cat <<'EOF'
+<そのページが持つはずのリポジトリルート相対パス>
+EOF
+)" [--repo-root <path>] [--max-pages N] <<'PAGE'
+<Pass 3 が生成したページ本文（frontmatter を含む）>
+PAGE
+```
+
+**`--page-path` はそのファイルを読まない。** lang / Type / slug の識別にのみ使い、パスが存在しなくてよい。これは避けて通れない要件である — `references/pass3-generate.md` の item 6 が **"Do not write to disk yet; Pass 4 reviews first"** と定めており、書き出すのは Pass 4 step 6 であるため:
+
+| `action` | Pass 4 時点のディスク |
+|---|---|
+| `create` | **存在しない** |
+| `update` | **古い版がある** — 読むと、いま生成した版ではなく**前の版**の発リンクを取る |
+
+後者が特に悪い。ページのパスを走査して本文を読む実装にすると、**本スクリプトが直そうとしているのと同じ「静かに違う集合を返す」形**を別の場所に作り直すことになる。
+
+**本文は stdin** で渡し、シェル引数に載せない（`resolve_source_cache_path.py` が識別子を stdin から読むのと同じ理由 — ページ本文はそれ自体が自由記述であり、かつ長い）。`--page-path` 側は `<Type>` と `<slug>` が Pass 2 のソース読解に由来し検証されていないため、`docs/DesignDoc-skills.md` §11.7 のヒアドキュメント形式で渡す。
+
+### 処理フロー
+
+1. `--page-path` から `(lang, Type, slug)` を導出する（`parse_wiki_path()` → `parse_view_path()` の順。どちらにも解決できなければ stderr に `ERROR:` を出して exit 1 — 打ち間違えたパスが「近傍 0 件」として黙って通るのを防ぐ）
+2. stdin の本文から `extract_wikilinks()`（＝ `WIKILINK_RE`）で `[[Type/slug]]` を出現順に取り、`resolve_wikilink()` で解決する。解決順序は `docs/DesignDoc-pipeline.md` §6.4 のクロス言語フォールバック（同 lang → `primary_lang` → 未解決）。**未解決のリンクは何も言わずに落とす** — まだ誰も書いていないページを指すことは正常かつ非ブロッキングであり（Issue #340）、それを報告するのは `check_wanted_pages.py` の仕事である
+3. 両ツリーを走査し、本文に `[[<Type>/<slug>]]` を含むページを inbound として集める（`Grep` ではなく共有の走査 + `WIKILINK_RE`。outbound と同じ抽出を使うため）
+4. 3 つの skip 判定を適用する（下記）。**レビュー対象ページ自身は両方向から除外する**
+5. outbound → inbound の順に並べ、両方向に現れるページは **outbound 優先で 1 件に畳む**
+6. **畳んだ後に** `--max-pages`（既定 5）で切る
+7. `PAGE:` 行と `SUMMARY:` 行を出力する
+
+### 3 つの skip 判定
+
+| 対象 | 理由 |
+|---|---|
+| `index.md` | `rebuild_index.py` が各ページ自身の WikiLink を Type インデックスに書くため inbound 側が必ずヒットする。かつインデックスはそれ自体では何の事実も述べない |
+| `status: removed` のページ | 公開されないため、読者に見える形で生きているページと食い違いようがない |
+| レビュー対象ページの翻訳（`translated_from` がそれを指すページ） | そこでの食い違いは翻訳の陳腐化であり、`check_translation_status.py` が `STALE` として既に報告している |
+
+**翻訳の判定は `normalize_entity_prefix()` を通す。** Issue #477 より前に書かれた翻訳ページは `translated_from` に旧 `.wikicommit/wiki/` プレフィックスを持ったまま残る（新旧混在を許容する方針のため自動移行されない）ので、生の文字列比較にすると**そうしたページが skip されずレビュアーに渡る**。
+
+### 出力フォーマット
+
+```
+PAGE: .wikicommit/entity/ja/DefinedTerm/vibe-coding.md (outbound)
+PAGE: .wikicommit/view/ja/agent-loop.md (outbound)
+PAGE: .wikicommit/entity/ja/DefinedTerm/spec-driven-development.md (inbound)
+SUMMARY: outbound=2, inbound=1, skipped=1, capped=false
+```
+
+**パスだけを出して終わってはならない。** 隣接ページが 0 件であることは正常な結果（新規の孤立ページ）だが、出力が空であれば「近傍が無かった」と「抽出が何も返さなかった」が区別できない — **本スクリプトが消そうとしている静かな縮みを、新しい境界にそのまま作り直すことになる**。`check_run_records.py` が 0 件のときに `NOTE:` を出すのと同じ理由である。したがって:
+
+- パス行は `PAGE:` を接頭辞に持ち、その向き（`outbound` / `inbound`）を添える
+- 最後に `SUMMARY: outbound=<N>, inbound=<N>, skipped=<N>, capped=<true|false>` を必ず 1 行出す。**`skipped` と `capped` がある理由は、3 つの skip 判定と 5 件上限がどちらも集合を縮める操作だから**である — それが効いたことが出力に現れなければ、縮んだ集合と元から小さい集合が再び見分けられなくなる
+- 対象ページが 0 件でも `SUMMARY:` は出す（exit code は 0）
+
+### view ツリーも対象に含める
+
+entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグメント。Issue #675）、`link_target_path()` は既に view ツリーを解決する。check 8 が見るのは「ページ間矛盾」であり、view ページも矛盾しうる相手である。view ページ自身をレビュー対象に取ることもできる。
+
+### 既知の限界
+
+`references/pass4-review.md` が既に述べている 2 つをそのまま引き継ぐ。**同一バッチ内では、あるページは自分より先に生成された兄弟しか見られない**ため、ペアが片側からしか照合されない（あるいは全くされない）ことがある。**異なるバッチで生成された 2 ページ間の矛盾は原理的に届かない。** リポジトリ全体走査が両方への答えであり、意図的に作られていない。
+
+**既に書かれたレビュー記録は書き換えない**（記録は不変。Issue #750）。縮んだ集合で下された記録が既存リポジトリに残るが、**再レビューを促す仕組みは作らない** — `STALE_REVIEW:` はページかソースが変わったときに出るものであり、「レビューの入力が足りなかった」はそこに乗らない。
+
+### 終了コード
+
+- `0`: 近傍を出力した（0 件を含む）
+- `1`: `--page-path` が entity / view ツリーの外を指している
 
 ---
 
@@ -1554,19 +1656,69 @@ RECORDED: .wikicommit/review/entity/ja/Person/yamada-taro/20260905-142233-ai.md 
 
 4 つの問いに答える: どれだけレビューされたか（`SUMMARY:` / `COVERAGE:`）、**今の本文を判定した記録が何も無いのはどれか**（`UNREVIEWED:`）、**人が読むならどれか**（`RISKY:`）、**どの判定がもう当てはまらないか**（`STALE_REVIEW:`）。
 
+1 つ目には `human_notes` が含まれる（Issue #952）— standing な human 記録のうち、**散文本文を持つ件数**である。数えるのは**有無であって中身ではない**（一語のコメントも長文も 1 件）。
+
 **すべての行が「standing な記録」1 件を読む**（Issue #766）— そのページを**今の姿のまま判定した最新の記録**である。kind の別だけが行ごとに違う（`ai_reviewed` / `COVERAGE:` は AI、`human_reviewed` は human、`RISKY:` は kind を問わず、`STALE_REVIEW:` / `RETRACTED_EVIDENCE:` は AI）。唯一の例外は `SUMMARY: findings=` で、こちらは歴史的な量として全記録を合算する。
 
 ### 使用場面
 
 - `wikicommit-status` Skill：Step 13
+- `wikicommit-merge` Skill：Step 9（`--discarded-reason`。生成失敗トラッキング Issue の理由欄。Issue #969）
 
 ### コマンド
 
 ```
 python .wikicommit/scripts/check_review_coverage.py
+python .wikicommit/scripts/check_review_coverage.py --discarded-reason <page>...
 ```
 
-引数なし。`.wikicommit/entity/` + `.wikicommit/view/` の全ページと `.wikicommit/review/` を対象とする。
+引数なしの既定モードは `.wikicommit/entity/` + `.wikicommit/view/` の全ページと `.wikicommit/review/` を対象とする。
+
+### `--discarded-reason` — 破棄されたページの理由を引く（Issue #969）
+
+`wikicommit-merge` Step 9 の生成失敗トラッキング Issue は、理由をソース管理ファイルの `## Failure Reason` から取る。ところが Pass 4 step 7 は**その節を `partial` 分岐で削除する**（`failed` ではないため。Issue #408）。そして `partial` こそが**普通の失敗の形**である — 1 ソースから複数エンティティを切り出す設計上、全件失敗は例外的であり、Step 9 が最も多く立てるのは `partial` 由来の Issue である。結果として理由欄は**構造的に必ず `unknown`** になり、同じ本文が「Investigate the failure reason above」と指示していた（設計が意図して消した理由を調査せよ、と言っていることになる）。
+
+**理由自体は存在する** — 同じ実行が `.wikicommit/review/` に書いた `result: discarded` の記録に、完全な形で残っている。Issue #750 はこの記録を「**破棄されたページの記録こそ最も価値がある**」と明言しており、**書く側は既にそう設計されていて、読む側だけが繋がっていなかった**（Issue #452 は #750 より前に入ったため、当時は読む先が存在しなかった）。
+
+本モードは指定された各ページについて、**`result: discarded` の最新 1 件**を探して findings を印字する。`standing_review()` が `discarded` を意図的に飛ばすのとちょうど逆で、それがここで欲しいものである — `failed_pages` に載るページは書き出されていないので、破棄された記録だけが理由を語る。
+
+**Step 9 のインライン Python に走査を足す案（検討事項 1 の (a)）は採らなかった。** 最新の判定は `record_sort_key()` が正であり（**素のファイル名の辞書順ではない** — 同一秒の衝突サフィックス `-2` が `-` < `.` のため未サフィックスより前に来る）、そのキーを共有しない実装は誤った「最新」を拾う。既存スクリプトに照会モードを足す形は Issue #928 が `check_retracted_sources.py --list` で採った先例と同型である。
+
+**印字するのは `type` / `source_lines` / `instruction` の 3 つに限る。**
+
+| フィールド | 扱い | 理由 |
+|---|---|---|
+| `round` | **記録が 2 ラウンド以上を持つときだけ印字する** | 破棄された記録は全ラウンドをフラットに持つ（`docs/DesignDoc-data.md` §4.8。Issue #571 の実測では 3 回とも別の欠陥だった）ため、番号が無いと 3 回の試行が 3 つの同時並行の問題に読める。1 ラウンドしか無い通常の記録では出さない |
+| `type` | 印字する | 所見の種類 |
+| `source_lines` | 印字する（**何に対する行番号かを添える**） | 単独では読めない |
+| `instruction` | **verbatim で印字する** | 下記 |
+| `source_file` | **印字しない** | 下記 |
+| `claim` | 印字しない | 長く、`instruction` と内容が重なる |
+| `page_at_fault` | 印字しない | `discarded` に至る所見には現れない（`other` は FAIL しない） |
+
+**`source_file` を印字しない理由**: 実データのとおり `.wikicommit/.cache/ingest-fetch/…` という **gitignored なマシンローカルのキャッシュ**を指しており、別の clone・別のマシン・キャッシュ削除後には存在しない。ただし**どの種類のファイルか**は言う価値があるので、Issue #566 が確立したのと同じ判別子（`.wikicommit/entity/` ないし `.wikicommit/view/` 配下なら別のページ、それ以外ならソースの抽出テキスト）で `at lines <N-M> of the extracted source text` / `... of another page` と添える。
+
+**`instruction` を verbatim にする理由**: この文は再生成プロンプトに渡すために書かれたものであって読者向けではなく、命令形で書かれている（`docs/DesignDoc-skills.md` §11.8 の「読み手が誰か」で判定する軸に当たる）。それでも要約しないのは、要約とは**この step が下していない判断を書き直すこと**であり、しかもこの記録の価値はその具体性そのものだからである。記録ツリーは人が読める形で設計されており（Issue #750）、この文はページが存在しない理由について現存する最も具体的な記述である。
+
+**記録が無い場合は `unknown` と書かない。** `NO_RECORD:` を返し、Step 9 は「理由は記録されていない」と書く。記録ツリー導入（Issue #750）より前の失敗と、`.wikicommit/review/` を持たない古いリポジトリがこれに当たる — **「理由が分からない」と「理由が記録されていない」は別のことであり**、後者は読み手に探しに行かなくてよいと伝える。
+
+**`partial` 分岐が `## Failure Reason` を削除する設計自体は変えない**（検討事項 6 を明示的に退ける）。変えれば Step 9 は無改修で済むが、「`partial` は `failed` ではないので失敗理由を残さない」という Pass 4 の整理（Issue #408）を崩し、**同じ情報を 2 箇所に持つ**ことになる。
+
+出力:
+
+```
+REASON: .wikicommit/entity/en/ScholarlyArticle/x.md (recorded 2026-09-18, attempts=1)
+  MISSING_SOURCE at lines 160-166 of the extracted source text: The source only characterises ...
+NO_RECORD: .wikicommit/entity/en/Person/y.md
+ERROR: .wikicommit/source/url/example.com/a.md: expected a page under .wikicommit/entity/ or .wikicommit/view/
+SUMMARY: pages=3, with_reason=1
+```
+
+**引数は `.wikicommit/entity/` / `.wikicommit/view/`（および旧 `.wikicommit/wiki/`）配下でなければ `ERROR:` を出して次へ進む。** `record_review.py` / `reset_review_on_content_change.py` と同じ契約であり、理由も同じ — 誤ったパスを `NO_RECORD:` として返すと、Step 9 がそれを「理由は記録されていない」という**答え**として Issue に書く。素通しもできない: `record_dir_for()` は `.wikicommit/` を**長さで**削ぐため、その接頭辞を持たないパスは黙って別のディレクトリに解決し、接頭辞より短いパスは `ValueError` を投げる。
+
+**ページを 1 件も渡さない呼び出しは正常であり、`pages=0` と答える。** Step 9 の 2 つ目の対象（Pass 1 で失敗した `status: failed` のソース。Issue #910）は `failed_pages` が空なので、呼び出し側の展開はフラグだけを残す — そこで argparse の usage エラー（exit 2）を返すと、常に 0 という契約が破れるうえ、呼び出し側からは「この版にこのモードが無い」と区別が付かない。
+
+終了コードは既定モードと同じく常に `0`。記録が 1 件も無いことは失敗ではなく、`failed_pages` の 1 エントリが壊れていることも残りのページの理由を巻き添えにしない。
 
 ### 処理フロー
 
@@ -1634,7 +1786,7 @@ python .wikicommit/scripts/check_review_coverage.py
 ### 出力フォーマット
 
 ```
-SUMMARY: pages=95, ai_reviewed=93, human_reviewed=12, findings=27, models=2
+SUMMARY: pages=95, ai_reviewed=93, human_reviewed=12, human_notes=5, findings=27, models=2
 COVERAGE: claude-opus-5[1m] 83 pages, 24 findings, 9 pages with attempts>=2, 1 discarded
 UNREVIEWED: .wikicommit/entity/ja/Place/x.md
 UNREVIEWED: .wikicommit/entity/ja/Place/u.md (2 record(s) exist, but every one was discarded; none judged the page as it now stands)
@@ -1644,7 +1796,35 @@ STALE_REVIEW: .wikicommit/entity/ja/Place/w.md (source changed: https://example.
 RETRACTED_EVIDENCE: .wikicommit/entity/ja/Place/v.md (the review of 2026-09-05 rested on https://example.com/b, since retracted)
 ```
 
+### `human_notes` — 経路 A の Close に一言が来たかを数える（Issue #952）
+
+`review-issue-close-sync.yml` は Close した本人の最新コメントを記録の散文本文にする（Issue #762）。**コメントが 1 件も無ければ本文なしの記録を書く** — 同 Issue が「沈黙して閉じるのは正常な閉じ方であり、失敗ではない」と定めた正規の分岐である。
+
+**問題は、来ても来なくても他のどの出力も同じに見えることだった。** `wikicommit/ai-driven-dev-wiki` でコメント無し 2 件・コメント付き 1 件を Close した実測では、ワークフローの全ステップ・`review_status`・`reviewed_by`・`deploy.yml` の再ビルド・公開バナーの読了行・`human_reviewed` の計上が**全件同一**で、違いは記録の散文本文が空であることだけだった。
+
+**数える理由は 1 つに絞れる。** `docs/DesignDoc-pipeline.md` §6.3 自身が「委任された Close 権限は機械では担保できない」と認めており、`Read by <login>` はこのプロジェクトの中心的な主張（Issue #800 の (1)）である。`reviewed_by` も `Reviewed-by:` トレーラーも「誰が閉じたか」しか言わず、**記録の散文本文だけが「読んだ」ことの痕跡**になる。`human_reviewed` はその 3 件が何かに裏づけられているかを読めない。
+
+**`kind: ai` の本文は数えない。** あちらは Pass 4 の非ブロッキングな観察（Issue #834）であって人の読了の痕跡ではなく、混ぜると 1 つの数が 2 つの別のものを指す。
+
+**一方、数えるのは経路 A に限らない** — 本節が経路 A を主題にするのは動機がそこにあるためであって、判定は `kind` だけを見る。`/wikicommit-review`（経路 B。`stage: review-skill`）もレビュアーの一言を `--note` で書き込むため、その記録も本文を持てば同じく 1 件と数える。**この数を見て「追跡 Issue がコメント付きで Close された件数」と読まないこと** — 正しい読みは「standing な human 記録のうち本文を持つ件数」であり、経路の内訳が要るなら記録の `stage` を見る。
+
+**置き場が `COVERAGE:` ではなく `SUMMARY:` なのは構造による。** `COVERAGE:` は `standing_ai.get("model")` で束ねた**モデル別**の行だが、`kind: human` の記録は `model` を持たない（`record_review.py` は human に `reviewer` を書き、`--model` を必須にするのは `--kind ai` の側だけである）— 載せる先が無い。`SUMMARY:` は既に `human_reviewed` を持っており、数えたいのはその内訳である。**行は 1 本も増えず、キーが 1 つ増えるだけ**なので、Issue #864 の「行を増やさず列を足す」形は保たれる。
+
+**記録ツリーが無い場合の早期 return にも同じキーを出す。** 片方にしか出ないキーは、読み手にとって「0 なのか、この版には無いのか」が区別できない。
+
+**3 つの規範のいずれにも当たらない**: Issue #553（frontmatter のキーも語彙も増えない。数えるのはディスク上に既にある事実で、消費者は `/wikicommit-status` を読む運用者として同時に存在する）・Issue #562 / #864 / #867（per-page 行にしないので Step 17 の行数は変わらない）・Issue #834 / #866（あの 2 度が拒んだのは観察の**中身**の構造化であり、ここで数えるのは**有無**である）。
+
+**Close 時に 1 ビットを取る仕掛け（ラベル等）は保留であって否定ではない。** 採らない理由は `docs/DesignDoc-pipeline.md` §6.3 にある。再開の条件は「AI と人間の一致率を読む主体が実在したとき」であり、そのときには本キーが溜めた件数が最初の材料になる。
+
+**公開側には出さない。** 俯瞰ページの読了件数は `convert_wikilinks.py` がページ frontmatter の `review_status` から数えており、記録の本文を一切見ていない。これは運用者向けの数である。
+
 ### 既知の限界
+
+**`human_notes` が答えないもの（Issue #952）**:
+
+1. **一語のコメントも長文も同じ 1 件である。** 測れるのは「**依頼が届いたか**」であって「読まれたか」ではない
+2. **`RISKY:` の選定が機能しているかは測れない。** それに要るのは件数ではなく**本文の中身と `RISKY:` の対応**であり、人が読んで初めて分かる。Issue #765 が closed の時点で残した限界（人間側は「生じないのではなく測れていない」）はそのまま残る
+3. **「引っかかった」は引き続き記録されない。** `review-issue-close-sync.yml` は `--result pass` を固定で渡す（`docs/DesignDoc-pipeline.md` §6.3）
 
 **孤児の記録は報告しない**（Issue #750 検討事項 3）。ページが削除されても記録は残す方針のため、実在しないページの記録が蓄積する。報告するか放置するかは実データが溜まってから決める — 今それを足すと、誰も求めていないものと引き換えに毎回 1 行増える。
 

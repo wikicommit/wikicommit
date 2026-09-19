@@ -231,7 +231,7 @@ The URL goes through a quote-delimited heredoc, as every unvalidated free-text C
 
 Always exits 0. Three outcomes:
 
-- `LICENSE: <id> (share-alike)` → show the identifier **and** say that a page built only from this source inherits the obligation to offer that page under the same license. This is the registration-time warning of Issue #570 moved one step earlier, where it can still change the decision
+- `LICENSE: <id> (share-alike)` → show the identifier **and** say that a page built only from this source may have to be offered under that same license. This is the registration-time warning of Issue #570 moved one step earlier, where it can still change the decision. Say "may" rather than "must": whether a prose summary of a copyleft document is a derivative work is an open question, and WikiCommit does not answer it (Issue #951). The marker itself reads `share-alike` for historical reasons and covers copyleft generally, software licenses included — the identifier next to it is what tells the reader which one this is
 - `LICENSE: <id>` → show the identifier alone
 - `UNKNOWN: <url>` → **write nothing on that candidate's line.** The table holds only the handful of sites that state a license for their own content as a whole, so most candidates land here; a "license: unknown" on nearly every row is a line the reader learns to skip, and this Skill already has a near-always-empty step it deliberately keeps folded away for that reason (step 7)
 
@@ -253,7 +253,7 @@ means WikiCommit does not know the terms — not that there are none. The final 
    ⚠️ Copyright concern: may amount to a full reprint of a commercial news article
 4. https://example.gov/pamphlet.pdf — [PDF] "Pamphlet Title" (brief reason for relevance)
 5. https://ja.wikipedia.org/wiki/XXX — "Article Title" (brief reason for relevance)
-   License: CC-BY-SA-4.0 — share-alike: a page built only from this source has to be offered
+   License: CC-BY-SA-4.0 — copyleft: a page built only from this source may have to be offered
    under the same license
 ```
 

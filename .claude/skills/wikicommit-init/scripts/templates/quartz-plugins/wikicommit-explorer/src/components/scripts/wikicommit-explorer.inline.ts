@@ -93,9 +93,22 @@ class FileTrieNode {
 }
 
 // Process and sort nodes. Kept in sync with WikiCommitExplorer.tsx's explorerSortFn (Issue
-// #334, extended to a 3-tier sortTier() by Issue #494) — this copy is only a fallback used
-// before the component's serialized sortFn (sent via the data-data-fns attribute) overrides it
-// below, but it must still match so that fallback path doesn't regress to an older ordering.
+// #334, extended to a 3-tier sortTier() by Issue #494, and to negative tiers for overview and
+// View by Issue #946) — this copy is only a fallback: buildFileTrie() below starts from it and
+// replaces it with the component's serialized sortFn (sent via the data-data-fns attribute)
+// before anything is rendered. It must still match so that fallback path doesn't regress to an
+// older ordering.
+//
+// The fallback is not a transient pre-hydration state: the tree is rendered exactly once, after
+// buildFileTrie() resolves. defaultSortFn governs a page's whole listing, for that page's whole
+// lifetime, whenever data-data-fns is absent or its JSON/sortFn fails to parse (that catch only
+// logs). So a drift here is invisible on the normal path and permanent on the fallback path —
+// which is why it needs a test rather than an eye.
+//
+// tests/test_explorer_sort_tier_sync.py enforces the match, but only for the sortTier body: the
+// tie-break below already differs between the two copies (a.displayName here vs
+// (a.displayName || "") there), so the whole function cannot be compared. Changing the
+// tie-break in one copy alone is still unchecked by any test.
 const defaultSortFn = (a, b) => {
   const LANG_SEGMENT_RE = /^[a-z]{2}$/;
   const sortTier = (n) => {
@@ -104,6 +117,12 @@ const defaultSortFn = (a, b) => {
     }
     if (n.isFolder && LANG_SEGMENT_RE.test(n.slugSegment || "")) {
       return 1;
+    }
+    if (n.isFolder && n.slugSegment === "overview" && (n.slugSegments?.length ?? 0) === 1) {
+      return -2;
+    }
+    if (n.isFolder && n.slugSegment === "View") {
+      return -1;
     }
     return 0;
   };

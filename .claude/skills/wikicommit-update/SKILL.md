@@ -64,6 +64,14 @@ Read its `OUTDATED:` / `MISSING:` / `ORPHAN:` lines and the `SUMMARY:` counts. E
 
 Note what a quiet result on a file you may have edited does **and does not** mean: those are compared only for things the template has *gained* — a new setting, a new frontmatter key, a new ignore pattern. Silence means nothing was added upstream that is missing here, not that your file matches the template.
 
+Then record whether the wiki's own content was already modified before this run started:
+
+```bash
+git status --porcelain -- .wikicommit/entity .wikicommit/view .wikicommit/schema
+```
+
+**Do this here and nowhere later.** Step 7 needs to know whether these paths were clean when the run began, and from Step 3 onward this Skill writes to them itself — after that, nothing can separate the user's edits from its own. Anything listed here: tell the user now that their uncommitted page edits make Step 7's judgment unreliable, and carry the list forward to Step 7.
+
 ### Step 3: Refresh WikiCommit's Own Payload
 
 ```bash
@@ -115,7 +123,7 @@ Do this even if the user declined some of Step 5. Those are optional settings an
 
 ### Step 7: Verify
 
-Run these in order, and stop at the first real failure rather than pressing on:
+Run these in order:
 
 ```bash
 python .wikicommit/scripts/rebuild_index.py
@@ -128,13 +136,71 @@ python .wikicommit/scripts/check_distribution_freshness.py
 
 The last one is the confirmation that this run did what it set out to do: what remains should be only what the user declined in Step 5, plus orphans they chose to keep. Anything else means a step did not take.
 
+**A blocking failure in the middle four is not automatically this update's doing.** Those four read the wiki's own pages, and this update does not write pages — so a failure there is often a deviation that was already on the default branch and is only surfacing now, because a check grew stricter or started looking at every page instead of the changed ones. Which of the two it is decides the right response, and the output alone does not tell them apart. Work it out rather than guessing, and do not stop on a finding this update did not create.
+
+#### Deciding whether a blocking failure is this update's
+
+Only `validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py` and `check_orphans.py` need this. `rebuild_index.py` and `check_distribution_freshness.py` always exit 0, and the second of those measures the update itself, so "pre-existing" is not even defined for it. Warnings are out of scope — plenty of those are normal.
+
+**Stage 1 — did this run write anything those checks read?**
+
+```bash
+git status --porcelain -- .wikicommit/entity .wikicommit/view .wikicommit/schema
+```
+
+- **Empty** → this run did not write a byte of what they read, so the finding is pre-existing by definition. No stash, no stage 2.
+- **Non-empty** → go to stage 2, passing **whichever of those three directories exist** — not the individual file paths this printed. Why directories is the next section.
+
+**`.wikicommit/config.yml` is deliberately not in that list**, even though `check_wikilinks.py` reads it. Step 6 rewrites its `wikicommit_version:` line on every run, so including it would make stage 1 non-empty every single time and the cheap branch above unreachable. The only thing the four checks read out of that file is `translation.primary_lang`, which no step of this Skill touches.
+
+A path that does not exist is fine *here*: `git status` accepts a pathspec matching nothing, so a repository with no `.wikicommit/view/` still exits 0. **Stage 2 is not so forgiving** — drop any of the three that does not exist before passing them on.
+
+**Stage 2 — the new checker against the old content**
+
+```bash
+before=$(git rev-parse -q --verify refs/stash || true)
+git stash push -u -- <the directories from stage 1 that exist>
+after=$(git rev-parse -q --verify refs/stash || true)
+
+<re-run just the one check that failed>
+
+# Pop only if this push actually created an entry
+[ -n "$after" ] && [ "$after" != "$before" ] && git stash pop
+```
+
+**Narrowing the pathspec is the whole point.** `.wikicommit/scripts/` and `.claude/skills/` stay refreshed, so the *new* checker examines the *old* pages — which is the actual question being asked. A bare `git stash` rolls the checker back as well, and then a check that has merely grown stricter finds nothing, and you conclude the update broke something it never touched.
+
+Same error → pre-existing. Error gone → this update caused it.
+
+**`-u` and the `refs/stash` comparison are both load-bearing.** Step 3 adds files as well as changing them — `.gitkeep` under a language directory it had to create, a base type new upstream — and those arrive untracked. Four things follow, all of them observed:
+
+| What happens | Why the shape above handles it |
+|---|---|
+| `git stash push` **aborts entirely** (`did not match any file(s) known to git`, exit 1, nothing stashed) when a pathspec matches nothing *known to git* — which includes a path that exists on disk but is untracked | `-u` takes untracked content too, so a tree whose only change under one of these directories is a file this run created no longer aborts. Passing the individual paths stage 1 printed is what walks into this: one `??` entry among them is enough |
+| Without `-u`, a directory pathspec stashes the tracked modifications and **leaves untracked files in place** | Then the file this run added is still there for the re-run, the same error comes back, and it reads as pre-existing — the verdict inverted, in the direction that opens a PR |
+| A push that creates **no entry** still leaves a following `pop` to open whatever unrelated stash the user already had | The `before`/`after` comparison, not the stage-1 emptiness test alone: a non-empty stage 1 can still end in no entry. `-u` also **stashes and then exits 1** on a directory that does not exist, keeping the entry — so never key the pop off the exit code either |
+| A conflicting `pop` leaves the working tree broken mid-update | **Stop there.** Show `git stash list` and how to recover. Do not open a PR |
+
+**If Step 2's probe already listed changes under those paths, the verdict is unreliable** — the user's own uncommitted page edits are rolled back in stage 2 too, so an error they introduced reads as this update's. That errs toward stopping, which is the safe direction, but say so rather than leaving it implicit.
+
+#### What to do with the verdict
+
+- **This update's** → stop, as before. Something in Steps 3–6 did not take, and a PR should not go out on it.
+- **Pre-existing** → say so and carry on to Step 8. The update itself is sound, and holding it hostage to a deviation it did not create fixes nothing — it just turns one problem into two. Carry the finding into the report (Step 8 and Step 9) together with its consequence.
+
+The consequence differs by check, and that is the part worth writing down:
+
+- **`check_orphans.py` `DUPLICATE:`** → this is the one that actually blocks. `/wikicommit-merge` runs this check unscoped, so **this wiki cannot merge anything until it is fixed.** Say that plainly, and say it before the user writes their next page.
+- **`check_wikilinks.py`, a wrong Type segment** → `/wikicommit-merge` only looks at changed files, so it does not stop there today. `/wikicommit-status` reports it as `TYPE_MISMATCH:` and will keep doing so.
+- **Everything else** — `validate_frontmatter.py` and `check_raw_html.py` errors, and links to a `status: removed` page → merge passes over them and **no standing check reports them**. Nobody sees them again until that page is next written.
+
 If this repository publishes with Quartz, build it too:
 
 ```bash
 npm install && npm run build
 ```
 
-A failure here usually means the refreshed plugins and the local `quartz.config.yaml` disagree — worth resolving now rather than discovering it in a deploy.
+A failure here usually means the refreshed plugins and the local `quartz.config.yaml` disagree — worth resolving now rather than discovering it in a deploy. **Treat it as this update's and stop**, without attempting the judgment above. Not because a build cannot have been broken beforehand — it can — but because the judgment is not available here: a pre-update build runs on un-refreshed plugins, and stage 2 deliberately does not roll `quartz-plugins/` back. Rolling it back would reproduce the old-checker mistake exactly.
 
 ### Step 8: Open a Pull Request
 
@@ -157,10 +223,19 @@ git checkout -b "wikicommit/update-<installed version>"
 # Stage the update, not the build. `git add -A` would also sweep in package-lock.json
 # (rewritten by Step 7's npm install) and any unrelated untracked file — both of which
 # this Skill declares out of scope at the top.
-git add .wikicommit .claude .github quartz-plugins .gitignore \
+git add .wikicommit .claude .agents skills-lock.json .github quartz-plugins .gitignore \
   .lychee.toml .markdownlint.json package.json quartz.config.yaml \
   prebuild-symlinks.cjs repair-plugin-builds.cjs install-local-plugins.cjs
 # (drop any path this repository does not have; `git add` fails on a missing pathspec)
+#
+# `.agents` looks like a build directory but holds the Skills themselves. When `npx skills
+# add` targets two or more agents it writes each Skill's real files to .agents/skills/<name>/
+# and makes .claude/skills/<name> a relative symlink into it (Issue #555), so staging .claude
+# without .agents commits a tree of links with nothing to point at — every clone gets a broken
+# .claude/skills/. skills-lock.json records what was installed and plays no part in resolving
+# those links, so it is a separate path rather than a substitute for either. A repository
+# installed with install.sh has no skills-lock.json and one placed by copy has no .agents; the
+# line above already drops whichever is absent, so neither needs a branch of its own here.
 
 git commit -m "$(cat <<'EOF'
 chore: sync distribution to <installed version>
@@ -182,6 +257,8 @@ If the default branch has moved on since this branch was cut, rebase it (`git fe
 **Do not merge, and do not enable auto-merge.** Everything in Steps 4 and 5 was a judgment call, and the PR is where someone checks it. If the branch already exists, this update is already in flight — say so rather than force-pushing over it.
 
 The body should carry: the version range, what was refreshed, what the user declined and why, orphans deleted and kept, and the regeneration candidates from Step 9.
+
+**Any pre-existing finding from Step 7 goes in too, under its own heading, kept apart from what this update changed.** Quote the finding verbatim and give its consequence — `DUPLICATE:` means this wiki cannot merge anything until it is fixed; a wrong Type segment means `/wikicommit-status` will keep reporting it; the rest means no standing check watches it at all. This is where such a finding gets read: the Skill does not auto-merge, so a person is already looking at this page.
 
 ### Step 9: Report
 
@@ -206,6 +283,8 @@ grep -rl "generated_with" .wikicommit/entity/ .wikicommit/view/ 2>/dev/null \
 Pages whose `generated_with` is older than the installed version were written under rules that have since changed. **Report the count and the changelog entries that explain why; do not rebuild anything.** Which pages are worth redoing is a judgment call — the version is coarser than the change (a release that touched one type template makes every page look equally old), so the count is a starting point and the changelog entries are what narrow it. `/wikicommit-generate --regenerate` is how they get rebuilt, when the user decides to.
 
 Close with: the version this repository is now in step with, the PR link, and anything left for the user to do.
+
+**List the pre-existing findings from Step 7 here as well, each with its consequence**, and say plainly that they were not caused by this update and are not fixed by it. Put a `DUPLICATE:` first if there is one: until it is resolved, `/wikicommit-merge` fails on every batch, so it is the one item that blocks the next thing the user does.
 
 ## Notes
 

@@ -100,13 +100,15 @@ def test_a_freshly_initialized_repository_reports_nothing(repo):
 @pytest.mark.parametrize(
     "path",
     [".wikicommit/config.yml", "quartz.config.yaml",
-     ".wikicommit/source-policy.md", ".wikicommit/entity-policy.md", ".gitignore"],
+     ".wikicommit/source-policy.md", ".wikicommit/entity-policy.md", ".gitignore",
+     ".claude/settings.json"],
 )
 def test_files_that_can_never_byte_match_are_not_reported_when_untouched(repo, path):
-    """These five are why `review` reports additive signals rather than byte diffs:
+    """These six are why `review` reports additive signals rather than byte diffs:
     two substitute placeholders at init time, two ship a body that says to replace it,
-    and .gitignore gets a Quartz section appended. Byte comparison would light all five
-    permanently on every repository that exists."""
+    .gitignore gets a Quartz section appended, and settings.json holds the user's own
+    permissions/env/hooks around three merged-in keys (Issue #953). Byte comparison would
+    light all six permanently on every repository that exists."""
     assert path not in _run(repo).stdout
 
 
@@ -134,6 +136,37 @@ def test_a_key_added_upstream_is_reported_on_that_file_alone(repo):
     assert "OUTDATED: .wikicommit/source-policy.md" in out
     assert "brand_new_key" in out
     assert _summary(out)["outdated"] == 1
+
+
+def test_an_operator_changing_a_skill_override_is_not_drift(repo):
+    """Setting one to `on` is the operator running unattended on purpose (Issue #953).
+
+    Reporting it would push them toward undoing the very thing they decided — so the
+    comparison reads keys, never values.
+    """
+    import json
+
+    settings = repo / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    data["skillOverrides"]["wikicommit-generate"] = "on"
+    data["permissions"] = {"allow": ["Bash(pytest:*)"]}
+    settings.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    assert ".claude/settings.json" not in _run(repo).stdout
+
+
+def test_a_skill_override_added_upstream_is_reported(repo):
+    """The comparison has to be genuinely on, not merely quiet."""
+    import json
+
+    settings = repo / ".claude" / "settings.json"
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    del data["skillOverrides"]["wikicommit-merge"]
+    settings.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    out = _run(repo).stdout
+    assert "OUTDATED: .claude/settings.json" in out
+    assert "skillOverrides.wikicommit-merge" in out
 
 
 def test_a_nested_key_added_upstream_is_reported(repo):

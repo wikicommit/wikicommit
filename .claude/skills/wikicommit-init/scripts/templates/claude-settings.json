@@ -1,0 +1,7 @@
+{
+  "skillOverrides": {
+    "wikicommit-generate": "name-only",
+    "wikicommit-merge": "name-only",
+    "wikicommit-translate": "name-only"
+  }
+}

@@ -426,7 +426,42 @@ a 案（サニタイズ）・c 案（経路Aの設計見直し）は不採用: a
 
 グラフが読む `contentIndex.json` のエントリは `{slug, filePath, title, links, tags, content, ...}` のみで、**任意の frontmatter は一切載らない**。したがって言語・型の判定はノードID（＝ Quartz の slug）のパースで行うほかなく、WikiCommit 固有のパス文法に依存するロジックをフォーク側に持つ。`contentIndex` に `lang`/`type` を載せる案（transformer プラグインの追加、または `content-index` のフォーク）はプラグインを1つ増やすことになり、slug パース程度で済む問題に対して割に合わないため採らない。
 
-この分類は `src/util/nodeFilter.ts` に切り出して単体テストしてある（inline スクリプトから import する。`wikicommit-explorer` の `foldLang.ts` と同じ形）。判定順は `tags/` → `sources/` → エンティティで、この順序は発見的なものではなく、前2者が publish 層の予約接頭辞であることによる。エンティティの型名は**publish 後の形**である点に注意する — publish はカスタム型のパスから先頭の `custom/` を落とす（Issue #576）ため、`schema:custom/Decision` はグラフには `<lang>/Decision/<slug>` として届き、型名は `Decision` と読める（`custom/` を落とすのは先頭1つだけなので、`custom/custom/Decision` のように二重に付いた型だけは publish 後も `custom` セグメントが残る。第2セグメントの決め打ちではこの型が `custom` という1つの型に潰れるため、そこだけ第2・第3セグメントを連結する）。一方 `quartz.config.yaml` を人手で書く場合は `type:` の綴り（`custom/Decision`）を書くのが自然であり、これを弾くと該当ページが黙って全部消えるため、`types` フィルタは publish 後の綴りと `type:` の綴りの両方を受け付ける（コントロールバーが書き戻すのは常に publish 後の綴り）。
+この分類は `src/util/nodeFilter.ts` に切り出して単体テストしてある（inline スクリプトから import する。`wikicommit-explorer` の `foldLang.ts` と同じ形）。判定順は `tags/` → `sources/` → `overview` → エンティティの 4 段で、この順序は発見的なものではなく、前3者が publish 層の予約接頭辞であることによる（`overview` は Issue #957 で追加。下記コールアウト）。エンティティの型名は**publish 後の形**である点に注意する — publish はカスタム型のパスから先頭の `custom/` を落とす（Issue #576）ため、`schema:custom/Decision` はグラフには `<lang>/Decision/<slug>` として届き、型名は `Decision` と読める（`custom/` を落とすのは先頭1つだけなので、`custom/custom/Decision` のように二重に付いた型だけは publish 後も `custom` セグメントが残る。第2セグメントの決め打ちではこの型が `custom` という1つの型に潰れるため、そこだけ第2・第3セグメントを連結する）。一方 `quartz.config.yaml` を人手で書く場合は `type:` の綴り（`custom/Decision`）を書くのが自然であり、これを弾くと該当ページが黙って全部消えるため、`types` フィルタは publish 後の綴りと `type:` の綴りの両方を受け付ける（コントロールバーが書き戻すのは常に publish 後の綴り）。
+
+> **俯瞰ページはグラフから外す（Issue #957）**: Issue #585 が `content/overview/` を新設したとき、**publish 層の予約接頭辞としてどちらのプラグインにも登録されなかった**。explorer 側は Issue #946 が直し、graph 側がこれである。
+>
+> 登録が無いと `classifyNode("overview/")` はエンティティ文法へ落ちて `{lang: "overview"}` になり、4 つの症状が同時に出る:
+>
+> | 症状 | 何が起きるか |
+> |---|---|
+> | 言語ファセットの汚染 | `collectFacets()` が拾うため、**言語マルチセレクトに `overview` が言語として並ぶ**。単一言語 Wiki でも `langs.length > 1` を満たしコントロールが出る |
+> | 裏返しの消失 | 読者が実在の言語を 1 つ選ぶと `info.lang === "overview"` が落ちるため、**俯瞰ページ自体がグラフから消える** |
+> | ハブ化 | Top-N リストが数十本の発リンクを持つ（被リンク上位 20・wanted の参照元・孤立ページ上位 20）。**Issue #584 が潰そうとした状態そのもの** |
+> | **自分の報告内容の否定** | 孤立ページ節が上位 20 件へリンクを張るため、**その 20 ページが「リンクを持つページ」として描かれる** |
+>
+> **4 つ目が決め手である。** `filterNodes()` は「エンティティノードは決して prune しない — 何にも届かないページは孤立ページであり、それこそ読者が見られるべきものである」という規則を自分で書いており（Issue #839）、俯瞰ページはそれを黙って壊していた。
+>
+> **採った案（(b) グラフから無条件に除外）と、採らなかった 2 案**:
+>
+> | 案 | 採否 | 理由 |
+> |---|---|---|
+> | (a) `sources` と同じ予約接頭辞として分類しトグルを与える | 不採用 | **トグルの on 側に価値が無い** — 俯瞰ページのエッジが意味するのは「ランキングに載っている」であって「参照している」ではなく、孤立ページ節は描かれる意味が報告の正反対になる。読者に選ばせるのは「誤解を招く表示を見るかどうか」でしかない。加えてコントロールバーは既に混んでおり（Issue #838）、凡例の形は 3 種で埋まっていて 4 つ目には新しい形の設計が要る（Issue #841） |
+> | **(b) 無条件に除外** | **採用** | 4 症状すべてが同時に消え、コントロールも凡例も増えない。俯瞰ページへの導線は root index と左ペイン最上段（Issue #946）に残る |
+> | (c) 分類だけ直しハブ化は次数フィルタに委ねる | 不採用 | 次数フィルタは既定で効かない（`minDegree: 0` / `maxDegree: 0`）ため既定表示は変わらず、**孤立ページの嘘を恒久化する** — 現在は 2 番目の症状のおかげで絞り込み後は孤立ページが正しく孤立して見えるが、分類だけ直すと俯瞰ページがあらゆる絞り込みを生き残る。**現状より悪い** |
+>
+> **除外は `filterNodes()` の中で、`all` を除外後の集合として作ることで行う。** 素直に `kept` から落とすと `narrowed = kept.size !== all.size` が常に真になり、既定の全体表示（選択なし・次数境界なし）でも毎回 prune 経路へ入って `computeEntityDegrees()` の全走査が 2 回余計に走る — 同関数のコメントが明示的に守っている早期 return（「Nothing was taken away, so nothing can have been *disconnected* either」）を潰すことになる。**出力そのものは変わらない**（俯瞰ページのリンク先はエンティティページだけなので、落としても tag / source の entity degree は 1 も減らず prune は何も掴まない）ため、**これは単体テストでは守れない** — 2 つの実装は `filterNodes()` の戻り値からは区別できず、assert として書けば退けたはずの実装でも緑になるテストが増えるだけである。守るのはコードのコメントとレビューであってテストではない。
+>
+> **root index（`/`）は残す。** `classifyNode()` はこれを `kind: "root"` と分類し `filterNodes()` は除外しない。この非対称は意図したもので、root index の発リンクは `<lang>/`・`sources`・`overview/` だけであり、言語数に比例して増えるとはいえ Top-N リストのような数十本規模には届かず、ハブ化もしなければ嘘もつかない。
+>
+> **既知の限界: ローカルグラフには残る。** `graph.inline.ts` は `filterNodes()` を `depth < 0`（グローバルグラフ）でしか呼ばない — ローカルグラフは現在ページからの BFS で近傍を作るため、後からノードを抜くと経路が切れて他ノードが孤立するからである。したがって**孤立ページのローカルグラフには「Overview」が隣接ノードとして残る**。孤立かどうかを読むのは全体を見るグローバルグラフであり、ローカルグラフは「このページの近傍」を見る別の面である、という理由で受け入れる。`data` の構築時点で落として両方から消す案は採らない — 俯瞰ページ自身のローカルグラフが `data.get(url)?.title` を引けず、`overview/` という生の id をラベルにした単独ノードになる。
+>
+> **`isIndex` は `false` にする。** 俯瞰ページの実体は `index.md` だが、`NodeInfo.isIndex` は「`<lang>/<Type>/index.md` の型インデックスか `<lang>` の言語ルート」と定義された**エンティティノード専用**のフィールドであり、同じ予約接頭辞である `tags` / `sources` はどちらも `false` を返す。`true` にすると、次に `isIndex` で分岐する実装が定義どおり「entity だけ見ればよい」という前提で書かれた瞬間に、俯瞰ノードだけが想定外の側へ落ちる。
+>
+> **`content/sources/` の索引ページは本件では扱わない。** `_write_sources_index()` / `_write_source_dir_indexes()` も巨大ハブだが、(1) `showSources` トグルで丸ごと切れるため読者に逃げ道が既に在り、(2) 索引を外すと Issue #839 が導入した prune の入力が変わって**実測で決めた挙動が動く**。したがって「build 生成の索引ページはグラフに出さない」という一般則は**まだ立てない**。
+>
+> **予約ツリーの登録漏れは CI で止める。** Issue #585 は explorer と graph の**両方**を落としており、同じ漏れが 2 回続いた。`convert_wikilinks.py` の `RESERVED_PUBLISH_TREES`（現在 `sources` と `overview`）を正本とし、`tests/test_publish_reserved_trees.py` が各エントリが `nodeFilter.ts` と explorer の `sortTier` 2 写しの**いずれにも**現れることを検証する。**限界**: grep 相当であり登録の**正しさ**は見ない（コメント中の言及でも通る）し、**`src/` しか見ないので `dist/` が古いままであることも捕まえない**。捕まえたいのは「新しいツリーを作って登録し忘れる」という Issue #585 の失敗そのものである。**対象外**: `tags` は Quartz が書くツリーで `convert_wikilinks.py` の所管ではなく、`assets` は非 `.md` のみでページを持たない。
+>
+> **ブラウザでの目視確認は行っていない**（このリポジトリに Quartz 本体が無い。Issue #81）。単一言語 Wiki の言語マルチセレクトに `overview` が出ないこと・俯瞰ページがグラフを支配しないことの目視は、パイロット側の確認項目とする。
 
 #### 言語・型フィルタはエンティティノードにしか適用しない
 
@@ -670,6 +705,38 @@ wanted ページは定義上リンク先が存在しないため、`[[Type/slug]
 **スコープ外**: Wiki 全体の傾向を LLM が論述するページは**作らない方針に確定した**（鮮度追跡の仕組みと型名の選定という2つの未確定な設計判断を伴う一方、実際に欲しかった内容は決定論的な集計で表現できるため）。特定の着眼点に基づく合成は `/wikicommit-synthesize` の担当。build-generated ページは `.wikicommit/entity/` に実体を持たないため `search_index.py`（FTS5）の走査対象外で、`/wikicommit-ask` / `/wikicommit-search` には出ない（ブラウザ側の Quartz 標準検索にはビルド成果物として出る）— Wiki の状態を LLM に尋ねる用途は `/wikicommit-status` が担う。
 
 **実装箇所**: `.wikicommit/scripts/convert_wikilinks.py`（`generate_overview_page()`・`OVERVIEW_LABELS`・`url_host()`。`.claude/skills/wikicommit-init/scripts/templates/scripts/` への symlink 経由で配布テンプレートにも反映される）。
+
+> **左ペインでの位置 — 予約ツリーは端へ寄せる（Issue #946）**: 本節がこのページを新設したとき、**publish 層の予約接頭辞としてプラグイン側へ登録するのが漏れていた**。`wikicommit-explorer` の `explorerSortFn` は `sortTier()` が 3 段しか持たず、`overview` はどれにも当たらず tier 0（既定）に落ちて Type フォルダの中にアルファベット順で混ざっていた。
+>
+> **埋もれる位置が `primary_lang` によって変わる**点がこれを単なる並び順の好みから分ける。tier 0 内の比較は `displayName`（＝そのフォルダの `index.md` の `title`）に対する `localeCompare` であり、俯瞰ページの `title` は `OVERVIEW_LABELS` から引かれる — `en` なら `Overview` で `Organization` と `Person` の間、`ja` なら `View` の直後の W の位置になる。同じ構造の Wiki が言語によって別の場所に俯瞰ページを持つことになる。一方 tier の判定は `displayName` ではなく `slugSegment` を見るので、`OVERVIEW_DIR_NAME` が固定である以上、tier で扱えば言語に依らず安定する。Issue #494 が `sources` をまさにその形で直している。
+>
+> 確定した並びは次のとおり。
+>
+> ```text
+> overview            ← 横断して見るもの（tier -2・root 限定）
+> View                ← 同上（tier -1・深さガード無し）
+> AdministrativeArea
+> DefinedTerm         ← 個別の事物（tier 0）
+> Organization
+> Person
+> Place
+> en                  ← 言語フォルダ（tier 1・Issue #334。変更なし）
+> sources             ← 出自の記録（tier 2・Issue #494。変更なし）
+> ```
+>
+> **原則は「予約ツリーは後ろ」から「予約ツリーは端へ寄せる」へ一般化した** — 横断して見るもの（`overview` / `View`）を先頭、個別のエンティティを中央、出自の記録（`sources`）を末尾に置く。`sources` の位置は Issue #494 が決めたまま 1 文字も動かしていないので、これは既存の判断の否定ではなくその軸を反対端まで延ばしたものである。**`overview` と `View` が隣接するのは偶然ではない** — `docs/DesignDoc-data.md` §4.5.1 は `kind: landscape` の view ページについて「数を書かない。build 生成の overview ページが毎ビルド正確に再計算しているので、数が要るならそちらへリンクする」と定めており、2 つは互いを名指しする関係にある。読者にとってもどちらも「1 枚のページの中身」ではなく「Wiki を見渡すもの」である。
+>
+> **tier 番号に負値を使い、既存の 3 値には触れない**。`aTier - bTier` で比較しているため負値で問題がなく、0..4 へ振り直さないことで **Issue #334 / #494 が書いた並び順テスト 8 件が 1 文字も変わらずに通る** — 段を足したのであって既存の段を乱していないことが、そのまま示せる。
+>
+> **root 限定ガードは `overview` にだけ付ける**。`View` に深さガードを付けないのは、`foldLang.ts` が「`node.slug` を書き換えない」設計であり、fold で root へ上がった View の `slugSegments` が `["ja", "View"]` のまま残るためである — 深さで絞るとこの機能が対象とするまさにその場合に当たらない。ガード無しなら、兄弟言語フォルダを展開した中の `en/View` も同じ理由でその言語の Type 群の先頭に来る。`View` は予約 Type セグメント（Issue #675）なので、`content/<lang>/` の下では Type / カスタム型と衝突しない。**`content/sources/` の下では衝突しうる** — あちらはリポジトリ内の任意のパスと URL のパスをそのままミラーする（`convert_wikilinks.py` の `out_rel = Path("sources") / mgmt_rel`）ため、`src/View/` を持つリポジトリを取り込んだ Wiki には `content/sources/path/src/View/` が現れ、そのフォルダが sources ツリーの中で兄弟の先頭に来る。**これは直していない** — 影響は既に tier 2 である 1 つのサブツリー内部の並び順に閉じており、`<lang>/View` へ絞ると上の段落が避けている深さの仮定を作り直すことになるため。`/wikicommit-synthesize` を一度も実行していない Wiki には `View` フォルダ自体が無く、その場合は `overview` だけが先頭に出る（分岐は要らない）。
+>
+> **`sortTier` の写しは 2 つあり、その同期を CI が強制するようになった**。`explorerSortFn`（`WikiCommitExplorer.tsx`）と `defaultSortFn`（`wikicommit-explorer.inline.ts`）が同じ tier ロジックを持ち、後者は前者を復元できなかったときのフォールバックである。後者のコメントは以前から「must still match」と書いていたが、**それを強制するものが無かった** — Issue #228 の `tests/test_quartz_plugins_lang_segment_sync.py` は行頭アンカーで定数を探すため、関数本体の中にインデントされたこの 2 つはどちらも射程外だった（`quartz-plugins/` 配下には同じ正規表現の写しが 5 つあり — explorer に 3 つ、breadcrumbs と language-switcher に 1 つずつ — あのテストが見ているのは 3 プラグインにつき 1 つずつの 3 つで、explorer の残り 2 つは今もどのテストも見ていない）。
+>
+> **フォールバックが効くのは「一瞬」ではない**。木は `buildFileTrie()` の解決後に一度だけ描画されるため、`defaultSortFn` で描いてから描き直す経路は無い。`data-data-fns` が無い・その JSON や `sortFn` の復元に失敗した（`catch` はログを出すだけ）場合に、`defaultSortFn` がそのページの並び順を**最後まで**決める。したがって片方だけ直したときの症状は、通常の経路では**何も起きず**、フォールバックへ落ちた読者にだけ古い並び順が出続けることであり、目視で見つけられる類のものではない。`tests/test_explorer_sort_tier_sync.py` が、2 つの `sortTier` 本体を型注釈・コメント・セミコロン・空白を落として正規化したうえで突き合わせる（2 つは同じ言語ではないため逐語比較にはできない。正規化が緩すぎて何も検出しなくなる状態は緑のまま通るので、tier の値を 1 つ変えたら差が出ること・コロンに続く値が残ること・コメント内の対応しない波括弧で本体の終端がずれないことを同ファイルが併せて確かめる）。**照合の対象は `sortTier` の本体だけである** — tier が同値のときの tie-break は`(a.displayName || "")` と `a.displayName` で既に食い違っており全体を突き合わせる形にできないため、そちらの drift は引き続きどのテストも見ていない。
+>
+> **採らなかった案**: ディレクトリ名を並び順のために変える（`OVERVIEW_DIR_NAME` は公開 URL そのものであり、並び順のために読者向けの識別子を歪めない）／`title` の先頭に記号を置く（表示名依存の並びこそが本件の原因であり、同じ依存を意図的に強めることになる）／`overview` を `sources` の下に置く（「予約ツリーは後ろ」には最も忠実だが、俯瞰ページは本節が「Wiki 全体の入口」として作ったものであり、出自の記録の下に沈めると `View` とも離れる）／`filterFn` / `mapFn` で解く（§8.2 が既に記録しているとおりこの枠組みでは「1 つのフォルダの子を親へ持ち上げる」類の操作を表現できず、並び順は `sortFn` の担当である）。
+>
+> **遡及適用は行わない**（本ドキュメント群が一貫して採る「新旧混在を許容する」方針）。`quartz-plugins/` は `_root_outputs.py` 上 `update: overwrite` なので、変更は再 init または `/wikicommit-update` を実行したリポジトリから届き、公開サイトへの反映は次のデプロイを待つ。
 
 ### 8.9 読者向けに表示されるフィールドの一覧（Issue #509）
 

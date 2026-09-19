@@ -18,20 +18,20 @@ import os
 import sys
 from pathlib import Path
 
-import yaml
-
-from _frontmatter import parse_frontmatter_cached
 from _wikilink import (
     ENTITY_DIR,
     VIEW_DIR,
-    VIEW_TYPE_SEGMENT,
     WIKILINK_RE,
     build_slug_type_index,
     collect_entity_pages,
     collect_view_pages,
+    extract_wikilinks as extract_wikilinks_from_text,
+    is_removed,
+    link_target_path,
+    load_primary_lang,
     other_types_for_slug,
-    parse_view_path,
-    parse_wiki_path,
+    page_lang,
+    type_slug_from_wiki_path,
 )
 
 IN_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
@@ -43,38 +43,11 @@ def _emit_annotation(level: str, title: str, message: str, file_path: str | None
         print(f"::{level} {loc}title={title}::{message}")
 
 
-def load_primary_lang(repo_root: Path) -> str:
-    # Fallback is "en" to match init.py's --primary-lang default (Issue #159 changed the
-    # tool-wide default from "ja"; Issue #376 brought this fallback in line with it). Only
-    # reached for a config.yml missing/malformed enough to lack an explicit primary_lang —
-    # every config.yml init.py generates always has one.
-    config_path = repo_root / ".wikicommit" / "config.yml"
-    try:
-        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return "en"
-        translation = data.get("translation") or {}
-        return str(translation.get("primary_lang", "en") or "en")
-    except Exception:
-        return "en"
-
-
-def load_frontmatter(path: Path) -> dict:
-    fm, err = parse_frontmatter_cached(path)
-    if err:
-        print(f"WARNING: {path}: {err}")
-        return {}
-    return fm
-
-
-def get_lang(path: Path, primary_lang: str) -> str:
-    fm = load_frontmatter(path)
-    return str(fm.get("lang", primary_lang))
-
-
-def is_removed(path: Path) -> bool:
-    fm = load_frontmatter(path)
-    return fm.get("status") == "removed"
+# load_primary_lang / page_lang / is_removed / link_target_path /
+# type_slug_from_wiki_path all moved to _wikilink.py when build_onehop_context.py
+# needed the same resolution (Issue #947). `get_lang` is kept as a local alias
+# because it is the name this script's own tests call.
+get_lang = page_lang
 
 
 def extract_wikilinks(path: Path) -> list[tuple[str, str]]:
@@ -83,39 +56,7 @@ def extract_wikilinks(path: Path) -> list[tuple[str, str]]:
         content = path.read_text(encoding="utf-8")
     except OSError:
         return []
-    return [(m.group(1), m.group(2)) for m in WIKILINK_RE.finditer(content)]
-
-
-def link_target_path(type_name: str, slug: str, lang: str, entity_dir: Path, view_dir: Path) -> Path:
-    """Where `[[<type_name>/<slug>]]` in `lang` would live on disk.
-
-    `View` is a reserved Type segment naming the view tree (Issue #675), whose
-    pages have no Type directory: `<view_dir>/<lang>/<slug>.md`. Everything
-    else keeps the entity layout. Resolving both here means the existence,
-    removed-page and cross-language-fallback checks below stay one code path.
-    """
-    if type_name == VIEW_TYPE_SEGMENT:
-        return view_dir / lang / f"{slug}.md"
-    return entity_dir / lang / type_name / f"{slug}.md"
-
-
-def type_slug_from_wiki_path(
-    path: Path, entity_dir: Path, view_dir: Path | None = None
-) -> tuple[str, str] | None:
-    """Derive (Type, slug) from a page path in either tree.
-
-    Type may contain "/" for nested custom types (e.g. custom/Decision), and is
-    the reserved `View` segment for a page in the view tree (Issue #675) — the
-    same key a `[[View/<slug>]]` link builds, which is what the backlink index
-    this feeds is keyed by.
-    """
-    resolved = parse_wiki_path(path, entity_dir)
-    if resolved is None and view_dir is not None:
-        resolved = parse_view_path(path, view_dir)
-    if resolved is None:
-        return None
-    _, type_name, slug = resolved
-    return type_name, slug
+    return extract_wikilinks_from_text(content)
 
 
 def main() -> int:

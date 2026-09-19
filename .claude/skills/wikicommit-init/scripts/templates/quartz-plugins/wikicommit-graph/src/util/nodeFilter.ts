@@ -8,7 +8,7 @@
 // the one place in the fork that depends on WikiCommit's own path grammar; it
 // is kept separate from the inline script so it can be unit-tested.
 
-export type NodeKind = "tag" | "source" | "root" | "entity";
+export type NodeKind = "tag" | "source" | "overview" | "root" | "entity";
 
 export interface NodeInfo {
   kind: NodeKind;
@@ -26,10 +26,12 @@ export interface NodeInfo {
 
 /** Classify one graph node id (a simplified Quartz slug, no leading slash).
  *
- * Order matters: `tags/` and `sources/` are checked before the entity grammar,
- * because a wiki whose primary language happened to be named `tags` would
- * otherwise be read as a tag tree. Those two prefixes are reserved by the
- * publishing layer, so the precedence is not a heuristic.
+ * Order matters: `tags/`, `sources/` and `overview` are checked before the entity
+ * grammar, because a wiki whose primary language happened to be named `tags`
+ * would otherwise be read as a tag tree. All three prefixes are reserved by the
+ * publishing layer, so the precedence is not a heuristic. Language directories
+ * are two letters, and a Type name only ever appears below a `<lang>/`, so none
+ * of the three can collide with a real entity path.
  */
 export function classifyNode(id: string): NodeInfo {
   if (id === "" || id === "/" || id === "index") {
@@ -44,6 +46,24 @@ export function classifyNode(id: string): NodeInfo {
   // the graph or does not.
   if (id === "sources" || id.startsWith("sources/")) {
     return { kind: "source", isIndex: false };
+  }
+  // The build-generated overview page (Issue #585). Registering it here is the
+  // half Issue #585 missed: without it `overview/` fell through to the entity
+  // grammar and read as `{lang: "overview"}`, which put "overview" in the
+  // control bar's language multi-select and made the page vanish the moment a
+  // reader picked a real language.
+  //
+  // `isIndex` is false even though the page is literally an `index.md`.
+  // `NodeInfo.isIndex` is defined for entity nodes — a type index or a language
+  // root — and `tags` / `sources` both answer false for the same reason. Saying
+  // true here would send this node down whichever branch a future `isIndex`
+  // check writes on the documented assumption that it is looking at an entity.
+  //
+  // Prefix-matched like `sources`, not compared for equality: the overview is
+  // one page today, and splitting it is out of scope only until it stops
+  // fitting on one page. This way that split does not break anything quietly.
+  if (id === "overview" || id.startsWith("overview/")) {
+    return { kind: "overview", isIndex: false };
   }
 
   const parts = id.split("/").filter((p) => p.length > 0);
@@ -183,7 +203,35 @@ export function filterNodes(
   // Materialized up front because it is walked twice: once to apply the
   // selections, and once as the "before" degree baseline below. An Iterable may
   // be a generator, which a second pass would find empty.
-  const all = new Set(ids);
+  //
+  // The overview page is dropped *here*, building `all` without it, rather than
+  // removed from `kept` afterwards (Issue #957). Dropping it from `kept` would
+  // make `kept.size !== all.size` true on every render, so the default global
+  // graph — no selection, no degree bound — would stop taking the early return
+  // below and pay for two full `computeEntityDegrees()` walks it has nothing to
+  // do with. Built this way, `narrowed` keeps meaning "the reader's selection
+  // took something away", which is what the early return and the
+  // `pageDegreesBefore` baseline are both written against.
+  //
+  // The output is the same either way: the overview links only to entity pages,
+  // so removing it changes no tag's or source's entity degree and the prune
+  // catches nothing new. That is why this is a comment and not a test — the two
+  // implementations are indistinguishable from `filterNodes()`'s return value.
+  //
+  // Why exclude it at all: its "hubs" section links the top 20 most-linked
+  // pages, its "wanted" section links every referrer, and its "orphans" section
+  // links the top 20 orphans — so on the canvas it is both a hub of the kind
+  // Issue #584 set out to remove and a page that **contradicts its own report**,
+  // drawing 20 orphans as pages that have a link. `filterNodes()` protects the
+  // opposite below ("Entity nodes are never pruned … it is an orphan, which is
+  // exactly what the reader should be able to see"), and the overview was
+  // quietly undoing it. Readers still reach the page from the root index and
+  // from the explorer's top row.
+  const all = new Set<string>();
+  for (const id of ids) {
+    if (classifyNode(id).kind === "overview") continue;
+    all.add(id);
+  }
 
   const kept = new Set<string>();
   for (const id of all) {

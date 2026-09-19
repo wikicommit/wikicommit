@@ -1239,3 +1239,136 @@ def test_a_repository_predating_a_pattern_reports_it_missing(tmp_path):
     )
     result = run(["--primary-lang", "ja", "--no-overwrite"], cwd=repo)
     assert "GITIGNORE_READY: no (missing: .wikicommit/run/)" in result.stdout
+
+
+# ── .claude/settings.json skillOverrides (Issue #953) ──────────────────────
+#
+# Issue #945 removed `disable-model-invocation` from generate / merge / translate so
+# unattended runs have a path at all, which also made a passing request able to trigger
+# them. `name-only` hides the description — the mechanism a model matches against — while
+# leaving a prompt that names `/wikicommit-generate` working, so nothing has to be flipped
+# to run unattended. The two tests that matter most here are the ones asserting what init
+# does NOT do: an operator running unattended has set one of these to `on` deliberately,
+# and a re-init silently putting it back would stop those runs while printing success.
+
+def _settings(root: Path) -> dict:
+    import json
+    return json.loads((root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+
+
+def _write_settings(root: Path, data: dict) -> None:
+    import json
+    path = root / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def test_init_writes_skill_overrides_for_a_new_repository(tmp_path):
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    assert _settings(tmp_path)["skillOverrides"] == {
+        "wikicommit-generate": "name-only",
+        "wikicommit-merge": "name-only",
+        "wikicommit-translate": "name-only",
+    }
+    assert "CREATED: .claude/settings.json" in result.stdout
+
+
+def test_reinit_does_not_touch_a_value_the_operator_changed(tmp_path):
+    """The point of the whole merge: a repository running unattended must not stop."""
+    run([], tmp_path)
+    settings = _settings(tmp_path)
+    settings["skillOverrides"]["wikicommit-generate"] = "on"
+    _write_settings(tmp_path, settings)
+
+    result = run(["--no-overwrite"], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    assert _settings(tmp_path)["skillOverrides"]["wikicommit-generate"] == "on"
+    assert "SKIPPED: .claude/settings.json" in result.stdout
+
+
+def test_reinit_adds_only_the_keys_that_are_missing(tmp_path):
+    run([], tmp_path)
+    settings = _settings(tmp_path)
+    settings["skillOverrides"]["wikicommit-generate"] = "on"
+    del settings["skillOverrides"]["wikicommit-merge"]
+    _write_settings(tmp_path, settings)
+
+    result = run(["--no-overwrite"], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    overrides = _settings(tmp_path)["skillOverrides"]
+    assert overrides["wikicommit-generate"] == "on", "the operator's value must survive"
+    assert overrides["wikicommit-merge"] == "name-only", "the missing key is re-added"
+    assert "UPDATED: .claude/settings.json" in result.stdout
+
+
+def test_the_skipped_settings_file_is_counted_in_the_summary(tmp_path, tmp_path_factory):
+    """A printed SKIPPED: that the tally does not count makes the summary disagree
+    with the lines above it.
+
+    Asserted as a delta between two re-inits that differ only in whether
+    settings.json is skipped — the tally is not "one per printed line" in general
+    (copy_tree counts per file without printing each one), so a global invariant
+    would be false for reasons unrelated to this path.
+    """
+    other = tmp_path_factory.mktemp("other")
+    for root in (tmp_path, other):
+        run([], root)
+
+    # tmp_path: all three keys present, so settings.json is skipped.
+    # other: one key missing, so it is updated instead.
+    settings = _settings(other)
+    del settings["skillOverrides"]["wikicommit-merge"]
+    _write_settings(other, settings)
+
+    skipped_when_skipped = int(
+        re.search(r"skipped=(\d+)", run(["--no-overwrite"], tmp_path).stdout).group(1)
+    )
+    skipped_when_updated = int(
+        re.search(r"skipped=(\d+)", run(["--no-overwrite"], other).stdout).group(1)
+    )
+    assert skipped_when_skipped == skipped_when_updated + 1
+
+
+def test_init_preserves_the_users_other_settings(tmp_path):
+    _write_settings(tmp_path, {
+        "permissions": {"allow": ["Bash(pytest:*)"]},
+        "env": {"FOO": "bar"},
+    })
+
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    settings = _settings(tmp_path)
+    assert settings["permissions"] == {"allow": ["Bash(pytest:*)"]}
+    assert settings["env"] == {"FOO": "bar"}
+    assert settings["skillOverrides"]["wikicommit-merge"] == "name-only"
+
+
+def test_unreadable_settings_are_left_alone_and_the_gap_is_reported(tmp_path):
+    """Rewriting it would destroy settings this script cannot even read."""
+    path = tmp_path / ".claude" / "settings.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ this is not JSON", encoding="utf-8")
+
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    assert path.read_text(encoding="utf-8") == "{ this is not JSON"
+    assert "could not be read as a JSON object" in result.stderr
+    # Says the guard is not in place, rather than reporting one that is not.
+    assert "auto-invoke" in result.stderr
+
+
+def test_a_non_mapping_skill_overrides_is_left_alone(tmp_path):
+    """There is no per-key merge to make, and replacing it would discard intent."""
+    _write_settings(tmp_path, {"skillOverrides": "off"})
+
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    assert _settings(tmp_path)["skillOverrides"] == "off"
+    assert "could not be read as a JSON object" in result.stderr

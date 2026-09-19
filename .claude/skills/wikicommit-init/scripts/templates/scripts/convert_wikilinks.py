@@ -41,6 +41,7 @@ from _wikilink import (
     VIEW_TYPE_SEGMENT,
     WIKILINK_RE,
     collect_view_pages,
+    load_primary_lang,
     other_types_for_slug,
     parse_view_path,
     parse_wiki_path,
@@ -52,6 +53,25 @@ from _wikilink import (
 # drift into a banner that contradicts `/wikicommit-status`.
 from check_review_coverage import load_records, stale_reasons, standing_verdict
 from record_review import ACCEPTED_PREFIXES, RecordError, compute_page_content_hash
+
+
+# The page trees this script reserves directly under `content/` (Issue #957).
+#
+# Both are build-generated: `sources/` mirrors `.wikicommit/source/` (Issue #476)
+# and `overview/` is the survey page (Issue #585). Neither is an entity path, so
+# both publishing plugins have to know them by name — the graph to keep
+# `overview/` out of the language facet, the explorer to keep both out of the
+# Type folders. Issue #585 registered `overview` with neither, and the symptom in
+# each case was silent: a fake language in one control bar, a stray folder in the
+# other. `tests/test_publish_reserved_trees.py` now asserts that every name here
+# appears in all three plugin sources.
+#
+# Deliberately not listed: `tags/` is written by Quartz, not by this script (the
+# explorer drops it through `filterFn`, not `sortTier`), and `assets/` holds no
+# `.md` at all, so neither plugin ever sees a node or a folder for it.
+SOURCES_DIR_NAME = "sources"
+OVERVIEW_DIR_NAME = "overview"
+RESERVED_PUBLISH_TREES = (SOURCES_DIR_NAME, OVERVIEW_DIR_NAME)
 
 
 # Stamped onto the published copy of a page, never onto the page itself
@@ -225,15 +245,6 @@ def _config_section(repo_root: Path, key: str) -> dict:
         return {}
     section = data.get(key)
     return section if isinstance(section, dict) else {}
-
-
-def load_primary_lang(repo_root: Path) -> str:
-    # Fallback is "en" to match init.py's --primary-lang default (Issue #159 changed the
-    # tool-wide default from "ja"; Issue #376 brought this fallback in line with it). Only
-    # reached for a config.yml missing/malformed enough to lack an explicit primary_lang —
-    # every config.yml init.py generates always has one.
-    translation = _config_section(repo_root, "translation")
-    return str(translation.get("primary_lang", "en") or "en")
 
 
 def load_translation_targets(repo_root: Path) -> list[str]:
@@ -649,11 +660,11 @@ def generate_root_index(
         # Single-language wiki: there is no language list to hang the
         # description off, so it goes under the top link instead.
         lines += ["", descriptions[primary_lang]]
-    lines += ["", f"[{labels['sources']}](./sources/)"]
+    lines += ["", f"[{labels['sources']}](./{SOURCES_DIR_NAME}/)"]
     # Issue #585: the overview page is the other build-generated entry point
     # (aggregate counts, hubs, gaps, source breakdown), so the root index is
     # the one place both are reachable from.
-    lines += ["", f"[{labels['overview']}](./overview/)"]
+    lines += ["", f"[{labels['overview']}](./{OVERVIEW_DIR_NAME}/)"]
     # Issue #645: the site-wide counterpart of the per-page attribution
     # WikiCommitSources renders (Issue #558). A reader who lands on one page sees
     # that page's sources and their terms inline; a reader looking at the site as
@@ -921,7 +932,7 @@ def generated_page_link(wiki_rel: str, mgmt_rel: Path) -> str:
     A custom type's `custom/` segment is dropped here to match that output
     path (Issue #576).
     """
-    current_dir = posixpath.join("sources", mgmt_rel.parent.as_posix())
+    current_dir = posixpath.join(SOURCES_DIR_NAME, mgmt_rel.parent.as_posix())
     # The caller resolved the page on disk with the unflattened path; the link
     # has to name where convert_file() actually wrote it (Issue #576).
     return _dot_relpath(flatten_entity_rel(Path(wiki_rel)).as_posix(), current_dir)
@@ -1233,7 +1244,7 @@ def _write_source_dir_indexes(
 
     written: set[Path] = set()
     for d in all_dirs:
-        index_rel = Path("sources") / d / "index.md"
+        index_rel = Path(SOURCES_DIR_NAME) / d / "index.md"
         if index_rel in already_written:
             written.add(index_rel)
             continue
@@ -1311,7 +1322,7 @@ def generate_source_pages(
 
             mgmt_rel = mgmt_file.relative_to(mgmt_dir)
             title = str(source.get("path") or source.get("url") or mgmt_rel.as_posix())
-            out_rel = Path("sources") / mgmt_rel
+            out_rel = Path(SOURCES_DIR_NAME) / mgmt_rel
             linked_wiki_rels = _write_source_page(
                 output_dir / out_rel, fm, body, source, title, entity_dir, mgmt_rel, labels
             )
@@ -1334,7 +1345,7 @@ def generate_source_pages(
                 page_type = flatten_custom_type(resolved[1])
                 per_page_type[page_type] = per_page_type.get(page_type, 0) + 1
 
-    index_rel = Path("sources") / "index.md"
+    index_rel = Path(SOURCES_DIR_NAME) / "index.md"
     _write_sources_index(output_dir / index_rel, entries, labels, type_labels)
     written.add(index_rel)
     written |= _write_source_dir_indexes(output_dir, entries, type_labels, labels, already_written=written)
@@ -1502,8 +1513,6 @@ OVERVIEW_WANTED_LIMIT = 20
 OVERVIEW_ORPHAN_LIMIT = 20
 OVERVIEW_HOST_LIMIT = 20
 OVERVIEW_TAG_LIMIT = 30
-
-OVERVIEW_DIR_NAME = "overview"
 
 
 def _pct(part: int, whole: int) -> str:

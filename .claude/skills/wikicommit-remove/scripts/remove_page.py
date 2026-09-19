@@ -40,9 +40,19 @@ def normalize_entity_prefix(raw_path: str) -> str:
     `.wikicommit/entity/...` path regardless of which prefix the stored
     value happens to use (old and new forms are allowed to coexist rather than
     being auto-migrated). Mirrors .wikicommit/scripts/_wikilink.py's
-    helper of the same name — duplicated here rather than imported because
-    this Skill script runs as a subprocess and can't assume
-    .wikicommit/scripts/ is resolvable relative to its caller's cwd."""
+    helper of the same name — duplicated here rather than imported, as a
+    convention that keeps this Skill script self-contained.
+
+    This used to claim the duplication was forced: that the script runs as a
+    subprocess and cannot assume .wikicommit/scripts/ resolves relative to its
+    caller's cwd. That does not hold (Issue #947). Every SKILL.md invokes this
+    file as `python .claude/skills/wikicommit-remove/scripts/remove_page.py`,
+    a repo-root-relative path — so the same assumption about cwd is already
+    being made one word earlier on the same command line, and a cwd that broke
+    the import would stop the command before Python started. A sibling Skill
+    script, wikicommit-ask's resolve_source_cache_path.py, does import from
+    .wikicommit/scripts/ via sys.path. Whether to switch this one over is a
+    separate decision from correcting why it reads the way it does."""
     if raw_path.startswith(LEGACY_ENTITY_PREFIX):
         return ENTITY_PREFIX + raw_path[len(LEGACY_ENTITY_PREFIX):]
     return raw_path
@@ -130,8 +140,9 @@ def parse_wiki_path(path: Path, entity_dir: Path) -> tuple[str, str, str] | None
 
 
 # view ツリー（Issue #675）。`.wikicommit/scripts/_wikilink.py` の同名の定数・関数の複製で、
-# normalize_entity_prefix() と同じ理由による — このスクリプトはサブプロセスとして実行され、
-# 呼び出し元の cwd から `.wikicommit/scripts/` が解決できるとは限らない。
+# normalize_entity_prefix() と同じく「この Skill スクリプトを自己完結に保つ」という慣行による。
+# かつてここには cwd から `.wikicommit/scripts/` が解決できるとは限らないためと書いていたが、
+# その理由は成立しない（Issue #947。normalize_entity_prefix() の docstring 参照）。
 VIEW_TYPE_SEGMENT = "View"
 
 

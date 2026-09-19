@@ -137,17 +137,19 @@ within it:
 - .wikicommit/entity/en/ScholarlyArticle/vibe-coding-survey.md (source: .wikicommit/source/url/arxiv.org/vibe-coding-survey.md)
 ```
 
-If any page written in this run has `sources` that are **all** share-alike licensed, list them. Registration warned once per source; this says which *pages* actually came out that way, which is the thing the obligation attaches to:
+If any page written in this run has `sources` that are **all** copyleft licensed (share-alike Creative Commons, ODbL, or a copyleft software license — Issue #951 widened the table beyond the first of those), list them. Registration warned once per source; this says which *pages* actually came out that way, which is the thing the obligation would attach to:
 
 ```
-The following page(s) draw only on share-alike sources, so they must be offered under that license
-too:
+The following page(s) draw only on copyleft sources, so they may have to be offered under that
+license too — check before publishing:
 - .wikicommit/entity/ja/Place/hikawa-shrine.md (CC-BY-SA-4.0)
 
-A page with even one non-share-alike source is not listed here. Where a primary source exists,
+A page with even one non-copyleft source is not listed here. Where a primary source exists,
 /wikicommit-collect --index <url> reads an encyclopedia page's citations and offers those instead
 of the page itself.
 ```
+
+Say "may have to" rather than "must", as above. Whether a prose summary of a copyleft document is a derivative work is an open question and WikiCommit does not answer it — what this list reports is which pages are in the position where it has to be asked.
 
 If Pass 4 found a page that contradicts an **existing** page and judged the existing one to be the one at fault (Pass 4 step 3's routing rule, Issue #566), list every such pair. This run deliberately changed nothing about them — it regenerates a page against that page's own sources, and has neither the other page's sources nor any mandate over it — so this Notice is the only place the conflict is recorded at all:
 

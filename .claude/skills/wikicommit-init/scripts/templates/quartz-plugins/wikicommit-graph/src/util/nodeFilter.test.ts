@@ -389,3 +389,83 @@ describe("collectFacets", () => {
     ).toEqual({ langs: ["en", "ja"], types: ["Decision", "Person"] });
   });
 });
+
+// ── The overview page (Issue #957) ─────────────────────────────────────────
+//
+// Issue #585 added `content/overview/` and registered it with neither publishing
+// plugin. Issue #946 fixed the explorer half; this is the graph half. Without
+// the branch in classifyNode(), `overview/` fell through to the entity grammar
+// and read as `{lang: "overview"}` — which put a fake language in the control
+// bar and made the page disappear as soon as a reader picked a real one.
+
+describe("the overview page", () => {
+  it("classifies as its own kind, not as a language", () => {
+    expect(classifyNode("overview/")).toEqual({ kind: "overview", isIndex: false });
+    expect(classifyNode("overview")).toEqual({ kind: "overview", isIndex: false });
+  });
+
+  it("classifies a split overview page the same way", () => {
+    // One page today, but the prefix match is what keeps a future split from
+    // breaking this quietly.
+    expect(classifyNode("overview/types")).toEqual({ kind: "overview", isIndex: false });
+  });
+
+  it("is not isIndex, even though the page is an index.md", () => {
+    // `isIndex` is documented as an entity-node concept (a type index or a
+    // language root). `tags` and `sources` both answer false; so does this.
+    expect(classifyNode("overview/").isIndex).toBe(false);
+  });
+
+  it("does not appear in the language facet", () => {
+    const facets = collectFacets(["ja/Person/a", "overview/", "tags/t", "sources/url/a"]);
+    expect(facets.langs).toEqual(["ja"]);
+    expect(facets.langs).not.toContain("overview");
+  });
+
+  it("is dropped from the graph even with no selection at all", () => {
+    const kept = filterNodes(["ja/Person/a", "overview/", "tags/t"], [], {});
+    expect(kept.has("overview/")).toBe(false);
+    expect([...kept].sort()).toEqual(["ja/Person/a", "tags/t"]);
+  });
+
+  it("is dropped under a language selection too", () => {
+    const kept = filterNodes(["ja/Person/a", "overview/"], [], { langs: ["ja"] });
+    expect(kept.has("overview/")).toBe(false);
+    expect(kept.has("ja/Person/a")).toBe(true);
+  });
+
+  it("does not make an orphan look linked", () => {
+    // The whole point. The overview's orphan section links the top 20 orphans,
+    // so leaving it in draws them as pages that have a link — the opposite of
+    // what that section reports, and of what filterNodes() protects below
+    // ("Entity nodes are never pruned … it is an orphan").
+    const links = [{ source: "overview/", target: "ja/Person/orphan" }];
+    const kept = filterNodes(["ja/Person/orphan", "overview/"], links, { langs: ["ja"] });
+    expect(kept.has("ja/Person/orphan")).toBe(true);
+    expect(kept.has("overview/")).toBe(false);
+    // Degree bounds now see the orphan for what it is: zero visible links.
+    const bounded = filterNodes(["ja/Person/orphan", "overview/"], links, { minDegree: 1 });
+    expect(bounded.has("ja/Person/orphan")).toBe(false);
+  });
+
+  it("leaves the root index in the graph", () => {
+    // Deliberately asymmetric (Issue #957). The root index links `<lang>/`,
+    // `sources` and `overview/` — it grows with the language count, never
+    // reaches the tens of links a Top-N list does, and states nothing that its
+    // own edges contradict.
+    const kept = filterNodes(["/", "ja/Person/a", "overview/"], [], {});
+    expect(kept.has("/")).toBe(true);
+    expect(kept.has("overview/")).toBe(false);
+  });
+
+  it("does not prune a tag the overview's removal left at zero", () => {
+    // Guards the `all`-side construction: the removal must not read as the
+    // reader's selection having disconnected something.
+    const kept = filterNodes(
+      ["tags/t", "overview/"],
+      [{ source: "overview/", target: "tags/t" }],
+      {},
+    );
+    expect(kept.has("tags/t")).toBe(true);
+  });
+});

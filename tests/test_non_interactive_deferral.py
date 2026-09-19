@@ -14,6 +14,14 @@ So the assertions are about wording in instruction files, which is unusual — b
 behaviour lives only in that wording, and the saitama pilot measured guard A at 4
 false positives in 8 genuine sources. A 30-source batch silently losing a third of
 itself is what a regression here costs.
+
+**One of these rules has since been redefined rather than regressed** (Issue #945):
+`wikicommit-merge` no longer aborts when warnings remain and no one is there to
+answer. That is the same principle applied to a case where the facts were different —
+see `test_merge_records_warnings_rather_than_aborting_on_them` for which half moved
+and which did not. When an assertion here starts failing, check that distinction
+before assuming a regression: the question is not "did the wording change" but
+"does the absence of an answer still cost the batch".
 """
 
 import sys
@@ -118,10 +126,14 @@ def test_the_ambiguity_route_is_reconcile_not_a_collection_change():
     )
 
 
-def test_the_three_undefined_prompts_now_have_a_non_interactive_rule():
-    """Not deferrals — places where the absence of an answer was simply unwritten."""
+def test_the_two_undefined_generate_prompts_now_have_a_non_interactive_rule():
+    """Not deferrals — places where the absence of an answer was simply unwritten.
+
+    There were three of these under Issue #910; the third (`wikicommit-merge`
+    Step 3) moved to its own test when Issue #945 redefined it, so the count in
+    this name is two. Keep the name honest about what is asserted here — these
+    names are the only record of which prompts are covered."""
     generate = _flat(_instructions("wikicommit-generate"))
-    merge = _flat(_instructions("wikicommit-merge"))
 
     assert _flat("**In a non-interactive run, where no answer will arrive, register nothing"
                  " and report it** (Issue #910)") in generate, (
@@ -131,10 +143,39 @@ def test_the_three_undefined_prompts_now_have_a_non_interactive_rule():
     assert _flat("**In a non-interactive run, take (b) without asking**") in generate, (
         "the 5-source cap has no non-interactive rule again"
     )
-    assert _flat("**In a non-interactive run, where no answer will arrive, abort — and "
-                 "say that is why** (Issue #910)") in merge, (
-        "wikicommit-merge can read silence as permission to squash-merge warnings "
-        "nobody saw"
+
+
+def test_merge_records_warnings_rather_than_aborting_on_them():
+    """The third of those prompts, redefined by Issue #945.
+
+    This assertion used to require the opposite sentence — "abort — and say that is
+    why" — and it is worth being exact about which half of Issue #910 moved. The
+    principle did not: an unattended run still must not resolve a human judgment by
+    pretending one was made. What moved is which resolution defers. Aborting is the
+    deferring answer only while the working tree survives to be picked up later, and
+    for this Skill it does not: nothing is committed at that point, and an unattended
+    run's tree is gone when the session ends. So aborting *discarded* the batch, which
+    is the behaviour the rest of this file exists to prevent.
+
+    Two things keep that from being a loosening. Warnings never decided mergeability
+    — every warning this step can produce is classified always-mergeable, so the
+    confirmation was carrying a report to a person, not a verdict — and the report is
+    not dropped, it moves to the PR body. Blocking findings are asserted separately
+    below precisely because *they* are the half that must still stop the run."""
+    merge = _flat(_instructions("wikicommit-merge"))
+
+    assert _flat("**In a non-interactive run, where no answer will arrive, do not abort"
+                 " — record the warnings and proceed** (Issue #945") in merge, (
+        "wikicommit-merge aborts on warnings again with no one to ask, which throws "
+        "away an unattended batch that had already passed every blocking check"
+    )
+    assert _flat("**Blocking is untouched.** `ERROR:` and `DUPLICATE:` still abort") in merge, (
+        "the warning rule above is only safe while blocking still stops the run; "
+        "without this sentence the two read as one relaxation"
+    )
+    assert _flat("Carry the warning list forward to Step 6") in merge, (
+        "warnings are no longer confirmed with anyone, so if they also stop reaching "
+        "the PR body they are simply lost"
     )
 
 

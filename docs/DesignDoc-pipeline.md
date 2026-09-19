@@ -249,16 +249,25 @@ rebuild_index.py（title が変わりうるため）
   lychee --config .lychee.toml                        # 外部リンク検証（sources URL・本文 https://）
   markdownlint-cli2 <変更 .md ファイル>               # スタイル検証（warning のみ）
   python .wikicommit/scripts/check_orphans.py         # 孤立ページ・重複ページ検出
-  ↓ blocking エラーあり → エラー内容を表示して中断
+  ↓ blocking エラーあり → エラー内容を表示して中断（対話・非対話を問わない）
   ↓ warning のみ → 内容を表示してユーザーに続行確認
+  ↓              （非対話実行では確認せず、warning を記録して続行する。Issue #945）
 ブランチ作成（wikicommit/merge-<YYYYMMDD>-<HHMMSS>）
   ↓
 変更ファイルと <新規ソースファイル> をコミット
   ↓
-PR 作成 → `mergeStateStatus` が `CLEAN` になるまで `gh pr view --json state,mergeStateStatus` でポーリング（最大 300 秒・10 秒間隔。Phase 2 以降は lychee による外部リンク検証に数分かかるため） → `--auto` なしで `gh pr merge --squash`
+PR 作成（本文に warning の件数と先頭数件を書く。Issue #945） → `mergeStateStatus` が `CLEAN` になるまで `gh pr view --json state,mergeStateStatus` でポーリング（最大 300 秒・10 秒間隔。Phase 2 以降は lychee による外部リンク検証に数分かかるため） → `--auto` なしで `gh pr merge --squash`
   ↓ `state: CLOSED` または `mergeStateStatus` が `DIRTY`/`BLOCKED`（待っても解消しない終端状態） → 即座にポーリングを打ち切りエラー表示して中断
   ↓ 上記以外でタイムアウト → エラーを表示して中断（マージしていない以上、次のレビュー追跡 Issue 作成へは進まない）
                    残存ブランチ・PR のクリーンアップ手順: `gh pr close <PR番号>` → `git push origin --delete <ブランチ名>` → /wikicommit-merge を再実行
+
+> **非対話実行は warning で止まらない — 記録して続行する（Issue #945）**: Issue #910 はここに「答えが来ない実行では中断する」を置いていた。中断は破壊的でない側の答えであり、ブランチがまだ無いので作業ツリーはそのまま残る、という理由である。**その理由は正しいが、`merge` に限っては前提の方が成り立たなかった** — 無人実行ではその作業ツリー自体が永続しないため（クラウドのセッションは終われば消える）、「次に人がいる実行が同じ変更を拾う」が起きない。止まった時点で `generate` の出力は失われる。
+>
+> 論拠は 3 つで、いずれも **warning に限った話**である。(1) **確認はマージ可否の門ではない** — §7 の分類では warning は例外なく「常にマージ可」であり、可否は確認の前に決まっている。確認が担っていたのは人に見せることだけである。(2) **この規則は運用プロンプトが毎回上書きしていた** — 無人実行を駆動する 2 本のプロンプトがどちらも「非対話と自己判定しないこと・warning のみなら続行」と書いており、de facto の挙動は既に「続行」で、それが指示遵守に依存していた。de jure に揃えるほうが安全側である。(3) **見られなかったことの害が小さい** — `ORPHAN:` と未解決 WikiLink は standing state であり `/wikicommit-status` が直るまで毎回報告する。lychee と markdownlint はその実行の出力からは消えるが、同じチェックを再実行すれば戻る。
+>
+> **PR 本文が変えるのは「一過性から永続へ」であって「見られるかどうか」ではない。** Step 7 が数秒後に auto-merge するため、この PR は事実上誰にも読まれない。だからこそ本文の粒度は網羅ではなくツールごとの件数 + 先頭 3〜5 件 + `(+N more)` に留める（全件逐語は lychee の 4xx で数十行になり、Issue #562 が名指しした「常時点灯すると読まれなくなる」形が PR 本文で起きる）。**本文は対話実行でも同一にする** — PR は後から読まれる記録であり、主張の中身が実行のされ方で変わるべきでない。あわせて旧本文の固定文字列 "Quality checks passed." は、warning が出て人が「続行」と答えた対話実行でも偽だった。
+>
+> **誤判定の代償の向きが逆になる。** 「対話なのに非対話と誤判定」した場合、変更前は人がいるのに聞かれず**中断**していた（バッチは残るがその場では進まない）のに対し、変更後は人がいるのに聞かれず**進む**（warning をプロンプトではなく PR で読むことになる）。非対称は変更する側に倒れている。**blocking（`ERROR:` / `DUPLICATE:`）は一切変えない** — 対話・非対話を問わず中断し、しかもブランチが存在しない時点で止まるので作業ツリーはそのまま残る。品質ゲートのスクリプトは 1 行も変わらない。
 
 > **`gh pr merge --auto` に依存しない理由（Issue #456）**: GitHub の auto-merge 機能（`--auto` がフォールバックする `enablePullRequestAutoMerge` ミューテーション）は、リポジトリの `allow_auto_merge` 設定に依存する。この設定は GitHub Free の private リポジトリでは CLI/API/UI いずれからも有効化不可能（バグでも設定漏れでもなくプラン制限）であり、`wikicommit-merge` が想定する主要ユーザー像（GitHub Free で private wiki を運用する個人）で構造的に失敗しうる。`wikicommit-merge` は PR 作成前にローカルで品質チェックを完了させる設計のため、そもそも「チェック通過を待つ」auto-merge 機能を必要としない。必要なのは GitHub 側の `mergeStateStatus` 計算が終わるまでの数秒を待つことだけであり、これはプランに関係なく参照できる。`review-issue-close-sync.yml`（後述の Issue Close 検知後の自動処理）の "Auto-merge on quality pass" ステップにも同じ変更を適用している。
   ↓（PR マージ確認後）
@@ -271,6 +280,7 @@ PR 作成 → `mergeStateStatus` が `CLEAN` になるまで `gh pr view --json 
   ※ 既に同じページを指す open な `wikicommit-review` ラベル Issue が存在するページはスキップ（`gh issue list --label wikicommit-review --state open --json number,body` を取得し、`body` を機械可読マーカーで局所的に照合する。`gh issue list --search` には頼らない — GitHub の検索インデックスがこの形式の HTML コメントをどう扱うかの保証がなく、取りこぼすと重複 Issue を作ってしまうため）
   ↓
 生成失敗トラッキング Issue を ソース管理ファイル単位で作成（`.wikicommit/source/` 配下で `failed_pages` が空でない管理ファイルが対象。Issue #452 — 上記レビュー追跡 Issue と同じ全件走査・マーカー埋め込みパターンをそのまま踏襲するが、対象は「生成されたが未レビューのページ」ではなく「生成自体が失敗し何も書き出されなかったソース」で、ラベルも別（`wikicommit-generation-failure`）。Close しても `review_status` のような自動書き換えは走らない可視化専用の記録用 Issue — 再試行するには `/wikicommit-generate` を再実行する）
+  ※ **理由欄はレビュー記録から取る**（Issue #969）。Pass 4 step 7 は `## Failure Reason` を `partial` 分岐で削除するが、`partial` こそが普通の失敗の形であるため、管理ファイルだけを読むと理由が**構造的に必ず `unknown`** になる。`check_review_coverage.py --discarded-reason <failed_pages...>` が `result: discarded` の最新記録から `type` / `source_lines` / `instruction` を返す（`source_file` は gitignored なキャッシュを指すため印字しない）。管理ファイルの節がある場合（`status: failed`。ページが 1 枚も試みられていないためレビュー記録が存在しない）はそちらを、どちらも無い場合は「記録されていない」と書く — **`unknown` とは書かない**。詳細は `docs/DesignDoc-ScriptSpec.md` の同スクリプトの節
   ↓（GitHub Actions により自動実行。Phase 2 以降）
 main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Quartz v5 ビルド → GitHub Pages 公開（§8 参照）
 ```
@@ -529,6 +539,10 @@ main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Q
 >
 > この抜け穴は `wikicommit-merge`（経路Aの一括PR・経路Bの `wikicommit-review`）が人間自身のトークンで `main` に push する場合には発生しない（通常の push イベントとして扱われ `deploy.yml` が正常に起動する）。`review-issue-close-sync.yml` 経由の自動マージに固有の問題である。
 >
+> **この連鎖が端から端まで通ることを実測した（2026-09-16。`wikicommit/ai-driven-dev-wiki`）**: 追跡 Issue 2 件をそれぞれ Close したところ、`review-issue-close-sync.yml` が **15 ステップすべて success**（`Trigger GitHub Pages rebuild` を含む）で完走し、生成された `review: mark <page> as reviewed` コミットが自動マージされ、**`deploy.yml` が `workflow_dispatch` で 2 回とも新規に起動**した。その run の HEAD はいずれもレビューコミットそのものであり、公開サイトのバナーに読了行（`Read by <login>` と `reviewed_by`。Issue #663）が出ることまで確認した。
+>
+> **この Issue が記録している欠落は、これより前は別の形で残っていた** — 同リポジトリの 2026-09-10 の run 2 件は、ワークフローの**名前がファイルパスのまま** `failure` になっている。GitHub がファイルをパースできず、`name:` を読めないまま起動に失敗した状態であり、**Pages 再ビルドの dispatch 以前にこのワークフロー自体が一度も成立していなかった**。したがって上の連鎖は、dispatch の追加とワークフローの修正が両方届いて初めて通ったものである。
+>
 > **採らなかった案**: (a) `gh api repos/{owner}/{repo}/pages/builds -X POST` で Pages ビルドを直接キックする — Quartz によるサイト生成自体は `deploy.yml` の責務であり、この API は生成済みの成果物の公開を叩くだけなので本質的な解決にならない。(b) 個人アクセストークン（PAT）でマージして `GITHUB_TOKEN` の制約自体を回避する — 配布 Skill として誰でも使える設計を保つには追加の PAT セットアップ手順をユーザーに要求することになり、`wikicommit-init` の導入コストを上げる。
 >
 > **未決事項として残す範囲**: レビュー追跡 Issue が Close 後に再オープンされた場合、`review_status` を `reviewed` から `pending` に自動で戻す仕組みは用意しない（Issue #313 の完了条件で意図的に未決事項とした）。再レビューが必要になった場合は人間が手動でページの `review_status` を書き換える。
@@ -642,7 +656,15 @@ main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Q
 >
 > **機械的に防ぐ手段は無く、これは §6.7 が `Reviewed-by` トレーラーの改ざん耐性について既に到達している結論と同型である** — 「実害の起点は結局リポジトリの権限管理に帰着する」。ここに書いておくのは、次に読む人が「機械で担保できないか」を再検討して同じ結論に辿り着き直す手間を省くためである。
 >
-> **経路 A は「引っかかった」を記録できない。** `review-issue-close-sync.yml` は `record_review.py` に `--attempts 1 --result pass` を固定で渡す。新しい定義はこれを**正当化する**（pass ＝ 引っかからなかった）一方で、「引っかかった」を記録する先が無いことをより目立たせる。AI と人間の判定の一致率を測ろうとすると、人間の判定が常に `pass` であるため**定義上 100%・見逃し率は常に 0** と出る。測るには Close 時に最低 1 ビットを取る必要があり、GitHub の Issue Close には入力欄が無いので新しい仕掛けが要る（本 Issue のスコープ外。別草案とする）。
+> **経路 A は「引っかかった」を記録できない。** `review-issue-close-sync.yml` は `record_review.py` に `--attempts 1 --result pass` を固定で渡す。新しい定義はこれを**正当化する**（pass ＝ 引っかからなかった）一方で、「引っかかった」を記録する先が無いことをより目立たせる。AI と人間の判定の一致率を測ろうとすると、人間の判定が常に `pass` であるため**定義上 100%・見逃し率は常に 0** と出る。測るには Close 時に最低 1 ビットを取る必要があり、GitHub の Issue Close には入力欄が無いので新しい仕掛けが要る。
+>
+> **その別草案が Issue #952 であり、決着は「1 ビットは取らない・本文の有無だけを数える」である。** 実測で分かったのは、この限界にもう一段あることだった — `wikicommit/ai-driven-dev-wiki` でコメント無し 2 件・コメント付き 1 件を Close すると、ワークフローの全ステップ・`review_status`・`reviewed_by`・再ビルド・公開バナーの読了行・`human_reviewed` が**全件同一**になり、違いは記録の散文本文が空であることだけで、**それはどの出力にも現れなかった**。Issue #740 が「この器が実際に運べる産物」として選んだ受け取った知識の一言が、来ても来なくても同じに見えていたことになる。
+>
+> **採ったのは `check_review_coverage.py` の `SUMMARY:` に `human_notes` を足すことだけである**（`docs/DesignDoc-ScriptSpec.md` の同スクリプトの節）。standing な human 記録のうち散文本文を持つ件数で、数えるのは**有無であって中身ではない**。理由は 1 つに絞れる — 本節が上で認めているとおり**委任された Close 権限は機械では担保できない**一方、`Read by <login>` はこのプロジェクトの中心的な主張であり、`reviewed_by` も `Reviewed-by:` トレーラーも「誰が閉じたか」しか言わないため、**記録の散文本文だけがその唯一の裏づけ**になる。**Issue #762 の分岐（沈黙して閉じるのは正常）は覆していない** — 少ない件数を欠陥として報告しない。
+>
+> **Close 時に 1 ビットを取る仕掛け（ラベル等）は保留であって否定ではない。** 採らない理由は 3 つ: (1) Issue #313 の設計意図（Claude Code のセッションを持たない人が Web / モバイルから Close するだけで完結する）を重くする、(2) Close できるのは write / triage 以上の人だけであり（Issue #665）、そこにさらに操作を積むと Issue #740 が下げたばかりの重さが戻る、(3) **プロトコル上 `--result pass` は正しい** — 追跡 Issue の 3 バリアントはいずれも、読んでいて気づいた点があるならコメントだけ書いて Close しないよう明示しており、Close ＝ 引っかからなかった、は嘘ではない（文面は上の各テンプレート本文にあり、`tests/test_tracking_issue_checklist.py` が 3 件揃っていることを守っている。**ここで同じ文言を引かないのはそのためである** — 引くと 3 件が 4 件になり、1 バリアントから消えても数が合ってしまう）。失われるのは一致率という指標だけで、**それを読む消費者はいまどこにも存在しない**（Issue #669 が `chain_of_thought` について採った基準がそのまま当たる）。**再開の条件は「一致率を読む主体が実在したとき」**であり、そのときには `human_notes` が溜めた件数が最初の材料になる。
+>
+> **`human_notes` が答えないもの**: 一語も長文も同じ 1 件なので測れるのは「依頼が届いたか」であって「読まれたか」ではない。`RISKY:` の選定が機能しているか（Issue #765）も測れない — それに要るのは件数ではなく本文の中身と `RISKY:` の対応であり、人が読んで初めて分かる。そして上記のとおり「引っかかった」は引き続き記録されない。
 
 ### 6.4 翻訳パイプライン
 
@@ -948,3 +970,5 @@ Pass 4 は Issue #451 / #473 により、ページが引用・言及している
 | 経路 A: 自動生成（wikicommit-generate → wikicommit-merge） | 品質チェック全 blocking PASS | `pending`（レビュー追跡 Issue の Close 待ち） |
 | 経路 A: レビュー追跡 Issue | 人間による Close（マージ自体は `review-issue-close-sync.yml` が自動実行。Issue #313） | `reviewed`（Issue Close をトリガーに自動更新） |
 | 経路 B: 手動作成（wikicommit-review → wikicommit-merge） | 品質チェック全 blocking PASS | `reviewed`（wikicommit-review がローカルで設定済み） |
+
+**warning はどの経路でもマージ可否に影響しない（Issue #945）。** 上表の条件が「全 blocking PASS」であることがそれを言っている — 本節の 2 つの表に現れる warning（orphan・wanted・未解決 WikiLink・lychee・markdownlint）は例外なく「常にマージ可」であり、`wikicommit-merge` Step 3 の確認が担っているのは**人に見せること**であって可否の決定ではない。したがって人がいない実行では確認せず、warning を PR 本文に記録して続行する（§6.2 の該当コールアウト）。**blocking はこの変更の対象外**であり、`ERROR:` / `DUPLICATE:` は対話・非対話を問わず中断する。

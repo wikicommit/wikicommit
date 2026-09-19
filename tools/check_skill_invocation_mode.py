@@ -1,12 +1,29 @@
 #!/usr/bin/env python3
 """Surface .claude/skills/*/SKILL.md that don't set disable-model-invocation (#234).
 
-Whether a Skill should set `disable-model-invocation: true` is a judgment call
-(does it have side effects — git/gh writes, filesystem mutations outside a
-sandbox — that shouldn't fire from an agent's own automatic trigger judgment?)
-that this script does not attempt to make. It only lists every Skill currently
-without the field set, as a non-blocking reminder for reviewers to consciously
-confirm that omission is still correct — most relevant when a PR adds a new
+**What the flag stops is wider than "automatic trigger judgment" (Issue #945).**
+The official documentation names three things: a description-matched autoload,
+preloading into subagents, and a scheduled task firing with the Skill as its
+prompt. It does *not* say the flag blocks an explicit invocation through the
+Skill tool — but that is blocked too, by a separate mechanism: a flagged Skill is
+not listed to the model at all, so its name is not among the ones the Skill tool
+accepts. Keep those two apart when describing the flag. The accurate summary is
+that setting it leaves exactly one path open — a person typing `/name`.
+
+Whether a Skill should set it is therefore a judgment call with two halves, and
+this script does not attempt to make either. The first is the original one: does
+it have side effects — git/gh writes, filesystem mutations outside a sandbox —
+that shouldn't fire from an agent's own automatic trigger judgment? The second
+stayed invisible while only the first was being asked: does this Skill ever need
+to run with no person at the keyboard? If it does, the flag is the wrong
+instrument for the first half, because it closes the unattended path as well. The
+narrower one is `skillOverrides` in `.claude/settings.json`, which the operator of
+a given repository holds rather than the distribution (docs/DesignDoc-skills.md
+§11.1).
+
+This script only lists every Skill currently without the field set, as a
+non-blocking reminder for reviewers to consciously confirm that omission is
+still correct — most relevant when a PR adds a new
 SKILL.md (see docs/DesignDoc-skills.md §11.5, CONTRIBUTING.md "SKILL.md を
 変更する場合の追加手順").
 

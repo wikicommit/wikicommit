@@ -199,12 +199,15 @@ EXPECTED_UPDATE_POLICIES = {
     ".wikicommit/entity-policy.md": ("review", "frontmatter keys are added upstream"),
     # Not ours to compare.
     ".claude": ("skip", "installed by install.sh, not init"),
+    ".agents": ("skip", "the other half of where npx skills add puts the Skills, not init"),
+    "skills-lock.json": ("skip", "written by npx skills add, not init"),
     ".wikicommit/entity": ("skip", "the user's pages"),
     ".wikicommit/view": ("skip", "the user's pages"),
     ".wikicommit/source": ("skip", "the user's source management files"),
     ".wikicommit/review": ("skip", "the wiki's own accumulated review history"),
     ".gitmodules": ("skip", "the user's own git submodule add"),
     "quartz": ("skip", "the user's own git submodule add"),
+    ".claude/settings.json": ("review", "the user's own settings file; init merges 3 keys in"),
     ".wikicommit/schemaorg-vocab.json": ("skip", "regenerable cache"),
     "package-lock.json": ("skip", "npm side effect"),
 }

@@ -33,8 +33,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 from _frontmatter import parse_frontmatter_and_body_text
 from _wikilink import (
     ENTITY_DIR,
@@ -42,6 +40,7 @@ from _wikilink import (
     WIKILINK_RE,
     collect_entity_pages,
     collect_view_pages,
+    load_primary_lang,
     parse_view_path,
     parse_wiki_path,
 )
@@ -53,17 +52,6 @@ FENCE_RE = re.compile(r"^(?:```|~~~).*?(?:^(?:```|~~~)\s*$|\Z)", re.MULTILINE | 
 
 MAX_DESC_CHARS = 160
 MAX_HEADINGS = 8
-
-
-def load_primary_lang(repo_root: Path) -> str:
-    """Same fallback as convert_wikilinks.load_primary_lang() (Issue #376)."""
-    try:
-        data = yaml.safe_load((repo_root / ".wikicommit" / "config.yml").read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return "en"
-        return str((data.get("translation") or {}).get("primary_lang", "en") or "en")
-    except Exception:
-        return "en"
 
 
 def page_headings(body: str) -> list[str]:
