@@ -1299,7 +1299,7 @@ SUMMARY: installed_types=4
 | `--describe` 3 件 | 170 B |
 | **合計** | **約 14 KB（−90%）** |
 
-これは `/wikicommit-generate` の固定オーバーヘッドをソース件数によらず約 84K → 約 51K トークンに下げる（`README.md` の Context window in detail が正本）。
+これは `/wikicommit-generate` の固定オーバーヘッドをソース件数によらず約 84K → 約 51K トークンに下げる（利用者向けの数字は `README.md` の Requirements → Context window が正本）。
 
 **`--list-types` は残さず削除した**（Issue #798 の検討事項 5）。3 Skill が 2 段階へ移った時点で呼び出し元が 0 になり、「どの Skill も使っていないが配布はされているモード」を仕様に残すことは、Issue #553 が確立した「消費者のいない受け皿を配らない」に反する。しかも残せば、プリロードすべきでないと決めたばかりの高価な経路を仕様書が宣伝し続けることになる。同じ需要は `--describe` がオンデマンドで満たす。
 
