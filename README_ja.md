@@ -3,11 +3,20 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/wikicommit/wikicommit?style=social)](https://github.com/wikicommit/wikicommit)
 
+[English](README.md) | **日本語**
+
 Git ベースの知識管理プラットフォーム。ソースドキュメントから LLM が Wiki ページを生成し、自動・人間によるレビューを経て静的 Wiki として公開します。SKILL.md 群として実装されており、Claude Code などユーザー自身が契約している LLM 環境上でそのまま動作します。
 
 **LLM は 1 人が読める速さを超えてページを書くため、レビューは分割できなければなりません。** WikiCommit はレビューの単位をページ 1 枚に固定します — 1 ページが 1 つの追跡 Issue で、それだけを Close すれば完了です。レビューする人はそのページだけを読めばよく、知識ベース全体を読む必要も、他の人のレビューを待つ必要もありません。増えていく Wiki が 1 人の読み手の前で詰まらないのは、この単位によります。
 
 > **Status**: パイロットリポジトリでの実運用検証を進めており、破壊的変更が入ることがあります。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/page-dark.png">
+  <img alt="生成された Wiki ページ。タイトルの下のバナーが、このページが LLM によって書かれたこと・生成日・モデル名を示し、レビュー状況と報告フォームへのリンクを持つ。右列にリンクグラフ・目次・被リンク。" src="assets/page-light.png">
+</picture>
+
+*下の実例に挙げた [ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/) のページです。このバナーは読まれた後も消えません — LLM が書いたことは人が読んでも変わらない事実であるため、レビューは警告を取り消すのではなく「人が読んだ」という行を足します。*
 
 ## できること
 
@@ -25,27 +34,15 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 実際に運用している Wiki です。
 
-- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — ジョヴァンニ・ボッカッチョ『デカメロン』（14 世紀イタリア）についての Wiki。イタリア語で執筆し、英語・日本語へ翻訳しています。
+- **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — AI 駆動開発の方法論についての Wiki。vibe coding、spec-driven development、エージェント的なコーディングの進め方などを扱っています。英語で執筆。
+- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — ジョヴァンニ・ボッカッチョ『デカメロン』（14 世紀イタリア）についての Wiki。イタリア語で執筆し、英語・日本語へ翻訳しています。**翻訳パイプラインが端から端まで動いているのはこの 1 件です。**
 
-## 目次
+各サイトのフロントページには、ビルドのたびに再計算される実数が出ます — ページ数、出典と照合済みのページ数、そしてそのうち人が読んだページ数です。最後の数は総数に届くことを目指したものではなく、設計上の抜取です（[Step 3](#step-3-マージ後レビュー) 参照）。
 
-- [WikiCommit](#wikicommit)
-  - [できること](#できること)
-  - [実例](#実例)
-  - [目次](#目次)
-  - [基本フロー](#基本フロー)
-    - [Step 1: ソース登録 + Wiki ページ生成](#step-1-ソース登録--wiki-ページ生成)
-    - [Step 2: 品質チェック・PR 作成・マージ](#step-2-品質チェックpr-作成マージ)
-    - [Step 3: マージ後レビュー](#step-3-マージ後レビュー)
-  - [技術スタック](#技術スタック)
-  - [Requirements](#requirements)
-    - [コンテキスト長](#コンテキスト長)
-  - [インストール](#インストール)
-  - [変更履歴](#変更履歴)
-  - [Skills 一覧](#skills-一覧)
-  - [設計ドキュメント](#設計ドキュメント)
-  - [Contributing](#contributing)
-  - [License](#license)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/front-dark.png">
+  <img alt="公開された Wiki のフロントページ。ページ数・出典と照合済みのページ数・人が読んだページ数の 3 つの数字と、各々が何を意味し何を意味しないかを説明する段落。" src="assets/front-light.png">
+</picture>
 
 ## 基本フロー
 
@@ -86,17 +83,6 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 `main` へのマージをトリガーに Quartz v5 による静的 Wiki ビルドと GitHub Pages への自動デプロイが行われます。
 
-## 技術スタック
-
-| 用途 | 技術 |
-| --- | --- |
-| 静的サイト生成 | [Quartz v5](https://quartz.jzhao.xyz/) |
-| 構造化データ | [Schema.org](https://schema.org/) |
-| 知識表現仕様 | [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)（Open Knowledge Format） |
-| 全文検索 | SQLite FTS5（trigram） |
-| リンク検証 | [lychee](https://github.com/lycheeverse/lychee) |
-| Markdown スタイル | markdownlint-cli2 |
-
 ## Requirements
 
 - [Claude Code](https://www.npmjs.com/package/@anthropic-ai/claude-code)（最新版を推奨）
@@ -109,35 +95,16 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 ### コンテキスト長
 
-WikiCommit は LLM 推論を提供しません — ユーザーが自身の Claude Code / GitHub Copilot / API 契約を持ち込みます。その契約にはコンテキスト長の要件があり、それを決めるのは `/wikicommit-generate` です。ソース件数によらない固定のオーバーヘッドを積み、その上に各ソースの抽出テキストが乗ります。
-
-```text
-必要なコンテキスト ≈ 49K（固定） + 約22K × 1回で処理するソース件数
-
-  固定分の内訳:
-    wikicommit-generate/SKILL.md（全文が読み込まれる）  約40K
-    Schema.org 型名一覧（--list-type-names）            約3.3K
-    毎回の実行が読む別ファイル 2 本                      約6K
-```
-
-ソースを 1 件も読む前に載るのは最初の 2 行だけです。別ファイルの 2 本 — テキスト抽出のルーティング表と Completion Notice — は実行の途中で読まれ、**どちらも省略できません**。
+WikiCommit は LLM 推論を提供しません — ユーザーが自身の Claude Code / GitHub Copilot / API 契約を持ち込み、その契約にはコンテキスト長の要件があります。それを決めるのは `/wikicommit-generate` で、ソース件数によらない固定分が約 49K、そこに 1 回の実行で処理するソース 1 件あたり約 22K が乗ります。
 
 | コンテキスト長 | 1 回あたりのソース件数 |
 |---|---|
 | 200K | 約 7 件 |
 | 1M | 約 43 件 |
 
-**これは 1 回の実行が収まらなくなる点であって、引き上げられる設定ではありません。** `/wikicommit-generate` は 1 回に 5 件を超える前に確認を求めますが、それは**上限ではなくプロンプト**です — 「全件処理」と答えることは想定された使い方であり、上表はその費用です。この点を超えると実行の途中で compaction が発火し、その後に再添付されるのは Skill の冒頭部分だけになります。**実行は残りの手順を持たないまま続き、しかも出力は一見正常に見えます。** 確実に超える手段は実行を分けることで、それがガードのもう一方の答え（「先頭 5 件のみ処理」）の用途です — 残したソースは状態が変わらないため、次回の実行がそのまま拾います。
+**これは引き上げられる設定値ではなく、実行が収まらなくなる地点です。** 超えるとセッションが実行の途中で compaction され、Skill 自身の指示が部分的に失われ、それでも**出力は一見正常に見えます** — 確実な回避策は実行を分けることです。Claude Code では Opus 5 / 4.8 / 4.6 と Sonnet 4.6 が既定 200K、Sonnet 5 と Fable 5 / 5.1 はネイティブ 1M で、Opus は `[1m]` サフィックスによりプラン次第で 1M に届きます。
 
-**「約 22K/件」は実測値であり、自分でも実測できます。** 実際に 30 件を 1 回で処理し、完了時に 1M の約 70% だった実行からの逆算であり、**抽出テキストだけでなく 1 件のソースが要するもの全体**を含みます — そのテキストから生成されたページは、レビューのために同じ会話に保持されるためです。以前の見積もり「約 15K/件」は日本語 Wikipedia 記事 1 本を根拠にしたもので、短いブログ記事ならはるかに小さく、PDF レポートならはるかに大きくなります。上表は高いほう（実測値）を採っており、15K/件なら同じ 2 つの窓は約 10 件・約 63 件になります。`/wikicommit-generate` は `.wikicommit/source/` 配下の各ソース管理ファイルに `extracted_tokens` を書き込むため、1 度実行すれば `grep extracted_tokens .wikicommit/source/**/*.md` で自分のソースの重さが分かります — ただしこの値が数えているのは**抽出だけ**なので、式の 22K より小さく出ます。
-
-**固定分はかつて約 84K でした** — Schema.org の全 933 型を**説明文ごと**毎回読み込んでいたためです。現在は名前だけを読み込み、実際に検討する数件についてのみ説明文を引きます。その後 `/wikicommit-generate` は Completion Notice・`--regenerate`・テキスト抽出のルーティング表を SKILL.md の外の別ファイルへ出しており、**先に載る量**は約 7K 減りました。ただしソースを処理する実行はそのうち 2 本を結局読むため、**上表の合計は SKILL.md 本体ほどには減っていません**。
-
-**200K の出どころ。** Claude Code では Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 の既定が 200K、Sonnet 5 と Fable 5・5.1 はネイティブ 1M です。Opus を 1M にするには `[1m]` サフィックス（`/model opus[1m]`）か環境変数が必要で、利用可否はプランに依存します — Max / Team / Enterprise は自動、**Pro は usage credits が必要**、API 従量は利用可です。いずれも 2026-09 時点の値であり、最新は [Claude Code のモデル設定ドキュメント](https://code.claude.com/docs/en/model-config)を参照してください。
-
-**超えるとどうなるか。** Claude Code は失敗せず会話を圧縮し、その後で各 Skill の**先頭 5,000 トークンだけ**を再添付します — `wikicommit-generate/SKILL.md` ではおよそ先頭 110 行、つまり Step 0 までです。Pass 1〜4 はその外側にあります。実行は手順を持たないまま続き、出力は一見正常に見えるため、上の表は目安ではなく実際の上限として扱ってください。
-
-`/wikicommit-collect` と `/wikicommit-init` も型名一覧を読み込みますが、どちらも generate のようにソースごとのテキストを累積しないため、同じ総量には達しません。
+数字の根拠・自分のソースの実測方法・compaction で具体的に何が失われるかは [コンテキスト長（詳細）](#コンテキスト長詳細) にあります。
 
 ## インストール
 
@@ -215,10 +182,6 @@ Skill が代行するのではなく、人が一度だけ手でたどる設定�
 自分で置いたファイルは `/wikicommit-status` が孤児として報告し `/wikicommit-update` が削除を
 提案します。自分用のメモはリポジトリの別の場所に置いてください。
 
-## 変更履歴
-
-WikiCommit 自身（Skills とそれが展開するテンプレート木）の版ごとの変更は [CHANGELOG.md](CHANGELOG.md) にあります。配布リポジトリは開発履歴を引き継がないため、最後にインストールした版から何が変わったかを知る手段はこのファイルだけであり、`/wikicommit-update` が同期時に読む先でもあります。
-
 ## Skills 一覧
 
 | # | カテゴリ | コマンド | 説明 |
@@ -241,7 +204,54 @@ WikiCommit 自身（Skills とそれが展開するテンプレート木）の�
 | 16 | 運用・プレビュー | `/wikicommit-update` | インストール済み配布物と同期（PR・非auto-merge） |
 | 17 | 運用・プレビュー | `/wikicommit-reconcile <--source <path\|url>\|--type <Type>\|--all>` | ポリシー・型テンプレート・生成ルールの変更後にソースをキューへ戻す |
 
----
+## コンテキスト長（詳細）
+
+[Requirements → コンテキスト長](#コンテキスト長) の詳細です — 数字がどこから来ているか、自分のソースをどう実測するか、ウィンドウを超えた実行が何を失うか。
+
+WikiCommit は LLM 推論を提供しません — ユーザーが自身の Claude Code / GitHub Copilot / API 契約を持ち込みます。その契約にはコンテキスト長の要件があり、それを決めるのは `/wikicommit-generate` です。ソース件数によらない固定のオーバーヘッドを積み、その上に各ソースの抽出テキストが乗ります。
+
+```text
+必要なコンテキスト ≈ 49K（固定） + 約22K × 1回で処理するソース件数
+
+  固定分の内訳:
+    wikicommit-generate/SKILL.md（全文が読み込まれる）  約40K
+    Schema.org 型名一覧（--list-type-names）            約3.3K
+    毎回の実行が読む別ファイル 2 本                      約6K
+```
+
+ソースを 1 件も読む前に載るのは最初の 2 行だけです。別ファイルの 2 本 — テキスト抽出のルーティング表と Completion Notice — は実行の途中で読まれ、**どちらも省略できません**。
+
+| コンテキスト長 | 1 回あたりのソース件数 |
+|---|---|
+| 200K | 約 7 件 |
+| 1M | 約 43 件 |
+
+**これは 1 回の実行が収まらなくなる点であって、引き上げられる設定ではありません。** `/wikicommit-generate` は 1 回に 5 件を超える前に確認を求めますが、それは**上限ではなくプロンプト**です — 「全件処理」と答えることは想定された使い方であり、上表はその費用です。この点を超えると実行の途中で compaction が発火し、その後に再添付されるのは Skill の冒頭部分だけになります。**実行は残りの手順を持たないまま続き、しかも出力は一見正常に見えます。** 確実に超える手段は実行を分けることで、それがガードのもう一方の答え（「先頭 5 件のみ処理」）の用途です — 残したソースは状態が変わらないため、次回の実行がそのまま拾います。
+
+**「約 22K/件」は実測値であり、自分でも実測できます。** 実際に 30 件を 1 回で処理し、完了時に 1M の約 70% だった実行からの逆算であり、**抽出テキストだけでなく 1 件のソースが要するもの全体**を含みます — そのテキストから生成されたページは、レビューのために同じ会話に保持されるためです。以前の見積もり「約 15K/件」は日本語 Wikipedia 記事 1 本を根拠にしたもので、短いブログ記事ならはるかに小さく、PDF レポートならはるかに大きくなります。上表は高いほう（実測値）を採っており、15K/件なら同じ 2 つの窓は約 10 件・約 63 件になります。`/wikicommit-generate` は `.wikicommit/source/` 配下の各ソース管理ファイルに `extracted_tokens` を書き込むため、1 度実行すれば `grep extracted_tokens .wikicommit/source/**/*.md` で自分のソースの重さが分かります — ただしこの値が数えているのは**抽出だけ**なので、式の 22K より小さく出ます。
+
+**固定分はかつて約 84K でした** — Schema.org の全 933 型を**説明文ごと**毎回読み込んでいたためです。現在は名前だけを読み込み、実際に検討する数件についてのみ説明文を引きます。その後 `/wikicommit-generate` は Completion Notice・`--regenerate`・テキスト抽出のルーティング表を SKILL.md の外の別ファイルへ出しており、**先に載る量**は約 7K 減りました。ただしソースを処理する実行はそのうち 2 本を結局読むため、**上表の合計は SKILL.md 本体ほどには減っていません**。
+
+**200K の出どころ。** Claude Code では Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 の既定が 200K、Sonnet 5 と Fable 5・5.1 はネイティブ 1M です。Opus を 1M にするには `[1m]` サフィックス（`/model opus[1m]`）か環境変数が必要で、利用可否はプランに依存します — Max / Team / Enterprise は自動、**Pro は usage credits が必要**、API 従量は利用可です。いずれも 2026-09 時点の値であり、最新は [Claude Code のモデル設定ドキュメント](https://code.claude.com/docs/en/model-config)を参照してください。
+
+**超えるとどうなるか。** Claude Code は失敗せず会話を圧縮し、その後で各 Skill の**先頭 5,000 トークンだけ**を再添付します — `wikicommit-generate/SKILL.md` ではおよそ先頭 110 行、つまり Step 0 までです。Pass 1〜4 はその外側にあります。実行は手順を持たないまま続き、出力は一見正常に見えるため、上の表は目安ではなく実際の上限として扱ってください。
+
+`/wikicommit-collect` と `/wikicommit-init` も型名一覧を読み込みますが、どちらも generate のようにソースごとのテキストを累積しないため、同じ総量には達しません。
+
+## 技術スタック
+
+| 用途 | 技術 |
+| --- | --- |
+| 静的サイト生成 | [Quartz v5](https://quartz.jzhao.xyz/) |
+| 構造化データ | [Schema.org](https://schema.org/) |
+| 知識表現仕様 | [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)（Open Knowledge Format） |
+| 全文検索 | SQLite FTS5（trigram） |
+| リンク検証 | [lychee](https://github.com/lycheeverse/lychee) |
+| Markdown スタイル | markdownlint-cli2 |
+
+## 変更履歴
+
+WikiCommit 自身（Skills とそれが展開するテンプレート木）の版ごとの変更は [CHANGELOG.md](CHANGELOG.md) にあります。配布リポジトリは開発履歴を引き継がないため、最後にインストールした版から何が変わったかを知る手段はこのファイルだけであり、`/wikicommit-update` が同期時に読む先でもあります。
 
 ## 設計ドキュメント
 

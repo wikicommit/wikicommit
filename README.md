@@ -3,11 +3,20 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/wikicommit/wikicommit?style=social)](https://github.com/wikicommit/wikicommit)
 
+**English** | [日本語](README_ja.md)
+
 A Git-based knowledge management platform. An LLM generates wiki pages from your source documents, and after automated and human review, they're published as a static wiki. It's implemented as a set of SKILL.md files and runs as-is on whatever LLM environment you already subscribe to, such as Claude Code.
 
 **An LLM writes faster than one person can read, so review has to be splittable.** WikiCommit makes a single page the unit of review: one page is one tracking Issue, closed on its own. A reviewer reads that page and nothing else — not the rest of the knowledge base — and never has to wait on anyone else's review. That is what keeps a growing wiki from piling up behind one reader.
 
 > **Status**: Actively being validated through real-world use in pilot repositories; breaking changes may occur.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/page-dark.png">
+  <img alt="A generated wiki page. A banner under the title says the page was written by an LLM, with the date, the model, and links to its review status and to a report form. The right column shows a link graph, a table of contents and backlinks." src="assets/page-light.png">
+</picture>
+
+*A page from [ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/), one of the wikis listed below. That banner stays for good: being LLM-written does not stop being true once someone reads the page, so review adds a line saying a person has rather than taking the warning away.*
 
 ## What You Can Do
 
@@ -25,27 +34,15 @@ A Git-based knowledge management platform. An LLM generates wiki pages from your
 
 Wikis that are actually running in production:
 
-- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A wiki about Giovanni Boccaccio's *The Decameron*, written in Italian and translated into English and Japanese.
+- **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — A wiki on AI-driven software development: vibe coding, spec-driven development, and agentic coding workflows. Written in English.
+- **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A wiki about Giovanni Boccaccio's *The Decameron*, written in Italian and translated into English and Japanese. This is the one where the translation pipeline runs end to end.
 
-## Table of Contents
+Each front page carries its own counts, recomputed on every build: how many pages there are, how many were checked against the sources they were written from, and how many a person has since read. That last number is a sample by design rather than a target — see [Step 3](#step-3-post-merge-review).
 
-- [WikiCommit](#wikicommit)
-  - [What You Can Do](#what-you-can-do)
-  - [Examples](#examples)
-  - [Table of Contents](#table-of-contents)
-  - [Basic Flow](#basic-flow)
-    - [Step 1: Register a source + generate wiki pages](#step-1-register-a-source--generate-wiki-pages)
-    - [Step 2: Quality checks, PR creation, merge](#step-2-quality-checks-pr-creation-merge)
-    - [Step 3: Post-merge review](#step-3-post-merge-review)
-  - [Tech Stack](#tech-stack)
-  - [Requirements](#requirements)
-    - [Context window](#context-window)
-  - [Installation](#installation)
-  - [Changelog](#changelog)
-  - [Skills List](#skills-list)
-  - [Design Docs](#design-docs)
-  - [Contributing](#contributing)
-  - [License](#license)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/front-dark.png">
+  <img alt="The front page of a published wiki, showing three counts — pages, pages checked against their sources, and pages a person has read — followed by a paragraph explaining what each count does and does not mean." src="assets/front-light.png">
+</picture>
 
 ## Basic Flow
 
@@ -96,17 +93,6 @@ Check the review-tracking Issue (`wikicommit-review` label, automatically create
 
 Merging to `main` triggers a static wiki build via Quartz v5 and automatic deployment to GitHub Pages.
 
-## Tech Stack
-
-| Purpose | Technology |
-| --- | --- |
-| Static site generation | [Quartz v5](https://quartz.jzhao.xyz/) |
-| Structured data | [Schema.org](https://schema.org/) |
-| Knowledge representation spec | [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (Open Knowledge Format) |
-| Full-text search | SQLite FTS5 (trigram) |
-| Link validation | [lychee](https://github.com/lycheeverse/lychee) |
-| Markdown style | markdownlint-cli2 |
-
 ## Requirements
 
 - [Claude Code](https://www.npmjs.com/package/@anthropic-ai/claude-code) (latest version recommended)
@@ -119,35 +105,16 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 
 ### Context window
 
-WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract. That contract has a context requirement, and `/wikicommit-generate` is the command that sets it: it loads a fixed overhead that does not depend on how many sources you give it, then adds the extracted text of each source on top.
-
-```text
-context needed  ≈  49K (fixed)  +  ~22K x (sources processed in one run)
-
-  the fixed part:
-    wikicommit-generate/SKILL.md, loaded in full        ~40K
-    the Schema.org type names (--list-type-names)       ~3.3K
-    two sibling instruction files every run reads       ~6K
-```
-
-Only the first two lines are loaded before the first source is read. The sibling files — the text-extraction routing table and the completion notice — are read as the run needs them, and neither is optional.
+WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract, and that contract has a context requirement. `/wikicommit-generate` is the command that sets it: a fixed overhead of about 49K, plus about 22K for each source processed in the same run.
 
 | Context window | Sources in one run |
 |---|---|
 | 200K | about 7 |
 | 1M | about 43 |
 
-**Those are the points where a run stops fitting, not a setting you can raise.** `/wikicommit-generate` asks before processing more than 5 in one run, but that is a prompt rather than a limit — answering "process all" is supported, and the table is what it costs. Past those numbers the session compacts mid-run, and only the opening part of the Skill is re-attached afterwards: the run carries on without the rest of its instructions, and **its output still looks normal**. Splitting the work across separate runs is the reliable way past them, and it is what the guard's other answer — "process only the first 5" — is for: the sources you leave keep their state, and the next run picks them up.
+**Those are the points where a run stops fitting, not a setting you can raise.** Past them the session compacts mid-run, the Skill's own instructions are partly lost, and **the output still looks normal** — splitting the work across separate runs is the reliable way past them. In Claude Code, Opus 5 / 4.8 / 4.6 and Sonnet 4.6 default to a 200K window; Sonnet 5 and Fable 5 / 5.1 are natively 1M, and Opus reaches 1M with the `[1m]` suffix depending on your plan.
 
-**The ~22K per source is measured, and you can measure your own.** It is back-calculated from a real 30-source run that finished at about 70% of a 1M window, so it covers everything a source costs and not just its text: the page that text produces is held in the same conversation to be reviewed. The earlier estimate of ~15K per source came from a single Japanese Wikipedia article — a short blog post is far less, a PDF report far more — and the table uses the higher, measured figure; at 15K per source the same two windows hold about 10 and about 63. `/wikicommit-generate` writes `extracted_tokens` into every source management file under `.wikicommit/source/`, so after one run `grep extracted_tokens .wikicommit/source/**/*.md` tells you how heavy your own sources are — that field counts the extraction alone, so expect it to read lower than the 22K in the formula.
-
-**The fixed part used to be ~84K**, because the full Schema.org type list — every one of the 933 types *with its description* — was loaded on every run; it now loads the names alone and reads the descriptions of only the handful of types actually being considered. `/wikicommit-generate` has since moved its completion notice, its `--regenerate` mode and its text-extraction routing table out of SKILL.md into separate files, which takes about 7K off what is loaded up front — but a run that processes a source reads two of those files anyway, so the total above fell by much less than SKILL.md itself did.
-
-**Where 200K comes from.** In Claude Code, Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 default to a 200K window; Sonnet 5 and Fable 5 / 5.1 are natively 1M. Opus reaches 1M with the `[1m]` suffix (`/model opus[1m]`) or an environment variable, and whether that is available depends on your plan — Max, Team and Enterprise get it automatically, Pro needs usage credits, and metered API access can use it. These are the figures as of 2026-09; see [Claude Code's model configuration docs](https://code.claude.com/docs/en/model-config) for the current ones.
-
-**What happens if you exceed it.** Claude Code compacts the conversation rather than failing, and re-attaches only the **first 5,000 tokens** of each skill afterwards — roughly the first 110 lines of `wikicommit-generate/SKILL.md`, which is Step 0 and nothing else. Passes 1 through 4 are outside it. The run continues without them and produces output that looks normal, so treat the table above as a real limit rather than a suggestion.
-
-`/wikicommit-collect` and `/wikicommit-init` also load the type names, but neither accumulates per-source text the way generate does, so neither approaches the same total.
+[Context window in detail](#context-window-in-detail) covers where these numbers come from, how to measure your own sources, and exactly what is lost when a run compacts.
 
 ## Installation
 
@@ -226,10 +193,6 @@ The directory is WikiCommit's rather than yours: a refresh overwrites what is th
 of your own added alongside them is reported as an orphan by `/wikicommit-status` and offered
 for deletion by `/wikicommit-update`. Keep your own notes somewhere else in the repository.
 
-## Changelog
-
-[CHANGELOG.md](CHANGELOG.md) records what changed in each version of WikiCommit itself — the Skills and the template tree they expand. The distribution repository carries no development history, so this file is the only way to learn what changed since the version you last installed, and it is what `/wikicommit-update` reads when it syncs a repository with a newer release.
-
 ## Skills List
 
 | # | Category | Command | Description |
@@ -252,7 +215,54 @@ for deletion by `/wikicommit-update`. Keep your own notes somewhere else in the 
 | 16 | Operations/Preview | `/wikicommit-update` | Bring the repository in step with the installed distribution (PR, not auto-merged) |
 | 17 | Operations/Preview | `/wikicommit-reconcile <--source <path\|url>\|--type <Type>\|--all>` | Put sources back in the queue after a policy, type template or generation rule changed |
 
----
+## Context window in detail
+
+This expands on [Requirements → Context window](#context-window): where the numbers come from, how to measure your own sources, and what a run loses when it exceeds the window.
+
+WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract. That contract has a context requirement, and `/wikicommit-generate` is the command that sets it: it loads a fixed overhead that does not depend on how many sources you give it, then adds the extracted text of each source on top.
+
+```text
+context needed  ≈  49K (fixed)  +  ~22K x (sources processed in one run)
+
+  the fixed part:
+    wikicommit-generate/SKILL.md, loaded in full        ~40K
+    the Schema.org type names (--list-type-names)       ~3.3K
+    two sibling instruction files every run reads       ~6K
+```
+
+Only the first two lines are loaded before the first source is read. The sibling files — the text-extraction routing table and the completion notice — are read as the run needs them, and neither is optional.
+
+| Context window | Sources in one run |
+|---|---|
+| 200K | about 7 |
+| 1M | about 43 |
+
+**Those are the points where a run stops fitting, not a setting you can raise.** `/wikicommit-generate` asks before processing more than 5 in one run, but that is a prompt rather than a limit — answering "process all" is supported, and the table is what it costs. Past those numbers the session compacts mid-run, and only the opening part of the Skill is re-attached afterwards: the run carries on without the rest of its instructions, and **its output still looks normal**. Splitting the work across separate runs is the reliable way past them, and it is what the guard's other answer — "process only the first 5" — is for: the sources you leave keep their state, and the next run picks them up.
+
+**The ~22K per source is measured, and you can measure your own.** It is back-calculated from a real 30-source run that finished at about 70% of a 1M window, so it covers everything a source costs and not just its text: the page that text produces is held in the same conversation to be reviewed. The earlier estimate of ~15K per source came from a single Japanese Wikipedia article — a short blog post is far less, a PDF report far more — and the table uses the higher, measured figure; at 15K per source the same two windows hold about 10 and about 63. `/wikicommit-generate` writes `extracted_tokens` into every source management file under `.wikicommit/source/`, so after one run `grep extracted_tokens .wikicommit/source/**/*.md` tells you how heavy your own sources are — that field counts the extraction alone, so expect it to read lower than the 22K in the formula.
+
+**The fixed part used to be ~84K**, because the full Schema.org type list — every one of the 933 types *with its description* — was loaded on every run; it now loads the names alone and reads the descriptions of only the handful of types actually being considered. `/wikicommit-generate` has since moved its completion notice, its `--regenerate` mode and its text-extraction routing table out of SKILL.md into separate files, which takes about 7K off what is loaded up front — but a run that processes a source reads two of those files anyway, so the total above fell by much less than SKILL.md itself did.
+
+**Where 200K comes from.** In Claude Code, Opus 5 / Opus 4.8 / Opus 4.6 / Sonnet 4.6 default to a 200K window; Sonnet 5 and Fable 5 / 5.1 are natively 1M. Opus reaches 1M with the `[1m]` suffix (`/model opus[1m]`) or an environment variable, and whether that is available depends on your plan — Max, Team and Enterprise get it automatically, Pro needs usage credits, and metered API access can use it. These are the figures as of 2026-09; see [Claude Code's model configuration docs](https://code.claude.com/docs/en/model-config) for the current ones.
+
+**What happens if you exceed it.** Claude Code compacts the conversation rather than failing, and re-attaches only the **first 5,000 tokens** of each skill afterwards — roughly the first 110 lines of `wikicommit-generate/SKILL.md`, which is Step 0 and nothing else. Passes 1 through 4 are outside it. The run continues without them and produces output that looks normal, so treat the table above as a real limit rather than a suggestion.
+
+`/wikicommit-collect` and `/wikicommit-init` also load the type names, but neither accumulates per-source text the way generate does, so neither approaches the same total.
+
+## Tech Stack
+
+| Purpose | Technology |
+| --- | --- |
+| Static site generation | [Quartz v5](https://quartz.jzhao.xyz/) |
+| Structured data | [Schema.org](https://schema.org/) |
+| Knowledge representation spec | [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (Open Knowledge Format) |
+| Full-text search | SQLite FTS5 (trigram) |
+| Link validation | [lychee](https://github.com/lycheeverse/lychee) |
+| Markdown style | markdownlint-cli2 |
+
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) records what changed in each version of WikiCommit itself — the Skills and the template tree they expand. The distribution repository carries no development history, so this file is the only way to learn what changed since the version you last installed, and it is what `/wikicommit-update` reads when it syncs a repository with a newer release.
 
 ## Design Docs
 
