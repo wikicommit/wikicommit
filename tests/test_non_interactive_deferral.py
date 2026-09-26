@@ -79,7 +79,7 @@ def test_guard_b_and_empty_extraction_still_fail():
 def test_pass_2b_below_the_bar_defers_rather_than_declining():
     text = _flat((SKILLS / "wikicommit-generate" / "references"
                   / "pass2b-type.md").read_text(encoding="utf-8"))
-    assert _flat("**defer this source** (Issue #910)") in text, (
+    assert _flat("**defer this source**") in text, (
         "a Pass 2b candidate below the strict bar is being declined again, so the "
         "entity is written under an ancestor type and nothing can reclassify it"
     )
@@ -100,10 +100,12 @@ def test_the_strict_auto_approval_path_is_untouched():
 def test_an_ambiguous_entity_is_recorded_on_the_management_file():
     """The one deferral that cannot be expressed by leaving `status` alone.
 
-    The source really did produce pages, so it moves to `partial` regardless. Without
-    the field, `partial` with an empty `failed_pages` means both "excluded as
-    off-theme" (which re-running reproduces forever) and "waiting on a human" (which
-    a human can resolve), and the collection condition reads exactly that pair.
+    The source really did produce pages, so it moves to `partial` regardless. Since
+    Issue #992 a source whose only shortfall was a policy exclusion goes to
+    `generated`, so for a new management file `partial` with an empty `failed_pages`
+    means only "waiting on a human". Management files written before that still
+    carry the old "excluded as off-theme" meaning under the same pair, and the field
+    is what tells the two apart and names the entities waiting.
     """
     text = _flat((SKILLS / "wikicommit-generate" / "references"
                   / "pass4-review.md").read_text(encoding="utf-8"))
@@ -136,7 +138,7 @@ def test_the_two_undefined_generate_prompts_now_have_a_non_interactive_rule():
     generate = _flat(_instructions("wikicommit-generate"))
 
     assert _flat("**In a non-interactive run, where no answer will arrive, register nothing"
-                 " and report it** (Issue #910)") in generate, (
+                 " and report it**") in generate, (
         "Step 0's policy conflict has no non-interactive rule again, so silence can "
         "be read as consent to register a source the policy argues against"
     )
@@ -165,7 +167,7 @@ def test_merge_records_warnings_rather_than_aborting_on_them():
     merge = _flat(_instructions("wikicommit-merge"))
 
     assert _flat("**In a non-interactive run, where no answer will arrive, do not abort"
-                 " — record the warnings and proceed** (Issue #945") in merge, (
+                 " — record the warnings and proceed**") in merge, (
         "wikicommit-merge aborts on warnings again with no one to ask, which throws "
         "away an unattended batch that had already passed every blocking check"
     )

@@ -540,6 +540,15 @@ def _license_line(license_id: str) -> str:
     return f"  license: {_yaml_single_quote(license_id)}" if license_id else "  license:"
 
 
+# `source.lang`（Issue #989）は登録時には常に空で置く。値を書くのは抽出テキストを
+# 全文読む wikicommit-generate の Pass 2a だけであり、ここでは言語を知らない。
+# 空のキーを雛形に置くのは、管理ファイルを開いた人にフィールドの存在を伝えるためと、
+# Pass 2a が「既存の行を埋める」だけで済むようにするため。消費者（俯瞰ページの
+# ソース言語別集計）は同じ変更で入っているので、受け皿だけ配る形（Issue #553）には
+# 当たらない。
+_LANG_LINE = "  lang:"
+
+
 def build_frontmatter_file(source_path: str, file_hash: str, license_id: str = "") -> str:
     return f"""---
 source:
@@ -547,6 +556,7 @@ source:
   path: {_yaml_single_quote(source_path)}
   hash: {file_hash}
 {_license_line(license_id)}
+{_LANG_LINE}
 
 schema:
 status: pending
@@ -566,6 +576,7 @@ source:
   url: {_yaml_single_quote(url)}
   hash: ""
 {_license_line(license_id)}
+{_LANG_LINE}
 
 schema:
 status: pending
@@ -653,9 +664,11 @@ def retracted_result(mgmt_rel: str, content: str) -> tuple[str, str, str]:
 def parse_frontmatter_has_failed_pages(content: str) -> bool:
     """管理ファイルの failed_pages が非空かどうかを返す（#567）。
 
-    `partial` が「再試行に意味がある（生成失敗を含む）」のか「同じ条件では
-    もう進展しない（theme 除外のみ）」のかを分ける唯一の手がかり。前者だけが
-    引数なし実行の収集対象に残る。
+    `partial` が「再試行に意味がある（生成失敗を含む）」のか、そうでないのかを
+    分ける唯一の手がかり。前者だけが引数なし実行の収集対象に残る。後者は現在
+    `ambiguous: true` の型確定待ちだけである（読み直しても同じ ambiguous が返る）。
+    Issue #992 より前はポリシー除外のみのソースもここに来ていたが、今は Pass 4 が
+    `generated` にする — 古い管理ファイルには残っており、同じく後者として扱う。
 
     フロー形式（`failed_pages: []` / `[a, b]`）とブロック形式（次行以降の
     `  - ...`）の両方を読む。Pass 4 が書くのは前者だが、人間が手で編集した
@@ -896,7 +909,8 @@ def process_url(url: str, repo_root: Path, license_override: str = "") -> tuple[
     ままにしておく必要があるため）。
 
     partial は failed_pages で分かれる（#567）。非空なら再試行の余地があり Pass 1 の
-    収集対象に残っているので SKIP。空なら同じ条件では二度と進展しないため収集対象から
+    収集対象に残っているので SKIP。空なら（型確定待ちの ambiguous。Issue #992 より前の
+    管理ファイルではポリシー除外のみのものも）読み直しても進展しないため収集対象から
     外れており、「キューに入っている」という SKIP の前提が成り立たない — この場合に
     SKIP を返すと、その URL は鮮度を再確認する経路をどこにも持たなくなるので
     generated 等と同じく RECHECK を返す。
@@ -1193,6 +1207,29 @@ def print_path_cache_path(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str
     return ("CACHE_PATH", cache_path.relative_to(repo_root.resolve()).as_posix(), "")
 
 
+def _is_connection_failure(exc: BaseException) -> bool:
+    """`exc` か、その原因の連鎖のどこかが `requests` の接続段階の失敗か（Issue #1020）。
+
+    `markitdown` が例外を包み直しても判定が変わらないよう、`__cause__` / `__context__` を
+    辿る。循環に備えて同じ例外は 2 度見ない。
+
+    `SSLError` は `ConnectionError` の子だが除外する — TLS ハンドシェイクまで進んだ
+    ＝ サーバーには届いており、証明書の失効・自己署名はそのサイト固有の問題である。
+    """
+    import requests
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, requests.exceptions.SSLError):
+            return False
+        if isinstance(current, requests.exceptions.ConnectionError):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
     """
     URL を WikiCommit 独自 User-Agent で `markitdown` の Python API 経由でフェッチ・変換し、
@@ -1207,7 +1244,16 @@ def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
 
     Returns:
         (result_code, output_path_str, message)
-        result_code: "FETCHED" | "ERROR"
+        result_code: "FETCHED" | "NETWORK_UNAVAILABLE" | "ERROR"
+
+    `NETWORK_UNAVAILABLE` は「接続段階で失敗した」— 名前解決・接続拒否・プロキシ拒否・
+    接続タイムアウト（`requests.exceptions.ConnectionError` の系列）— ことを表し、
+    ソースではなく環境の問題として `ERROR`（404・変換失敗・`ReadTimeout` 等、そのソースに
+    固有の失敗）と分ける（Issue #1020）。Pass 1 は前者を `status: failed` にせず保留し、
+    連続したら処理全体を止める — ガード C（Issue #574）と同じ線引きである。
+    `ReadTimeout` は `ConnectionError` の子ではないので `ERROR` のまま残る（接続は
+    できたが応答が遅い ＝ そのサーバーの問題）。名前解決の失敗は消えたドメイン
+    （ソースの問題）でも起きるため 1 件では判断できず、それが「連続 2 件で停止」の理由である。
     """
     import requests
     from markitdown import MarkItDown
@@ -1219,7 +1265,8 @@ def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
     try:
         result = md.convert_url(url)
     except Exception as e:  # noqa: BLE001 - surfaced verbatim as an extraction failure
-        return ("ERROR", output, f"{type(e).__name__}: {e}")
+        code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e) else "ERROR"
+        return (code, output, f"{type(e).__name__}: {e}")
 
     out_path = Path(output)
     if not out_path.is_absolute():
@@ -1302,14 +1349,14 @@ def main_from_args(argv: list[str] | None = None) -> int:
         default="",
         help="SPDX-style license identifier to record as source.license on newly created "
         "management files (e.g. 'CC-BY-SA-4.0'). Overrides the known-domain table. Existing "
-        "management files are never rewritten — edit them directly instead (Issue #558).",
+        "management files are never rewritten — edit them directly instead.",
     )
     parser.add_argument(
         "--license-for-url",
         metavar="URL",
         help="Look up URL's host in the known-domain license table and print the result, without "
         "registering anything (read-only). Lets wikicommit-collect show the same deterministic "
-        "license on a candidate that registration would record on it (Issue #646). Ignores the "
+        "license on a candidate that registration would record on it. Ignores the "
         "positional 'source' argument.",
     )
     parser.add_argument(
@@ -1359,6 +1406,17 @@ def main_from_args(argv: list[str] | None = None) -> int:
         if result == "FETCHED":
             print(f"FETCHED: {path}")
             return 0
+        if result == "NETWORK_UNAVAILABLE":
+            # A distinct exit code as well as a distinct prefix, so a caller that only
+            # reads the exit status cannot fold it back into ERROR (Issue #1020).
+            print(
+                f"NETWORK_UNAVAILABLE: {args.fetch_url}: {msg} — the request never reached "
+                "the server (name resolution, connection or proxy failed). This is usually "
+                "the environment, not the source: a sandbox with network access off, a proxy, "
+                "or no connection.",
+                file=sys.stderr,
+            )
+            return 3
         print(f"ERROR: {args.fetch_url}: {msg}", file=sys.stderr)
         return 1
 

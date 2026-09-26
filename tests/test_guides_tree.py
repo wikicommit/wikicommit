@@ -94,6 +94,7 @@ def test_the_shelf_is_stocked_and_prose_names_what_is_on_it():
     assert sorted(p.name for p in TEMPLATE_GUIDES.glob("*.md")) == [
         "applying-entity-policy-to-existing-pages.md",
         "enabling-comments.md",
+        "updating-the-quartz-submodule.md",
     ], (
         "adding or renaming a guide? three places name them in prose and none is "
         "generated from this directory: _GUIDES_STEP in "
@@ -154,3 +155,17 @@ def test_merge_skill_keeps_lychee_scoped_to_a_path():
         # run and the test pass having checked nothing — the same for/else guard
         # test_review_record_tree.py uses on the very same line.
         raise AssertionError("no lychee invocation found in wikicommit-merge SKILL.md")
+
+
+def test_preview_step_no_longer_says_there_is_nothing_to_clean_up():
+    """Issue #988: the build changes the tracked quartz/package-lock.json, which is
+    exactly what stops `git pull` inside quartz/. The preview step said there was
+    nothing to clean up; it now names that file and points at the guide."""
+    sys.path.insert(0, str(REPO / ".claude/skills/wikicommit-init/scripts"))
+    import print_next_steps
+
+    text = " ".join(print_next_steps._PREVIEW_STEP.split())
+    assert "nothing to clean up" not in text
+    assert "quartz/package-lock.json" in text
+    assert "updating-the-quartz-submodule.md" in text
+    assert (TEMPLATE_GUIDES / "updating-the-quartz-submodule.md").is_file()

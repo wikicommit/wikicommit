@@ -108,7 +108,9 @@ def test_the_skill_states_why_the_deferral_survives_the_gitignore_fix():
         "Issue #873 moved that condition onto the file's contents, so a repository "
         "WikiCommit made itself now answers GITIGNORE_READY: yes"
     )
-    assert "Issue #865" in text
+    assert "wait for Quartz and come back to the" in text, (
+        "SKILL.md no longer tells the agent to wait for Quartz setup and then return to the offer"
+    )
 
 
 def test_the_gitignore_condition_reads_the_contents_rather_than_the_log():

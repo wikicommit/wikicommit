@@ -262,7 +262,7 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
             errors.append((
                 key,
                 f"is a Schema.org property of schema:{type_name}; nest it under properties: "
-                "(it must not be placed at the top level; Issue #495)",
+                "(it must not be placed at the top level)",
             ))
 
     return errors, warnings

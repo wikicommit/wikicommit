@@ -42,9 +42,17 @@ describe("explorerSortFn", () => {
   })
 
   it("does not treat a Type-cased 2-letter folder as a language folder", () => {
-    // LANG_SEGMENT_RE only matches lowercase — WikiCommit's Type/custom-type naming
-    // convention (PascalCase) never collides with it in
-    // practice, but this pins the case-sensitivity as intentional.
+    // LANG_SEGMENT_RE only matches lowercase, and this pins that case-sensitivity as
+    // intentional. It does NOT mean a collision cannot happen: the comparison is
+    // against the published slug, which Quartz lowercases (Issue #981), so a
+    // two-letter custom type does collide — custom/Ab publishes as content/<lang>/Ab/
+    // once the custom/ segment is flattened away (Issue #576) and arrives here as
+    // "ab", which this regex matches and files under the language tier. Left alone:
+    // Schema.org has no two-letter type and a wiki naming a custom type in two letters
+    // is remote, while the only way to tell the two apart would be to look at
+    // displayName (a language folder has no index.md so its displayName falls back to
+    // the slug, a Type folder has a title) — the display-name dependency Issue #946
+    // deliberately refused for overview. Recorded as a known limit rather than fixed.
     const nodes = [folder("en"), folder("Ab")]
 
     nodes.sort(explorerSortFn)
@@ -96,11 +104,11 @@ describe("explorerSortFn", () => {
   })
 
   it("sorts overview before View, and both before Type folders (Issue #946)", () => {
-    const nodes = [folder("Person"), folder("View"), folder("overview"), folder("DefinedTerm")]
+    const nodes = [folder("Person"), folder("view", "View"), folder("overview"), folder("DefinedTerm")]
 
     nodes.sort(explorerSortFn)
 
-    expect(nodes.map((n) => n.slugSegment)).toEqual(["overview", "View", "DefinedTerm", "Person"])
+    expect(nodes.map((n) => n.slugSegment)).toEqual(["overview", "view", "DefinedTerm", "Person"])
   })
 
   it("does not depend on the overview folder's display name, which is localized", () => {
@@ -117,16 +125,42 @@ describe("explorerSortFn", () => {
     expect(en.map((n) => n.slugSegment)).toEqual(["overview", "DefinedTerm", "Person"])
   })
 
+  it("matches the slug Quartz actually publishes for View, not the on-disk spelling", () => {
+    // Straight from a live contentIndex.json (wikicommit/ai-driven-dev-wiki, 2026-09-21):
+    //
+    //   "en/view/index"                     filePath: "en/View/index.md"
+    //   "en/blogposting/agent-definition-…" filePath: "en/BlogPosting/…"
+    //
+    // filePath keeps the case; slug does not. The trie is built from slug
+    // (FileTrieNode.add -> insert(file.slug.split("/"))), so slugSegment is "view" in
+    // the browser — and Issue #946's tier, written as "View", never fired once in
+    // production. The other tests here construct nodes by hand, which is exactly how
+    // the wrong spelling stayed green, so this one derives both nodes from the slugs
+    // quoted above rather than from the on-disk spelling.
+    const fromSlug = (slug: string, displayName: string) => {
+      const segments = slug.split("/").slice(0, -1)
+      return folder(segments[segments.length - 1] as string, displayName, segments)
+    }
+    const nodes = [
+      fromSlug("en/blogposting/agent-definition-drift", "BlogPosting"),
+      fromSlug("en/view/index", "View"),
+    ]
+
+    nodes.sort(explorerSortFn)
+
+    expect(nodes.map((n) => n.displayName)).toEqual(["View", "BlogPosting"])
+  })
+
   it("leads a sibling language's Type folders with its View, which is not at the root", () => {
     // View gets no depth guard, unlike overview and sources: foldLang.ts leaves node.slug
     // alone when it lifts the current language to the root, so even a folded View still has
     // slugSegments of length 2. Applying the tier at any depth is what makes both cases work.
-    const nested = folder("View", "View", ["en", "View"])
+    const nested = folder("view", "View", ["en", "view"])
     const nodes = [folder("Person", "Person", ["en", "Person"]), nested]
 
     nodes.sort(explorerSortFn)
 
-    expect(nodes.map((n) => n.slugSegment)).toEqual(["View", "Person"])
+    expect(nodes.map((n) => n.slugSegment)).toEqual(["view", "Person"])
   })
 
   it("puts overview and sources at opposite ends of the root listing (Issue #946)", () => {
@@ -134,7 +168,7 @@ describe("explorerSortFn", () => {
       folder("sources"),
       folder("Person"),
       folder("en"),
-      folder("View"),
+      folder("view", "View"),
       folder("DefinedTerm"),
       folder("overview"),
     ]
@@ -143,7 +177,7 @@ describe("explorerSortFn", () => {
 
     expect(nodes.map((n) => n.slugSegment)).toEqual([
       "overview",
-      "View",
+      "view",
       "DefinedTerm",
       "Person",
       "en",

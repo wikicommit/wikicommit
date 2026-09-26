@@ -110,7 +110,8 @@ plugin existed predates the `comments` entry in those two lists.
 `baseUrl` and links — so the `comments` plugin entry reaches a repository only on its *first*
 init. It is not commented out there: it is a live entry carrying `enabled: false`, which is what
 the section above has you flip. On an older wiki, copy that entry by hand out of the template
-that ships with the `wikicommit-init` Skill:
+that ships with the `wikicommit-init` Skill (under `.agents/skills/` instead of
+`.claude/skills/` if you installed the Skills for Codex):
 
 ```bash
 sed -n '/quartz-community\/comments/,/priority:/p' \

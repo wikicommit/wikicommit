@@ -183,9 +183,16 @@ def test_each_skill_falls_back_to_the_skill_tree_copy_before_giving_up():
     repository lacks. Without the fallback, every type addition on every existing
     wiki is refused while the procedure is on disk.
     """
+    # Written relative to the Skill's own directory since Issue #1021, so the same file
+    # is `scripts/templates/…` from wikicommit-init and `../wikicommit-init/scripts/…`
+    # from its siblings.
     for name in TYPE_WRITING_SKILLS:
         text = skill_text(name)
-        assert ".claude/skills/wikicommit-init/scripts/templates/schema-authoring.md" in text, (
+        expected = (
+            "scripts/templates/schema-authoring.md" if name == "wikicommit-init"
+            else "../wikicommit-init/scripts/templates/schema-authoring.md"
+        )
+        assert expected in text, (
             f"{name} gives up when .wikicommit/schema-authoring.md is "
             f"absent without trying the Skill-tree copy"
         )

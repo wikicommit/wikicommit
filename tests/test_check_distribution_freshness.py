@@ -459,3 +459,230 @@ def test_a_compared_entry_does_not_draw_the_uncompared_warning(repo):
     """The counterpart: a real comparison must stay quiet when it is in step."""
     out = _run(repo, "--only", ".wikicommit/scripts").stdout
     assert "does not compare" not in out
+
+
+# --- quartz.config.yaml: 47 plugins used to collapse into one key (Issue #950) ---------
+#
+# `_key_paths()` stopped at mapping keys, so every plugin, every `exclude` entry and
+# every `ignorePatterns` entry lived behind a single path. Four of the five drifts a
+# maintainer had written down as "not detected" were exactly that shape, and a fifth
+# (`comments`, Issue #755) was missing from two of three pilots with nobody having
+# written it down at all — which is why descending is not paired with a hand-kept list.
+#
+# The tests below come in two halves, and the second half is the load-bearing one: the
+# reason list descent had been rejected once was that it looked likely to report the
+# user's own deliberate choices. Measuring the pilots showed which choices those would be
+# (`enabled`, `options`), so the constraints stop short of them — and these tests are
+# what keeps a later change from quietly stepping past that line.
+
+def _quartz_config(repo: Path) -> Path:
+    return repo / "quartz.config.yaml"
+
+
+def _edit_quartz_config(repo: Path, old: str, new: str) -> None:
+    path = _quartz_config(repo)
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"anchor not found in quartz.config.yaml: {old!r}"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def _set_origin(repo: Path, url: str) -> None:
+    """Give the fixture a git origin, which `_origin_repo_slug()` reads."""
+    for args in (["init", "-q"], ["remote", "add", "origin", url]):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _quartz_lines(out: str) -> list[str]:
+    return [ln for ln in out.splitlines() if ln.startswith("OUTDATED: quartz.config.yaml")]
+
+
+def test_a_plugin_swapped_for_a_different_source_is_reported(repo):
+    """decameron still pulls the graph from upstream instead of the local build.
+
+    Issue #584 replaced it, and there was no path by which that repository could learn
+    so: `plugins` was one key on both sides no matter what its 47 entries said.
+    """
+    _edit_quartz_config(
+        repo,
+        "- source: ../quartz-plugins/wikicommit-graph",
+        "- source: github:quartz-community/graph",
+    )
+    out = _run(repo).stdout
+    assert "plugins[../quartz-plugins/wikicommit-graph]" in out
+    assert len(_quartz_lines(out)) == 1
+
+
+def test_a_component_missing_from_an_exclude_list_is_reported(repo):
+    """The `comments` case (Issue #755): a giscus box on machine-generated tag pages.
+
+    Nobody had listed this among the drifts to watch for, which is the argument for
+    comparing the lists themselves rather than maintaining an inventory of them.
+    """
+    _edit_quartz_config(
+        repo,
+        "    tag:\n      exclude:\n        - reader-mode\n        - wikicommit-banner\n        - comments\n",
+        "    tag:\n      exclude:\n        - reader-mode\n        - wikicommit-banner\n",
+    )
+    out = _run(repo).stdout
+    assert "layout.byPageType.tag.exclude[comments]" in out
+    # The folder list still has it, so only one of the two is named.
+    assert "layout.byPageType.folder.exclude[comments]" not in out
+
+
+def test_enabling_a_plugin_the_template_ships_disabled_is_not_drift(repo):
+    """ai-driven-dev-wiki turns giscus on; the template ships it off.
+
+    This is the constraint that decided the shape of the descent. Comparing `enabled`
+    would make the first user of Issue #755's feature the first false positive — so what
+    is compared about `plugins` is which plugins are there, and nothing inside them.
+    """
+    _edit_quartz_config(
+        repo,
+        "- source: github:quartz-community/comments\n    enabled: false\n",
+        "- source: github:quartz-community/comments\n    enabled: true\n",
+    )
+    assert _quartz_lines(_run(repo).stdout) == []
+
+
+def test_a_resolved_footer_placeholder_is_not_drift(repo):
+    """`options` differs on every repository that exists: the template holds
+    `{REPO_URL}` and the local file holds a real URL (or `links: {}` when there is no
+    remote). Descending into an element's options would report all three pilots forever.
+    """
+    _set_origin(repo, "https://github.com/acme/my-wiki.git")
+    _edit_quartz_config(
+        repo,
+        "      links: {}\n",
+        '      links:\n        GitHub: "https://github.com/acme/my-wiki"\n',
+    )
+    assert _quartz_lines(_run(repo).stdout) == []
+
+
+def test_a_config_with_every_upstream_decision_applied_is_silent(repo):
+    """The negative control. ai-driven-dev-wiki has all five applied and reports 0.
+
+    Without this, the tests above only show that the check can speak; they do not show
+    that it knows when to stay quiet — and a report that is always on stops being read
+    (Issue #562).
+    """
+    _set_origin(repo, "https://github.com/acme/my-wiki.git")
+    assert _quartz_lines(_run(repo).stdout) == []
+
+
+def test_a_locale_left_on_the_wrong_language_is_reported(repo):
+    """decameron is an Italian wiki still shipping `en-US` (Issue #771).
+
+    There is no upstream literal to compare against — the template holds `{LOCALE}` —
+    so this asks what init would write today from this repository's own primary_lang.
+    """
+    _edit_quartz_config(repo, "locale: ja-JP", "locale: en-US")
+    out = _run(repo).stdout
+    assert "configuration.locale is en-US" in out
+    assert "which init writes as ja-JP" in out
+
+
+def test_a_regional_locale_variant_is_the_user_s_choice(repo):
+    """Only the language subtag is compared. init.py's own table says a wiki wanting a
+    regional variant edits that line by hand, so `en-GB` on an English wiki is a
+    decision, not a leftover — and scolding it every run is how a check gets ignored."""
+    config = repo / ".wikicommit" / "config.yml"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("primary_lang: ja", "primary_lang: en"),
+        encoding="utf-8",
+    )
+    _edit_quartz_config(repo, "locale: ja-JP", "locale: en-GB")
+    assert "configuration.locale" not in _run(repo).stdout
+
+
+def test_a_footer_pointing_at_someone_else_s_repository_is_reported(repo):
+    """decameron's most prominent link still goes to upstream Quartz — the exact defect
+    Issue #557 fixed in the generator, living on in a repository the fix never reached."""
+    _set_origin(repo, "https://github.com/acme/my-wiki.git")
+    _edit_quartz_config(
+        repo,
+        "      links: {}\n",
+        '      links:\n        GitHub: "https://github.com/jackyzha0/quartz"\n',
+    )
+    out = _run(repo).stdout
+    assert "the footer's links.GitHub points at jackyzha0/quartz" in out
+    assert "acme/my-wiki" in out
+
+
+def test_an_ssh_remote_still_matches_the_footer_link(repo):
+    """The remote's form is the user's, not a signal. Reading `git@github.com:o/r.git`
+    as a different repository than `https://github.com/o/r` would report every wiki
+    cloned over SSH."""
+    _set_origin(repo, "git@github.com:acme/my-wiki.git")
+    _edit_quartz_config(
+        repo,
+        "      links: {}\n",
+        '      links:\n        GitHub: "https://github.com/acme/my-wiki"\n',
+    )
+    assert _quartz_lines(_run(repo).stdout) == []
+
+
+# --- the two value checks must degrade, not take the report down with them ------------
+#
+# `_quartz_value_findings()` reaches into the installed `init.py` for the one value it
+# cannot compute itself. The Skill tree and `.wikicommit/scripts/` are refreshed by
+# different commands (`npx skills add` and `/wikicommit-init`), so this script can meet
+# an `init.py` that is older than it is — the same skew `_SCRIPTS_CONSEQUENCE` exists to
+# describe. Two ways that used to go wrong, in opposite directions: an absent attribute
+# raised and took the whole report down, and a module that would not load left the checks
+# switched off behind a clean `SUMMARY: outdated=0`.
+
+def _break_footer_link(repo: Path) -> None:
+    """Give the fixture the one drift the footer check is meant to catch."""
+    _set_origin(repo, "https://github.com/acme/my-wiki.git")
+    _edit_quartz_config(
+        repo,
+        "      links: {}\n",
+        '      links:\n        GitHub: "https://github.com/jackyzha0/quartz"\n',
+    )
+
+
+def _init_py(repo: Path) -> Path:
+    return repo / ".claude" / "skills" / "wikicommit-init" / "scripts" / "init.py"
+
+
+def test_an_init_without_the_locale_helper_does_not_abort_the_report(repo):
+    """An older Skill tree must cost one check, not the run.
+
+    Calling through to a missing attribute raised `AttributeError` out of `check()`,
+    so the process exited 1 with a traceback and every OUTDATED / MISSING / ORPHAN line
+    for every other path was lost — breaking the module docstring's "always 0" contract
+    over a single check.
+    """
+    _break_footer_link(repo)
+    path = _init_py(repo)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "\ndef quartz_locale_for(", "\ndef _renamed_quartz_locale_for("
+        ),
+        encoding="utf-8",
+    )
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    assert "quartz_locale_for" in result.stdout  # it says which check did not run
+    # The footer check reads the local config and this repository's own remote, so it
+    # has no stake in init.py and must still report.
+    assert "the footer's links.GitHub points at jackyzha0/quartz" in result.stdout
+
+
+def test_an_unloadable_init_is_reported_rather_than_going_quiet(repo):
+    """A check that stopped running must not look like a check that found nothing.
+
+    Both value checks used to vanish behind `SUMMARY: outdated=0`, which
+    `/wikicommit-update` Step 2 reads as "genuinely nothing to do" — the silent wrong
+    answer `_yaml_keys()` already refuses to leave standing for an unparseable template.
+    """
+    _break_footer_link(repo)
+    path = _init_py(repo)
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\nthis is not python(\n", encoding="utf-8"
+    )
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "WARNING:" in result.stdout
+    assert _summary(result.stdout)["outdated"] >= 1

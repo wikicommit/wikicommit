@@ -213,3 +213,29 @@ def test_pipe_in_title_or_tag_does_not_look_like_another_field(tmp_path):
     result = run(tmp_path)
     assert result.returncode == 0
     assert "PAGE: Person/taro | A / B | backlinks=0 | tags=x/y | links=" in result.stdout
+
+
+def test_page_record_carries_the_source_count(tmp_path):
+    """Issue #990: lets the collect survey step see a hub that stands on one document."""
+    write_config(tmp_path)
+    write_page(
+        tmp_path, "ja", "Person", "taro",
+        fm("太郎", extra="sources:\n  - type: url\n    url: https://a.example/\n    hash: sha256:a\n"),
+    )
+    result = run(tmp_path)
+    assert "PAGE: Person/taro | 太郎 | backlinks=0 | sources=1 | tags= | links=" in result.stdout
+
+
+def test_source_count_is_omitted_for_translations_and_view_pages(tmp_path):
+    """Issue #990: a translation inherits its sources and a view page has
+    derived_from instead — 0 would read as "no source"."""
+    write_config(tmp_path)
+    write_page(tmp_path, "en", "Person", "taro", fm("Taro", lang="en", extra="translated_from: x.md\nsources: []\n"))
+    view = tmp_path / ".wikicommit" / "view" / "ja"
+    view.mkdir(parents=True)
+    (view / "loop.md").write_text("---\ntitle: Loop\nlang: ja\nderived_from: []\n---\n\nBody.\n", encoding="utf-8")
+
+    result = run(tmp_path, ["--lang", "all", "--include-view"])
+    assert "PAGE: Person/taro | Taro | backlinks=0 | tags= | links=" in result.stdout
+    assert "PAGE: View/loop | Loop | backlinks=0 | tags= | links=" in result.stdout
+    assert "sources=" not in result.stdout

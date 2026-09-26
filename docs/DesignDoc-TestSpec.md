@@ -37,6 +37,9 @@
 | コミットトレーラーのモデル ID がプレースホルダーであることの検証 | ✅ 済み | `tests/test_commit_trailer_placeholders.py` が `.claude/skills/*/SKILL.md`・`CLAUDE.md`・`CONTRIBUTING.md`・`docs/DesignDoc-pipeline.md` の `Co-Authored-By`/`Generated-By`/`Reviewed-By-AI` 行を走査し、`<...>` を除いた残りにモデル名リテラルが残っていないことを検証する（Issue #559。リテラルに戻ると `git log` 上のモデル情報が実行モデルと食い違うが、トレーラーは見た目では正誤が判別できないため機械検知する） |
 | 新規 Skill 追加時の `disable-model-invocation` 要否チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブ（専用ジョブ `skill-invocation-mode` からの統合は Issue #591。[L8](#l8-ci-ジョブ構成の集約によるコスト削減-対応済みissue-591)）が `tools/check_skill_invocation_mode.py` を非 blocking で実行し、`disable-model-invocation: true` が未設定の SKILL.md を一覧表示（要否そのものの機械判定はしない。Issue #234）。`CONTRIBUTING.md`「SKILL.md を変更する場合の追加手順」にも判断基準を明記。[L7](#l7-skill-追加時の-disable-model-invocation-要否チェック-対応済みissue-234) |
 | 配布物内の開発リポジトリパス参照チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_distributed_path_refs.py` を **blocking** で実行し、配布物（`install.sh` が配る 15 Skill と `wikicommit-init` の `scripts/templates/` ペイロード）に `docs/DesignDoc-*.md`・`Issues/`・`dev/` へのパス参照があると失敗させる（Issue #549）。[L9](#l9-配布物内の開発リポジトリパス参照チェック-対応済みissue-549) |
+| Skill ツリーの固定パス混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_tree_paths.py` を **blocking** で実行し、配布 Skill の指示文（`.md`）に `.claude/skills/<name>/…` の固定パスがあると失敗させる（Issue #1021）。[L14](#l14-skill-ツリーの固定パス混入チェック-対応済みissue-1021) |
+| Skill 指示文への Claude Code ツール名混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_tool_names.py` を **blocking** で実行し、配布 Skill の指示文（`.md`）に `Read tool` / `Bash tool` / `WebFetch` 等の Claude Code 固有のツール名があると失敗させる（Issue #1015）。[L15](#l15-skill-指示文への-claude-code-ツール名混入チェック-対応済みissue-1015) |
+| 配布物の Issue 番号混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_distributed_issue_refs.py` を **blocking** で実行する。配布スクリプトの出力文字列（実行時のメッセージ・argparse の help）の `Issue #NNN` は 0 件、配布 Skill の指示文は Skill ごとの件数上限（ラチェット）を超えると失敗させる（Issue #1054）。[L16](#l16-配布物の-issue-番号混入チェック-対応済みissue-1054) |
 | ルート生成物一覧の単一情報源化と、その不変条件の検証 | ✅ 済み | `init.py` の生成物と `print_next_steps.py` の `git add` 案内は、`.claude/skills/wikicommit-init/scripts/_root_outputs.py` という 1 つの宣言的な一覧から組み立てられる（Issue #642。この一覧は init.py の verbatim コピーも駆動するため、ルート生成物の追加は 1 箇所の編集で済む）。`tests/test_root_outputs.py` が一覧自体の不変条件（variant の妥当性・パスの一意性・宣言したテンプレートの実在・`git add` から意図的に外したパス〈`package-lock.json`〉と条件付きパス〈`.wikicommit/schemaorg-vocab.json`〉の扱い）と、**生成できない 3 つ目の一覧である SKILL.md の散文**が Quartz 限定の生成物を漏らしていないことを検証する。実際に init.py を走らせて案内どおりの `git add` 後に未追跡ファイルが残らないことの検証は `tests/test_smoke_local.py`（Issue #556）が引き続き担う |
 | ユーザー向け出力テンプレートへの内部語彙混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_user_facing_vocabulary.py` を **blocking** で実行し、`.claude/skills/wikicommit-*/SKILL.md` のユーザー向けフェンス済みテンプレートに `Step N`/`Pass N`・`Route A`/`Route B`・`Issue #NNN`/`PR #NNN` が混入していると失敗させる（Issue #588。`docs/DesignDoc-skills.md` §11.8）。[L10](#l10-ユーザー向け出力テンプレートへの内部語彙混入チェック-対応済みissue-588) |
 | 配布スクリプトのコンソール出力言語チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_script_output_language.py` を **blocking** で実行し、`.claude/skills/**/scripts/*.py` の `print()` 出力に日本語が含まれていると失敗させる（Issue #770。`docs/DesignDoc-ScriptSpec.md`「共通規則」）。[L11](#l11-配布スクリプトのコンソール出力言語チェック-対応済みissue-770) |
@@ -276,6 +279,52 @@ Issue #830 は、`run:` 本文に literal で書いた中身の無い式展開 1
 **取得先は作業ツリーの外（`RUNNER_TEMP`）にして `PATH` に載せる**。`./actionlint` として作業ツリーへ落とすと 2 つ壊れる — (1) `tests/test_workflow_actionlint.py` は `shutil.which()` で探すため **CI でも skip** され、そのテストだけが持つ範囲（`*.yaml` 拡張子。CI の明示 glob は `*.yml` しか拾わない）がどこからも検査されないまま、テスト自身も一度も実行されずに `main` へ入る。(2) untracked のバイナリが残り、後段の `check_publication_subset.sh` が「作業ツリーが汚れている」警告を毎回出す — あれは「いま直したものは検査されていない」を人に伝えるための警告であり、常時点灯させると意味を失う。
 
 **版のリテラルを他所へ書き写さない**。`.github/workflows/test.yml` の `ACTIONLINT_VERSION` が正本であり、テストの skip メッセージのような「実際に打つ手順」に版を写すと、bump のたびに古い版の導入を案内することになる — CI とローカルで別の版が走るのは、この節が上で警告している `shellcheck` の非対称とまったく同じ形の割れ方である。この表の `1.7.12` は実測がどの版に対するものかという**過去の記録**なので、これは対象外。
+
+---
+
+### L14. Skill ツリーの固定パス混入チェック（✅ 対応済み・Issue #1021）
+
+Skill は Claude Code では `.claude/skills/`、Codex では `.agents/skills/` に置かれ、`npx skills add --agent codex` 単独では `.claude/skills/` が作られない。指示文が `.claude/skills/wikicommit-generate/references/pass1-extract.md` のようにリポジトリルートからの固定パスで Skill 内のファイルを指すと、Codex 単独配置では解決しない — Issue #911 が全 Pass をこの形のポインタの先へ出したため、`/wikicommit-generate` は Pass 1 に入れなくなっていた。
+
+Issue #1021 はこれを Skill ディレクトリ相対（`references/…`・`scripts/…`）と兄弟 Skill 相対（`../wikicommit-init/…`）へ書き換えた。**書き換えだけでは再混入を止められない** — 固定パスは Issue #732 が数えた 22 箇所から 57 箇所へ、止めるものが無いまま増えていた。
+
+`tools/check_skill_tree_paths.py` が配布 Skill 配下の全 `.md` を走査し、`.claude/skills/<name>` の形（名前の 1 文字目まで）を ERROR にする。**blocking** とした理由は L9 と同じ — 機械的に判定できる誤りであり、一度直した回帰の再混入を止めるのが目的のガードである。
+
+| 除外 | 理由 |
+|---|---|
+| `CHANGELOG.md`・`changelog/` | 変更の記録であって指示ではない |
+| `scripts/templates/guides/` | 人がリポジトリルートから手で打つ手順書。Skill 相対のパスは意味を持たないので、`.claude/skills/` を書いたうえで Codex の場合の置き場を併記する |
+| 同じ行に `.agents/skills` がある | 2 つの置き場を**説明している**行であり、片方を仮定していない |
+
+`.claude/skills/`（その後に何も続かない）と `.claude/skills/<name>`（プレースホルダー）は Skill 内のファイルを指していないので一致しない。配布 Skill の一覧は `check_distributed_path_refs.py` の `DISTRIBUTED_SKILLS` を import する — 3 本目の写しを作らないため（`tests/test_skill_distribution_list_sync.py` が既に `install.sh` との一致を強制している）。
+
+**Python スクリプトは対象外**。`.wikicommit/scripts/` から Skill ツリーを読みに行く 2 本（`record_run.py`・`check_distribution_freshness.py`）は `_skill_tree.py` の探索順に寄せてあり、その挙動は `tests/test_skill_tree_location.py` が `.agents/skills/` だけを持つ一時ディレクトリで固定する。スクリプトの中の `.claude/skills` という文字列はコメント・docstring にも普通に現れるため、文字列の走査では判定できない。
+
+---
+
+### L15. Skill 指示文への Claude Code ツール名混入チェック（✅ 対応済み・Issue #1015）
+
+配布 Skill の指示文は `Read tool`（17 箇所）・`WebFetch`（3）・`Write tool`（3）・`Bash tool`（2）・`Grep tool`・`Edit tool` と、Claude Code のツールの固有名で書かれていた。Codex は shell と `apply_patch` しか持たず、**これらの名前のツールは 1 つも無い**。エージェントは大抵読み替えるが、**読み替えたのかその行を飛ばしたのかは出力に現れない**。
+
+Issue #1015 はこれを役割で書き直した（「read the file in full」「edit the target page」「a plain text search」）。サブエージェントの指示は元から「Launch a subagent」という一般形であり、それが基準線である。**書き換えだけでは再混入を止められない**ため、`tools/check_skill_tool_names.py` が L14 と同じファイル集合（`check_skill_tree_paths.collect_files()` を import する）を走査し、ツール名を ERROR にする。**折り返しをまたいで照合する** — 指示文は固定幅で折り返されており、「the Bash\ntool」は「the Bash tool」と同じ指示である。**blocking** とした理由は L9 / L14 と同じ。
+
+| 照合しないもの | 理由 |
+|---|---|
+| 単独の `Read` / `Write` | 普通の英語であり、ツール名ではない |
+| `/wikicommit-…` 記法 | 宛先が違う（下記）。利用者に届く出力でだけ Codex の `$` を併記した |
+
+---
+
+### L16. 配布物の Issue 番号混入チェック（✅ 対応済み・Issue #1054）
+
+公開リポジトリはスナップショット push であり Issue を 1 件も持たないため、配布物の `Issue #NNN` は利用者から辿れない（`docs/DesignDoc-skills.md` §11.9 の該当コールアウト）。`tools/check_distributed_issue_refs.py` が 2 つの範囲を強さを変えて見る。
+
+| 範囲 | 強さ | 理由 |
+|---|---|---|
+| 配布スクリプト（`.claude/skills/wikicommit-*/scripts/*.py`・`templates/scripts/*.py`）の文字列リテラルのうち、コメント・docstring（`_root_outputs.py` の属性 docstring を含む）以外 | **0 件で blocking** | Issue #1054 で 0 にした。以後の 1 件は回帰である |
+| 配布 Skill の指示文（`check_skill_md_lines.instruction_files()` の集合）＋ `templates/review-rules.md`・`templates/schema-authoring.md` | **Skill ごとの上限（ラチェット）** | 移行が Skill 単位で進むので途中では 0 にならない。`CAPS` を現在値で固定し、増えたら失敗、減ったら `NOTE:` で下げ先を示す。全 Skill が 0 になった時点で上限表は「0 件」の 1 規則に畳める（Issue #1060 の時点で全 Skill が 0。表はまだ畳んでいない） |
+
+**番号だけを見る**。経緯の文（「以前は X だった」）は機械的に検出できないので、PR レビューで扱う。`review-rules.md`・`schema-authoring.md` を `wikicommit-init` の集計に含めるのは、両者がそのテンプレート配下に置かれ、エージェントが指示として読むからである（`templates/guides/*.md` は人が読む手順書なので対象外）。**blocking** とした理由は L9 / L14 と同じ。
 
 ---
 

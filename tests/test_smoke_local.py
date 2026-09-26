@@ -168,9 +168,14 @@ _VARIANT_ARGS = {
 }
 
 
-def render_next_steps(*, variant: str) -> str:
+def render_next_steps(*, variant: str, readme_created: bool = False) -> str:
     result = subprocess.run(
-        [sys.executable, str(PRINT_NEXT_STEPS_PY), *_VARIANT_ARGS[variant]],
+        [
+            sys.executable,
+            str(PRINT_NEXT_STEPS_PY),
+            *_VARIANT_ARGS[variant],
+            *(["--readme-created"] if readme_created else []),
+        ],
         capture_output=True,
         text=True,
         check=True,
@@ -178,7 +183,7 @@ def render_next_steps(*, variant: str) -> str:
     return result.stdout
 
 
-def extract_git_add_paths(*, variant: str) -> list[str]:
+def extract_git_add_paths(*, variant: str, readme_created: bool = False) -> list[str]:
     """print_next_steps.py が案内する**選択的な** git add の対象パスを抽出する。
 
     ハードコードした固定リストと突き合わせるのではなく、実際にユーザーへ提示される
@@ -193,7 +198,7 @@ def extract_git_add_paths(*, variant: str) -> list[str]:
     variant: "quartz_pages"（--quartz --quartz-pages）/ "quartz_only"（--quartz のみ）/
     "none"（--quartz なし）のいずれか。
     """
-    joined = render_next_steps(variant=variant).replace("\\\n", " ")  # 行継続を解消し1行に結合
+    joined = render_next_steps(variant=variant, readme_created=readme_created).replace("\\\n", " ")  # 行継続を解消し1行に結合
     matches = [
         m.group(1)
         for m in re.finditer(r"^\s*git add (?!-A\b)(.+)$", joined, re.MULTILINE)
@@ -251,7 +256,13 @@ def test_full_local_pipeline_commits_foundational_files_and_generated_pages(tmp_
     git(
         [
             "add",
-            *(p for p in extract_git_add_paths(variant="none") if p not in _paths_that_may_be_absent()),
+            # init.py created README.md in this fresh repository (Issue #1034), so the guidance
+            # is rendered the way SKILL.md renders it after seeing `CREATED: README.md`.
+            *(
+                p
+                for p in extract_git_add_paths(variant="none", readme_created=True)
+                if p not in _paths_that_may_be_absent()
+            ),
         ],
         tmp_path,
         check=True,
@@ -560,7 +571,8 @@ def test_quartz_only_git_add_paths_match_generated_files(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    paths = extract_git_add_paths(variant="quartz_only")
+    assert "CREATED: README.md" in result.stdout
+    paths = extract_git_add_paths(variant="quartz_only", readme_created=True)
     assert "quartz-plugins" in paths  # マーカー境界が正しく他の変種の行を拾っていないことの確認
     assert ".github/workflows/deploy.yml" not in paths
     for rel_path in paths:
@@ -588,7 +600,8 @@ def test_quartz_pages_git_add_paths_match_generated_files(tmp_path):
     )
     assert result.returncode == 0, result.stderr
 
-    paths = extract_git_add_paths(variant="quartz_pages")
+    assert "CREATED: README.md" in result.stdout
+    paths = extract_git_add_paths(variant="quartz_pages", readme_created=True)
     assert "quartz-plugins" in paths
     assert ".github/workflows/deploy.yml" in paths
     for rel_path in paths:

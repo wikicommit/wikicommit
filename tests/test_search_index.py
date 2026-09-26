@@ -318,7 +318,10 @@ def test_query_multi_word_matches_non_adjacent_terms(tmp_path):
     assert 'hits=1' in result.stdout
 
 
-def test_query_corrupted_db_reports_error_instead_of_crashing(tmp_path):
+def test_query_rebuilds_a_corrupted_index_instead_of_crashing(tmp_path):
+    """An unreadable index carries no readable fingerprint, so it counts as stale
+    and is replaced (Issue #1061) — rather than failing every search until
+    someone deletes the file by hand."""
     write_page(
         tmp_path, "ja", "Person", "yamada-taro",
         textwrap.dedent("""\
@@ -331,8 +334,9 @@ def test_query_corrupted_db_reports_error_instead_of_crashing(tmp_path):
     (tmp_path / DB_RELATIVE_PATH).write_bytes(b"not a sqlite database")
 
     result = run(["query", "山田太郎"], cwd=tmp_path)
-    assert result.returncode == 1
-    assert "ERROR" in result.stdout
+    assert result.returncode == 0, result.stdout
+    assert "NOTE: search index was stale" in result.stdout
+    assert "MATCH: .wikicommit/entity/ja/Person/yamada-taro.md" in result.stdout
 
 
 def test_query_short_term_warns_and_returns_zero_hits(tmp_path):
@@ -617,6 +621,139 @@ def test_query_with_neither_term_source_is_an_error(tmp_path):
     result = run(["query"], cwd=tmp_path)
     assert result.returncode == 1
     assert "ERROR:" in result.stdout
+
+
+# ── staleness: the index follows the pages (Issue #1061) ─────────────────────
+
+_PERSON = textwrap.dedent("""\
+    title: "{title}"
+    lang: ja
+    type: "schema:Person"
+    review_status: {status}
+    """)
+
+
+def _person(root: Path, slug: str, title: str, status: str = "pending") -> Path:
+    return write_page(root, "ja", "Person", slug, _PERSON.format(title=title, status=status),
+                      body=f"{title}の経歴。\n")
+
+
+def test_a_page_added_after_the_first_query_is_found_by_the_next(tmp_path):
+    _person(tmp_path, "yamada-taro", "山田太郎")
+    assert "hits=1" in run(["query", "山田太郎"], cwd=tmp_path).stdout
+
+    _person(tmp_path, "suzuki-hanako", "鈴木花子")
+    result = run(["query", "鈴木花子"], cwd=tmp_path)
+    assert "NOTE: search index was stale" in result.stdout
+    assert "MATCH: .wikicommit/entity/ja/Person/suzuki-hanako.md" in result.stdout
+
+
+def test_a_deleted_page_stops_matching(tmp_path):
+    _person(tmp_path, "yamada-taro", "山田太郎")
+    gone = _person(tmp_path, "suzuki-hanako", "鈴木花子")
+    assert "hits=1" in run(["query", "鈴木花子"], cwd=tmp_path).stdout
+
+    gone.unlink()
+    result = run(["query", "鈴木花子"], cwd=tmp_path)
+    assert "hits=0" in result.stdout
+    assert "suzuki-hanako" not in result.stdout.replace("NOTE", "")
+
+
+def test_a_frontmatter_edit_reaches_the_match_line(tmp_path):
+    page = _person(tmp_path, "yamada-taro", "山田太郎")
+    assert "review_status=pending" in run(["query", "山田太郎"], cwd=tmp_path).stdout
+
+    page.write_text(page.read_text(encoding="utf-8").replace("review_status: pending",
+                                                               "review_status: reviewed"),
+                    encoding="utf-8")
+    result = run(["query", "山田太郎"], cwd=tmp_path)
+    assert "review_status=reviewed" in result.stdout
+
+
+def test_an_index_from_before_the_meta_table_is_rebuilt(tmp_path):
+    import sqlite3
+
+    _person(tmp_path, "yamada-taro", "山田太郎")
+    run(["build"], cwd=tmp_path)
+    con = sqlite3.connect(tmp_path / DB_RELATIVE_PATH)
+    con.execute("DROP TABLE meta")
+    con.commit()
+    con.close()
+
+    result = run(["query", "山田太郎"], cwd=tmp_path)
+    assert "NOTE: search index was stale (built before this check existed)" in result.stdout
+    assert "hits=1" in result.stdout
+
+
+def test_an_unchanged_wiki_does_not_rebuild(tmp_path):
+    _person(tmp_path, "yamada-taro", "山田太郎")
+    run(["build"], cwd=tmp_path)
+    before = (tmp_path / DB_RELATIVE_PATH).stat().st_mtime_ns
+
+    result = run(["query", "山田太郎"], cwd=tmp_path)
+    assert "NOTE:" not in result.stdout
+    assert "OK: indexed" not in result.stdout
+    assert (tmp_path / DB_RELATIVE_PATH).stat().st_mtime_ns == before
+
+
+def test_a_build_that_fails_part_way_leaves_the_previous_index_intact(tmp_path, monkeypatch):
+    """The index is written to a temporary file and swapped in only when complete,
+    so a crash mid-build cannot leave an empty index that carries a fingerprint."""
+    import importlib.util
+
+    _person(tmp_path, "yamada-taro", "山田太郎")
+    assert run(["build"], cwd=tmp_path).returncode == 0
+    db = tmp_path / DB_RELATIVE_PATH
+    before = db.read_bytes()
+    _person(tmp_path, "suzuki-hanako", "鈴木花子")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    spec = importlib.util.spec_from_file_location("search_index_under_test", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def boom(_page):
+        raise RuntimeError("simulated crash while reading pages")
+
+    monkeypatch.setattr(module, "_parse_page", boom)
+    try:
+        module.build_index()
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("the simulated crash did not propagate")
+
+    assert db.read_bytes() == before
+    assert not list(db.parent.glob("search_index.*.tmp")), "the temporary file was left behind"
+
+
+def test_a_rebuild_that_cannot_replace_the_index_still_searches_the_old_one(
+    tmp_path, monkeypatch, capsys
+):
+    """On Windows os.replace() fails while another process holds the index open.
+    The query must fall back to the previous index and say so, not stop."""
+    import importlib.util
+
+    _person(tmp_path, "yamada-taro", "山田太郎")
+    assert run(["build"], cwd=tmp_path).returncode == 0
+    _person(tmp_path, "suzuki-hanako", "鈴木花子")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    spec = importlib.util.spec_from_file_location("search_index_replace_fails", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def refuse(_src, _dst):
+        raise PermissionError("the file is in use")
+
+    monkeypatch.setattr(module.os, "replace", refuse)
+    assert module.query_index("山田太郎", None, 10) == 0
+    out = capsys.readouterr().out
+    assert "WARNING: searching the previous index" in out
+    assert "hits=1" in out
+    assert not list((tmp_path / DB_RELATIVE_PATH).parent.glob("search_index.*.tmp"))
 
 
 # ── wikicommit-init template stays in sync with the canonical script ─────────

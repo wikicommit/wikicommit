@@ -92,6 +92,30 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 - [lychee](https://github.com/lycheeverse/lychee)（外部リンク検証用。未インストール時は `/wikicommit-init` が自動インストールを試みる）
 
 > Skills は [agentskills.io](https://agentskills.io) 標準準拠の SKILL.md 群のため、Codex など他の対応コーディングエージェントでも原理的には動作するはずですが、現時点で動作検証を行っているのは Claude Code のみです。
+>
+> **Codex では、書き込み系 Skill の自律起動を止める仕組みが違います。** 9 本（`collect`・`fix`・`init`・`reconcile`・`remove`・`review`・`schema-propose`・`synthesize`・`update`）が持つ `disable-model-invocation: true` は Claude Code の設定で Codex は読まず、`.claude/settings.json` の `skillOverrides` も Claude Code しか読みません。Codex 向けには、その 9 本それぞれに `policy.allow_implicit_invocation: false` を書いた `agents/openai.yaml` を同梱し、description にも「明示的に頼まれたときだけ使う」と書いています。ただし Codex がこの設定を実際に守るかは、Codex 本体ではまだ確認していません。確認できるまでは、これらの Skill は名前で呼び出し（`$wikicommit-…`）、`wikicommit-merge` を走らせる前に残った変更を確認してください。
+>
+> **WikiCommit はネットワークと `.git` への書き込みを要します。** ネットワークは URL ソースの取得（`/wikicommit-generate <url>`）・`gh`（`/wikicommit-merge` の PR・マージ・追跡 Issue）・lychee が使い、`.git` へは `/wikicommit-merge`（ブランチ作成・コミット）と `/wikicommit-init`（基盤コミット）が書き込みます。**Codex の既定のサンドボックスはこの両方を塞ぎます。** Codex のドキュメント（[Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)。2026-09-24 確認）によれば、バージョン管理下のフォルダでの対話セッションの既定は `workspace-write` で、そこではネットワークが無効、`.git` は（`.agents`・`.codex` とともに）読み取り専用として保護されます。
+>
+> - **ネットワーク** — Codex の設定の `[sandbox_workspace_write]` に `network_access = true` を書くと有効になります。無効のままだと、`/wikicommit-generate <url>` は取得できないソースを保留し 2 件続いた時点で止まり、`/wikicommit-merge` は最初の `gh` の呼び出しで失敗します。
+> - **`.git`** — `workspace-write` のまま `.git` だけを書き込み可能にする設定は、上記のドキュメントからは見つけられていません。残る手段は、Codex が git コマンドの承認を求めたときに都度許可するか、サンドボックスを外すモードで実行するかです。後者はサンドボックスが与える安全性を下げるため、推奨ではなく事実として挙げるに留めます。
+> - **非対話実行（`codex exec`）** — `--ask-for-approval never` では承認が必要なコマンドはプロンプトなしで実行されないため、上の 2 つは実行前に設定で開けておく必要があります。
+>
+> これらの設定は Codex のドキュメントの記述であり、WikiCommit 側では Codex 本体での動作をまだ確認していません。確認でき次第この節を更新します。
+
+### 対応エージェント
+
+| エージェント | 状況 |
+|---|---|
+| Claude Code | **検証済み** — WikiCommit の開発・テストに使っている環境です。 |
+| Codex | **動作する見込み・Codex 本体では未検証** — Skills は agentskills.io 標準に準拠しています。Codex に要る設定は上の注記を参照してください。 |
+| GitHub Copilot — VS Code のエージェントモード | **対象・実機での検証待ち。** ドキュメントによれば `.claude/skills/` を読み、Skill を `/wikicommit-…` で起動し、`disable-model-invocation` を尊重するため、上の Codex の注意点はいずれも当てはまらない見込みです。 |
+| GitHub Copilot CLI | **未検証。** シェルコマンドのたびに承認を求め、Skill の 1 回の実行は数十回のスクリプト呼び出しを行うため、承認の回数は多くなります。それを省く `allowed-tools` は、意図して Skill に書いていません（下記）。 |
+| GitHub Copilot クラウドエージェント | **非対応。** 自分で開く 1 本の PR の中で作業するため、`/wikicommit-merge` はその PR の中から別の PR を作ってマージすることになります。既定のファイアウォールは URL ソースの取得を遮断し、セッションは 59 分が上限です。対応には設定ではなく merge の手順の置き換えが要ります。 |
+
+> **Copilot CLI で承認を減らすかは利用者の判断です。** Copilot CLI は起動時に `copilot --allow-tool='shell(python)'` でコマンドを事前承認でき、WikiCommit のスクリプト呼び出しはこれで通ります。ただし絞れるのはコマンド名までなので `python -c "…"` も承認なしで走り、実質的には、外部ページの本文を読む（`/wikicommit-generate <url>`・`/wikicommit-collect`）セッションに任意のコード実行を許すことになります。Skills 側がこの許可を代わりに出すことはしていません。`--deny-tool='shell(git push)'` を併せると push は止まりますが、`/wikicommit-merge` は PR ブランチを `git push` で送るため、マージの経路ごと止まります。
+>
+> **Copilot だけで使う場合** は `--agent claude-code` のみでインストールしてください。Copilot は `.claude/skills/` と `.agents/skills/` の両方を読むため、両方に Skill が置かれるインストール（Claude Code と Codex を併用する `--copy` インストール、または `--copy` なしで 2 つ以上のエージェントに入れた場合 — 実体が `.agents/skills/` に置かれ `.claude/skills/` からシンボリックリンクされる）では同じ Skill が 2 つずつ見える可能性があります。同名の Skill が 2 つあるとき Copilot がどう扱うかは文書に無く、まだ確認していません。
 
 ### コンテキスト長
 
@@ -135,15 +159,18 @@ npx skills add wikicommit/wikicommit --skill '*' --agent claude-code -y --copy
 git clone --depth 1 https://github.com/wikicommit/wikicommit.git /tmp/wikicommit
 cd /path/to/your-wiki-repo
 bash /tmp/wikicommit/install.sh
+# Codex で使う場合は --agents を付けると .claude/skills/ ではなく .agents/skills/ に入る
 ```
 
 > **`--copy` を推奨する理由**: 2 つ以上のエージェントへ同時にインストールする場合、`npx skills add` は Skill の実体を
 > `.agents/skills/<name>/` に置き、各エージェントのエントリ（`.claude/skills/<name>` を含む）をそこへの相対シンボリック
 > リンクにします。これは WikiCommit では 2 点で問題になります。
 > (1) ホスト → コンテナのファイルシステム境界を越えられません（ホスト側でインストールしてから devcontainer を作成したところ、
-> コンテナ内から Skills が認識されない事象を確認しています）。(2) WikiCommit は `.claude/skills/` を wiki リポジトリに
-> コミットする前提ですが、シンボリックリンクのままコミットすると、`.agents/skills/` も併せてコミットしない限り
-> clone 先でリンク切れになります。`--copy` を付けると `.claude/skills/` 配下が実体ファイルになり、
+> コンテナ内から Skills が認識されない事象を確認しています）。(2) wiki リポジトリにコミットしたシンボリックリンクは、
+> シンボリックリンクを扱えない clone（Windows の既定の `core.symlinks=false`）ではただのテキストファイルになり、
+> そこでは Skills が見えなくなります（それ以外では、シンボリックリンク配置のままコミットしても動きます —
+> `/wikicommit-init` と `/wikicommit-update` は `.claude/` と一緒に `.agents/` と `skills-lock.json` も
+> ステージするため、clone 先でリンク先が無いという状態にはなりません）。`--copy` を付けると `.claude/skills/` 配下が実体ファイルになり、
 > 方法 2（`install.sh`）と同じ配置になります（選択画面で Claude Code のみを選んだ場合は既定でも実体コピーになるため
 > `--copy` は無害な明示指定になります。どちらの場合も付けたままで構いません）。
 >
@@ -173,7 +200,7 @@ Skill が代行するのではなく、人が一度だけ手でたどる設定�
 `/wikicommit-update` のたびに更新されます。このリポジトリの `docs/` に置いていないのは、そこを
 直してもインストール済みの Wiki には永久に届かないためです。
 
-現在あるのは 2 件です。
+現在あるのは 3 件です。
 
 - `applying-entity-policy-to-existing-pages.md` — `.wikicommit/entity-policy.md` を変更した後に
   何をするか。このポリシーはページを生成する最中にしか読まれないため、後からスイッチを変えても
@@ -181,6 +208,9 @@ Skill が代行するのではなく、人が一度だけ手でたどる設定�
   大半は「それでも人の判断に残るもの」についてです。
 - `enabling-comments.md` — 既定で無効な giscus のコメント欄を有効にする手順（前提条件を 1 つでも
   外すと無言で機能しません）。したがって中身が意味を持つのは `--quartz` で初期化した Wiki だけです。
+- `updating-the-quartz-submodule.md` — `quartz/` サブモジュールを新しい Quartz に進める手順。これを
+  行う Skill は無く、ビルドが `quartz/` の中に残す変更のせいで素の `git pull` が止まります。更新は
+  任意で、公開サイトは記録したコミットのまま動き続けます。
 
 **このディレクトリはあなたのものではなく WikiCommit のものです** — 更新のたびに上書きされ、
 自分で置いたファイルは `/wikicommit-status` が孤児として報告し `/wikicommit-update` が削除を

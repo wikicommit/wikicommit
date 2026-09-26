@@ -16,11 +16,6 @@ Issue #577 はこのファイルを「利用者が前回インストールした
 `tests/test_version_sync.py`（`_version.py` と `plugin.json` の版の一致）と同じ
 「生成スクリプト化ではなく内容一致を CI で強制する」軽量パターンを採る。
 
-`CHANGELOG_ja.md`（ルートのみ）はこの同期の対象外である (Issue #772)。正本は英語の
-`CHANGELOG.md` で、日本語版は `README_ja.md` と同じ「読みやすさのための便宜」に留まり、
-機械が読む対象ではないためドリフトを許容する — 同期を強制すると、配布されず誰も
-機械的に読まないファイルのために全エントリの逐語訳が必須になる。
-
 Issue #801 で `CHANGELOG.md` は「最新の 1 版 + 過去版の索引」になり、確定した過去の版は
 `changelog/<version>.md` へ移った。**この同期は対を列挙して持たず走査で行う** — 版を
 1 つ足すたびにファイルが 1 つ増えるため、リストで持つとリリースのたびに更新箇所が
@@ -31,11 +26,8 @@ Issue #801 で `CHANGELOG.md` は「最新の 1 版 + 過去版の索引」に�
 
 from pathlib import Path
 
-from _publication import skip_unless_development_repository
-
 REPO_ROOT = Path(__file__).parent.parent
 ROOT_CHANGELOG = REPO_ROOT / "CHANGELOG.md"
-JA_CHANGELOG = REPO_ROOT / "CHANGELOG_ja.md"
 SKILL_CHANGELOG = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "CHANGELOG.md"
 ROOT_ARCHIVE = REPO_ROOT / "changelog"
 SKILL_ARCHIVE = SKILL_CHANGELOG.parent / "changelog"
@@ -103,28 +95,6 @@ def test_the_header_forbids_development_repository_paths():
     assert "Do not write `docs/`, `Issues/`, or `dev/` paths in this file." in text
 
 
-def test_the_japanese_edition_exists_and_states_it_is_not_canonical():
-    """日本語版はドリフトを許容する（同期テストを掛けない）が、そのことを読む人が
-    知らなければ、古い内容を正本と取り違える。位置づけの明示だけは強制する (Issue #772)。
-
-    `CHANGELOG_ja.md` は正本でも配布物でもないため公開スナップショットには出さない
-    （dev/publication-scope.md §3）。下の test_the_japanese_edition_is_not_distributed
-    とは向きが逆で、あちらは「Skill ツリーに置かれていないこと」を公開側でも確かめられる
-    （Issue #788）。"""
-    skip_unless_development_repository("CHANGELOG_ja.md")
-    assert JA_CHANGELOG.is_file()
-    text = JA_CHANGELOG.read_text(encoding="utf-8")
-    assert "`CHANGELOG.md`（英語）の日本語版です" in text
-    assert "正本は英語版" in text
-
-
-def test_the_japanese_edition_is_not_distributed():
-    """install.sh も npx skills add も Skill ディレクトリ配下しか運ばない。日本語版を
-    そこへ置くとファイルが 4 つになり、ドリフトを許容したファイルが利用者へ届く
-    （/wikicommit-update が読むのは英語版である） (Issue #772)。"""
-    assert not (SKILL_CHANGELOG.parent / "CHANGELOG_ja.md").exists()
-
-
 def test_the_canonical_changelog_is_written_in_english():
     """配布物の中で CHANGELOG だけが日本語という状態に戻さない (Issue #772)。
     日本語のリテラル（メッセージ本文・タグ・ページタイトルの例）は引用として現れうるため、
@@ -156,7 +126,6 @@ def test_the_canonical_changelog_is_written_in_english():
                 offenders.append((path.name, lines[0][:80], len(japanese), len(lines)))
 
     assert not offenders, (
-        "CHANGELOG に日本語で書かれた箇所があります。正本は英語です "
-        "（日本語版は CHANGELOG_ja.md）: "
+        "CHANGELOG に日本語で書かれた箇所があります。正本は英語です: "
         + "; ".join(f"{name}: {head!r} ({jp}/{total} 行)" for name, head, jp, total in offenders)
     )

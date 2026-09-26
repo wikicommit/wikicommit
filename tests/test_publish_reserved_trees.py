@@ -107,3 +107,56 @@ def test_tags_and_assets_are_deliberately_absent():
     """
     assert "tags" not in RESERVED
     assert "assets" not in RESERVED
+
+
+# --- `View` is reserved too, but it is not one of RESERVED_PUBLISH_TREES (Issue #981) ---
+#
+# It belongs to a different layer: RESERVED_PUBLISH_TREES lists what convert_wikilinks.py
+# writes directly under `content/`, while View sits under `content/<lang>/`. What the two
+# share is the failure mode this file exists for — a reserved name the publish plugins have
+# to know by literal — and View arrived with a spelling defect the whole category is prone to.
+#
+# Issue #946 added the View tier to explorer's sortTier() as `"View"` and **it never fired
+# once in production**. The comparison is against the *published slug*, and Quartz lowercases
+# every segment (the rule convert_wikilinks.py's own _quartz_slugify_segment() ports, ending
+# in `.lower()`): contentIndex.json holds slug "en/view/index" for filePath "en/View/index.md".
+# `sources` and `overview` were right only by luck — both come from lowercase directory-name
+# constants — whereas View comes from VIEW_TYPE_SEGMENT, which follows the PascalCase
+# Type-naming convention. The unit tests stayed green because they build nodes by hand and
+# happened to spell them the same wrong way.
+#
+# The same limits as the tests above apply: this is a grep, it does not check that the tier is
+# correct, and it does not look at `dist/`.
+
+def _view_segment() -> str:
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        spec = importlib.util.spec_from_file_location("_wikilink", SCRIPTS / "_wikilink.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(SCRIPTS))
+    return module.VIEW_TYPE_SEGMENT
+
+
+EXPLORER_SOURCES = tuple(p for p in PLUGIN_SOURCES if "wikicommit-explorer" in p.parts)
+
+
+def test_the_view_segment_is_matched_in_explorer_by_its_published_spelling():
+    """Lowercase, because that is what reaches the browser — never `VIEW_TYPE_SEGMENT` as-is."""
+    segment = _view_segment()
+    published = segment.lower()
+    assert published != segment, (
+        "VIEW_TYPE_SEGMENT is no longer PascalCase, so this test no longer proves anything; "
+        "re-derive what the published slug looks like before deleting it."
+    )
+    for source in EXPLORER_SOURCES:
+        text = source.read_text(encoding="utf-8")
+        assert f'=== "{published}"' in text, (
+            f"{source} does not compare a slug segment against '{published}'. "
+            "The explorer sorts on the published slug, which Quartz lowercases."
+        )
+        assert f'=== "{segment}"' not in text, (
+            f"{source} compares a slug segment against '{segment}'. That is the on-disk "
+            "spelling; it never appears in a slug, so the branch is dead (Issue #981)."
+        )

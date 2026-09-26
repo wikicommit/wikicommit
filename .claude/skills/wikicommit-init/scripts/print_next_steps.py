@@ -31,6 +31,23 @@ from pathlib import Path
 
 import _root_outputs
 
+
+def _templates_display() -> str:
+    """Where this Skill's templates are, as the reader would type it from the repository root.
+
+    Taken from this file's own location rather than written as `.claude/skills/...`:
+    the Skills may be installed under `.agents/skills/` instead (Issue #1021), and a path
+    printed for a human to copy has to be the one that exists.
+    """
+    templates = Path(__file__).resolve().parent / "templates"
+    try:
+        return templates.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return templates.as_posix()
+
+
+_TEMPLATES = _templates_display()
+
 QUARTZ_STATUSES = [
     "fully_set_up",
     "npm_install_completed_fully_set_up",
@@ -81,12 +98,18 @@ _PREVIEW_STEP = (
     "   (Settings > Privacy & Security > For developers) or running as Administrator; without\n"
     "   one of those, the wikicommit-* plugins (JSON-LD, Explorer, banner, language switcher,\n"
     "   breadcrumbs, sources) silently fail to load into the preview. This is unrelated to\n"
-    "   prebuild-symlinks.cjs (Issue #273), which only handles quartz/content and\n"
+    "   prebuild-symlinks.cjs, which only handles quartz/content and\n"
     "   quartz/quartz.config.yaml and needs no such privilege (directory junction + file-copy\n"
-    "   fallback). Either way (symlink or the file-copy fallback), `git status` inside the\n"
-    "   quartz/ submodule may show these as untracked/modified — this is expected and\n"
-    "   harmless: `git add quartz` from the repo root only records the submodule's commit\n"
-    "   pointer, never these generated build artifacts, so there is nothing to clean up."
+    "   fallback).\n"
+    "\n"
+    "   On every platform, building writes into the quartz/ submodule: quartz/content and\n"
+    "   quartz/quartz.config.yaml, the installed plugins, and a change to the tracked\n"
+    "   quartz/package-lock.json (from the `npm install` that `postinstall` runs there).\n"
+    "   This is WikiCommit's build, not your editing, and it never reaches your history —\n"
+    "   `git add quartz` records only the submodule's commit pointer. The one time it\n"
+    "   matters is updating Quartz itself: `git pull` inside quartz/ stops on that\n"
+    "   package-lock.json change. .wikicommit/guides/updating-the-quartz-submodule.md has\n"
+    "   the steps (updating is optional; the published site keeps the recorded commit)."
 )
 
 _LYCHEE_STEP = (
@@ -219,7 +242,9 @@ _ABSENT_PATHSPEC_CAVEAT = (
 )
 
 
-def build_selective_add_note(variant: str, vocab_cache_created: bool, repo_root: Path | None = None) -> str:
+def build_selective_add_note(
+    variant: str, vocab_cache_created: bool, repo_root: Path | None = None, readme_created: bool = False
+) -> str:
     """The note under the printed `git add -A`, in whichever of its two shapes applies.
 
     Reads the repository's `.gitignore` rather than taking a "did this run write it" flag, for
@@ -240,7 +265,7 @@ def build_selective_add_note(variant: str, vocab_cache_created: bool, repo_root:
         missing = ["WikiCommit's own ignore patterns (the shipped template could not be read)"]
     template = _SELECTIVE_ADD_NOTE_MISSING if missing else _SELECTIVE_ADD_NOTE_READY
     return template.format(
-        git_add=build_git_add(variant, vocab_cache_created),
+        git_add=build_git_add(variant, vocab_cache_created, readme_created),
         absent_caveat=build_absent_pathspec_caveat(variant),
         # Wrapped rather than joined into one line: a repository whose `.gitignore` is missing
         # every pattern lists ten or more of them, and every other line of this guidance is
@@ -274,19 +299,19 @@ def build_absent_pathspec_caveat(variant: str) -> str:
     )
 
 _QUARTZ_PAGES_EXTRA_FILES = (
-    "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"
+    "`.github/workflows/review-issue-close-sync.yml` (needed for the tracking-Issue\n"
     "   review flow, regardless of the Quartz choice), `.github/ISSUE_TEMPLATE/report.md`\n"
-    '   (Issue #339 — backs the wikicommit-banner report link, which otherwise silently\n'
+    '   (backs the wikicommit-banner report link, which otherwise silently\n'
     "   no-ops), and the root-level publishing configuration files "
 )
 _QUARTZ_ONLY_EXTRA_FILES = (
-    "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"
+    "`.github/workflows/review-issue-close-sync.yml` (needed for the tracking-Issue\n"
     "   review flow, regardless of the Quartz choice), `.github/ISSUE_TEMPLATE/report.md`\n"
-    '   (Issue #339 — backs the wikicommit-banner report link, which otherwise silently\n'
+    '   (backs the wikicommit-banner report link, which otherwise silently\n'
     "   no-ops), and the root-level local-build configuration files "
 )
 _NONE_EXTRA_FILES = (
-    "`.github/workflows/review-issue-close-sync.yml` (Issue #313 — needed for the tracking-Issue\n"
+    "`.github/workflows/review-issue-close-sync.yml` (needed for the tracking-Issue\n"
     "   review flow), and the quality gate configuration files "
 )
 
@@ -320,7 +345,7 @@ _GIT_ADD_INDENT = "     "
 _GIT_ADD_WIDTH = 96
 
 
-def build_git_add(variant: str, vocab_cache_created: bool) -> str:
+def build_git_add(variant: str, vocab_cache_created: bool, readme_created: bool = False) -> str:
     """Render `git add <paths>`, wrapping with backslash continuations.
 
     The wrapping is cosmetic; `_root_outputs.git_add_paths()` owns which paths
@@ -328,7 +353,9 @@ def build_git_add(variant: str, vocab_cache_created: bool) -> str:
     """
     lines: list[str] = []
     current = "git add"
-    for path in _root_outputs.git_add_paths(variant, vocab_cache_created=vocab_cache_created):
+    for path in _root_outputs.git_add_paths(
+        variant, vocab_cache_created=vocab_cache_created, readme_created=readme_created
+    ):
         candidate = f"{current} {path}"
         # `current == "git add"` is the only state that must never be flushed on its own:
         # a path longer than the width would otherwise produce a line holding just the prefix.
@@ -382,14 +409,15 @@ _README_STEP_NO_URL = (
 # not generated from the directory, and `tests/test_guides_tree.py` fails until it matches.
 _GUIDES_STEP = (
     "Longer how-to walkthroughs live in `.wikicommit/guides/` — one per task, written for a\n"
-    "   person rather than for an agent, and refreshed by later inits. Two so far:\n"
+    "   person rather than for an agent, and refreshed by later inits. Three so far:\n"
     "   `applying-entity-policy-to-existing-pages.md` (what to do after changing\n"
     "   `.wikicommit/entity-policy.md`, since the policy is read only while a page is being\n"
-    "   generated) and `enabling-comments.md` (turning on the giscus comment box, which is off\n"
-    "   by default — `--quartz` wikis only)."
+    "   generated), `enabling-comments.md` (turning on the giscus comment box, which is off\n"
+    "   by default — `--quartz` wikis only) and `updating-the-quartz-submodule.md` (moving\n"
+    "   `quartz/` to a newer Quartz — optional, and `--quartz` wikis only)."
 )
 
-_LICENSING_STEP = (
+_LICENSING_STEP_HEAD = (
     "Decide how this repository is licensed — nothing was generated for you (a WikiCommit repo\n"
     "   mixes code with content derived from third-party sources, and those sources' terms can\n"
     "   differ page by page, so no single LICENSE file would be correct). Two separate questions,\n"
@@ -400,22 +428,42 @@ _LICENSING_STEP = (
     "     from. Record each source's terms in the management file's `source.license` field; that\n"
     "     value is copied onto every page generated from it and shown next to that source on the\n"
     "     published site, together with a standing notice that the page adapts its sources.\n"
-    "   • README.md: consider adding a short section saying the same two things, so that someone\n"
-    "     who clones or browses the repository sees it before reaching a page. Nothing is written\n"
-    "     for you here either — README.md is yours to edit. Something like: \"Code in this\n"
-    "     repository and the wiki content it publishes are licensed separately. Page content is\n"
-    "     derived from the sources listed on each page; terms differ per source and no single\n"
-    "     license covers the wiki as a whole. See each page's sources for its terms.\"\n"
+)
+_LICENSING_STEP_TAIL = (
     "   WikiCommit records and displays what you tell it — it does not determine what a source's\n"
     "   terms are, nor whether they permit republishing. That judgment is yours."
 )
+
+
+def build_licensing_step(readme_created: bool) -> str:
+    """The licensing step, with the README bullet only when the README was already there.
+
+    When init created README.md (Issue #1034) it wrote the licensing section itself, from the
+    same `_root_outputs.README_LICENSE_TEXT` this bullet quotes — so offering it again would
+    say the same thing twice. When the README was already there, init did not touch it
+    (Issue #282), and this bullet is still the only place that wording reaches the user.
+    """
+    if readme_created:
+        return _LICENSING_STEP_HEAD + _LICENSING_STEP_TAIL
+    readme_bullet = textwrap.fill(
+        "• README.md: consider adding a short section saying the same two things, so that "
+        "someone who clones or browses the repository sees it before reaching a page. Nothing "
+        "is written for you here either — README.md is yours to edit. Something like: "
+        f"\"{_root_outputs.README_LICENSE_TEXT}\"",
+        width=95,
+        initial_indent="   ",
+        subsequent_indent="     ",
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return _LICENSING_STEP_HEAD + readme_bullet + "\n" + _LICENSING_STEP_TAIL
 
 _QUARTZ_ONLY_TRAILING_NOTE = (
     "Note: automatic GitHub Pages publishing was not set up (you did not opt into `--quartz-pages`),\n"
     "so the wiki stays local/preview-only for now — merges to main do not publish anywhere. To add\n"
     "automatic publishing later, re-run `wikicommit-init` and answer Y to the GitHub Pages\n"
     "confirmation, or manually copy\n"
-    "`.claude/skills/wikicommit-init/scripts/templates/workflows/deploy.yml` to\n"
+    f"`{_TEMPLATES}/workflows/deploy.yml` to\n"
     "`.github/workflows/deploy.yml` and enable Settings → Pages → Source: GitHub Actions."
 )
 
@@ -423,7 +471,7 @@ _PACKAGE_JSON_SKIPPED_WARNING = (
     "⚠️ package.json already existed in this repository, so WikiCommit's Quartz build scripts\n"
     '   ("build" / "preview") and devDependencies were not added to it (init.py never overwrites an\n'
     '   existing package.json). Merge the "scripts" and\n'
-    '   "devDependencies" from .claude/skills/wikicommit-init/scripts/templates/package.json into\n'
+    f'   "devDependencies" from {_TEMPLATES}/package.json into\n'
     "   your package.json by hand before running /wikicommit-serve."
 )
 
@@ -435,11 +483,11 @@ _PAGES_FALLBACK = (
 
 _ACTIONS_PR_PERMISSION_ENABLED = (
     '✅ "Allow GitHub Actions to create and approve pull requests" is enabled (needed for the\n'
-    "   review-issue-close-sync.yml auto-merge flow, Issue #313)."
+    "   review-issue-close-sync.yml auto-merge flow)."
 )
 _ACTIONS_PR_PERMISSION_FALLBACK = (
     "⚠️ Could not confirm \"Allow GitHub Actions to create and approve pull requests\" is enabled.\n"
-    "   Without it, review-issue-close-sync.yml's auto-merge step will fail (Issue #403) the first\n"
+    "   Without it, review-issue-close-sync.yml's auto-merge step will fail the first\n"
     "   time a reviewer closes a tracking Issue. Enable it manually:\n"
     "   Settings → Actions → General → Workflow permissions → check \"Allow GitHub Actions to\n"
     "   create and approve pull requests\""
@@ -468,6 +516,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--install-plugins-status", choices=["ok", "failed"])
     parser.add_argument("--pages-html-url")
     parser.add_argument("--vocab-cache-created", action="store_true")
+    # Pass when init.py printed `CREATED: README.md` (Issue #1034). That README already
+    # carries the licensing section and, under --quartz-pages, the published-site link, so the
+    # guidance that suggests adding them is dropped; and the selective `git add` list names
+    # README.md only then — a README that was already there may hold the user's own edits.
+    parser.add_argument("--readme-created", action="store_true")
     # The repository this guidance is about. init.py takes the same flag, and the note under
     # the printed `git add -A` now reads that repository's `.gitignore` — so if the two are
     # handed different roots they answer about different files, which is exactly the
@@ -477,7 +530,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_commit_step(variant: str, vocab_cache_created: bool, repo_root: Path | None = None) -> str:
+def build_commit_step(
+    variant: str, vocab_cache_created: bool, repo_root: Path | None = None, readme_created: bool = False
+) -> str:
     # .wikicommit/schemaorg-vocab.json (Issue #319) is committed like any other WikiCommit
     # output, but it is only ever created when a type-proposal step actually ran and hit the
     # network — listing it unconditionally would make this printed `git add` fail outright
@@ -487,7 +542,7 @@ def build_commit_step(variant: str, vocab_cache_created: bool, repo_root: Path |
     # _root_outputs.py carries that condition, so it is passed through rather than handled here.
     # Since Issue #842 the condition only governs the selective fallback list below; the default
     # `git add -A` needs no such special case, because a file that is not there is simply not staged.
-    selective_note = build_selective_add_note(variant, vocab_cache_created, repo_root)
+    selective_note = build_selective_add_note(variant, vocab_cache_created, repo_root, readme_created)
     if variant == "none":
         return _COMMIT_STEP_INTRO.format(
             extra_files=_NONE_EXTRA_FILES,
@@ -553,6 +608,13 @@ def build_announcements(args: argparse.Namespace) -> list[str]:
     return announcements
 
 
+# The steps below name Skills the way Claude Code invokes them (`/wikicommit-…`). Codex
+# invokes a Skill with `$` instead (`/skills` there only opens the list), so the one
+# place this guidance reaches a person says so once, rather than every step carrying
+# two spellings (Issue #1015).
+_INVOCATION_NOTE = "(Commands below are written /wikicommit-…; in Codex, type $wikicommit-… instead.)"
+
+
 def build_steps(args: argparse.Namespace) -> list[str]:
     steps: list[str] = []
     if args.variant != "none":
@@ -565,16 +627,23 @@ def build_steps(args: argparse.Namespace) -> list[str]:
         steps.append(_LYCHEE_STEP)
     if not args.markitdown_installed:
         steps.append(_MARKITDOWN_STEP)
-    steps.append(build_commit_step(args.variant, args.vocab_cache_created, Path(args.repo_root)))
+    steps.append(
+        build_commit_step(args.variant, args.vocab_cache_created, Path(args.repo_root), args.readme_created)
+    )
     steps.append(_REGISTER_STEP)
     steps.append(_MERGE_STEP_PAGES if args.variant == "quartz_pages" else _MERGE_STEP_PLAIN)
+    # A README init created in this run already carries the link when a URL was obtained, so
+    # suggesting it again would repeat it. Without a URL, `--finish-readme` removed the marker and
+    # the README has no link — the "once you enable Pages manually" reminder is still the only
+    # place the user learns to add one, so it stays regardless of who wrote the README.
     if args.variant == "quartz_pages":
         if args.pages_html_url:
-            steps.append(_README_STEP_WITH_URL.format(html_url=args.pages_html_url))
+            if not args.readme_created:
+                steps.append(_README_STEP_WITH_URL.format(html_url=args.pages_html_url))
         else:
             steps.append(_README_STEP_NO_URL)
     steps.append(_GUIDES_STEP)
-    steps.append(_LICENSING_STEP)
+    steps.append(build_licensing_step(args.readme_created))
     return steps
 
 
@@ -586,6 +655,8 @@ def render(args: argparse.Namespace) -> str:
     lines.append("✅ WikiCommit initialization complete.")
     lines.append("")
     lines.append("Next steps:")
+    lines.append(_INVOCATION_NOTE)
+    lines.append("")
     for i, step in enumerate(build_steps(args), start=1):
         prefix = f"{i}. "
         # Every step embeds its own 3-space continuation indent, which lines up under

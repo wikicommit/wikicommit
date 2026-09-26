@@ -28,14 +28,25 @@ interface D3Config {
     maxDegree?: number;
     /** Language codes to show. Empty means every language. */
     langs?: string[];
-    /** Type names to show, as they appear in the published path — that is `type:`
-     *  minus `schema:`, with a custom type's leading `custom/` dropped as
-     *  publishing drops it (Issue #576): `schema:custom/Decision` is `Decision`
-     *  here. The `custom/Decision` spelling is accepted too. Empty means every
-     *  type. */
+    /** Type names to show, written the way `type:` writes them minus `schema:` —
+     *  `Person`, `Decision`, `custom/Decision`. Matched against the node id's
+     *  **lowercased** slug segment without regard to case (Issue #1005), and a
+     *  custom type matches with or without its leading `custom/`, which
+     *  publishing drops (Issue #576). So `Person` and `person` select the same
+     *  pages. Empty means every type. */
     types?: string[];
     /** Show the content/sources/ tree. */
     showSources?: boolean;
+    /** Show the build-generated entity index pages — a `<lang>/<Type>` type index
+     *  or a `<lang>` language root. Defaults to **false**, the opposite of
+     *  `showSources` / `showTags`, because these are navigation rather than pages
+     *  a reader linked to: on `ai-driven-dev-wiki`, `en/definedterm` alone drew
+     *  214 links (Issue #983). The root index is not covered — see
+     *  `GraphFilterConfig.showIndexes`.
+     *
+     *  No control bar item writes this key; it is set here or in
+     *  `quartz.config.yaml`. Exposing it in the bar is Issue #985's. */
+    showIndexes?: boolean;
 }
 interface GraphOptions {
     localGraph?: Partial<D3Config>;

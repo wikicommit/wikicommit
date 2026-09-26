@@ -314,3 +314,117 @@ def test_collision_suffix_still_orders_chronologically():
     ]
     # Guard the premise: plain lexical order really does get this wrong.
     assert sorted(names)[0] == "20260905-113550-ai-2.md"
+
+
+# --- the stamp is clamped so records keep the order they were written in (#991) -------
+
+def test_a_backwards_clock_step_cannot_reorder_two_records(tmp_path):
+    """Which review is current is decided by filename order, and that order came
+    straight from `datetime.now()` — which is not monotonic. A container whose clock
+    is stepped backwards by its host (measured on WSL2: four steps of 0.49-0.58s in
+    24 seconds) hands two records written in sequence timestamps in the opposite
+    order, and then `standing_review()` reads the *older* one as current.
+
+    Driven at the allocator rather than through the CLI because the failure needs a
+    clock that misbehaves; passing the earlier stamp in directly is the same input
+    the stepped clock would have produced, without having to reproduce the step.
+    """
+    from record_review import allocate_record_path
+
+    directory = tmp_path / "records"
+    directory.mkdir()
+    first = allocate_record_path(directory, "20260921-153046", "ai")
+    first.write_text("---\n---\n", encoding="utf-8")
+
+    # The clock has gone back across a second boundary since `first` was written.
+    second = allocate_record_path(directory, "20260921-153045", "ai")
+
+    assert record_sort_key(second) > record_sort_key(first), (
+        f"{second.name} must still sort after {first.name}"
+    )
+
+
+def test_the_clamp_says_that_it_happened(tmp_path, capsys):
+    """A clamped record's filename is older than the instant it was written. That is
+    the price of keeping the order right, and it is stated rather than absorbed —
+    there is no later moment to notice it in, since records are immutable (#750)."""
+    from record_review import allocate_record_path
+
+    directory = tmp_path / "records"
+    directory.mkdir()
+    allocate_record_path(directory, "20260921-153046", "ai").write_text("x", encoding="utf-8")
+    capsys.readouterr()
+
+    allocate_record_path(directory, "20260921-153045", "ai")
+
+    assert "older than the newest record already here" in capsys.readouterr().err
+
+
+def test_a_forward_clock_is_left_alone(tmp_path, capsys):
+    """The clamp must only engage on an inversion. Firing on the normal case would
+    pin every record in a directory to its first stamp."""
+    from record_review import allocate_record_path
+
+    directory = tmp_path / "records"
+    directory.mkdir()
+    allocate_record_path(directory, "20260921-153045", "ai").write_text("x", encoding="utf-8")
+    capsys.readouterr()
+
+    later = allocate_record_path(directory, "20260921-153046", "ai")
+
+    assert later.name == "20260921-153046-ai.md"
+    assert capsys.readouterr().err == ""
+
+
+def test_a_hand_written_record_does_not_decide_where_the_next_one_sorts(tmp_path):
+    """The record tree is meant to be human-writable (#750), so a file whose name
+    `record_sort_key()` cannot parse can be sitting in the directory. It sorts on its
+    own name and stays visible — but it must not be read as a stamp and clamp every
+    machine record after it."""
+    from record_review import allocate_record_path
+
+    directory = tmp_path / "records"
+    directory.mkdir()
+    (directory / "notes-from-the-reviewer.md").write_text("x", encoding="utf-8")
+
+    path = allocate_record_path(directory, "20260921-153045", "ai")
+
+    assert path.name == "20260921-153045-ai.md"
+
+
+def test_a_clamped_record_of_another_kind_still_sorts_after(tmp_path):
+    """The clamp has to survive the case the tree is actually shaped like: a page's
+    directory holds `ai` records from Pass 4 and `human` records from the tracking
+    Issue (§4.8's own example). `kind` is not part of `record_sort_key()`, so
+    allocating by "is this filename free" would put the clamped human record at
+    `<stamp>-human.md` — *equal* to the ai record rather than after it. `load_records()`
+    sorts stably, so equal keys hand `standing_review()` back to `glob()` order, which
+    is the arbitrary answer the clamp exists to remove."""
+    from record_review import allocate_record_path
+
+    directory = tmp_path / "records"
+    directory.mkdir()
+    machine = allocate_record_path(directory, "20260921-153046", "ai")
+    machine.write_text("x", encoding="utf-8")
+
+    human = allocate_record_path(directory, "20260921-153045", "human")
+
+    assert record_sort_key(human) > record_sort_key(machine), (
+        f"{human.name} must sort after {machine.name}, not tie with it"
+    )
+
+
+def test_a_stamp_shaped_but_bogus_name_does_not_pin_the_directory(tmp_path):
+    """`record_sort_key()` checks that the first two segments are digits but not how
+    many, so `99-99-ai.md` parses. `max()` over stamps is a string comparison, so
+    such a name would sort above every real stamp and clamp every record written
+    afterwards onto it — forever, since records are immutable (#750)."""
+    from record_review import allocate_record_path
+
+    directory = tmp_path / "records"
+    directory.mkdir()
+    (directory / "99-99-ai.md").write_text("x", encoding="utf-8")
+
+    path = allocate_record_path(directory, "20260921-153045", "ai")
+
+    assert path.name == "20260921-153045-ai.md"

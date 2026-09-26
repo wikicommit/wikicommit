@@ -2437,6 +2437,177 @@ def test_overview_hub_section_ranks_pages_by_backlink_count(tmp_path):
     assert "被リンク数: 0" not in out
 
 
+def test_overview_hub_row_carries_the_source_count_with_its_caption(tmp_path):
+    """Issue #990: a hub standing on one document must not be invisible, and the
+    number is captioned so it does not read as a verdict."""
+    build_overview_fixture(tmp_path)
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    # A manual source is still a source.
+    assert "- [東京](../ja/Place/tokyo.md) — 被リンク数: 1 / 情報源: 1" in out
+    assert "独立した裏付けの数ではありません" in out
+    assert "構造上 1 件になります" in out
+    assert out.index("## 知識の中心") < out.index("独立した裏付けの数ではありません") < out.index("- [東京]")
+
+
+def test_overview_hub_row_omits_the_source_count_for_a_translation(tmp_path):
+    """Issue #990: a translation inherits its sources, so 0 would read as "no
+    source" — the field is dropped instead."""
+    write_config(tmp_path, primary_lang="ja")
+    write_page(
+        tmp_path, "en", "Place", "tokyo",
+        "---\ntitle: Tokyo\nlang: en\ntype: schema:Place\n"
+        "translated_from: .wikicommit/entity/ja/Place/tokyo.md\n---\n\nBody.\n",
+    )
+    write_page(
+        tmp_path, "ja", "Person", "taro",
+        "---\ntitle: 太郎\nlang: ja\ntype: schema:Person\nsources:\n  - type: url\n"
+        "    url: https://a.example/1\n    hash: sha256:a\n  - type: url\n"
+        "    url: https://b.example/2\n    hash: sha256:b\n---\n\n[[Place/tokyo]]\n",
+    )
+    write_page(tmp_path, "ja", "Person", "jiro", "---\ntitle: 次郎\nlang: ja\ntype: schema:Person\n---\n\n[[Person/taro]]\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    assert "- [Tokyo](../en/Place/tokyo.md) — 被リンク数: 1\n" in out
+    assert "- [太郎](../ja/Person/taro.md) — 被リンク数: 1 / 情報源: 2" in out
+    assert "情報源: 0" not in out
+
+
+def test_overview_labels_for_every_language_carry_the_source_count_keys():
+    """Issue #990: labels are read by bracket access, so a language missing the
+    new keys fails the build with KeyError."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    import convert_wikilinks as cw
+    for labels in [cw.DEFAULT_OVERVIEW_LABELS, *cw.OVERVIEW_LABELS.values()]:
+        assert labels["sources_count"] and labels["sources_count_note"]
+        # A distinct key from the `## Sources` heading (Issue #664 / #751).
+        assert labels["sources_count"] != labels["sources"]
+
+
+def _concentration_page(root, slug, title, sources_yaml, links=""):
+    write_page(
+        root, "ja", "DefinedTerm", slug,
+        f"---\ntitle: {title}\nlang: ja\ntype: schema:DefinedTerm\n{sources_yaml}---\n\n{links}\n",
+    )
+
+
+def _one_source(url):
+    return f"sources:\n  - type: url\n    url: {url}\n    hash: sha256:a\n"
+
+
+def build_concentration_fixture(root: Path, shared_hubs: int = 2) -> None:
+    """Issue #1006: `shared_hubs` hubs stand on the same one arXiv paper, one hub
+    on another paper alone, and one hub on that paper plus a second source."""
+    write_config(root, primary_lang="ja")
+    paper = "https://arxiv.org/pdf/2509.06216"
+    hubs = []
+    for i in range(shared_hubs):
+        _concentration_page(root, f"shared{i}", f"共有{i}", _one_source(paper))
+        hubs.append(f"shared{i}")
+    _concentration_page(root, "alone", "単独", _one_source("https://other.example/x"))
+    _concentration_page(
+        root, "multi", "複数",
+        "sources:\n  - type: url\n    url: https://arxiv.org/pdf/2509.06216\n    hash: sha256:a\n"
+        "  - type: url\n    url: https://other.example/y\n    hash: sha256:b\n",
+    )
+    hubs += ["alone", "multi"]
+    # One linking page makes every hub a hub (backlink 1).
+    _concentration_page(
+        root, "linker", "リンク元", _one_source("https://linker.example/z"),
+        " ".join(f"[[DefinedTerm/{h}]]" for h in hubs),
+    )
+    write_source(
+        root, "url/arxiv.org/pdf-2509.06216.md",
+        "---\nsource:\n  type: url\n  url: https://arxiv.org/pdf/2509.06216\n  hash: sha256:a\n"
+        "status: generated\ngenerated_pages: []\n---\n\n## Summary\n\nS.\n",
+    )
+
+
+def test_overview_reports_one_source_shared_by_two_hubs(tmp_path):
+    """Issue #1006. The pilot measurement this indicator exists for:
+    `ai-driven-dev-wiki` (2026-09-18, 205 pages) had 12 single-source hubs in its
+    top 20, 7 of them the same arXiv paper — each row read "sources: 1" and
+    nothing said it was the same one."""
+    build_concentration_fixture(tmp_path)
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    assert "上位 4 件のうち、次の情報源だけに立つもの:" in out
+    assert (
+        "- [https://arxiv.org/pdf/2509.06216](../sources/url/arxiv.org/pdf-2509.06216.md) — 2 件"
+        in out
+    )
+    # Said as a report, not a verdict, with the two legitimate shapes named.
+    assert "判定ではありません" in out
+    assert "1 つの文書を主題とする Wiki" in out
+    # A lone single-source hub is not a concentration, and a multi-source hub is
+    # not counted even though it cites the shared paper.
+    assert "https://other.example/x" not in out
+    # The section stays the hubs section: no new heading was added.
+    hubs_at = out.index("## 知識の中心")
+    assert hubs_at < out.index("上位 4 件のうち") < out.index("## 型別の傾向")
+
+
+def test_overview_reports_nothing_when_no_source_holds_two_hubs(tmp_path):
+    build_concentration_fixture(tmp_path, shared_hubs=1)
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    assert "次の情報源だけに立つもの" not in out
+    assert "判定ではありません。ある文書" not in out
+
+
+def test_overview_concentration_ignores_translations_and_falls_back_to_plain_text(tmp_path):
+    """A translation carries no source identity (it inherits), so it is outside
+    the count; an identity with no source page is written as plain text."""
+    write_config(tmp_path, primary_lang="ja")
+    for slug in ("a", "b"):
+        write_page(
+            tmp_path, "en", "Place", slug,
+            f"---\ntitle: {slug}\nlang: en\ntype: schema:Place\n"
+            f"translated_from: .wikicommit/entity/ja/Place/{slug}.md\n---\n\nBody.\n",
+        )
+    for slug in ("c", "d"):
+        _concentration_page(tmp_path, slug, slug, _one_source("https://nopage.example/p"))
+    _concentration_page(
+        tmp_path, "linker", "L", _one_source("https://l.example/"),
+        "[[Place/a]] [[Place/b]] [[DefinedTerm/c]] [[DefinedTerm/d]]",
+    )
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    assert "- https://nopage.example/p — 2 件" in out
+    assert "](../en/Place" not in out.split("上位")[-1]
+
+
+def test_overview_labels_for_every_language_carry_the_concentration_keys():
+    """Issue #1006: bracket access means a language missing a key fails the
+    build with KeyError."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    import convert_wikilinks as cw
+    for labels in [cw.DEFAULT_OVERVIEW_LABELS, *cw.OVERVIEW_LABELS.values()]:
+        assert "{n}" in labels["hub_concentration"]
+        assert "{n}" in labels["hub_concentration_count"]
+        assert labels["hub_concentration_note"]
+
+
+def test_overview_concentration_in_english(tmp_path):
+    build_concentration_fixture(tmp_path)
+    write_config(tmp_path, primary_lang="en")
+    for p in (tmp_path / "entity" / "ja").rglob("*.md"):
+        dest = tmp_path / "entity" / "en" / p.relative_to(tmp_path / "entity" / "ja")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(p.read_text(encoding="utf-8").replace("lang: ja", "lang: en"), encoding="utf-8")
+        p.unlink()
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    assert "Of the top 4, these stand on one source alone:" in out
+    assert "— 2 hubs" in out
+
+
 def test_overview_by_type_table_reports_counts_reviewed_avg_backlinks_and_orphans(tmp_path):
     build_overview_fixture(tmp_path)
     assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
@@ -2479,6 +2650,63 @@ def test_overview_source_breakdown_counts_type_status_host_and_cross_tab(tmp_pat
     # www. is stripped so one publisher cannot split into two rows.
     assert "| `example.com` | 1 |" in out
     assert "| `url` | 1 | 1 | 2 |" in out
+
+
+def test_overview_source_language_table_counts_langs_and_keeps_unrecorded_last(tmp_path):
+    """Issue #989: the per-language table must show sources with no recorded
+    language as their own row — hiding them would make the recorded few look
+    like the whole wiki."""
+    write_config(tmp_path, primary_lang="en")
+    for name, lang in [("a", "ja"), ("b", "ja"), ("c", "ko"), ("d", None), ("e", None), ("f", None)]:
+        lang_line = f"  lang: {lang}\n" if lang else "  lang:\n"
+        write_source(
+            tmp_path, f"url/example.com/{name}.md",
+            f"---\nsource:\n  type: url\n  url: https://example.com/{name}\n  hash: sha256:x\n"
+            f"{lang_line}status: generated\ngenerated_pages: []\n---\n\n## Summary\n\nS.\n",
+        )
+    # A management file from before the field existed has no lang key at all.
+    write_source(
+        tmp_path, "url/example.com/g.md",
+        "---\nsource:\n  type: url\n  url: https://example.com/g\n  hash: sha256:x\n"
+        "status: generated\n---\n\n## Summary\n\nS.\n",
+    )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    section = out[out.index("### By language"):out.index("### Source type x generated page type")]
+    assert "went through a summarizing translation" in section
+    assert "| `ja` | 2 |" in section
+    assert "| `ko` | 1 |" in section
+    assert "| Not recorded | 4 |" in section
+    assert section.index("| `ja`") < section.index("| `ko`") < section.index("| Not recorded")
+
+
+def test_overview_source_language_table_reads_unquoted_no_as_norwegian(tmp_path):
+    """Issue #989: YAML 1.1 parses an unquoted `lang: no` as False; the table
+    must still count it as Norwegian, not as `false`."""
+    write_config(tmp_path, primary_lang="en")
+    write_source(
+        tmp_path, "url/example.com/n.md",
+        "---\nsource:\n  type: url\n  url: https://example.com/n\n  hash: sha256:x\n"
+        "  lang: no\nstatus: generated\ngenerated_pages: []\n---\n\n## Summary\n\nS.\n",
+    )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+    out = read_overview(tmp_path)
+    section = out[out.index("### By language"):out.index("### Source type x generated page type")]
+    assert "| `no` | 1 |" in section
+    assert "false" not in section
+
+
+def test_overview_source_language_labels_exist_for_every_language():
+    """Issue #989: labels are read by bracket access, so a language missing the
+    new keys fails the build with KeyError."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    import convert_wikilinks as cw
+    for labels in [cw.DEFAULT_OVERVIEW_LABELS, *cw.OVERVIEW_LABELS.values()]:
+        for key in ("by_source_lang", "col_source_lang", "source_lang_unknown", "source_lang_note"):
+            assert labels[key]
 
 
 def test_overview_tag_ranking(tmp_path):
@@ -2919,6 +3147,89 @@ def test_overview_reports_ai_review_separately_from_human_review(tmp_path):
     assert "網羅性" in overview
 
 
+
+TRANSLATION_OF_YAMADA = (
+    "---\n"
+    'title: "Taro Yamada"\n'
+    "lang: en\n"
+    'type: "schema:Person"\n'
+    "translated_from: .wikicommit/entity/ja/Person/yamada-taro.md\n"
+    "review_status: pending\n"
+    "---\n"
+    "\n"
+    "Body.\n"
+)
+
+
+def _two_lang_config(root: Path) -> None:
+    config_dir = root / ".wikicommit"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "config.yml").write_text(
+        "translation:\n  primary_lang: ja\n  targets: [en]\n", encoding="utf-8"
+    )
+
+
+def test_overview_ai_ratio_does_not_drop_when_the_wiki_is_translated(tmp_path):
+    """Issue #1030 — a translation carries no review record, so counting it in
+    the denominator made a fully translated wiki read 1 / 2 (50%). It is left
+    out of the ratio, and a separate line says so where it happens."""
+    _two_lang_config(tmp_path)
+    write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    write_wikicommit_page(tmp_path, "en", "Person", "yamada-taro", TRANSLATION_OF_YAMADA)
+    record_review(
+        tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+        model="claude-opus-5[1m]", reviewed_at="2026-09-05",
+    )
+
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    overview = (tmp_path / "content" / "overview" / "index.md").read_text(encoding="utf-8")
+    assert "**出典と照合済み（AI）**: 1 / 1 (100%) (claude-opus-5[1m])" in overview
+    assert "**翻訳ページ**: 1（原文との照合は記録されていません）" in overview
+    assert "翻訳ページはこの照合の対象外であり" in overview
+    # The total and the human count still cover every page.
+    assert "**総ページ数**: 2" in overview
+
+
+def test_overview_ai_ratio_cannot_pass_100_when_a_translation_has_a_record(tmp_path):
+    """Issue #1030 — numerator and denominator are narrowed together. A
+    translation reviewed with /wikicommit-review carries an AI record; leaving it
+    in the numerator alone would read 2 / 1."""
+    _two_lang_config(tmp_path)
+    write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    write_wikicommit_page(tmp_path, "en", "Person", "yamada-taro", TRANSLATION_OF_YAMADA)
+    for rel in (
+        ".wikicommit/entity/ja/Person/yamada-taro.md",
+        ".wikicommit/entity/en/Person/yamada-taro.md",
+    ):
+        record_review(tmp_path, rel, model="claude-opus-5[1m]", reviewed_at="2026-09-05")
+
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    overview = (tmp_path / "content" / "overview" / "index.md").read_text(encoding="utf-8")
+    assert "**出典と照合済み（AI）**: 1 / 1 (100%)" in overview
+
+
+def test_overview_without_translations_has_no_translation_line(tmp_path):
+    """Issue #1030 — a wiki with no translation pages keeps the same rows; only
+    the note's subject changes."""
+    write_config(tmp_path, primary_lang="ja")
+    write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    record_review(
+        tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+        model="claude-opus-5[1m]", reviewed_at="2026-09-05",
+    )
+
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    overview = (tmp_path / "content" / "overview" / "index.md").read_text(encoding="utf-8")
+    assert "翻訳ページ" not in overview
+    assert "出典から生成されたページは、生成時に" in overview
+
+
 def test_root_index_reports_the_ai_review_count_single_language(tmp_path):
     """Issue #769 — the AI count reached the per-page banner and the overview but
     not the front page, so "N pages / M read by a person" read as "nothing has
@@ -3059,6 +3370,82 @@ def test_overview_counts_findings_but_the_page_banner_does_not(tmp_path):
     assert 'ai_review_model: "claude-opus-5[1m]"' in published
     assert "MISSING_SOURCE" not in published
     assert "findings" not in published
+
+
+def _overview(root: Path) -> str:
+    return (root / "content" / "overview" / "index.md").read_text(encoding="utf-8")
+
+
+def test_overview_breaks_findings_down_by_type_and_the_parts_sum_to_the_total(tmp_path):
+    """The breakdown and the total come from the same records under the same
+    exclusion (Issue #1063); a reader would take a mismatch to mean one is wrong.
+    A `page_at_fault: other` finding is about a neighbouring page and is counted
+    in neither; an unknown or missing `type` lands in the "other" row."""
+    write_config(tmp_path, primary_lang="ja")
+    write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    record_review(
+        tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+        model="claude-opus-5[1m]", reviewed_at="2026-09-05",
+        findings=(
+            '{"result": "PASS", "issues": ['
+            '{"round": 1, "type": "HALLUCINATION", "claim": "a", "instruction": "i"},'
+            '{"round": 1, "type": "HALLUCINATION", "claim": "b", "instruction": "i"},'
+            '{"round": 1, "type": "CONTRADICTION", "claim": "c", "instruction": "i"},'
+            '{"round": 2, "type": "IMPRECISION", "claim": "d", "instruction": "i"},'
+            '{"round": 2, "claim": "e", "instruction": "i"},'
+            '{"round": 2, "type": "CONTRADICTION", "claim": "f", "instruction": "i",'
+            ' "page_at_fault": "other"},'
+            '{"round": 2, "type": "MISSING_SOURCE", "claim": "g", "instruction": "i",'
+            ' "page_at_fault": "self"}'
+            ']}'
+        ),
+    )
+    assert run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    overview = _overview(tmp_path)
+    assert "**うち指摘を受けて書き直された箇所**: 6" in overview
+    assert "  - 出典に書かれていない記述: 2" in overview
+    assert "  - 出典と食い違う記述: 1" in overview
+    assert "  - 手元に無い文書に依拠した記述: 1" in overview
+    assert "  - その他: 2" in overview
+    assert "HALLUCINATION" not in overview
+
+
+def test_overview_counts_pages_the_review_withheld_but_not_a_discarded_update(tmp_path):
+    """A page whose newest AI record is `discarded` and that is not on disk was
+    never published (Issue #1063). A discarded `action: update` leaves the old
+    page published, so it is not counted; neither is a page that passed later."""
+    write_config(tmp_path, primary_lang="ja")
+    write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    record_review(tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+                  model="m", reviewed_at="2026-09-05")
+    record_review(tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+                  model="m", reviewed_at="2026-09-06", result="discarded")
+    record_review(tmp_path, ".wikicommit/entity/ja/Person/never-written.md",
+                  model="m", reviewed_at="2026-09-06", result="discarded")
+    record_review(tmp_path, ".wikicommit/view/ja/withheld-view.md",
+                  model="m", reviewed_at="2026-09-06", result="discarded")
+    assert run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    overview = _overview(tmp_path)
+    assert "**検査を通らず公開されなかったページ**: 2" in overview
+    assert "検査が働いた記録です" in overview
+    assert "never-written" not in overview
+    assert "withheld-view" not in overview
+
+
+def test_overview_omits_the_breakdown_and_withheld_rows_when_there_are_none(tmp_path):
+    write_config(tmp_path, primary_lang="en")
+    write_wikicommit_page(tmp_path, "en", "Person", "yamada-taro",
+                          PAGE_WITH_STAMPS.replace("lang: ja", "lang: en"))
+    record_review(tmp_path, ".wikicommit/entity/en/Person/yamada-taro.md",
+                  model="m", reviewed_at="2026-09-05")
+    assert run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    overview = _overview(tmp_path)
+    assert "Findings raised and fixed" not in overview
+    assert "Statements the sources do not make" not in overview
+    assert "Pages withheld" not in overview
 
 
 def test_index_pages_are_never_stamped(tmp_path):

@@ -57,7 +57,8 @@
 │   │       └── Person/
 │   ├── run/                    # 実行記録（1 実行 ＝ 1 ファイル。git 追跡外・ローテーションあり。Issue #790）
 │   ├── guides/                 # 人が一度だけ手でたどる手順書（1 タスク 1 ファイル・英語。Issue #846）
-│   │   └── enabling-comments.md
+│   │   ├── enabling-comments.md
+│   │   └── updating-the-quartz-submodule.md
 │   └── scripts/                # Skills の共通スクリプト（品質チェック含む）
 │       ├── validate_frontmatter.py
 │       ├── check_orphans.py
@@ -82,8 +83,10 @@
 >
 > なお `Assets` emitter は `**/*.md` を除外するため、`assets/` 配下に `.md` を置くと添付ファイルとしてではなく通常のページとして描画される（`convert_wikilinks.py` のページ走査からは除外されるので、二重に書き出されることはない）。
 
-既存リポジトリに対して `/wikicommit-init` を実行する場合、既存のファイルは移動・複製せずに保持し、`.wikicommit/` のみを追加する。Wiki ページの `sources.path` は `src/auth.py` のように既存ファイルを直接参照する。
+既存リポジトリに対して `/wikicommit-init` を実行する場合、既存のファイルは移動・複製せずに保持し、`.wikicommit/` のみを追加する。
 
+> **README が 1 つも無いリポジトリにだけ README.md を作る（Issue #1034）**: Issue #282 は「README は既にあることが多く、自動挿入は元の構成を壊しうる」として init が README.md を編集しないと決めた。その理由は README が無い場合には当てはまらないため、**GitHub が表示する位置（ルート・`.github/`・`docs/`）のどこにも、拡張子・大文字小文字を問わず README が無いときだけ**、固定の英語テンプレートにリポジトリ名を埋めて作る。LLM が書いた文章を含まないので基盤コミット（Issue #843）にそのまま乗る。ライセンスの節の文面は `print_next_steps.py` が貼り付け用に示す文面と同じ定数（`_root_outputs.README_LICENSE_TEXT`）から作る。公開サイトへのリンクは Pages の `html_url` が分かる SKILL.md step 3 まで待ち、`--quartz-pages` のときだけ置いた目印を `init.py --finish-readme` が差し替える（得られなければ目印を消す）。差し込みは**同じ実行で作った README に限る** — 前の実行で作られた README は既に利用者のものである。`_root_outputs.py` では `update: skip`・`condition: readme_created`（選択的な `git add` の列挙に入るのは作った実行だけ。元からあった README には利用者の未コミットの編集がありうる）。既存リポジトリでも README が無ければ次の再 init で作られる（`CHANGELOG.md` に記載）。読者向けの説明は見出しを置かずコメントだけにし、`theme` は流用しない（Issue #670）。Wiki ページの `sources.path` は `src/auth.py` のように既存ファイルを直接参照する。
+>
 > **`.claude/settings.json` の `skillOverrides` — 自律起動を絞る 2 層のうち新規リポジトリ側（Issue #953）**: `/wikicommit-init` は `wikicommit-generate` / `wikicommit-merge` / `wikicommit-translate` の 3 本を **`name-only`** として書き込む。この 3 本は Issue #945 で `disable-model-invocation` を失った — 無人実行の経路がその 3 本で閉じるため — が、同時に通りすがりの依頼でモデルが自律起動しうるようになった。
 >
 > **2 層の分担は「届く先」で分かれる**（`docs/DesignDoc-skills.md` §11.1）:
@@ -111,7 +114,7 @@
 
 > **トップレベルディレクトリ名 `.wikicommit/wiki/` → `.wikicommit/entity/`（Issue #477）**: `content/sources/`（Issue #476）の導入により公開サイトが `.wikicommit/wiki/` 由来のentity/conceptページと `.wikicommit/source/` 由来のsourceページの両方から構成されるようになり、中核コンテンツディレクトリが引き続き `wiki/` と名乗ることが「wikiという名前のディレクトリが公開サイト全体の一部でしかない」という矛盾を生んでいたため、Pass 2 の分析JSON（`"entities": [...]`）で既に使われている `entity` という語彙に統一した。移行は自動リネームを行わず新旧混在を許容する（Issue #352 の `repository/`→`path/` 等リネーム時と同じ前例踏襲）。
 >
-> **`translated_from`/`derived_from[].path`/`generated_pages[]`/Issueマーカーに埋め込まれた旧パス文字列への後方互換**: 上記の「新旧混在を許容する」方針は、ディレクトリそのものの新旧混在だけでなく、ページの frontmatter やレビュー追跡 Issue の本文に**文字列として埋め込まれた**旧パス（例: `translated_from: .wikicommit/wiki/ja/Person/yamada-taro.md`）にも及ぶ — これらの値は自動移行されないため、リポジトリ側がディレクトリを `git mv` で完全移行した後もそのまま残り続ける。これを消費する側のスクリプト・Skill 指示はすべてこの後方互換を実装する必要がある: `.wikicommit/scripts/_wikilink.py` の `normalize_entity_prefix()`/`resolve_stored_entity_path()`（`validate_frontmatter.py`・`check_translation_status.py`・`check_derivation_freshness.py` が使用）、`convert_wikilinks.py` の `normalize_wiki_rel()`（`generated_pages[]` 用）、`WikiCommitSources.tsx`・`WikiCommitBanner.tsx`（Issue #528。両者とも同名の `entityPathToRelativePath()` を独立に複製 — 各 `quartz-plugins/` パッケージがそれぞれ独立ビルドのため、`WikiCommitSources.tsx` の同関数コメントが説明する理由でここも共有関数化していない。Issue #587 で `translatedFromToRelativePath()` から改名した — `WikiCommitSources.tsx` 側が `derived_from[].path` にも同じ変換を適用するようになり、フィールド名ではなく変換内容を表す名前にした。`WikiCommitBanner.tsx` 側の用途は `translated_from` のみのままだが、2つを対で見つけられる状態を保つため同時に改名している）の `entityPathToRelativePath()`（この2つは旧プレフィックスの吸収に加えて、Issue #576 の `custom/` フラット化にも対応する必要がある — 突き合わせ先の `relativePath` は `content/` 相対であり `custom/` を含まないため。ここを直さないと翻訳された custom 型ページの sources 継承と原文ページリンクが**例外にならず黙って**効かなくなる。同じことが `WikiCommitSources.tsx` の `derived_from[].path` 解決にも当てはまる — Issue #587）、`.claude/skills/wikicommit-remove/scripts/remove_page.py` の `normalize_entity_prefix()`（同名だが `_wikilink.py` からのインポートではなく複製 — **この Skill スクリプトを自己完結に保つという慣行による**。かつてここには「サブプロセスとして実行され `.wikicommit/scripts/` が呼び出し元の cwd から解決可能とは限らないため」と書いていたが、**その理由は成立しない**〈Issue #947〉: 全 SKILL.md の呼び出しは `python .claude/skills/<skill>/scripts/<x>.py` というリポジトリルート相対であり、cwd への同じ仮定を同じコマンドラインの 1 語手前で既に置いている。`wikicommit-ask` の `resolve_source_cache_path.py` は実際に `sys.path` 経由で import している。複製自体は残してある — 誤った理由を正すことと、それに基づいて書かれたコードを書き換えることは別の判断である。`docs/DesignDoc-skills.md` §11.5 冒頭のコールアウト参照）、`review-issue-close-sync.yml` のマーカー解決ロジック、`wikicommit-merge`/`wikicommit-review` SKILL.md のトラッキングIssueマーカー照合手順。新しい消費箇所を追加する際はこの一覧に加えること。
+> **`translated_from`/`derived_from[].path`/`generated_pages[]`/Issueマーカーに埋め込まれた旧パス文字列への後方互換**: 上記の「新旧混在を許容する」方針は、ディレクトリそのものの新旧混在だけでなく、ページの frontmatter やレビュー追跡 Issue の本文に**文字列として埋め込まれた**旧パス（例: `translated_from: .wikicommit/wiki/ja/Person/yamada-taro.md`）にも及ぶ — これらの値は自動移行されないため、リポジトリ側がディレクトリを `git mv` で完全移行した後もそのまま残り続ける。これを消費する側のスクリプト・Skill 指示はすべてこの後方互換を実装する必要がある: `.wikicommit/scripts/_wikilink.py` の `normalize_entity_prefix()`/`resolve_stored_entity_path()`（`validate_frontmatter.py`・`check_translation_status.py`・`check_derivation_freshness.py` が使用）、`convert_wikilinks.py` の `normalize_wiki_rel()`（`generated_pages[]` 用）、`WikiCommitSources.tsx`・`WikiCommitBanner.tsx`（Issue #528。両者とも同名の `entityPathToRelativePath()` を独立に複製 — 各 `quartz-plugins/` パッケージがそれぞれ独立ビルドのため、`WikiCommitSources.tsx` の同関数コメントが説明する理由でここも共有関数化していない。Issue #587 で `translatedFromToRelativePath()` から改名した — `WikiCommitSources.tsx` 側が `derived_from[].path` にも同じ変換を適用するようになり、フィールド名ではなく変換内容を表す名前にした。`WikiCommitBanner.tsx` 側の用途は `translated_from` のみのままだが、2つを対で見つけられる状態を保つため同時に改名している）の `entityPathToRelativePath()`（この2つは旧プレフィックスの吸収に加えて、Issue #576 の `custom/` フラット化にも対応する必要がある — 突き合わせ先の `relativePath` は `content/` 相対であり `custom/` を含まないため。ここを直さないと翻訳された custom 型ページの sources 継承と原文ページリンクが**例外にならず黙って**効かなくなる。同じことが `WikiCommitSources.tsx` の `derived_from[].path` 解決にも当てはまる — Issue #587）、`.claude/skills/wikicommit-remove/scripts/remove_page.py` の `normalize_entity_prefix()`（同名だが `_wikilink.py` からのインポートではなく複製 — **この Skill スクリプトを自己完結に保つという慣行による**。かつてここには「サブプロセスとして実行され `.wikicommit/scripts/` が呼び出し元の cwd から解決可能とは限らないため」と書いていたが、**その理由は成立しない**〈Issue #947〉: 全 SKILL.md の呼び出しは `python <Skill ツリー>/<skill>/scripts/<x>.py`（Issue #1021 以降、指示文は Skill ディレクトリ相対で書き、エージェントがリポジトリルートから綴り直して実行する）というリポジトリルート相対であり、cwd への同じ仮定を同じコマンドラインの 1 語手前で既に置いている。`wikicommit-ask` の `resolve_source_cache_path.py` は実際に `sys.path` 経由で import している。複製自体は残してある — 誤った理由を正すことと、それに基づいて書かれたコードを書き換えることは別の判断である。`docs/DesignDoc-skills.md` §11.5 冒頭のコールアウト参照）、`review-issue-close-sync.yml` のマーカー解決ロジック、`wikicommit-merge`/`wikicommit-review` SKILL.md のトラッキングIssueマーカー照合手順。新しい消費箇所を追加する際はこの一覧に加えること。
 
 ### 3.2 WikiCommit 開発リポジトリ
 
@@ -229,7 +232,7 @@ schema:
 > |---|---|---|
 > | `overwrite` | `.wikicommit/scripts/`・`.wikicommit/review-rules.md`・`.wikicommit/schema-authoring.md`・`.wikicommit/guides/`・`quartz-plugins/`・`deploy.yml`・`review-issue-close-sync.yml`・`prebuild-symlinks.cjs`・`repair-plugin-builds.cjs`・`install-local-plugins.cjs` | `--no-overwrite` の有無に関わらず更新される |
 > | `review` | `config.yml`・`quartz.config.yaml`・`schema/`・`package.json`・`.lychee.toml`・`.markdownlint.json`・`.gitignore`・`report.md`・ポリシーファイル 2 つ | 既存ファイルには一切触れない |
-> | `skip` | `entity/`・`view/`・`source/`・`.claude/`・`quartz/`・`.gitmodules`・`package-lock.json`・`schemaorg-vocab.json` | 同上（かつ差分報告の対象外） |
+> | `skip` | `entity/`・`view/`・`source/`・`.claude/`・`quartz/`・`.gitmodules`・`package-lock.json`・`schemaorg-vocab.json`・`README.md`（無いときだけ作る。Issue #1034） | 同上（かつ差分報告の対象外） |
 >
 > **副次的に、`--no-overwrite` にしか守られていなかった 2 つの穴が構造的に塞がった**。`config.yml`（`theme`・`targets` を持つ）と `schema/`（人間の直接編集を許す唯一の領域）はフラグを 1 つも持っておらず、`--no-overwrite` を落とすとどちらも上書きされていた — パイロットの更新手順書が太字で「このフラグだけが唯一の防護である」と警告し、外すと `theme` が消えることを実測付きで記録していたのはこのためである。両者に `review` を割り当てた結果、フラグの有無に関わらず守られる。
 >
@@ -325,8 +328,8 @@ wikicommit:
 | `exclude_domains` | `wikicommit-generate` Step 0 | 引数のホストが該当する場合、登録前に確認を求める（下記） |
 | `rejected` | `wikicommit-collect` Step 2.5 → 5 | 該当 URL の候補を落とす |
 | `rejected` | `wikicommit-generate` Step 0 | 引数の URL が該当する場合、その `reason` を引用して確認を求める |
-| `index_only` | `wikicommit-collect` Step 5.5 | そのページ自身は候補にせず、参照節から一次資料を掘る（下記） |
-| `index_only` | `wikicommit-generate` Step 0 | 引数のホストが該当する場合、登録前に確認を求める（Issue #833。下記） |
+| `index_only` | `wikicommit-collect` Step 5 / 5.5 | 該当するページ自身は候補にせず、リンクの列挙から一次資料を掘る。ページのエントリは自分から見に行く（下記。照合は `match_index_only.py`。Issue #1032） |
+| `index_only` | `wikicommit-generate` Step 0 | 引数の URL が該当する場合、登録前に確認を求める（Issue #833。照合は `match_index_only.py`。Issue #1032） |
 
 #### `exclude_domains` と `KNOWN_JS_SHELL_DOMAINS` の合成は和集合（完了条件）
 
@@ -353,7 +356,7 @@ wikicommit:
 
 `wikicommit-collect` SKILL.md Step 5 は既にこの問題クラスを "free-exploration guidance that **has no memory of that prior exclusion**" と名指ししていたが、その時点で用意できた解決先はスクリプト内ハードコードだけだった。`rejected` はリポジトリ固有の記憶を置ける最初の場所である。
 
-#### `index_only` — 読むが登録しないドメイン（Issue #570）
+#### `index_only` — 読むが登録しないドメイン・ページ（Issue #570・#1032）
 
 `/wikicommit-collect` が、このドメイン上のページを**参照節から一次資料を掘るためだけに読み、そのページ自身は候補にしない**。コマンド引数 `--index <url>` はその場限りの同じ指定である。
 
@@ -374,6 +377,27 @@ wikicommit:
 > **塞がない。ここが `exclude_domains` との違いである**。下の「推奨する組み合わせ」(3) のとおり「人間が名指しで登録する経路は塞がない」のが Issue #570 の設計であり、一次資料が存在しない対象のために百科事典記事を明示登録する運用は残す必要がある。求めているのは、それが偶然ではなく判断であることだけである。
 >
 > **`check-domain` に和集合しない**。あれはブロックでありここで欲しいのは確認である。和集合にすると `status: failed` の管理ファイルが残り `wikicommit-merge` Step 9 が追跡 Issue を立てる（Issue #564 が `exclude_domains` について避けたのと同じ「誤った記録」）うえ、**登録してよい場合が実在する** `index_only` を `exclude_domains` より強くブロックすることになり、強度の順序が逆転する。
+>
+> **ページ URL も書けるようになった — awesome リスト等を常設の索引として使う（Issue #1032）**: `index_only:` は当初ドメインしか表せず、awesome リストを常設で使うには `github.com` を丸ごと指定するしかなかった — それはソースとして登録すべき GitHub の README まで全部巻き込む。`--index <url>` はページ単位だがその実行限りである。欠けていたのは「ページ URL 単位の常設リスト」だった。
+>
+> **新しいキーは足さず、エントリの形で意味を分ける**。「これは索引であってソースではない」という判断は 1 つであり、それを表すキーも 1 つで足りる:
+>
+> | エントリ | 範囲 | 検索結果に出てきたとき（受動） | 自分から見に行く（能動） |
+> |---|---|---|---|
+> | パスが無い（ドメイン） | そのホスト全体 | 採掘へ回す | しない |
+> | パスがある（ページ） | そのページだけ | 採掘へ回す | する（guidance に関係する節があるときだけ） |
+>
+> 分かれ目は「ドメインかページか」ではなく**取得先の URL が 1 つに決まるかどうか**である。ワイルドカードは入れていない — 書いても取得先は決まらず、能動・受動の区別はそのまま残る。**別キー（`index_pages:` 等）と `index:` + `rejected:` の組み合わせは採らなかった**。前者はパス付きの既存エントリとの衝突を避ける利点があったが、公開パイロット 3 件（2026-09-25 確認）に該当エントリが無かった。後者は `rejected:` が URL 単位でドメインを表せず、書き忘れると索引ページ自体が候補になり Issue #570 が防いだ側に倒れる。
+>
+> **照合はスクリプトへ寄せた**（`match_index_only.py`。`docs/DesignDoc-ScriptSpec.md`）。それまで collect Step 5 と generate Step 0 の 2 か所の散文が照合しており、規則が 2 形に増えると 2 か所が別々にずれる余地が大きくなる — Issue #474 の「決定論的に判定できる操作を instruction にしない」に当たる。正規化はドメインが従来どおり（ホストの完全一致）、ページはスキーム・先頭 `www.`・フラグメント・末尾スラッシュを落とし、パスをパーセントデコードして比較する。**クエリは保持して完全一致で比べる** — `index.php?title=X` のようにクエリがページを名指すサイトで、落とすと 1 ページが全ページに広がる。
+>
+> **意味の変化が 1 つある**: パス付きのエントリは、従来はパスが捨てられてホスト全体を意味したが、今は 1 ページだけを指す。**黙って狭まる向き**なので `CHANGELOG.md` に書いた。
+>
+> **常設の索引を毎回丸ごと掘らない**。awesome リストは 100〜500 件のリンクを持ち、Wikipedia 記事の 10 件前後と桁が違う。collect Step 5.5 はページのエントリについて見出しの構造だけを見て research guidance に関係する節を選び、無ければ掘らずにその旨を 1 行報告する（取得した以上「見たが該当しなかった」ことを言う）。それでも多い場合に備え、**索引由来の候補は実行全体で 20 件まで**とし、切ったことを件数付きで報告する。索引ごとの上限にしないのは、読む人にとって問題になるのは最後に何件並ぶかだけだからで、どれを残すかは索引内の並び順ではなく関連性で決める。
+>
+> **Step 5.5 の文面を索引の種類に依存しない形にした**。「参照節を読め」は Wikipedia の形を前提にしており、awesome リストには参照節という区別が無い。「リンクの列挙部分を読み、散文部分は読まない」に一般化した。**各項目に付いた一言説明は散文であり、候補の説明に持ち込まない**。一方で**キュレーション（どのリンクを載せたか）を採用することは許容する** — Issue #570 の「どの被引用ソースが面白そうかをその記事の枠組みに決めさせない」を緩める判断であり、awesome リストは選別そのものが索引としての価値であるため、登録前レビューでメンテナが認めた。使うのはリンクの選択であって、記述ではない。
+>
+> **collect はページのエントリを追記しない**（索引の選定は人間が明示的に行うもので、Step 8 が人間の却下を `rejected:` に追記するのとは向きが違う）。取得キャッシュ（`.wikicommit/.cache/collect-index/`）は毎回取り直す。**既存リポジトリへの遡及は行わない**（スクリプトは再 init で届き、テンプレートのコメントは新規リポジトリにのみ届く）。
 
 **境界がこの位置にある理由**が本質である。索引ページを読んで「**何を書くか**」を決めるのは危険で、表現・構成が生成物に漏れうるうえ、そのページは `sources:` に無いため **Pass 4 の出典照合が漏れを検出できず、帰属表示も付かない** — 結果として「無帰属の二次的著作物」になり、ソースとして明記して表示を付ける現状より**法的に悪化する**。一方、索引ページを読んで「**どの URL を取りに行くか**」を決めるのは安全である。参照文献リストは事実の列挙であり、そこから一次資料を自分で取得して書けば ShareAlike 義務は発生しない。したがって**参照リストだけを読み、本文は読まない** — 記事を要約しない、節見出しを候補の説明に持ち込まない、どの被引用ソースが面白そうかをその記事の枠組みに決めさせない。
 
@@ -783,6 +807,7 @@ source:
   path: raw/paper-2024.pdf
   hash: sha256:abc123def456...
   license: CC-BY-SA-4.0                   # 任意（Issue #558）。不明なら値なしの空欄
+  lang: ja                                # 任意（Issue #989）。抽出テキストの主言語（ISO 639-1）。Pass 2a が書く。登録時は空欄
 
 schema: schema:Person    # LLM へのヒント（省略時は LLM が自動判断）
 status: generated        # pending | generated | partial | excluded | outdated | failed
@@ -863,14 +888,30 @@ confirmed with the publisher that the page was never corrected."
 > **既存の管理ファイルは書き換えない**。`--license` も対応表も新規作成時にしか働かず、登録済みの管理ファイルの `license` を上書きすることはない（人間が手で直した値を機械が壊さないため）。値を変えたい場合は管理ファイルを直接編集する。`type: path` のソースにはドメインが無いため、対応表は効かず `--license` か手編集のみが値の入り口になる。
 >
 > **LLM に推定させない**: 抽出テキストからライセンスを推定する経路（Issue #558 の対応方針 2(b)）は採らなかった。ソースのライセンスは事実確認の対象であり、確認していないものを推定値で埋めると、記録があること自体が確認済みの証拠であるかのように見えてしまうため。対応表に無いドメインは空欄のまま残り、`wikicommit-generate` の Step 0 が「不明であること」と値の入れ方をユーザーに伝える。
+>
+> **`source.lang` — 抽出テキストの主言語（Issue #989）**: `wikicommit-generate` の Pass 2a が抽出テキストを全文読む際に、**主として書かれている言語を ISO 639-1 で 1 つ**答え、その場で `source.lang` に書く。`add_source.py` は登録時に空の `lang:` を置く（言語は登録時には分からない。空のキーを置くのはフィールドの存在を伝えるためと、Pass 2a が既存の行を埋めるだけで済むようにするためで、消費者＝俯瞰ページの言語別集計が同じ変更で入っているので受け皿だけ配る形〈Issue #553〉には当たらない）。
+>
+> **出発点は運用中の訴えである** — `wikicommit/ai-driven-dev-wiki` に英語以外のソースを足していく過程で、どのソースが何語かを知る手段がどこにも無いことが分かった。2026-09-21 の公開サイト（`primary_lang: en`・511 ページ・URL ソース 284 件）では 66 ホスト中**少なくとも 19 ホストが非英語**（`ja` 11・`zh` 4・`ko` 4・`de` 推定 1）で、それらは 1〜3 件の裾にいるため俯瞰ページのホスト別表（`OVERVIEW_HOST_LIMIT = 20`）で 11 ホストが切り落とされていた。**ホスト数は青天井だが言語数は有界**なので、言語別集計は切り詰めを生き延びる唯一の集約になる。しかもホスト名から言語は導けない（`toss.tech` が韓国語であることはそのドメインを知る人間にしか分からない）。**先行する測定は正反対の結論を出していた** — 起票の初稿は手元のクローン（URL ソース 164 件・41 ホスト・非英語 0）を測って「全パイロットで 1 行になる」と書いたが、それは多言語化より前のスナップショットであり、増えた 25 ホストのうち 19 が非英語だった。どのスナップショットを測るかで答えが反転することの記録として残す。
+>
+> **判断の性質を変えた**。Issue #336 の判断は「`primary_lang` と明白に違うか」を旗立てるだけで、微妙なものは旗を立てなかった。これをそのまま永続化すると**欠如が「同じ」と「微妙」の 2 つを指す**（Issue #519 / #577 が繰り返し避けてきた形）。「主としてどの言語か」は外国語の固有名詞や引用が混ざっていても答えられるので微妙の行が消え、**欠如は「まだ記録されていない」1 つの意味だけを持つ**。`mul` や「判定不能」の値は置かない — 置けば欠如の意味が再び割れる。
+>
+> **`source.license` が LLM 推定を禁じた（上記）こととは区別できる**。ライセンスは文書の**外**にある法的事実で、確認には別の表示を読む必要がある。言語は**テキストそのものの性質**であり、LLM がいま読んだテキストがそのまま証拠になる — 証拠拘束ルール（Issue #442）の下でも証拠の外に出ていない。決定論的な経路（`<html lang>`・`Content-Language`）は採らない: 自己申告でよく誤っており、`type: path` と PDF には無く、LLM 判断と併存させると値の出所が 2 つになる。`check_extraction_quality.py` の `CJK_CHAR_WEIGHT` も文字クラスの重みであって `ja` と `zh` を分けられない。
+>
+> **厳密には「文書の言語」ではなく「抽出テキストの言語」である**（partial extraction〈Issue #574 / #715〉では両者がずれうる）。それでも `source:` の下に置くのは、`source.hash` が既に同じ曖昧さを持つからである（`type: url` は抽出テキスト、`type: path` は生ファイルのハッシュ。Issue #885）。
+>
+> **書き込み点は Pass 2a である**（判断と書き込みが同じ手順にあれば drift しない）。Pass 4 手順 7 に寄せると、Pass 2b の保留（Issue #910）や `status: failed` のように Pass 4 に到達しない経路で、既に分かっている言語が失われる。**Pass 1 での保留（ガード A）では言語は分からない**（Pass 2a に到達しない）— 正しい挙動であり、そのソースは未記録のままキューに残る。Completion Notice の不一致ロールアップ（Issue #336）は残す — 永続化とその場の通知は別の役目である。
+>
+> **ページの `sources[]` へは転記しない**。`license` が転記されたのは公開ページの出典ボックス（`WikiCommitSources.tsx`）が frontmatter しか読まないためで、本フィールドの消費者は管理ファイルを直接読む俯瞰ページ 1 本である（`docs/DesignDoc-publish.md` §8.8.1）。値は ISO 639-1 のコードのまま表示し、言語名へのローカライズはしない（すれば全ラベル辞書に言語名の対応表が要る）。**`/wikicommit-status` にも足さない** — 多言語であること自体は欠陥ではなく、常時点灯する所見になる（Issue #562 / #864 / #867）。公開ソースページ（`_write_source_page()`）に 1 行足すかは本 Issue では決めない — `## Summary` が `primary_lang` で書かれるため日本語ソースのページが全編英語に見えるという実例があり、「読者は URL で分かる」という理由で閉じてはならない。
+>
+> **遡及付与は行わない**（新旧混在を許容する慣例）。しかも `extracted_tokens` と違い**再実行でも付くとは限らない** — `status: generated` のソースは Pass 1 の収集条件に乗らないため、`/wikicommit-generate <url>` の強制リチェックか `/wikicommit-reconcile` の requeue を経るまで空のまま残る。導入直後の `ai-driven-dev-wiki` では URL ソース 284 件すべてが未記録になる。**したがって俯瞰ページは未記録を隠さず 1 行として出す** — 隠すと、英語ソースだらけの Wiki が記録済みの少数の言語だけでできているように見える。
 
 `status` の遷移：
 
 | status | 意味 | 設定タイミング |
 |---|---|---|
 | `pending` | 管理ファイル作成済み・未生成（または再生成待ち） | `wikicommit-generate` 実行時（新規登録、またはハッシュ不一致による再登録） |
-| `generated` | 全ページ生成済み・ハッシュ一致・除外エンティティなし | `wikicommit-generate` 完了時（全成功） |
-| `partial` | 一部ページ生成済み・一部生成失敗または一部除外（`theme` 不一致・`entity-policy.md` のいずれも。Issue #667）。**この値は性質の異なる 2 状態を同居させており、`failed_pages` の空／非空で区別する**（Issue #567。下記コールアウト参照） | `wikicommit-generate` 完了時（部分失敗、または一部エンティティのみ除外） |
+| `generated` | 1 件以上のページを生成し、生成失敗も `ambiguous` も無い（ポリシー除外は混ざっていてよい。Issue #992）・ハッシュ一致 | `wikicommit-generate` 完了時（失敗なし） |
+| `partial` | 生成失敗または `ambiguous`（型確定待ち）のエンティティが残っている。**`failed_pages` の空／非空で区別する**（Issue #567）— 非空は再試行で、空は人が型を確定すれば進む。Issue #992 より前は一部除外もここに来ていた（下記コールアウト参照） | `wikicommit-generate` 完了時（部分失敗、または ambiguous あり） |
 | `excluded` | 全エンティティが除外され、生成ページが 0 件（除外理由は問わない — `theme` 不一致・`entity-policy.md` の許容性方針のどちらでもこの値になる。Issue #667） | `wikicommit-generate` 完了時（`action: exclude` による全除外。`failed` とは異なりページ生成自体は試みていない） |
 | `outdated` | ソースが変更された（ハッシュ不一致） | `check_ingest_freshness.py`（`wikicommit-status` Skill）が自動検出して書き換える |
 | `failed` | 全ページ生成試行したが失敗 | `wikicommit-generate` 失敗時（`## Failure Reason` に理由を記録。Issue #408） |
@@ -945,7 +986,7 @@ confirmed with the publisher that the page was never corrected."
 >
 > **新しい `status` 値（`deferred` 等）は足さない。** `status` を読む消費者は Pass 1 の収集条件・`add_source.py` の分岐・`check_ingest_freshness.py` の `CHECKABLE_STATUSES`・`wikicommit-status` の集計・`reconcile_ingest_status.py` の 5 つあり、値を足すとすべてに分岐が増える（Issue #567 が `partial` について「新しい `status` 値は足さない」と決めたのと同じ理由）。保留は「進めない」ことなので、**進めないことがそのまま表現になる**。
 >
-> **保留するのは 2 つだけである** — ガード A の `LOW_DENSITY:`（テキスト形状のヒューリスティックであり、Issue #562 自身が「リンクの多い正当な行政サイトや統計資料と区別がつかない」と書いている。saitama パイロットの実測で 8 件中 4 件が誤検知）と、Pass 2b の厳格閾値を外れた型候補（型がその主題にふさわしいかは人間の判断であり、declined にすると祖先型でページが書かれて後から再分類する手が無い。Issue #447 / #565 が両方ともスコープ外と明言している）。**決定論的な判定は保留しない** — ガード B（既知 JS シェルドメイン）・抽出結果が空／読み取り不能・YouTube の URL 形式違いは、人間が見ても答えが変わらないので `status: failed` のままが正しい。ガード C（取得能力不足）は環境の問題なので処理全体を停止する扱い（Issue #574）を変えない。
+> **保留するのは 2 つだけである** — ガード A の `LOW_DENSITY:`（テキスト形状のヒューリスティックであり、Issue #562 自身が「リンクの多い正当な行政サイトや統計資料と区別がつかない」と書いている。saitama パイロットの実測で 8 件中 4 件が誤検知）と、Pass 2b の厳格閾値を外れた型候補（型がその主題にふさわしいかは人間の判断であり、declined にすると祖先型でページが書かれて後から再分類する手が無い。Issue #447 / #565 が両方ともスコープ外と明言している）。**決定論的な判定は保留しない** — ガード B（既知 JS シェルドメイン）・抽出結果が空／読み取り不能・YouTube の URL 形式違いは、人間が見ても答えが変わらないので `status: failed` のままが正しい。ガード C（取得能力不足）は環境の問題なので処理全体を停止する扱い（Issue #574）を変えない。**ネットワークの不在（`NETWORK_UNAVAILABLE:`。Issue #1020）も保留するが、理由が違う** — 人間の判断を待つのではなくネットワークを待つので、対話実行でも保留し、強制リチェック由来でも `pending` に戻さない（取得していないので `source.hash` は変わっておらず、失われたものが無い）。連続 2 件で処理全体を停止する（`docs/DesignDoc-skills.md` §11.5）。
 >
 > **`reconcile_ingest_status.py` が保留を黙って `generated` へ戻すことはない。** ただし守っているのは**ハッシュの突き合わせ**であって、空のハッシュではない — 上記のとおり保留時点で `source.hash` は既に書かれている。初回の保留はページを 1 枚も作っていないので、そのハッシュをどの `sources[]` も引用しておらず一致しない。再取り込みでの保留は前回の `generated_pages` が非空なので同スクリプトがスキップし、強制リチェック由来で `pending` に戻した場合も `generated_pages` と `last_generated_at` を持つので同じくスキップする。
 >
@@ -965,6 +1006,14 @@ confirmed with the publisher that the page was never corrected."
 > **新しい `status` 値は足さない**（Issue #567 の対応方針 1(b)）。`failed_pages` が既にこの区別を持っているため、値を増やさずに Pass 1 の収集条件を「`partial` かつ `failed_pages` が非空」に変更すれば足りる。**遡及適用は不要** — 既存リポジトリの `failed_pages` が空の `partial` は、次回実行時に単に収集されなくなるだけで、ファイルへの書き換えは一切要らない。
 >
 > あわせて 5 件ガードの**選定順序**を変更した。パス昇順のみだと、既に着手済みのファイルが毎回同じ枠を占めうる — 1 回の処理量を人間が制御するというガードの目的が、枠の中身が変わらないことで果たされなくなる。(1) `status: outdated`、(2) 一度も生成されていない（`last_generated_at` なし）、(3) 残り、の 3 段でパス昇順とする。`outdated` を backlog の前に置くのは意味が違うため — 既に公開されているページのソースが変わった状態であり、サイト上の内容が**誤っている**。未処理のソースは**欠けている**だけである。backlog を飢えさせる心配も無い: ソースが実際に変わったときにしか `outdated` にならず、この段は小さく、勝手に埋め戻らない。処理対象の提示も「未フェッチ」「フェッチ済みだが未生成」「再処理待ち」の 3 つに分けて見せる（`source.hash` の空／非空が前 2 者を分ける）。`wikicommit-status` は「登録済みだが一度も処理されていないソース」の件数を集計に加える — 失敗ではなく**単に順番が来ていない**ものなので、Issue #452 のようなトラッキング Issue 化ではなく集計に留める。
+>
+> **除外のみの `partial` を `generated` へ移した — 同居の片方が解けた（Issue #992）**: 上の分析のうち「再試行に意味がない」側、すなわちポリシー除外（`theme_mismatch` / `privacy`）だけが残ったソースは、**Issue #992 以降 `status: generated` になる**。`status` の消費者を全数えすると（Pass 1 の収集条件・`add_source.py` の `process_url()` / `process_file()`・`check_ingest_freshness.py`・`reconcile_ingest_status.py`・`/wikicommit-reconcile`・`/wikicommit-merge` Step 9・`/wikicommit-status`）、`partial`（`failed_pages` 空）を `generated` にしても挙動を変えるものは 1 つも無く、**変わるのは公開サイトに出る文字列（`content/sources/` の各ページと俯瞰ページの `status` 別表）だけ**だった。そこで `partial` と名乗ることは「部分的に止まっている」と読者に伝えるが、実態は Wiki が書かないと決めたものを書かなかった — 設計どおりの完了である。**新しい `status` 値は足さない**（上の判断と同じ。区別のために分岐を必要とする消費者が 1 つも無い）。`excluded_entities` フロントマターも足さない — `ambiguous_entities` が正当化されたのは機械が 2 つの意味を区別できず実際に困っていたからで、除外側にその困りは無い（Issue #553）。除外の記録は `## Generation Notes` と Completion Notice のまま（Issue #831 / #876）であり、Pass 2c が `status` と独立に書くので失われない。
+>
+> Pass 4 手順7の第 1 分岐は「`failed_pages` 無し・`ambiguous: true` 無し・**少なくとも 1 件がページを生成した**」になった。最後の条件が、全件除外（成功ゼロ）を第 1 分岐から外して `excluded` に残す。結果として `partial` ＋ 空の `failed_pages` は、新しい管理ファイルでは **ambiguous の型確定待ちだけ**を意味し、`partial` は「誰かが何かすれば進む」状態に絞られる。**収集条件そのものは変えていない**（ambiguous を収集しないという Issue #910 の決定は据え置き）。変わったのは理由づけである。
+>
+> **既存リポジトリは自動では変わらない** — Pass 1 は `failed_pages` が空の `partial` を収集しないため、次の実行でも直らない。`/wikicommit-reconcile` は勧めない（`--all` では直したい `partial` だけを選べず、requeue → generate は Pass 2a〜4 を全部走らせてページを書き直し、`review_status` が `pending` に戻り追跡 Issue が立ち直る。しかも今日のポリシーで `generated` に着地する保証が無い）。代わりに、管理ファイルの frontmatter だけで閉じる述語（`status: partial`・`failed_pages` が空・`ambiguous_entities` が無い）と、それを `set_frontmatter_field.py --require` で書き換えるコマンドを `CHANGELOG.md` に書いた。移行スクリプトを配布物に足さないのは 1 回きりのイベントに恒久的なファイルを残すことになるため（Issue #867 と同じ形）、`/wikicommit-reconcile` にモードを足さないのはあの Skill の契約が「キューに戻す」でありこれはその逆だからである。**caveat**: Issue #910 より前の管理ファイルは `ambiguous_entities` を持たないので ambiguous 由来の `partial` もこの述語に一致するが、それらは既に「Entities awaiting a type」に出ていない（フィールドが無いので読めない）ため、新たに失われるものは無い。
+>
+> **既知の副作用**: 「`partial` かつ `failed_pages` 空かつ `ambiguous_entities` 無し ＝ 除外あり」という導出は成り立たなくなる。この導出を使う消費者は現在ゼロであり、現れた時点で `excluded_entities` を足す判断になる。「1 件成功 + 10 件除外」も `generated` になるが、境目は `generated_pages` の空／非空であって恣意的ではなく、除外件数は Completion Notice が `existing_path` まで名指しして列挙している。
 >
 > **「薄いソースで生成済みのページに対する未処理の良質ソース」の検出はスコープ外**とする。上記の施設のケースを機械的に検出するには、未処理ソースの内容と既存ページの主題を突き合わせる必要があり、決定論的スクリプトの範囲を超える（`docs/DesignDoc-skills.md` §11.5）。未処理ソースが放置されない状態を作ることで間接的に解消する方針を採る。
 
@@ -1181,6 +1230,20 @@ view ページの本文が書く相対リンク（画像・添付）は、**公�
 - **人が読める・人が書ける**。較正（人間の指摘と機械の指摘を突き合わせる）には、人が機械のレビューを読める必要がある
 
 ファイル名は `<YYYYMMDD>-<HHMMSS>-<kind>.md`（`<kind>` は `ai` / `human`）。`wikicommit-merge` の一時ブランチ `wikicommit/merge-<YYYYMMDD>-<HHMMSS>` に前例がある。**モデル ID をファイル名に入れてはならない** — 実行中モデルは `claude-opus-5[1m]` のように角括弧を含みうる（Issue #559 が実データで観測した表記）ため、glob を壊す。同一秒の衝突は実用上起こらない（Pass 4 は LLM 呼び出しを挟んで逐次実行される）が、`record_review.py` は 2 件目に `-2` を付す — 上書きは契約上あり得ない。
+
+> **スタンプは同じディレクトリの最新記録まで切り上げる — 壁時計は単調ではない（Issue #991）**: どの記録が「いま立っている」かはこのファイル名順が決め（`standing_review()` / `standing_verdict()` / `latest_discarded()` と `check_review_coverage.py` の全集計が読む）、その順序は `datetime.now()` から来ていた。**ホストが時計を後方へステップさせるコンテナでは、連続して書いた 2 件が逆順のタイムスタンプを得る** — WSL2 上の devcontainer で実測すると、24 秒間に 4 回・1 回あたり 0.49〜0.58 秒だけ realtime が後退していた（`CLOCK_MONOTONIC` と対比して確認）。逆転すると**古い方の記録が最新として読まれる**。
+>
+> **しかも何も警告されない。** 記録は不変であり（本節の設計の中核）、後から気づく契機がどこにも無い。発覚したのは `tests/test_check_review_coverage.py::test_discarded_reason_takes_the_newest_discard` がフル実行で断続的に落ちたこと（3 回に 1 回。負荷が高いほど落ちやすく、これは 2 回の起動の間隔が伸びて窓が広がることと整合する）による — **`record_sort_key()` も採番も与えられた入力に対しては正しく、誤っていたのは入力の側だった**。
+>
+> 現在は `allocate_record_path()` が、**そのディレクトリに既にある最新記録より古いスタンプを受け取った場合、そのスタンプまで切り上げてから採番する**。既存の「同一秒なら `-2`」の機構をそのまま使うため、**文書化されたファイル名の形も `record_sort_key()` も変わらず、既存の記録もそのまま読める**。切り上げが働いたときは stderr に `WARNING:` を出す。
+>
+> **採番はファイル名ではなくスタンプを見る**（`next_seq()`）。`kind` は `record_sort_key()` の一部ではないため、`ai` 記録の隣へ切り上げた `human` 記録は `<stamp>-human.md` という空いている名前を取り、**2 件が同値になる** — §4.8 冒頭の例のとおり 1 ページのディレクトリに `ai` と `human` が同居するのが通常の形である。`load_records()` の `sorted()` は安定ソートなので、同値のキーは順序を `glob()` の返す順（ファイルシステム依存）に委ねてしまい、切り上げが消そうとした恣意性がそのまま戻る。したがって次の枠は「そのスタンプを持つ既存記録の最大 seq + 1」として決める。
+>
+> **代償は、切り上げられた記録のファイル名が書かれた瞬間より最大でステップ幅ぶん古くなること**である。有界であり、日付は記録自身の `reviewed_at` が持つ。引き換えに消えるのは「どのレビューが現在のものか」という、**この記録ツリーが存在する理由そのものの問い**に対する無言の誤答である。
+>
+> **採らなかった案**: (a) 環境起因として受け入れる — flaky なテストが残り、製品側の脆さも残る。(b) テストだけ直す（書き込みの間にタイムスタンプの単調性を注入する） — テストは緑になるが**製品側の前提は変わらず**、テストが守っていた契約を守れない条件下で守れているように見せることになる。(d) 逆転を検出して報告するだけ — 変更は小さいが**順序は直らない**ので、上に挙げた 4 つの読み手は誤った記録を指し続ける。本対応は (c)（記録に単調な順序を持たせる）を採り、(d) の警告をその副産物として併せ持つ形である。
+>
+> **`record_run.py` にも同じ欠陥があり、同じ形で直した**（`.wikicommit/run/` の `<YYYYMMDD>-<HHMMSS>-<skill>.md`）。あちらでは影響がもう一段重い — `run_sort_key()` は `LAST_RUN:` が報告する記録を選ぶだけでなく、**ローテーションがどれを削除するかも決める**ため、後方ステップは最古ではなく最新の実行を消しうる。**同値の問題もあちらの方が起きやすい**: `.wikicommit/run/` は 4 つの Skill の実行を 1 つのディレクトリに束ねており、skill スラッグは `run_sort_key()` の一部ではないため、主経路そのものである `generate` → `merge` がちょうどこの形に当たる。加えて、ローテーションがそのスタンプの seq 1 を削ると未サフィックスの名前が空くため、ファイル名で採番すると次の実行がそこを再利用して**最古の位置に着地する**（`LAST_RUN:` から落ち、次の削除対象になる）。
 
 **ページが削除されても記録は残す**（履歴であるため）。したがって `.wikicommit/review/` は既存ページの厳密なミラーではない。**書き出されなかったページ（`failed_pages`）のディレクトリも作られる** — これが最も価値のある記録なので、これは仕様である。
 

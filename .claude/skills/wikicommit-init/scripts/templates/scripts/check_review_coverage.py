@@ -442,7 +442,7 @@ def print_discarded_reasons(page_rels: list[str]) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Report review coverage across the wiki's pages (Issue #750)."
+        description="Report review coverage across the wiki's pages."
     )
     parser.add_argument(
         "--discarded-reason",
@@ -459,7 +459,7 @@ def main() -> int:
             "Print why each named page was discarded, taken from the newest "
             "`result: discarded` review record, and stop without scanning "
             "anything else. Used by /wikicommit-merge Step 9, whose only other "
-            "source of a reason is deleted on the `partial` branch (Issue #969)."
+            "source of a reason is deleted on the `partial` branch."
         ),
     )
     args = parser.parse_args()

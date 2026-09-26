@@ -4,7 +4,7 @@ wikicommit:
   # No version field, deliberately: `review-rules.md` carries `rules_version`
   # because a review subagent echoes it back and the orchestrator checks it.
   # Every reader of this file is the agent itself, so an echo would be
-  # self-reported and would verify nothing (Issue #886).
+  # self-reported and would verify nothing.
   # The `provenance` values the four reading paths stamp, so this list and a written
   # file's own `wikicommit.provenance` are in one vocabulary. The type-necessity pass
   # stamps two of them depending on how the candidate was approved, hence four paths
@@ -20,11 +20,9 @@ wikicommit:
 # Writing a `.wikicommit/schema/<Type>.md` file
 
 The one place the procedure for writing a type file is written. Four paths add
-types, and each reads this file at the point a candidate has been approved
-(Issue #886).
+types, and each reads this file at the point a candidate has been approved.
 
-Before this file existed the same procedure lived in four Skills at once. What
-they shared was the *procedure*; what differs between them is the *judgment* —
+The four paths share the *procedure*; what differs between them is the *judgment* —
 how strong the evidence has to be before proposing a type, how approval is
 obtained, and which `provenance` value gets stamped. Those stay with each path,
 because the evidence genuinely differs: one has a single sentence of prose, one
@@ -117,7 +115,7 @@ Then:
 
 ## Part 2 — Write the file
 
-Write it directly with the Write tool, in the standard-type format: a
+Write it directly as a new file, in the standard-type format: a
 `wikicommit:` block, template frontmatter with the verified property names
 nested under `properties:`, and a body template.
 

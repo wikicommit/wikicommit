@@ -94,8 +94,20 @@ def test_git_add_paths_omit_entries_guided_separately(variant):
 def test_conditional_paths_appear_only_when_the_condition_holds(variant):
     conditional = {e.path for e in _root_outputs.ROOT_OUTPUTS if e.condition != "always"}
     assert conditional, "condition 付きのエントリが 1 つも無く、この検証が空振りしています"
-    assert not conditional & set(_root_outputs.git_add_paths(variant, vocab_cache_created=False))
-    assert conditional <= set(_root_outputs.git_add_paths(variant, vocab_cache_created=True))
+    assert not conditional & set(
+        _root_outputs.git_add_paths(variant, vocab_cache_created=False, readme_created=False)
+    )
+    assert conditional <= set(
+        _root_outputs.git_add_paths(variant, vocab_cache_created=True, readme_created=True)
+    )
+
+
+@pytest.mark.parametrize("variant", _root_outputs.VARIANTS)
+def test_readme_is_listed_only_when_this_run_created_it(variant):
+    """A README the repository already had may carry the user's own edits; the selective
+    list must not stage them (Issue #1034)."""
+    assert "README.md" not in _root_outputs.git_add_paths(variant)
+    assert "README.md" in _root_outputs.git_add_paths(variant, readme_created=True)
 
 
 def test_quartz_pages_is_a_superset_of_quartz_only():
@@ -209,6 +221,7 @@ EXPECTED_UPDATE_POLICIES = {
     "quartz": ("skip", "the user's own git submodule add"),
     ".claude/settings.json": ("review", "the user's own settings file; init merges 3 keys in"),
     ".wikicommit/schemaorg-vocab.json": ("skip", "regenerable cache"),
+    "README.md": ("skip", "written only when absent; the user's file from then on (Issue #1034)"),
     "package-lock.json": ("skip", "npm side effect"),
 }
 

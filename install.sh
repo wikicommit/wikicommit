@@ -3,9 +3,12 @@ set -euo pipefail
 
 # WikiCommit Skills Installer
 # Copies wikicommit-* Skills from this repository to the target wiki repo's .claude/skills/
+# (Claude Code), or to .agents/skills/ with --agents (Codex and other agents that read the
+# universal directory — Issue #1021). The Skills find each other and their own files relative
+# to their own directory, so either location works on its own.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="$(pwd)/.claude/skills"
+INSTALL_SUBDIR=".claude/skills"
 SOURCE_DIR="${SCRIPT_DIR}/.claude/skills"
 
 # Parse options
@@ -16,13 +19,16 @@ for arg in "$@"; do
   case "$arg" in
     --yes) YES=true ;;
     --dry-run) DRY_RUN=true ;;
+    --agents) INSTALL_SUBDIR=".agents/skills" ;;
     *)
       echo "Unknown option: $arg" >&2
-      echo "Usage: bash install.sh [--yes] [--dry-run]" >&2
+      echo "Usage: bash install.sh [--yes] [--dry-run] [--agents]" >&2
       exit 1
       ;;
   esac
 done
+
+INSTALL_DIR="$(pwd)/${INSTALL_SUBDIR}"
 
 # Skills to install
 SKILLS=("wikicommit-init" "wikicommit-generate" "wikicommit-merge" "wikicommit-review" "wikicommit-remove" "wikicommit-fix" "wikicommit-status" "wikicommit-collect" "wikicommit-search" "wikicommit-ask" "wikicommit-quiz" "wikicommit-synthesize" "wikicommit-serve" "wikicommit-translate" "wikicommit-schema-propose" "wikicommit-update" "wikicommit-reconcile")
@@ -113,7 +119,7 @@ done
 echo "Successfully installed ${installed} file(s)."
 echo ""
 echo "Next steps:"
-echo "  1. Run /wikicommit-init in Claude Code to initialize your wiki repository"
+echo "  1. Run /wikicommit-init in your agent (Claude Code, or Codex with --agents) to initialize your wiki repository"
 echo "  2. Run /wikicommit-generate <path|url> to register a source and generate wiki pages"
 echo "  3. Run /wikicommit-review <page> to validate and review a manually created/edited page"
 echo "  4. Run /wikicommit-remove <page> to mark a page (and its translations) as removed"

@@ -163,7 +163,7 @@ def print_list(retracted: dict[str, str]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Report pages still resting on a retracted source (Issue #737)."
+        description="Report pages still resting on a retracted source."
     )
     parser.add_argument(
         "--list",
@@ -172,7 +172,7 @@ def main() -> int:
         help=(
             "Print the retracted sources themselves and stop, without scanning any "
             "page. Used by /wikicommit-review and /wikicommit-fix before they fetch "
-            "source documents (Issue #928)."
+            "source documents."
         ),
     )
     args = parser.parse_args()

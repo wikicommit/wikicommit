@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -341,9 +342,11 @@ def test_process_url_queued_status_still_skips(tmp_path, status):
 # ── partial splits on failed_pages (Issue #567) ──────────────────────────────
 #
 # A `partial` with pages that failed can still make progress, so Pass 1 keeps
-# collecting it and SKIP is right. A `partial` that only excluded off-theme
-# entities never progresses again, so Pass 1 stopped collecting it — leaving
-# SKIP in place would give that URL no freshness path at all.
+# collecting it and SKIP is right. A `partial` with an empty `failed_pages`
+# (an entity awaiting a human's type decision — or, on a file written before
+# Issue #992, only policy exclusions) does not progress by re-running, so Pass 1
+# does not collect it — leaving SKIP in place would give that URL no freshness
+# path at all.
 
 def _register_partial(tmp_path, failed_pages_line: str) -> str:
     _result, path, _msg = add_source.process_url("https://example.com/article", tmp_path)
@@ -730,6 +733,29 @@ def test_fetch_url_sends_wikicommit_user_agent(tmp_path, monkeypatch):
 
     assert captured["url"] == "https://example.com/page"
     assert captured["requests_session"].headers["User-Agent"] == add_source.USER_AGENT
+
+
+def test_fetch_url_into_refetch_leaves_management_files_untouched(tmp_path, monkeypatch):
+    """`wikicommit-review` / `wikicommit-fix` fetch into `.wikicommit/.cache/refetch/`
+    (Issue #1047). Only `wikicommit-generate` may move `source.hash`, so the fetch
+    they run must not touch a management file or the extraction cache beside it."""
+    _install_fake_markitdown(monkeypatch, text_content="fresh text")
+    mgmt = tmp_path / ".wikicommit/source/url/example.com/page.md"
+    mgmt.parent.mkdir(parents=True)
+    mgmt_text = "---\nsource:\n  type: url\n  url: https://example.com/page\n  hash: sha256:abc\nstatus: generated\n---\n"
+    mgmt.write_text(mgmt_text, encoding="utf-8")
+    cache = tmp_path / ".wikicommit/.cache/ingest-fetch/example.com/page.md"
+    cache.parent.mkdir(parents=True)
+    cache.write_text("cached text", encoding="utf-8")
+
+    result, _path, _msg = add_source.fetch_url(
+        "https://example.com/page", ".wikicommit/.cache/refetch/review-1.md", tmp_path
+    )
+
+    assert result == "FETCHED"
+    assert mgmt.read_text(encoding="utf-8") == mgmt_text
+    assert cache.read_text(encoding="utf-8") == "cached text"
+    assert (tmp_path / ".wikicommit/.cache/refetch/review-1.md").read_text(encoding="utf-8") == "fresh text"
 
 
 def test_fetch_url_creates_parent_directories(tmp_path, monkeypatch):
@@ -1938,3 +1964,124 @@ def test_the_skill_skips_the_cache_commands_for_md_and_txt_sources():
     check_step, write_step = block.split("After a route below produces text successfully", 1)
     assert "`.md` / `.txt`" in check_step.split("Before dispatching to a route below", 1)[1].split("```", 1)[0]
     assert "`.md` / `.txt` source is not cached at all" in write_step[:400]
+
+
+def test_new_management_files_carry_an_empty_source_lang(tmp_path):
+    """Issue #989: registration does not know the language; Pass 2a fills the
+    empty key in. The key sits under source:, next to license."""
+    import yaml
+    for text in (add_source.build_frontmatter_file("raw/a.pdf", "sha256:x"),
+                 add_source.build_frontmatter_url("https://example.com/a")):
+        fm = yaml.safe_load(text.split("---")[1])
+        assert "lang" in fm["source"]
+        assert fm["source"]["lang"] is None
+
+
+# ── fetch_url: connection failure vs. source failure (#1020) ──────────────────
+#
+# These do not need markitdown: a stand-in module is put in sys.modules, and the
+# stand-in's convert_url() makes a *real* request through the session fetch_url()
+# built, against targets that fail offline and deterministically (a proxy on a
+# closed local port, a refused local port). That keeps the classification tied to
+# the exception types requests actually raises rather than to ones a test invents.
+
+
+def _install_session_markitdown(monkeypatch, *, raises=None, wrap=False):
+    import types
+
+    requests = pytest.importorskip("requests")
+
+    class SessionMarkItDown:
+        def __init__(self, requests_session=None, **_kwargs):
+            self.session = requests_session
+
+        def convert_url(self, url):
+            if raises is not None:
+                raise raises
+            try:
+                response = self.session.get(url, timeout=5)
+            except requests.exceptions.RequestException as exc:
+                if wrap:
+                    raise RuntimeError("conversion failed") from exc
+                raise
+            return _FakeConvertResult(response.text)
+
+    fake = types.ModuleType("markitdown")
+    fake.MarkItDown = SessionMarkItDown
+    monkeypatch.setitem(sys.modules, "markitdown", fake)
+    return requests
+
+
+def test_fetch_url_refused_connection_is_network_unavailable(tmp_path, monkeypatch):
+    _install_session_markitdown(monkeypatch)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    result, _path, msg = add_source.fetch_url("http://127.0.0.1:9/", "out.md", tmp_path)
+
+    assert result == "NETWORK_UNAVAILABLE", msg
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_fetch_url_unreachable_proxy_is_network_unavailable(tmp_path, monkeypatch):
+    """A sandbox or corporate proxy that refuses the connection is the environment."""
+    _install_session_markitdown(monkeypatch)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:9")
+
+    result, _path, msg = add_source.fetch_url("https://example.com/", "out.md", tmp_path)
+
+    assert result == "NETWORK_UNAVAILABLE", msg
+    assert "ProxyError" in msg or "ConnectionError" in msg
+
+
+def test_fetch_url_connection_failure_is_found_through_a_wrapper(tmp_path, monkeypatch):
+    """markitdown may re-raise; the cause chain still decides."""
+    _install_session_markitdown(monkeypatch, wrap=True)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    result, _path, msg = add_source.fetch_url("http://127.0.0.1:9/", "out.md", tmp_path)
+
+    assert result == "NETWORK_UNAVAILABLE", msg
+    assert msg.startswith("RuntimeError")
+
+
+@pytest.mark.parametrize("make_exc", [
+    lambda r: r.exceptions.ReadTimeout("the server took too long"),
+    lambda r: r.exceptions.SSLError("certificate has expired"),
+    lambda r: r.exceptions.HTTPError("404 Client Error: Not Found"),
+    lambda r: RuntimeError("unsupported content"),
+])
+def test_fetch_url_source_failures_stay_errors(tmp_path, monkeypatch, make_exc):
+    """A connection that was made and then failed is about the source, not the network.
+
+    ReadTimeout in particular is not a ConnectionError subclass: the server answered
+    the connection and was slow, which is that server's problem."""
+    requests = pytest.importorskip("requests")
+    _install_session_markitdown(monkeypatch, raises=make_exc(requests))
+
+    result, _path, _msg = add_source.fetch_url("https://example.com/", "out.md", tmp_path)
+
+    assert result == "ERROR"
+
+
+def test_main_fetch_url_cli_network_unavailable_has_its_own_code(tmp_path, monkeypatch, capsys):
+    _install_session_markitdown(monkeypatch)
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+
+    exit_code = add_source.main_from_args(
+        ["--fetch-url", "http://127.0.0.1:9/", "--output", "out.md",
+         "--repo-root", str(tmp_path)]
+    )
+
+    assert exit_code == 3
+    err = capsys.readouterr().err
+    assert err.startswith("NETWORK_UNAVAILABLE:")
+    assert "ERROR:" not in err

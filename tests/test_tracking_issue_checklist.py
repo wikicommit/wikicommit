@@ -636,3 +636,37 @@ def test_the_review_skill_states_the_same_two_claims():
         "wikicommit-review no longer refuses to record a review over a problem "
         "the reviewer just raised, which would state something they contradicted."
     )
+
+
+def _step9_how_to_proceed() -> str:
+    """Step 9's generation-failure template's `## How to Proceed` block."""
+    step9 = MERGE_SKILL[MERGE_SKILL.index("### Step 9"):MERGE_SKILL.index("### Step 10")]
+    return step9[step9.index("## How to Proceed"):]
+
+
+def test_generation_failure_acceptance_goes_through_user_notes():
+    """Accepting a generation failure must leave `failed_pages` (Issue #977).
+
+    Step 9's duplicate check looks only at open Issues and closing it changes
+    no state, so the old exit — "close this Issue with a note if the gap is
+    acceptable" — recreated the Issue on every merge for exactly the people who
+    took it. The route that actually retires it is `## User Notes` plus a named
+    re-run; it lives only in this prose, so nothing else notices if it goes.
+    """
+    body = _step9_how_to_proceed()
+    assert "close this Issue with a note if the gap is acceptable" not in body, (
+        "Step 9 again recommends closing the Issue as-is, which the open-only "
+        "duplicate check turns into a new Issue on the next merge."
+    )
+    assert "## User Notes" in body and "naming this source explicitly" in body, (
+        "Step 9 no longer tells the reader to record the acceptance in "
+        "## User Notes and re-run this source by name."
+    )
+    assert "`failed_pages` is now empty" in body, (
+        "Step 9 no longer tells the reader to check failed_pages emptied "
+        "before closing; without it, a note Pass 2c ignored is closed anyway."
+    )
+    assert "does not keep it closed" in body, (
+        "The Issue #969 sentence explaining why a plain close does not stick "
+        "has been dropped."
+    )

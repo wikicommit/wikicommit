@@ -1,36 +1,29 @@
 # Completion notice (`wikicommit-generate`)
 
-> **Contents.** This file is over 20,000 bytes, so it opens with a map rather than making a reader scroll to find out what is in it. The threshold is stated in bytes rather than the 300 lines the Skill guidance names, because a line in this repository's instruction prose runs 40-170 bytes and a line count therefore says very little about how much there is to read (Issue #887 made the same correction to the size metric).
-
 ## Contents
 
 - Close the run record **first**
 - The notice itself: the counts, then the conditional blocks — `ambiguous` entities, `exclude` decisions with their reasons, `failed_pages`, types added by Pass 2b, deferred sources, types declined, source-language mismatches, extraction warnings, ShareAlike sources, and the checkpoint roll-up
 
-What to report when a run ends, and how. This is over 20,000 bytes of which about 95% are
-conditional branches — each one there because some run needed it (Issues #452, #491,
-#507, #550) — and none of it is needed until a run is ending. Keeping it in `SKILL.md`
-meant loading all of it on every invocation, including the ones that stop at Step 0
-(Issue #894).
+What to report when a run ends, and how. Most of it is conditional branches, and none of it
+is needed until a run is ending.
 
 **What each pass accumulates stays with that pass.** The running lists this file renders
 (`ambiguous` entities, `exclude` decisions, `failed_pages`, newly added types, language
 mismatches, extraction warnings) are built as the passes run, by instructions in
 `references/pass1-extract.md`, `references/pass2b-type.md`, `references/pass2c-entities.md`,
-`references/pass3-generate.md` and `references/pass4-review.md` (Issue #911 moved them out
-of `SKILL.md`, which now holds the pointers). This file is only the rendering.
+`references/pass3-generate.md` and `references/pass4-review.md`. This file is only the rendering.
 
 ## Read this before closing the run record
 
 **The call that closes the run record is in this file, not in `SKILL.md`** — deliberately.
 Forgetting to read this file would otherwise cost a report and nothing else, and nothing
 would say so; with the closing call here, forgetting it leaves the record open, and
-`/wikicommit-status` reports that as `INCOMPLETE_RUN:` (Issue #790). The run's own bookkeeping
-is what notices.
+`/wikicommit-status` reports that as `INCOMPLETE_RUN:`.
 
 Display a summary of the results (pages succeeded / skipped / failed / excluded).
 
-**Close the run record first (Issue #790)**, so the timings and counts it holds are this run's:
+**Close the run record first**, so the timings and counts it holds are this run's:
 
 ```bash
 python .wikicommit/scripts/record_run.py end <the path start printed> \
@@ -38,7 +31,7 @@ python .wikicommit/scripts/record_run.py end <the path start printed> \
     --outcome generated=<N> --outcome failed=<N> --outcome excluded=<N>
 ```
 
-Then report its path, elapsed time and the passes it stamped in the notice — that duration exists nowhere else, and **the record is not committed**, so this run's own output is the only place a reader sees any of it. That matters most in the unattended cloud runs, where the record dies with the VM: this line is the only form in which the stamps reach a PR body at all (Issue #797).
+Then report its path, elapsed time and the passes it stamped in the notice — that duration exists nowhere else, and **the record is not committed**, so this run's own output is the only place a reader sees any of it. In unattended cloud runs the record dies with the VM, so this line is the only way the stamps reach a PR body.
 
 ```
 Run record: .wikicommit/run/20260907-104233-generate.md (22m14s)
@@ -47,7 +40,7 @@ Passes stamped: pass1-extract x5, pass2b-type x5, pass2c-entities x5, pass3-gene
 
 If any expected pass has no stamp, say so on that line rather than omitting it silently — and say whether it is because the pass genuinely had nothing to do (every source blocked at Pass 1, say) or because you cannot tell.
 
-Then always print one line for the source-integrity review, whatever its outcome (Issue #750):
+Then always print one line for the source-integrity review, whatever its outcome:
 
 ```
 Reviewed 12 page(s) against their sources: 4 finding(s) raised, 2 page(s) corrected
@@ -55,9 +48,9 @@ on retry, 1 page(s) not written. Model: claude-opus-5[1m]
   → records in .wikicommit/review/
 ```
 
-**What makes this worth printing is the denominator.** Everything else in this notice lists only what went wrong, so a reader sees a count of findings with no way to tell whether it is out of 3 pages or 300 — and a run in which every page passed cleanly, a run in which one page failed and was fixed, and a run in which the review never happened at all are today indistinguishable in the output. With the page count present, "0 finding(s) raised" says something: every page went through and came back clean.
+**What makes this worth printing is the denominator.** Everything else here lists only what went wrong; without the page count, a clean run, a run with one fixed page and a run where the review never happened look the same.
 
-Take the numbers from this run: pages recorded, findings across all rounds, pages that took more than one attempt, pages that ended up unwritten, and the model that reviewed. **Do not replace it with a fixed sentence about having written records** — a line whose value never changes stops being read, which is the same reason the low-density guard was demoted from blocking (Issue #562).
+Take the numbers from this run: pages recorded, findings across all rounds, pages that took more than one attempt, pages that ended up unwritten, and the model that reviewed. **Do not replace it with a fixed sentence about having written records** — a line whose value never changes stops being read.
 
 If any entities were skipped for `ambiguous: true` (Pass 2), list them explicitly with their candidate `alternatives` and the source management file, and ask the user to confirm the type — e.g.:
 
@@ -66,13 +59,13 @@ The following entities were skipped because their type could not be determined. 
 - "Taro Yamada" (candidates: schema:Person, schema:Organization) — source: .wikicommit/source/path/raw/paper-2024.pdf.md
 ```
 
-Confirming a type does not by itself re-queue the source. That run left its management file at `status: partial` with an empty `failed_pages`, which a bare `/wikicommit-generate` does not collect (Pass 1 step 1) — deliberately, since re-reading the same source would reach the same entity and return the same `ambiguous: true` every run until someone looked. So tell the user what does re-queue it: **`/wikicommit-reconcile --source <the source path or URL shown above>`**, which puts the management file back to `status: pending` for the next run (Issue #874). Naming the source directly (`/wikicommit-generate <the source path or URL shown above>`) also works — the argument branch processes a source whatever its state.
+Confirming a type does not by itself re-queue the source. That run left its management file at `status: partial` with an empty `failed_pages`, which a bare `/wikicommit-generate` does not collect (Pass 1 step 1) — re-reading it would return the same `ambiguous: true` every run. So tell the user what does re-queue it: **`/wikicommit-reconcile --source <the source path or URL shown above>`**, which puts the management file back to `status: pending` for the next run. Naming the source directly (`/wikicommit-generate <the source path or URL shown above>`) also works — the argument branch processes a source whatever its state.
 
-Say it here, but do not rely on this notice being the only place it is said. Since Issue #910 that branch also writes `ambiguous_entities` to the management file, so the wait survives this run's output: `/wikicommit-status` names the source and the entity on every subsequent run until it is resolved.
+Say it here, but this notice is not the only place: that branch also writes `ambiguous_entities` to the management file, and `/wikicommit-status` names the source and the entity on every subsequent run until it is resolved.
 
 If any entities were skipped for `action: exclude`, list them too (no user action required — this is informational, unlike the `ambiguous` list above). Group them by `exclude_reason`, so the two reasons stay visibly distinct: one says the entity was off-subject, the other that this wiki has decided not to write about it. Show only the groups that have entries.
 
-**Where an excluded entity's `existing_path` is set, name that page on its line (Issue #876).** Generation never removes a page, so an entity excluded today can have one from an earlier run still standing and published, and nothing else in this run's output points at it. The entity's title is not enough to find it: the filename is a language-neutral English slug whose derivation does not run backwards, so on a wiki whose `primary_lang` is not English the reader would be grepping `title:` across the tree for something Pass 2c already knew.
+**Where an excluded entity's `existing_path` is set, name that page on its line.** Generation never removes a page, so an excluded entity can still have a published page from an earlier run, and nothing else points at it. The title is not enough to find it: the filename is a language-neutral English slug that cannot be derived back from a non-English title.
 
 ```
 The following entities were excluded as unrelated to theme:
@@ -90,7 +83,7 @@ extraction. Use /wikicommit-remove to take an existing page down — the pages n
 in this group are the ones this applies to.
 ```
 
-**State what is true of the page, not what to do about it.** "A page exists and this run did not create or update it" is the whole of what the exclusion establishes. It is not evidence the page should go: a page can rest on three sources, and one of them judging the entity off-subject today says nothing about the other two. The same posture `check_installed_type_usage.py` takes with `ANCESTOR_FALLBACK:`, which says of itself that it is a suggestion and not a verdict.
+**State what is true of the page, not what to do about it.** "A page exists and this run did not create or update it" is the whole of what the exclusion establishes. It is not evidence the page should go: a page can rest on three sources, and one of them judging the entity off-subject today says nothing about the other two.
 
 **Only the `privacy` group points at `/wikicommit-remove`** — that is the trailing note's job, and it is printed only when that group is non-empty, since it is about that policy and repeating it under an ordinary off-subject exclusion would read as if `theme` had the same reach-back caveat. Under `theme_mismatch`, name the page and stop there: nothing about being off-subject argues for taking a page down. **The trailing note therefore says "the pages named in this group", not "above"** — both groups can name pages, and a note that swept up the off-subject ones would undo the distinction the grouping exists to draw.
 
@@ -104,15 +97,15 @@ entity policy at all — every entity was judged on subject relevance alone. Fix
 file's frontmatter and re-run the affected source(s) by name if you rely on it.
 ```
 
-If Pass 2a flagged one or more sources as clearly written in a language other than `primary_lang` (Issue #336), list them too (informational only, no action required — their content is summarized/translated into `primary_lang` as usual):
+If Pass 2a named a language other than `primary_lang` for one or more sources, list them too (the code is also recorded as `source.lang`, but that record does not replace this line: the run's own output is where the user learns about it now) (informational only, no action required — their content is summarized/translated into `primary_lang` as usual):
 
 ```
 Note: the following source(s) appear to be written in a language other than primary_lang (ja).
 Their content will be summarized/translated into ja when generating pages:
-- .wikicommit/source/path/docs/privacy-spec.pdf.md (appears to be English)
+- .wikicommit/source/path/docs/privacy-spec.pdf.md (en)
 ```
 
-If the human chose to continue with one or more sources that Pass 1's low-density check flagged (Issue #562), list them too, so that override is recorded in this run's own summary rather than only as a hand-written note in the management file's `## Summary`:
+If the human chose to continue with one or more sources that Pass 1's low-density check flagged, list them too, so that override is recorded in this run's own summary rather than only as a hand-written note in the management file's `## Summary`:
 
 ```
 Note: the following source(s) were flagged as low-density by the extraction-quality
@@ -121,7 +114,7 @@ check (guard A) and generated anyway at your confirmation:
   (ratio 0.21, threshold 0.3; non-prose breakdown: links 50%, numbers/tables 1%, other markup 48%)
 ```
 
-If any YouTube source turned out to have no captions (Issue #574 — the transcript package is installed, so the video itself simply has none), list them too, since the resulting pages rest on the description alone rather than on what the video says:
+If any YouTube source turned out to have no captions (the transcript package is installed, so the video itself simply has none), list them too, since the resulting pages rest on the description alone rather than on what the video says:
 
 ```
 Note: the following video source(s) have no transcript available, so their pages are
@@ -129,7 +122,7 @@ based only on the title, keywords, runtime and description:
 - .wikicommit/source/url/www.youtube.com/watch-v-96jN2OCOfLs.md
 ```
 
-If one or more entities were generated as source-entity pages (Issue #475 — Pass 2a judged the source document itself citable as a standalone work), list them too, since they are a page type the user did not explicitly request and may not expect:
+If one or more entities were generated as source-entity pages (Pass 2a judged the source document itself citable as a standalone work), list them too, since they are a page type the user did not explicitly request and may not expect:
 
 ```
 The following page(s) were generated for a source document itself, not for a concept discussed
@@ -137,7 +130,7 @@ within it:
 - .wikicommit/entity/en/ScholarlyArticle/vibe-coding-survey.md (source: .wikicommit/source/url/arxiv.org/vibe-coding-survey.md)
 ```
 
-If any page written in this run has `sources` that are **all** copyleft licensed (share-alike Creative Commons, ODbL, or a copyleft software license — Issue #951 widened the table beyond the first of those), list them. Registration warned once per source; this says which *pages* actually came out that way, which is the thing the obligation would attach to:
+If any page written in this run has `sources` that are **all** copyleft licensed (share-alike Creative Commons, ODbL, or a copyleft software license), list them. Registration warned once per source; this says which *pages* actually came out that way, which is the thing the obligation would attach to:
 
 ```
 The following page(s) draw only on copyleft sources, so they may have to be offered under that
@@ -151,7 +144,7 @@ of the page itself.
 
 Say "may have to" rather than "must", as above. Whether a prose summary of a copyleft document is a derivative work is an open question and WikiCommit does not answer it — what this list reports is which pages are in the position where it has to be asked.
 
-If Pass 4 found a page that contradicts an **existing** page and judged the existing one to be the one at fault (Pass 4 step 3's routing rule, Issue #566), list every such pair. This run deliberately changed nothing about them — it regenerates a page against that page's own sources, and has neither the other page's sources nor any mandate over it — so this Notice is the only place the conflict is recorded at all:
+If Pass 4 found a page that contradicts an **existing** page and judged the existing one to be the one at fault (Pass 4 step 3's routing rule), list every such pair. This run deliberately changed nothing about them — it regenerates a page against that page's own sources, and has neither the other page's sources nor any mandate over it — so this Notice is the only place the conflict is recorded at all:
 
 ```
 The following existing page(s) state a fact differently from a page generated in this run, and this
@@ -164,7 +157,7 @@ Check which is right against the existing page's own sources, then fix it with
 run were compared, so this is not a survey of the wiki.
 ```
 
-If any entity fell back to `.wikicommit/schema/default.md` because its type has no dedicated schema file (Pass 3 step 1, Issue #575), list them too. The pages were still generated, but without that type's `granularity`, `properties:` candidates or body template — the only other signal is `validate_frontmatter.py`'s non-blocking WARNING, which a later `wikicommit-merge` raises only for the files that batch happens to change, so this Notice is the one place every affected page in this run is listed together:
+If any entity fell back to `.wikicommit/schema/default.md` because its type has no dedicated schema file (Pass 3 step 1), list them too. The pages were still generated, but without that type's `granularity`, `properties:` candidates or body template — the only other signal is `validate_frontmatter.py`'s non-blocking WARNING, which a later `wikicommit-merge` raises only for the files that batch happens to change, so this Notice is the one place every affected page in this run is listed together:
 
 ```
 The following page(s) were generated from .wikicommit/schema/default.md because their type has no
@@ -179,7 +172,7 @@ a subdirectory: the path is derived straight from `type:`, so .wikicommit/schema
 found for schema:Book.
 ```
 
-If Pass 2b added one or more new `.wikicommit/schema/<Type>.md` files during this run, list them too, since they are new local files the user has not yet seen committed anywhere. Annotate each entry with how it was approved per Pass 2b step 3 in `SKILL.md` — a human answered the prompt, or it was auto-approved with no prompt shown because the run was non-interactive and the candidate cleared the stricter bar (Issue #507):
+If Pass 2b added one or more new `.wikicommit/schema/<Type>.md` files during this run, list them too, since they are new local files the user has not yet seen committed anywhere. Annotate each entry with how it was approved per Pass 2b step 3 in `SKILL.md` — a human answered the prompt, or it was auto-approved with no prompt shown because the run was non-interactive and the candidate cleared the stricter bar:
 
 ```
 The following Schema.org type(s) were added to .wikicommit/schema/ during this run:
@@ -195,10 +188,10 @@ human approval step in between, so this is not a review gate — it is the same 
 ```
 
 Do **not** word that last part as "reviewed before merge" — the accurate description is "recorded in git
-history for later audit" (Issue #507). The batch auto-merges on mechanical checks alone (Issue #456), so
-calling it review would tell the user a human looked at the type when none did.
+history for later audit". The batch auto-merges on mechanical checks alone, so calling it review would
+tell the user a human looked at the type when none did.
 
-Quote each added type's `granularity` verbatim in that block (Issue #552). It is the only part of the
+Quote each added type's `granularity` verbatim in that block. It is the only part of the
 file that was written as free prose rather than verified against the vocabulary, nothing downstream
 checks its wording, and no Skill can edit it afterwards — so the moment it is printed here is the only
 moment anyone sees it before it becomes that Wiki's standing rule for the type:
@@ -210,7 +203,7 @@ moment anyone sees it before it becomes that Wiki's standing rule for the type:
 ```
 
 If any of those newly added types wrote a `granularity` bullet drawing a boundary against a type that
-already had a file in `.wikicommit/schema/` (recorded in Pass 2b step 4 in `SKILL.md`), say so as well (Issue #550). The
+already had a file in `.wikicommit/schema/` (recorded in Pass 2b step 4 in `SKILL.md`), say so as well. The
 line only exists on the new type's side, and no Skill can add the reciprocal statement to the installed
 type's file — a human editing `.wikicommit/schema/` directly is the only way it ever gets there, so this
 notice is the only signal that it is missing:
@@ -231,10 +224,12 @@ undocumented type less likely to be chosen from here on. No Skill can write the 
 Report this even when the run was non-interactive: nobody reads it in the moment, but it lands in the
 run's output alongside everything else, and unlike the type file itself the gap leaves no other trace.
 
-**If any source was deferred, list every one (Issue #910).** A deferral is what this Skill does in a
+**If any source was deferred, list every one.** A deferral is what this Skill does in a
 non-interactive run when it reaches a judgment only a person can make: it stops that source, changes
-nothing about it, and leaves it in the queue. Two things produce one — guard A's `LOW_DENSITY:` in Pass 1,
-and a Pass 2b type candidate that did not clear the stricter auto-approval bar. Both write a
+nothing about it, and leaves it in the queue. Three things produce one — guard A's `LOW_DENSITY:` in Pass 1,
+a fetch that returned `NETWORK_UNAVAILABLE:` (this one also happens in an interactive run,
+and what it waits for is a network rather than a person), and a Pass 2b type candidate that did not
+clear the stricter auto-approval bar. All three write a
 `## Deferred Reason` section to the source's management file, so unlike everything else in this notice
 the record outlives the run; report it here anyway, because this is where someone reading the run learns
 there is anything to go back for.
@@ -247,6 +242,9 @@ The following source(s) were deferred — a person needs to look at them, and th
   from the text alone.
 - .wikicommit/source/path/raw/gaming-report.pdf.md — schema:VideoGame was considered for "Elden Ring"
   but did not clear the "obviously implied" bar that lets a type be added with no human in the loop.
+- .wikicommit/source/url/example.org/annual-report.md — the fetch never reached the server (the
+  connection failed). Nothing is wrong with this source that is known yet; run again where the network
+  is reachable.
 
 Nothing about these sources was decided: their status is unchanged and they are still queued — behind
 sources this run has not tried yet, so a repeated unattended run does not spend its whole quota on them.
@@ -259,10 +257,9 @@ still registered and still queued; the only thing missing is an answer. Saying o
 to "fix" it by deleting and re-adding the management file, which discards the extraction cache and
 answers nothing.
 
-If Pass 2b step 3's running list has one or more declined type candidates, list them too (Issue #491,
-extended by Issue #507). Since Issue #910 there is only one way a candidate lands here — **a human
-answered N**. A candidate that failed the stricter bar in a non-interactive run is no longer declined;
-it defers the source, and belongs in the deferral block above instead. By this point in the run, Pass 4 (step 5) has already finished for every source and its own
+If Pass 2b step 3's running list has one or more declined type candidates, list them too. There is
+only one way a candidate lands here — **a human answered N**. A candidate that failed the stricter bar
+in a non-interactive run is not declined; it defers the source, and belongs in the deferral block above instead. By this point in the run, Pass 4 (step 5) has already finished for every source and its own
 `failed_pages` list (below) is fully known — cross-check against it so this block is accurate about what
 actually happened to each motivating entity: a declined type's motivating entities are not guaranteed to
 have become real pages; one may have separately hit `failed_pages` for an unrelated reason (a
@@ -275,10 +272,8 @@ this block with the auto-approved block above, which is a different outcome of t
 path.
 **Do not suggest running `/wikicommit-schema-propose` to reconsider these** — its `check_schema_coverage.py`-based
 detection only finds `type:` strings with no dedicated schema file at all, which is not the case for an
-entity that did get a page (it already has a working, covered type; Issue #447). This exact wrong
-suggestion was made in a real non-interactive run and
-produced a "No schema coverage gaps found" dead end when the user tried it — give the guidance
-below instead:
+entity that did get a page (it already has a working, covered type), so it ends in a "No schema
+coverage gaps found" dead end — give the guidance below instead:
 
 ```
 The following Schema.org type candidate(s) were considered during this run but declined:
@@ -296,7 +291,7 @@ if config.yml's theme alone clearly implies the type) or /wikicommit-collect nex
 comes up (it judges from real candidate evidence before registration).
 ```
 
-If any entity's page hit `failed_pages` after exhausting `generate.max_retries` (Pass 4 step 5), list them too (Issue #452) — unlike `ambiguous`/`exclude`, this represents an intended `create`/`update` that did **not** take effect, which for `action: update` entities means an existing page was left unchanged with no visible sign anything was attempted:
+If any entity's page hit `failed_pages` after exhausting `generate.max_retries` (Pass 4 step 5), list them too — unlike `ambiguous`/`exclude`, this represents an intended `create`/`update` that did **not** take effect, which for `action: update` entities means an existing page was left unchanged with no visible sign anything was attempted:
 
 ```
 The following pages failed source-integrity review after exhausting retries and were not written
@@ -309,7 +304,7 @@ wikicommit-generation-failure), so this doesn't require watching this run's cons
 later.
 ```
 
-If Pass 4 step 4's harvest collected any `MISSING_SOURCE` document, list them (Issue #722). These are documents the wiki cited but does not hold — each one is a registration candidate the run already identified, and without this the finding vanishes as soon as the retry drops the offending claim. **Fold duplicates to one line per document**, however many pages or retries raised it, and name the pages under it. Where every page that raised a document ended up discarded (Pass 4 step 5), say so on that line rather than listing the document twice — the failed-pages roll-up above reports the *page*, this one reports the *document*, and a reader should not have to reconcile the two:
+If Pass 4 step 4's harvest collected any `MISSING_SOURCE` document, list them. These are documents the wiki cited but does not hold — each one is a registration candidate the run already identified, and without this the finding vanishes as soon as the retry drops the offending claim. **Fold duplicates to one line per document**, however many pages or retries raised it, and name the pages under it. Where every page that raised a document ended up discarded (Pass 4 step 5), say so on that line rather than listing the document twice — the failed-pages roll-up above reports the *page*, this one reports the *document*, and a reader should not have to reconcile the two:
 
 ```
 The following documents were cited by generated pages but are not registered as sources. In each case
@@ -323,7 +318,7 @@ Register one with /wikicommit-generate <url-or-path>; the next run folds it in a
 same page.
 ```
 
-If `reset_review_on_content_change.py` (Pass 4 step 6) printed any `RESET:` line, list those pages (Issue #724). These were `reviewed` before this run and are not any more, which is a state change a reader of the published wiki will see — the banner's line saying a person read the page disappears, and the reviewer's name with it:
+If `reset_review_on_content_change.py` (Pass 4 step 6) printed any `RESET:` line, list those pages. These were `reviewed` before this run and are not any more, which is a state change a reader of the published wiki will see — the banner's line saying a person read the page disappears, and the reviewer's name with it:
 
 ```
 The following pages were previously reviewed and had their content rewritten by this run, so they are
@@ -333,7 +328,7 @@ back to review_status: pending (the reviewer's name has been removed with it):
 Run /wikicommit-merge next as usual — it opens a fresh review-tracking Issue for each of these.
 ```
 
-If `reconcile_ingest_status.py` (run from `SKILL.md` before this file) reported `reconciled` > 0, list the corrected files too (Issue #474):
+If `reconcile_ingest_status.py` (run from `SKILL.md` before this file) reported `reconciled` > 0, list the corrected files too:
 
 ```
 The following source management files were left at status: pending even though their content is

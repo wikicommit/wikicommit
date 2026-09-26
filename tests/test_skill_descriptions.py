@@ -197,3 +197,79 @@ def test_every_other_distributed_skill_still_disables_model_invocation():
             f"start it on its own. If that is intended, it also needs a 'when to use' "
             f"description and a place in MODEL_INVOCABLE."
         )
+
+
+def _flagged_distributed() -> list[Path]:
+    """The distributed Skills that carry `disable-model-invocation: true`."""
+    out = []
+    for path in _skills():
+        fm = _frontmatter(path)
+        if (fm.get("metadata") or {}).get("internal"):
+            continue
+        if fm.get("disable-model-invocation") is True:
+            out.append(path)
+    return out
+
+
+def test_the_flagged_skills_say_when_not_to_use_them():
+    """The flag is a Claude Code key; Codex ignores it (Issue #1014).
+
+    Issue #912 exempted these Skills from the "when to use" rule because Claude
+    Code never lists them to the model, so their descriptions triggered nothing.
+    Under Codex the description is read for exactly these Skills, and it was the
+    only defence left — written as a one-line "what it does". Each now says it is
+    for explicit requests only and when not to use it, in the braking direction of
+    generate and merge rather than #912's pushy one."""
+    flagged = _flagged_distributed()
+    assert flagged, "no distributed Skill sets disable-model-invocation"
+    for path in flagged:
+        description = _frontmatter(path)["description"]
+        assert "Use this only when someone explicitly asks" in description, (
+            f"{path.parent.name}'s description no longer limits it to explicit requests; "
+            f"under Codex the description is what decides implicit invocation (Issue #1014)"
+        )
+        assert "do not use it" in description, (
+            f"{path.parent.name}'s description no longer says when not to use it"
+        )
+
+
+def test_the_flagged_skills_carry_codex_implicit_invocation_off():
+    """Codex's counterpart of `disable-model-invocation` lives in agents/openai.yaml,
+    under `policy:` — at the top level it is not read (Issue #1014). Checked in both
+    directions, so a Skill that gains or loses the Claude Code flag cannot leave the
+    Codex half behind."""
+    import yaml
+
+    flagged = {p.parent.name for p in _flagged_distributed()}
+    for path in _skills():
+        name = path.parent.name
+        yaml_path = path.parent / "agents" / "openai.yaml"
+        if name in flagged:
+            assert yaml_path.is_file(), f"{name} has no agents/openai.yaml"
+            data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+            assert "allow_implicit_invocation" not in data, (
+                f"{yaml_path} sets allow_implicit_invocation at the top level, where Codex "
+                f"does not read it"
+            )
+            assert data["policy"]["allow_implicit_invocation"] is False, yaml_path
+        else:
+            assert not yaml_path.exists() or (
+                yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+                .get("policy", {}).get("allow_implicit_invocation") is not False
+            ), f"{name} is model-invocable under Claude Code but blocked under Codex"
+
+
+def test_no_skill_pre_approves_tools():
+    """No Skill ships `allowed-tools` (Issue #1048).
+
+    In Copilot CLI it pre-approves shell commands for the Skill's run, and the
+    narrowest form on offer is a command name — `shell(python)` also lets
+    `python -c "..."` through, which is arbitrary code execution while the
+    Skill reads the text of external pages. In Claude Code it pre-approves
+    tools too. Lifting that safeguard is left to the user's own launch flags.
+    """
+    for path in _skills():
+        fm = _frontmatter(path)
+        assert "allowed-tools" not in fm, (
+            f"{path} declares allowed-tools; the Skills leave pre-approval to the user"
+        )

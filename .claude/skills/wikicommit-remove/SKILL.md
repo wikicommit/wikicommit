@@ -1,10 +1,12 @@
 ---
 name: wikicommit-remove
-description: Mark a wiki page (and its translations) as removed and prepare a removal PR
+description: Mark a wiki page (and its translations) as removed and prepare a removal PR. Use this only when someone explicitly asks to remove or delete a specific wiki page. It marks the page to come off the published site once merged, so do not use it to correct a page or to find pages nothing links to — wikicommit-fix corrects a page and wikicommit-status finds orphans without writing.
 disable-model-invocation: true
 ---
 
 # wikicommit-remove
+
+> **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to this Skill's directory — the one holding this `SKILL.md`, which the runtime names when it loads the Skill — not to the repository root, because the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there (`python <this Skill's directory>/scripts/…`). Paths starting with `.wikicommit/` are repository-root paths as before.
 
 Skill for removing a wiki page. Does not physically delete the file — it only performs a soft delete by setting `status: removed` on the target page. This hides the page from the published wiki while preserving Git history and rollback capability.
 
@@ -29,7 +31,7 @@ If the target page doesn't exist, or already has `status: removed`, this is dete
 ### Step 2: Run `remove_page.py`
 
 ```bash
-python .claude/skills/wikicommit-remove/scripts/remove_page.py <page> --reason <reason> [--merged-into <path>]
+python scripts/remove_page.py <page> --reason <reason> [--merged-into <path>]
 ```
 
 - When `--reason merged`, always add `--merged-into <path of the merge target page>`.

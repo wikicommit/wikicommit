@@ -157,7 +157,9 @@ def test_permission_disabled_reports_warning_with_enable_command(tmp_path):
     assert result.returncode == 0
     assert "WARNING:" in result.stdout
     assert "acme/example-wiki" in result.stdout
-    assert "Issue #403" in result.stdout
+    # 帰結の文（なぜ有効化が要るか）を照合する。Issue 番号は公開側で辿れないため出力から外した（Issue #1054）
+    assert "cannot auto-merge after a review tracking Issue is closed" in result.stdout
+    assert "Issue #" not in result.stdout
     assert (
         "gh api -X PUT repos/acme/example-wiki/actions/permissions/workflow "
         "-F can_approve_pull_request_reviews=true -f default_workflow_permissions=write"

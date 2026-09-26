@@ -5,7 +5,7 @@ description: Build the published wiki with Quartz v5 and preview it locally, ins
 
 # wikicommit-serve
 
-A thin wrapper around the Quartz v5 build/dev-server commands (`npm run build` / `npm run preview`) that `/wikicommit-init --quartz` sets up. Previewing the wiki was previously surfaced to users as a bare `npm run preview`, which doesn't read as a WikiCommit-specific command and is easy to miss among the `/wikicommit-*` Skills that are otherwise the tool's primary interface (`CLAUDE.md`, Issue #276). This Skill has no dedicated script of its own — it is a thin sequence of a prerequisite check and an `npm` invocation.
+A thin wrapper around the Quartz v5 build/dev-server commands (`npm run build` / `npm run preview`) that `/wikicommit-init --quartz` sets up. This Skill has no dedicated script of its own — it is a thin sequence of a prerequisite check and an `npm` invocation.
 
 ## Usage
 
@@ -42,9 +42,11 @@ node -e "process.exit(require('./package.json').scripts?.preview ? 0 : 1)"
 already had its own package.json before running /wikicommit-init --quartz, so WikiCommit's build
 scripts were never added to it (init.py never overwrites an existing package.json). Merge the
 "scripts" and "devDependencies" from
-.claude/skills/wikicommit-init/scripts/templates/package.json into your package.json by hand,
+<skill-tree>/wikicommit-init/scripts/templates/package.json into your package.json by hand,
 then re-run /wikicommit-serve.
 ```
+
+Fill `<skill-tree>` with the directory this Skill was actually loaded from, minus its own name (`.claude/skills` or `.agents/skills`); the reader runs the merge from the repository root, where a Skill-relative `../` path means nothing.
 
 ### Step 2: Run the Build/Preview
 
@@ -69,4 +71,4 @@ npm run preview
 - Do not commit or create a PR against `main` or any branch — this Skill has no Git side effects of its own
 - Do not write to `.wikicommit/schema/`
 - Windows: see the "Windows only" caveat in `wikicommit-init`'s next-steps guidance — `npm run install-plugins` (part of both `build` and `preview`) needs Developer Mode or Administrator privileges for the Quartz plugin symlinks to load
-- A single broken Quartz community plugin (e.g. a plugin referenced in `quartz.config.yaml` has no `dist/` under `quartz/.quartz/plugins/<name>/`) no longer aborts `npm run build`/`preview` outright (Issue #443) — `install-plugins`'s own `repair-plugin-builds.cjs` step (Issue #382) retries it up to 3 times, and if it's still broken afterward, the `build`/`preview` scripts print a `WARNING: one or more Quartz community plugins failed to install/build` line and continue into `npx quartz build` anyway, which generates the site using the plugins that did install successfully. If the build output includes that warning, scroll up to `repair-plugin-builds`'s own error output — it names the still-broken plugin(s) and the exact command to run inside that plugin's directory to see the underlying error (a real failure in the plugin's own dependencies, not something WikiCommit or this Skill can fix)
+- A single broken Quartz community plugin (e.g. a plugin referenced in `quartz.config.yaml` has no `dist/` under `quartz/.quartz/plugins/<name>/`) does not abort `npm run build`/`preview` outright — `install-plugins`'s own `repair-plugin-builds.cjs` step retries it up to 3 times, and if it's still broken afterward, the `build`/`preview` scripts print a `WARNING: one or more Quartz community plugins failed to install/build` line and continue into `npx quartz build` anyway, which generates the site using the plugins that did install successfully. If the build output includes that warning, scroll up to `repair-plugin-builds`'s own error output — it names the still-broken plugin(s) and the exact command to run inside that plugin's directory to see the underlying error (a real failure in the plugin's own dependencies, not something WikiCommit or this Skill can fix)

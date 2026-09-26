@@ -1,14 +1,16 @@
 ---
 name: wikicommit-schema-propose
-description: Detect wiki page types with no dedicated .wikicommit/schema/ file, propose a new standard (Schema.org) or custom type file, and open a PR for human review (no auto-merge)
+description: Detect wiki page types with no dedicated .wikicommit/schema/ file, propose a new standard (Schema.org) or custom type file, and open a PR for human review (no auto-merge). Use this only when someone explicitly asks to add schema files for types that lack one. It opens a PR that changes .wikicommit/schema/, so do not use it just to list the uncovered types — wikicommit-status reports them without writing.
 disable-model-invocation: true
 ---
 
 # wikicommit-schema-propose
 
-Detects `type:` values used by wiki pages that have no dedicated `.wikicommit/schema/` file, and proposes a new schema type file via PR (Issue #285). `.wikicommit/schema/` itself is off-limits to write directly from `wikicommit-generate` (that Skill's "Git operations: none, schema/: read-only" contract), so this Skill exists to be the one place schema files actually get added — and only by adding new files, never editing or deleting existing ones.
+> **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to this Skill's directory — the one holding this `SKILL.md`, which the runtime names when it loads the Skill — not to the repository root, because the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there (`python <this Skill's directory>/scripts/…`). Paths starting with `.wikicommit/` are repository-root paths as before.
 
-This complements `coverage_gap_note` (`wikicommit-generate` Pass 2, Issue #284): that mechanism records when an already-correct type is missing a *field*; this Skill addresses when the *type itself* isn't the best fit — e.g. pages generated as `schema:DefinedTerm` when `schema:Game` (with `typicalAgeRange`/`gameItem`/`numberOfPlayers`) would fit better, or `schema:HowTo` when `schema:GovernmentService` (with `jurisdiction`/`availableChannel`/`hoursAvailable`) would fit better. The two do not integrate — `wikicommit-schema-propose` does not consume `coverage_gap_note`.
+Detects `type:` values used by wiki pages that have no dedicated `.wikicommit/schema/` file, and proposes a new schema type file via PR. `.wikicommit/schema/` itself is off-limits to write directly from `wikicommit-generate` (that Skill's "Git operations: none, schema/: read-only" contract), so this Skill exists to be the one place schema files actually get added — and only by adding new files, never editing or deleting existing ones.
+
+This complements `coverage_gap_note` (`wikicommit-generate` Pass 2): that mechanism records when an already-correct type is missing a *field*; this Skill addresses when the *type itself* isn't the best fit — e.g. pages generated as `schema:DefinedTerm` when `schema:Game` (with `typicalAgeRange`/`gameItem`/`numberOfPlayers`) would fit better, or `schema:HowTo` when `schema:GovernmentService` (with `jurisdiction`/`availableChannel`/`hoursAvailable`) would fit better. The two do not integrate — `wikicommit-schema-propose` does not consume `coverage_gap_note`.
 
 ## Usage
 
@@ -26,7 +28,7 @@ No arguments. Always runs a full scan.
 gh repo view --json defaultBranchRef -q .defaultBranchRef.name
 ```
 
-Record the result as `<default branch>` and use it everywhere below in place of a literal `main` (Issue #351 — the repository's actual default branch is not guaranteed to be `main`). If this command fails (no GitHub remote, or `gh` not authenticated), fall back to `main` and warn the user that Step 6's branch/PR operations will fail if the repository's real default branch differs.
+Record the result as `<default branch>` and use it everywhere below in place of a literal `main` — the repository's actual default branch is not guaranteed to be `main`. If this command fails (no GitHub remote, or `gh` not authenticated), fall back to `main` and warn the user that Step 6's branch/PR operations will fail if the repository's real default branch differs.
 
 ### Step 1: Detect coverage gaps
 
@@ -36,7 +38,7 @@ python .wikicommit/scripts/check_schema_coverage.py
 
 Parse each `UNCOVERED: <type> (<N> pages, e.g. <path>)` line — this is the deterministic, guaranteed-complete detection source (a scan of every page currently in `.wikicommit/entity/`). If none, report "No schema coverage gaps found" and stop.
 
-> **Role since Issue #315**: `wikicommit-generate` Pass 2b now resolves most type-necessity judgments inline, at generation time, by writing an approved `.wikicommit/schema/<Type>.md` directly (no PR, no `better_type_candidate` field — that field was removed). This Skill's `check_schema_coverage.py` scan therefore now mainly serves as the **post-hoc safety net**: pages generated before Issue #315 shipped (when `better_type_candidate` was only ever a Completion Notice suggestion, easy to lose across sessions — the exact problem #315 fixed), or any future page that ends up using a type with no dedicated schema file through some other path. It is no longer the primary channel for new type proposals.
+> **Role**: `wikicommit-generate` Pass 2b resolves most type-necessity judgments inline, at generation time, by writing an approved `.wikicommit/schema/<Type>.md` directly. This Skill's scan is the **post-hoc safety net**: pages generated by an older version, or any page that ends up using a type with no dedicated schema file through some other path. It is not the primary channel for new type proposals.
 
 ### Step 2: Skip types that already have a proposal
 
@@ -59,7 +61,7 @@ python .wikicommit/scripts/check_schema_org_type.py --type <Type>
 
 ### Step 4: Standard type path
 
-**Read `.wikicommit/schema-authoring.md` and follow it** (Issue #886). That file holds the whole procedure for writing a type file — browsing `--list-properties`, verifying each candidate with `--property`, dropping the ones reported `ERROR:`, the standard-type file format with `default.md` / `Person.md` as the fixed style references, and how to write `granularity` (1–3 rules, one `Boundary —` rule, cross-type deference, the YAML-string discipline, and not contradicting a rule stated elsewhere in the pipeline). Four paths write type files and only the judgment differs between them, so the procedure lives in one place rather than four.
+**Read `.wikicommit/schema-authoring.md` and follow it**. That file holds the whole procedure for writing a type file — browsing `--list-properties`, verifying each candidate with `--property`, dropping the ones reported `ERROR:`, the standard-type file format with `default.md` / `Person.md` as the fixed style references, and how to write `granularity` (1–3 rules, one `Boundary —` rule, cross-type deference, the YAML-string discipline, and not contradicting a rule stated elsewhere in the pipeline). Four paths write type files and only the judgment differs between them, so the procedure lives in one place rather than four.
 
 What this Skill supplies on top of it:
 
@@ -69,13 +71,13 @@ What this Skill supplies on top of it:
 
 Three things this step is accountable for even if that Read is skipped: **every property goes through `check_schema_org_type.py` before it enters `properties:`**, **one `granularity` rule starts with `Boundary —`** (em dash, not a colon), and **`provenance` is `schema-propose`**.
 
-**If `.wikicommit/schema-authoring.md` is not present** (a wiki initialized before it shipped, or Skills updated without re-running init), **read the copy in the Skill tree instead** — `.claude/skills/wikicommit-init/scripts/templates/schema-authoring.md`, the same file `init.py` expands, which `install.sh` and `npx skills add` carry into every installation of these Skills (the route `/wikicommit-update` already takes for a script an older repository does not have yet). Say which copy you read. **Only if neither is readable**, do not write the file: skip this type, name the missing file and `/wikicommit-init --no-overwrite` as the way to get it, and move on to the next detected type. Unlike a Skill whose every run needs the file, this one reaches it only when a type is actually being proposed. The gap stays visible — `check_schema_coverage.py` is what detected this type in the first place and will report it again on the next `/wikicommit-status`.
+**If `.wikicommit/schema-authoring.md` is not present** (a wiki initialized before it shipped, or Skills updated without re-running init), **read the copy in the Skill tree instead** — `../wikicommit-init/scripts/templates/schema-authoring.md`, the same file `init.py` expands, which `install.sh` and `npx skills add` carry into every installation of these Skills (the route `/wikicommit-update` already takes for a script an older repository does not have yet). Say which copy you read. **Only if neither is readable**, do not write the file: skip this type, name the missing file and `/wikicommit-init --no-overwrite` as the way to get it, and move on to the next detected type. Unlike a Skill whose every run needs the file, this one reaches it only when a type is actually being proposed. The gap stays visible — `check_schema_coverage.py` is what detected this type in the first place and will report it again on the next `/wikicommit-status`.
 
 ### Step 5: Custom type path
 
 1. Derive `<Name>` (the segment after `custom/`) from the `type:` value already used by the detected pages. It must already follow the custom-type naming rule (PascalCase, word characters only, no hyphen) — this Skill only *adds* the missing schema file, it never renames the `type:` value on existing wiki pages. If it doesn't follow the rule (e.g. contains a hyphen), skip this type, log a warning naming the offending pages, and move to the next detected type — renaming is out of scope and left to a human via `wikicommit-fix`.
-2. Generate `.wikicommit/schema/custom/<Name>.md` in the custom-type format — unlike a standard type, explicitly document each property's meaning/type/constraints in prose, since the LLM has no built-in knowledge of a project-specific custom type. Pick a `wikicommit.base` value that names the closest real Schema.org parent type as a reference point (informational only, not verified against the vocabulary — custom types by definition fall outside it). Set `wikicommit.provenance: schema-propose` here too (Step 4's note above applies uniformly to both paths). **Read `.wikicommit/schema-authoring.md`'s `granularity` section and follow it here as well** (Issue #886) — a custom type carries `granularity` exactly like a standard one, so the 1–3 rules, the one `Boundary —` rule, cross-type deference, the YAML-string discipline (`Boundary — …` with an em dash, never `Boundary: …`; no ` #` mid-bullet) and the don't-contradict-the-pipeline rule all apply unchanged. Its property and file-format sections do not: they resolve names against the Schema.org vocabulary, which a custom type is by definition outside of. Use the same missing-file handling Step 4 states above (the Skill-tree copy first, and only then skip this type).
-3. No `check_schema_org_type.py` property verification applies here (nothing to check against). Instead, write one or two sentences explaining *why no existing Schema.org standard type fits* and why the `wikicommit.base` you picked is the closest parent. Put that text in the file itself, as a `wikicommit.rationale:` value in the same `wikicommit:` block (Issue #548) — a custom type sits outside the Schema.org vocabulary, so this reasoning is the only durable record of why the type exists and is what a later reader, or a future decision to migrate the type onto a standard one, has to work from. Then reuse the same text verbatim in the PR description's "Schema.org standard type could not reasonably replace this" checklist item (the custom-type-only line in the template below), which is the human reviewer's main thing to scrutinize for a custom type. `rationale:` is custom-type-only — do not add it in Step 4's standard-type path, where the type's existence in the vocabulary is itself the justification. Do not confuse it with a `rationale` key that a given custom type may happen to declare under its own `properties:` block: that one is a property of the entities the type describes, this one is about the type's design.
+2. Generate `.wikicommit/schema/custom/<Name>.md` in the custom-type format — unlike a standard type, explicitly document each property's meaning/type/constraints in prose, since the LLM has no built-in knowledge of a project-specific custom type. Pick a `wikicommit.base` value that names the closest real Schema.org parent type as a reference point (informational only, not verified against the vocabulary — custom types by definition fall outside it). Set `wikicommit.provenance: schema-propose` here too (Step 4's note above applies uniformly to both paths). **Read `.wikicommit/schema-authoring.md`'s `granularity` section and follow it here as well** — a custom type carries `granularity` exactly like a standard one, so the 1–3 rules, the one `Boundary —` rule, cross-type deference, the YAML-string discipline (`Boundary — …` with an em dash, never `Boundary: …`; no ` #` mid-bullet) and the don't-contradict-the-pipeline rule all apply unchanged. Its property and file-format sections do not: they resolve names against the Schema.org vocabulary, which a custom type is by definition outside of. Use the same missing-file handling Step 4 states above (the Skill-tree copy first, and only then skip this type).
+3. No `check_schema_org_type.py` property verification applies here (nothing to check against). Instead, write one or two sentences explaining *why no existing Schema.org standard type fits* and why the `wikicommit.base` you picked is the closest parent. Put that text in the file itself, as a `wikicommit.rationale:` value in the same `wikicommit:` block — a custom type sits outside the Schema.org vocabulary, so this reasoning is the only durable record of why the type exists and is what a later reader, or a future decision to migrate the type onto a standard one, has to work from. Then reuse the same text verbatim in the PR description's "Schema.org standard type could not reasonably replace this" checklist item (the custom-type-only line in the template below), which is the human reviewer's main thing to scrutinize for a custom type. `rationale:` is custom-type-only — do not add it in Step 4's standard-type path, where the type's existence in the vocabulary is itself the justification. Do not confuse it with a `rationale` key that a given custom type may happen to declare under its own `properties:` block: that one is a property of the entities the type describes, this one is about the type's design.
 
 ### Step 6: Branch, commit, PR (no auto-merge)
 
@@ -86,7 +88,7 @@ Repeat for each type that reached this step (mirrors `wikicommit-merge`'s post-r
 git checkout "<default branch>"
 git checkout -B wikicommit/schema-propose-<TypeSlug>
 
-# 2. Write the new schema file (Write tool) — ONE new file only, never edit/delete an existing one
+# 2. Write the new schema file — ONE new file only, never edit/delete an existing one
 #    .wikicommit/schema/<Type>.md            (standard type)
 #    .wikicommit/schema/custom/<Name>.md      (custom type)
 
@@ -95,7 +97,7 @@ git add .wikicommit/schema/<path from step 2>
 git commit -m "$(cat <<'EOF'
 schema: propose <Type> for <N> uncovered pages
 
-Co-Authored-By: <Claude display name> <noreply@anthropic.com>
+<Co-Authored-By line>
 Generated-By:   <current model ID>
 EOF
 )"
@@ -117,9 +119,19 @@ git checkout "<default branch>"
 sleep 2
 ```
 
-**The trailer's model fields are placeholders, not literals (Issue #559).** Replace `<current model ID>` with the ID of the model actually running this skill — the same self-reported value `wikicommit-generate` writes into a page's `generated_by`, spelled exactly as the runtime reports it (keep any suffix; do not shorten or normalize it). Replace `<Claude display name>` with that model's human-readable name, or write just `Claude` when the running model's display name is not known with confidence: GitHub links a co-author by the email address, not by the name, so a conservative `Claude` costs nothing while a guessed name misattributes the commit in the GitHub UI. `<noreply@anthropic.com>` is a fixed literal. Never hardcode a model ID here.
+<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update and -init; tests/test_commit_trailer_vendor_table.py holds them together) -->
+**Commit trailers.** Always write `Generated-By:   <current model ID>`: the ID of the model actually running this Skill, exactly as the runtime reports it — the same self-reported value `wikicommit-generate` writes into a page's `generated_by` (keep any suffix; do not shorten or normalize it; never hardcode one). Then choose `<Co-Authored-By line>` from the start of that same ID, so the two lines can never name different vendors:
 
-`--title` is passed through a quote-delimited heredoc rather than a plain double-quote embedding, uniformly for both the standard-type and custom-type paths (Issue #398). The two paths were evaluated separately: on the standard-type path `<Type>` is already confirmed real by `check_schema_org_type.py --type <Type>` in Step 3, and Schema.org vocabulary identifiers are themselves alphanumeric CamelCase (no shell metacharacters are possible), so that path alone would qualify for the "upstream-validated constrained identifier" exemption to this rule. On the custom-type path, though, Step 5.1's naming-rule check ("must follow PascalCase, word characters only, no hyphen") is an instruction the LLM carries out by reading the page's existing `type:` value, not a deterministic script-enforced check — so it does not strictly meet that exemption's bar of validation by an upstream script or command. Rather than branch the `--title` construction on which path produced `<Type>`, the heredoc is applied unconditionally: it costs nothing on the already-safe standard-type path (same reasoning `wikicommit-merge` already uses for applying `:(literal)` uniformly), and it closes the gap on the custom-type path without depending on the rigor of the Step 5.1 LLM check.
+| `<current model ID>` starts with | `<Co-Authored-By line>` |
+|---|---|
+| `claude-`, or `claude-` after a provider prefix ending in `anthropic.` (Bedrock, e.g. `us.anthropic.claude-…`) | `Co-Authored-By: <Claude display name> <noreply@anthropic.com>` — the model's human-readable name, or just `Claude` when it is not known with confidence |
+| `gpt-` or `codex` | `Co-Authored-By: Codex <noreply@openai.com>` |
+| anything else | **no `Co-Authored-By` line at all** — `Generated-By` already records the model |
+
+GitHub resolves a co-author by the email address and shows that vendor's avatar on the commit, so a line naming a vendor that did not run this Skill misattributes it; writing none is the correct answer for a model not in the table. Decide by the model, not by the harness running it — one harness can run models from more than one vendor. If the harness appends its own co-author line after this message, leave it; an identical duplicate does no harm.
+<!-- commit-trailers:end -->
+
+`--title` is passed through a quote-delimited heredoc on both paths, never a plain double-quote embedding: on the custom-type path `<Type>` comes from the pages' existing `type:` value, which Step 5.1 only checks by reading, not by a script, so it may hold shell metacharacters — and applying the heredoc unconditionally costs nothing on the standard-type path.
 
 Skip step 6 after the last proposed type. If `git push` or `gh pr create` errors, log it, leave the branch for cleanup, and move to the next type rather than aborting the whole run (same resilience pattern as `wikicommit-merge`'s post-review PR loop).
 
@@ -155,4 +167,4 @@ Report, per detected type: proposed (with PR link) / skipped (duplicate proposal
 - Only ever **adds** a new file under `.wikicommit/schema/`. Never edits or deletes an existing schema file.
 - Never touches `.wikicommit/entity/` — existing pages keep using their current `type:` value; migrating them to the newly proposed type (if desired) is a separate, human-driven decision.
 - Never auto-merges. Every PR this Skill opens waits for a human to review and merge it manually (unlike `wikicommit-merge`'s bulk-update PR, or the PR that `review-issue-close-sync.yml` opens and auto-merges once a review tracking Issue is closed).
-- `.wikicommit/schemaorg-vocab.json` (built lazily by `check_schema_org_type.py`, committed to Git — Issue #319) has no TTL/auto-refresh — delete it manually to force a rebuild against the latest Schema.org vocabulary.
+- `.wikicommit/schemaorg-vocab.json` (built lazily by `check_schema_org_type.py`, committed to Git) has no TTL/auto-refresh — delete it manually to force a rebuild against the latest Schema.org vocabulary.

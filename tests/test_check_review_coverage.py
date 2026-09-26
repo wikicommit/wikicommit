@@ -355,10 +355,16 @@ def test_exit_code_is_always_zero(tmp_path):
 
 
 def reason(cwd: Path, *pages: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
+    result = subprocess.run(
         [sys.executable, str(SCRIPT), "--discarded-reason", *pages],
         capture_output=True, text=True, cwd=cwd, check=False,
     )
+    # `record()` asserts this and this helper did not (Issue #991). The script's
+    # contract is exit 0 always, so a non-zero code here is never the finding under
+    # test — and without the assert it surfaces as a confusing mismatch on stdout
+    # rather than as the crash it is.
+    assert result.returncode == 0, result.stderr
+    return result
 
 
 DISCARD_FINDING = (

@@ -34,12 +34,31 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 
-TEMPLATES_REL = Path(".claude/skills/wikicommit-init/scripts")
+# This script is read-only, down to not leaving a `__pycache__/` beside itself — the
+# same reason _load_module_by_path() suppresses bytecode for the modules it imports.
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).parent))
+from _skill_tree import SKILL_TREE_ROOTS, find_skill_dir  # noqa: E402
+
+
+def _init_scripts_dir(repo_root: Path) -> Path:
+    """`<skill tree>/wikicommit-init/scripts` — where the templates to compare against live.
+
+    The Skill tree may be under `.claude/skills/` or `.agents/skills/` (Issue #1021; the
+    search order and why it is that order are in `_skill_tree.py`). Before this looked
+    only at `.claude/skills/`, so a Codex-only install printed "wikicommit-init is not
+    installed" and a clean all-zero summary — the Skill present, merely elsewhere, read
+    as absent. When no copy exists the `.claude/skills` path is returned so the
+    not-installed message still names somewhere to look.
+    """
+    found = find_skill_dir("wikicommit-init", repo_root)
+    return (found or repo_root / SKILL_TREE_ROOTS[0] / "wikicommit-init") / "scripts"
 
 # Never walked on either side: npm's install tree and Python's bytecode cache are not
 # distribution content, and copy_tree() prunes both for the same reason.
@@ -73,6 +92,43 @@ def _consequence(path: str) -> str:
     return _SCRIPTS_CONSEQUENCE if path == ".wikicommit/scripts" else ""
 
 
+def _load_module_by_path(module_path: Path, module_name: str, *, syspath: Path | None = None):
+    """Execute one Python file as a module, or None if it will not load.
+
+    Bytecode caching is suppressed for the duration: exec_module() would otherwise write
+    `__pycache__` into the installed Skill tree, and a read-only report has no business
+    writing there (init.py's own `_version.py` loader takes the same precaution, for the
+    same reason). `syspath` is prepended while the module executes, for a module that
+    imports a sibling by bare name.
+
+    Kept as one loader rather than one per caller: both callers want the same "load it
+    or degrade" contract, and two copies of the bytecode dance would drift apart the
+    first time either is touched.
+    """
+    if not module_path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    previous = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    if syspath is not None:
+        sys.path.insert(0, str(syspath))
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    finally:
+        if syspath is not None:
+            try:
+                sys.path.remove(str(syspath))
+            except ValueError:
+                pass
+        sys.dont_write_bytecode = previous
+    return module
+
+
 def _load_root_outputs(repo_root: Path):
     """Import `_root_outputs` from the installed wikicommit-init Skill, or None.
 
@@ -83,22 +139,9 @@ def _load_root_outputs(repo_root: Path):
     `check_property_wikilink_reinforcement.py` takes when the Schema.org vocabulary
     cannot be read.
     """
-    module_path = repo_root / TEMPLATES_REL / "_root_outputs.py"
-    if not module_path.is_file():
-        return None
-    spec = importlib.util.spec_from_file_location("_root_outputs_installed", module_path)
-    if spec is None or spec.loader is None:
-        return None
-    module = importlib.util.module_from_spec(spec)
-    previous = sys.dont_write_bytecode
-    sys.dont_write_bytecode = True
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        return None
-    finally:
-        sys.dont_write_bytecode = previous
-    return module
+    return _load_module_by_path(
+        _init_scripts_dir(repo_root) / "_root_outputs.py", "_root_outputs_installed"
+    )
 
 
 def detect_variant(repo_root: Path) -> str:
@@ -117,7 +160,7 @@ def detect_variant(repo_root: Path) -> str:
 
 def _installed_version(repo_root: Path) -> str:
     """The version the *template tree* ships, or "unknown"."""
-    version_file = repo_root / TEMPLATES_REL / "templates" / "scripts" / "_version.py"
+    version_file = _init_scripts_dir(repo_root) / "templates" / "scripts" / "_version.py"
     if not version_file.is_file():
         return "unknown"
     for line in version_file.read_text(encoding="utf-8").splitlines():
@@ -127,6 +170,14 @@ def _installed_version(repo_root: Path) -> str:
     return "unknown"
 
 
+def _load_yaml_mapping(path: Path) -> dict:
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _synced_version(repo_root: Path) -> str:
     """`wikicommit_version` from config.yml, or "unknown".
 
@@ -134,26 +185,72 @@ def _synced_version(repo_root: Path) -> str:
     guess is made: every comparison below runs on the files themselves regardless, so
     the version is reported for the reader's benefit and never gates a check.
     """
-    config = repo_root / ".wikicommit" / "config.yml"
-    if not config.is_file():
-        return "unknown"
-    try:
-        data = yaml.safe_load(config.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
-        return "unknown"
-    if not isinstance(data, dict):
-        return "unknown"
-    version = data.get("wikicommit_version")
+    version = _load_yaml_mapping(repo_root / ".wikicommit" / "config.yml").get(
+        "wikicommit_version"
+    )
     return str(version) if version else "unknown"
 
 
+# The key a list element carries its identity in. `plugins` is the only list of mappings
+# in any compared template, and `source` is what names each entry there. No `name`/`id`
+# fallback is guessed at: a second candidate would be a receptacle with no consumer
+# (Issue #553), and an element with no identifier is skipped rather than matched by
+# position — see _list_element_paths().
+_LIST_ELEMENT_IDENTIFIER_KEY = "source"
+
+
+def _list_element_identifier(item) -> str | None:
+    """How a list element is named for comparison, or None to skip it."""
+    if isinstance(item, dict):
+        identifier = item.get(_LIST_ELEMENT_IDENTIFIER_KEY)
+        return identifier if isinstance(identifier, str) else None
+    # bool is an int subclass and stringifies the same way on both sides, so it needs no
+    # separate branch. Anything else (None, a nested list) has no stable identity here.
+    if isinstance(item, (str, int, float)):
+        return str(item)
+    return None
+
+
+def _list_element_paths(items: list, path: str) -> set[str]:
+    """`<path>[<identifier>]` for each element that has one (Issue #950).
+
+    Three constraints, each settled by measuring the three pilots rather than by taste:
+
+    1. **Identity, never position.** One plugin added upstream would shift all 47 and
+       report every one of them as drift.
+    2. **No descent into an element mapping.** `enabled` would report ai-driven-dev-wiki
+       for turning giscus on — the deliberate choice the very Issue that shipped the
+       plugin exists to enable — and `options` would report all three pilots forever,
+       because the footer's `{REPO_URL}` is still a placeholder on the template side.
+       So what is compared about `plugins` is *which plugins are there*, nothing else.
+    3. **Additive only**, like every other `review` comparison: an element the local file
+       has and the template does not is the user's own and is never reported.
+
+    An element with no identifier is skipped, not matched by position: the degradation is
+    the same silence as before this existed, which is not a source of noise.
+    """
+    paths: set[str] = set()
+    for item in items:
+        identifier = _list_element_identifier(item)
+        if identifier is None:
+            continue
+        paths.add(f"{path}[{identifier}]")
+    return paths
+
+
 def _key_paths(value, prefix: str = "") -> set[str]:
-    """Every mapping key in `value`, as dotted paths.
+    """Every mapping key in `value`, as dotted paths, plus identified list elements.
 
     Recursive rather than top-level-only because the keys that actually get added
     upstream are nested: `quartz.config.yaml` has three top-level keys and never gains a
-    fourth, while `pageTitleSuffix` (Issue #679) arrived under `configuration`. Lists are
-    not descended into — their contents are the user's values, not schema.
+    fourth, while `pageTitleSuffix` (Issue #679) arrived under `configuration`.
+
+    Lists are descended into as well (Issue #950). Stopping at the key collapsed all 47
+    entries of `plugins` into a single path, so a plugin swapped for the local build, a
+    plugin added upstream, or a component added to `layout.byPageType.*.exclude` was
+    structurally invisible — four of the five drifts a maintainer had listed as "not
+    detected" were of exactly that shape, and a fifth (`comments`, Issue #755) was
+    missing from two of three pilots with nobody having written it down at all.
     """
     if not isinstance(value, dict):
         return set()
@@ -161,7 +258,10 @@ def _key_paths(value, prefix: str = "") -> set[str]:
     for key, child in value.items():
         path = f"{prefix}{key}"
         paths.add(path)
-        paths |= _key_paths(child, prefix=f"{path}.")
+        if isinstance(child, list):
+            paths |= _list_element_paths(child, path)
+        else:
+            paths |= _key_paths(child, prefix=f"{path}.")
     return paths
 
 
@@ -274,6 +374,144 @@ def _meaningful_lines(path: Path) -> set[str]:
     }
 
 
+def _load_init_module(repo_root: Path):
+    """Import the installed `init.py`, or None — for the values it alone can compute.
+
+    Loaded the same way `_root_outputs` is. Absence of the Skill tree is not handled
+    here: check() returns early with its own WARNING in that case, so reaching this and
+    getting None means the module is present and would not load — which the caller
+    reports rather than passing off as a clean result. `init.py` imports `_root_outputs`
+    by bare name, so its own directory has to be on `sys.path` for the duration.
+    """
+    scripts_dir = _init_scripts_dir(repo_root)
+    return _load_module_by_path(
+        scripts_dir / "init.py", "_wikicommit_init_installed", syspath=scripts_dir
+    )
+
+
+def _github_repo_slug(url: str) -> str | None:
+    """`owner/repo` from an HTTPS or SSH GitHub remote, or None."""
+    text = url.strip().rstrip("/")
+    if text.endswith(".git"):
+        text = text[: -len(".git")]
+    match = re.search(r"github\.com[:/]+([^/]+/[^/]+)$", text)
+    return match.group(1) if match else None
+
+
+def _origin_repo_slug(repo_root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=repo_root, capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return _github_repo_slug(result.stdout)
+
+
+def _footer_github_link(config: dict) -> str | None:
+    """The footer plugin's `options.links.GitHub`, or None if there is no such entry."""
+    plugins = config.get("plugins")
+    if not isinstance(plugins, list):
+        return None
+    for plugin in plugins:
+        if not isinstance(plugin, dict):
+            continue
+        options = plugin.get("options")
+        if not isinstance(options, dict):
+            continue
+        links = options.get("links")
+        if not isinstance(links, dict):
+            continue
+        link = links.get("GitHub")
+        if isinstance(link, str):
+            return link
+    return None
+
+
+def _quartz_value_findings(repo_root: Path, local_path: Path) -> list[str]:
+    """`quartz.config.yaml` values that are wrong rather than merely different (#950).
+
+    Two of the drifts that stayed invisible are not template-comparison problems at all:
+    the template holds `{LOCALE}` and `{REPO_URL}`, so there is no upstream literal to
+    compare against. Their correct values are *computed* by init, from this repository's
+    own `primary_lang` and git remote. So the question these two ask is not "does this
+    differ from the template" but "is this what init would write today".
+
+    That is why they live here and not in `_root_outputs.py`: init.py and
+    print_next_steps.py read that list too, and neither has any use for a value check —
+    it would be a field on a shared list that one of three consumers reads. Dispatching
+    on the path inside this script has a precedent a few lines up in `_consequence()`.
+
+    Deliberately *not* checked the same way:
+
+    - `pageTitle` / `pageTitleSuffix`, whose init value is a default derived from the
+      directory name, not a correct answer. A wiki renaming its own site is doing the
+      normal thing, and comparing would scold it every run.
+    - the locale's *region* subtag. init.py's own table says a wiki wanting a regional
+      variant edits that line by hand, so only the language subtag is compared — `en-GB`
+      is a choice, `en-US` on an Italian wiki is a leftover.
+
+    Only the first of the two needs init at all, so only the first is skipped when it
+    cannot be loaded — and skipping it is announced rather than folded into a clean
+    summary.
+    """
+    config = _load_yaml_mapping(local_path)
+    if not config:
+        return []
+    findings: list[str] = []
+
+    # Reached only with the Skill tree present (check() returns early otherwise), so a
+    # module that will not load — or one too old to carry the function — is WikiCommit's
+    # own problem, and its only symptom would be a check that quietly stopped running
+    # while `SUMMARY: outdated=0` stood in for "in step". That is the same silent wrong
+    # answer `_yaml_keys()` refuses to leave standing for an unparseable template, so it
+    # gets the same treatment: say which check did not run.
+    #
+    # Fetched rather than called through: an attribute that is simply absent used to
+    # raise, aborting the whole report with a traceback and breaking this script's
+    # "exit code: always 0" contract over one of its checks.
+    init_module = _load_init_module(repo_root)
+    locale_for = getattr(init_module, "quartz_locale_for", None)
+    if locale_for is None:
+        print(
+            f"WARNING: {(_init_scripts_dir(repo_root) / 'init.py').as_posix()} would not load, "
+            "or is too old to provide quartz_locale_for(), so configuration.locale was not "
+            "checked against this repository's primary_lang. Re-install the Skills."
+        )
+    else:
+        configuration = config.get("configuration")
+        locale = configuration.get("locale") if isinstance(configuration, dict) else None
+        translation = _load_yaml_mapping(
+            repo_root / ".wikicommit" / "config.yml"
+        ).get("translation")
+        primary_lang = translation.get("primary_lang") if isinstance(translation, dict) else None
+        if isinstance(locale, str) and isinstance(primary_lang, str) and primary_lang.strip():
+            expected = locale_for(primary_lang)
+            if locale.split("-")[0].lower() != expected.split("-")[0].lower():
+                findings.append(
+                    f"configuration.locale is {locale}, but translation.primary_lang is "
+                    f"{primary_lang}, which init writes as {expected}"
+                )
+
+    # Deliberately outside that branch: this one reads the local config and this
+    # repository's own git remote, so an unloadable init.py has no bearing on it.
+
+    link = _footer_github_link(config)
+    origin = _origin_repo_slug(repo_root)
+    if link is not None and origin is not None:
+        linked = _github_repo_slug(link)
+        if linked is not None and linked.lower() != origin.lower():
+            findings.append(
+                f"the footer's links.GitHub points at {linked}, not at this "
+                f"repository ({origin})"
+            )
+
+    return findings
+
+
 def _walk(root: Path, exclude=None) -> dict[str, Path]:
     """Every file under `root`, keyed by its path relative to `root`."""
     found: dict[str, Path] = {}
@@ -299,8 +537,8 @@ def _same_bytes(a: Path, b: Path) -> bool:
 
 def check(repo_root: Path, variant: str | None, only: str | None = None) -> int:
     root_outputs = _load_root_outputs(repo_root)
-    templates_dir = repo_root / TEMPLATES_REL / "templates"
-    module_path = repo_root / TEMPLATES_REL / "_root_outputs.py"
+    templates_dir = _init_scripts_dir(repo_root) / "templates"
+    module_path = _init_scripts_dir(repo_root) / "_root_outputs.py"
     if root_outputs is None or not templates_dir.is_dir():
         # Two different situations reach here and they call for opposite responses, so
         # they must not share a message: the Skill really is absent (install it), or it
@@ -314,8 +552,9 @@ def check(repo_root: Path, variant: str | None, only: str | None = None) -> int:
         else:
             print(
                 "WARNING: wikicommit-init is not installed in this repository "
-                f"({TEMPLATES_REL}/templates/ not found), so there is no template to compare "
-                "against. Install the Skills to enable this check.",
+                "(wikicommit-init/scripts/templates/ not found under "
+                f"{' or '.join(r.as_posix() + '/' for r in SKILL_TREE_ROOTS)}), so there is "
+                "no template to compare against. Install the Skills to enable this check.",
             )
         print("SUMMARY: outdated=0, missing=0, orphan=0")
         return 0
@@ -426,12 +665,18 @@ def check(repo_root: Path, variant: str | None, only: str | None = None) -> int:
         else:
             continue
 
+        # One entry can now report more than one line: the additive key comparison and
+        # the computed-value checks below answer different questions about the same file,
+        # and folding them into one line would make either one hide the other.
+        messages: list[str] = []
         if gained:
             listed = ", ".join(sorted(gained))
-            print(
-                f"OUTDATED: {entry.path} ({policy}) — "
-                f"the template has {label} this file lacks: {listed}"
-            )
+            messages.append(f"the template has {label} this file lacks: {listed}")
+        if entry.path == "quartz.config.yaml":
+            messages.extend(_quartz_value_findings(repo_root, local_path))
+
+        for message in messages:
+            print(f"OUTDATED: {entry.path} ({policy}) — {message}")
             outdated += 1
 
     if only is not None and entries and not compared:

@@ -589,3 +589,88 @@ def test_no_pass_file_points_at_another_pass_as_if_it_were_inline():
             f"{path.name} sends the reader 'above' or 'below' to something that is in "
             f"another file since Issue #911: {hit.group(0)!r} — name the file instead"
         )
+
+
+def test_a_backwards_clock_step_cannot_reorder_two_runs(tmp_path):
+    """Same defect and same fix as `record_review.py` (Issue #991), and it bites
+    harder here: `run_sort_key()` does not only pick what `LAST_RUN:` reports, it
+    also decides which records `rotate()` deletes — so a stepped clock could prune
+    the newest run instead of the oldest.
+    """
+    sys.path.insert(0, str(SCRIPT.parent))
+    from record_run import allocate_run_path, run_sort_key
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+    first = allocate_run_path(directory, "20260907-104234", "wikicommit-generate")
+    first.write_text("---\n---\n", encoding="utf-8")
+
+    second = allocate_run_path(directory, "20260907-104233", "wikicommit-generate")
+
+    assert run_sort_key(second) > run_sort_key(first), (
+        f"{second.name} must still sort after {first.name}"
+    )
+
+
+def test_a_forward_clock_is_left_alone_for_runs(tmp_path):
+    """The clamp engages on inversion only; otherwise every record in a directory
+    would end up pinned to the first stamp written there."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    from record_run import allocate_run_path
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+    allocate_run_path(directory, "20260907-104233", "wikicommit-generate").write_text(
+        "x", encoding="utf-8"
+    )
+
+    later = allocate_run_path(directory, "20260907-104234", "wikicommit-generate")
+
+    assert later.name == "20260907-104234-generate.md"
+
+
+def test_a_clamped_run_of_another_skill_still_sorts_after(tmp_path):
+    """`.wikicommit/run/` holds every Skill's runs together and the skill slug is not
+    part of `run_sort_key()`, so `generate` -> `merge` — the documented main flow — is
+    exactly where clamping by filename ties instead of ordering. `check_run_records.py`
+    takes `sorted(...)[-1]` and `rotate()` takes `records[:-keep]`, both stable, so a
+    tie hands `LAST_RUN:` and the prune list back to `glob()` order."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    from record_run import allocate_run_path, run_sort_key
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+    generate = allocate_run_path(directory, "20260907-104234", "wikicommit-generate")
+    generate.write_text("---\n---\n", encoding="utf-8")
+
+    merge = allocate_run_path(directory, "20260907-104233", "wikicommit-merge")
+
+    assert run_sort_key(merge) > run_sort_key(generate), (
+        f"{merge.name} must sort after {generate.name}, not tie with it"
+    )
+
+
+def test_rotation_freeing_the_unsuffixed_slot_does_not_resurrect_it(tmp_path):
+    """A clock that stays behind clamps every run onto one stamp, and rotation then
+    prunes that stamp's seq-1 record first — freeing `<stamp>-<skill>.md`. Allocating
+    by filename would hand the next run that name, i.e. the *oldest* position: the
+    newest run would drop out of `LAST_RUN:` and become the next thing pruned."""
+    sys.path.insert(0, str(SCRIPT.parent))
+    from record_run import allocate_run_path, rotate, run_sort_key
+
+    directory = tmp_path / "run"
+    directory.mkdir()
+    stamp = "20260907-104233"
+    for _ in range(4):
+        allocate_run_path(directory, stamp, "wikicommit-generate").write_text(
+            "---\n---\n", encoding="utf-8"
+        )
+    rotate(directory, keep=3)
+    assert not (directory / f"{stamp}-generate.md").exists()
+
+    latest = allocate_run_path(directory, stamp, "wikicommit-generate")
+
+    survivors = [run_sort_key(p) for p in directory.glob("*.md")]
+    assert run_sort_key(latest) > max(survivors), (
+        f"{latest.name} must sort after every surviving record"
+    )

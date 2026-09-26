@@ -1,6 +1,6 @@
 ---
 name: wikicommit-reconcile
-description: Put sources back in the queue after a policy, type template or generation rule changed, so the next generate re-runs entity extraction against them
+description: Put sources back in the queue after a policy, type template or generation rule changed, so the next generate re-runs entity extraction against them. Use this only when someone explicitly asks to requeue sources after such a change. It rewrites source management files, so do not use it to process the queue or to see what is pending — wikicommit-generate processes it and wikicommit-status reports it without writing.
 disable-model-invocation: true
 ---
 

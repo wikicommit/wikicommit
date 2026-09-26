@@ -13,12 +13,17 @@ var en_US_default = {
         sources: "Sources",
         tags: "Tags",
         degree: "Links per node",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = no bound",
         reset: "Reset",
         legend: "Legend",
         legendPages: "Pages",
         legendCurrent: "Current page",
         legendVisited: "Visited",
-        legendUnvisited: "Not visited"
+        legendUnvisited: "Not visited",
+        legendVisitedHint: "Pages you have opened in this browser",
+        legendTagsAlways: "Tags always use this color, whether or not you have opened them"
       }
     }
   }
@@ -35,12 +40,17 @@ var en_GB_default = {
         sources: "Sources",
         tags: "Tags",
         degree: "Links per node",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = no bound",
         reset: "Reset",
         legend: "Legend",
         legendPages: "Pages",
         legendCurrent: "Current page",
         legendVisited: "Visited",
-        legendUnvisited: "Not visited"
+        legendUnvisited: "Not visited",
+        legendVisitedHint: "Pages you have opened in this browser",
+        legendTagsAlways: "Tags always use this colour, whether or not you have opened them"
       }
     }
   }
@@ -57,12 +67,17 @@ var ar_SA_default = {
         sources: "\u0627\u0644\u0645\u0635\u0627\u062F\u0631",
         tags: "\u0627\u0644\u0648\u0633\u0648\u0645",
         degree: "\u0627\u0644\u0631\u0648\u0627\u0628\u0637 \u0644\u0643\u0644 \u0639\u0642\u062F\u0629",
+        degreeMin: "\u0627\u0644\u0623\u062F\u0646\u0649",
+        degreeMax: "\u0627\u0644\u0623\u0642\u0635\u0649",
+        degreeNoBound: "0 = \u0628\u0644\u0627 \u062D\u062F",
         reset: "\u0625\u0639\u0627\u062F\u0629 \u062A\u0639\u064A\u064A\u0646",
         legend: "\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u0631\u0645\u0648\u0632",
         legendPages: "\u0627\u0644\u0635\u0641\u062D\u0627\u062A",
         legendCurrent: "\u0627\u0644\u0635\u0641\u062D\u0629 \u0627\u0644\u062D\u0627\u0644\u064A\u0629",
         legendVisited: "\u062A\u0645\u062A \u0632\u064A\u0627\u0631\u062A\u0647\u0627",
-        legendUnvisited: "\u0644\u0645 \u062A\u062A\u0645 \u0632\u064A\u0627\u0631\u062A\u0647\u0627"
+        legendUnvisited: "\u0644\u0645 \u062A\u062A\u0645 \u0632\u064A\u0627\u0631\u062A\u0647\u0627",
+        legendVisitedHint: "\u0627\u0644\u0635\u0641\u062D\u0627\u062A \u0627\u0644\u062A\u064A \u0641\u062A\u062D\u062A\u0647\u0627 \u0641\u064A \u0647\u0630\u0627 \u0627\u0644\u0645\u062A\u0635\u0641\u062D",
+        legendTagsAlways: "\u062A\u064F\u0631\u0633\u0645 \u0627\u0644\u0648\u0633\u0648\u0645 \u062F\u0627\u0626\u0645\u064B\u0627 \u0628\u0647\u0630\u0627 \u0627\u0644\u0644\u0648\u0646 \u0633\u0648\u0627\u0621 \u0641\u062A\u062D\u062A\u0647\u0627 \u0623\u0645 \u0644\u0627"
       }
     }
   }
@@ -79,12 +94,17 @@ var ca_ES_default = {
         sources: "Fonts",
         tags: "Etiquetes",
         degree: "Enlla\xE7os per node",
+        degreeMin: "M\xEDn",
+        degreeMax: "M\xE0x",
+        degreeNoBound: "0 = sense l\xEDmit",
         reset: "Reinicia",
         legend: "Llegenda",
         legendPages: "P\xE0gines",
         legendCurrent: "P\xE0gina actual",
         legendVisited: "Visitades",
-        legendUnvisited: "No visitades"
+        legendUnvisited: "No visitades",
+        legendVisitedHint: "P\xE0gines que has obert en aquest navegador",
+        legendTagsAlways: "Les etiquetes sempre es dibuixen amb aquest color, les hagis obert o no"
       }
     }
   }
@@ -101,12 +121,17 @@ var cs_CZ_default = {
         sources: "Zdroje",
         tags: "\u0160t\xEDtky",
         degree: "Odkaz\u016F na uzel",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = bez omezen\xED",
         reset: "Obnovit",
         legend: "Legenda",
         legendPages: "Str\xE1nky",
         legendCurrent: "Aktu\xE1ln\xED str\xE1nka",
         legendVisited: "Nav\u0161t\xEDven\xE9",
-        legendUnvisited: "Nenav\u0161t\xEDven\xE9"
+        legendUnvisited: "Nenav\u0161t\xEDven\xE9",
+        legendVisitedHint: "Str\xE1nky, kter\xE9 jste otev\u0159eli v tomto prohl\xED\u017Ee\u010Di",
+        legendTagsAlways: "\u0160t\xEDtky se v\u017Edy kresl\xED touto barvou, a\u0165 jste je otev\u0159eli, nebo ne"
       }
     }
   }
@@ -123,12 +148,17 @@ var de_DE_default = {
         sources: "Quellen",
         tags: "Tags",
         degree: "Links pro Knoten",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = keine Grenze",
         reset: "Zur\xFCcksetzen",
         legend: "Legende",
         legendPages: "Seiten",
         legendCurrent: "Aktuelle Seite",
         legendVisited: "Besucht",
-        legendUnvisited: "Nicht besucht"
+        legendUnvisited: "Nicht besucht",
+        legendVisitedHint: "Seiten, die Sie in diesem Browser ge\xF6ffnet haben",
+        legendTagsAlways: "Tags werden immer in dieser Farbe dargestellt, unabh\xE4ngig davon, ob Sie sie ge\xF6ffnet haben"
       }
     }
   }
@@ -145,12 +175,17 @@ var es_ES_default = {
         sources: "Fuentes",
         tags: "Etiquetas",
         degree: "Enlaces por nodo",
+        degreeMin: "M\xEDn",
+        degreeMax: "M\xE1x",
+        degreeNoBound: "0 = sin l\xEDmite",
         reset: "Restablecer",
         legend: "Leyenda",
         legendPages: "P\xE1ginas",
         legendCurrent: "P\xE1gina actual",
         legendVisited: "Visitadas",
-        legendUnvisited: "No visitadas"
+        legendUnvisited: "No visitadas",
+        legendVisitedHint: "P\xE1ginas que has abierto en este navegador",
+        legendTagsAlways: "Las etiquetas siempre se dibujan con este color, las hayas abierto o no"
       }
     }
   }
@@ -167,12 +202,17 @@ var fa_IR_default = {
         sources: "\u0645\u0646\u0627\u0628\u0639",
         tags: "\u0628\u0631\u0686\u0633\u0628\u200C\u0647\u0627",
         degree: "\u067E\u06CC\u0648\u0646\u062F \u062F\u0631 \u0647\u0631 \u06AF\u0631\u0647",
+        degreeMin: "\u06A9\u0645\u06CC\u0646\u0647",
+        degreeMax: "\u0628\u06CC\u0634\u06CC\u0646\u0647",
+        degreeNoBound: "0 = \u0628\u062F\u0648\u0646 \u062D\u062F",
         reset: "\u0628\u0627\u0632\u0646\u0634\u0627\u0646\u06CC",
         legend: "\u0631\u0627\u0647\u0646\u0645\u0627",
         legendPages: "\u0635\u0641\u062D\u0647\u200C\u0647\u0627",
         legendCurrent: "\u0635\u0641\u062D\u0647\u0654 \u0641\u0639\u0644\u06CC",
         legendVisited: "\u0628\u0627\u0632\u062F\u06CC\u062F\u0634\u062F\u0647",
-        legendUnvisited: "\u0628\u0627\u0632\u062F\u06CC\u062F\u0646\u0634\u062F\u0647"
+        legendUnvisited: "\u0628\u0627\u0632\u062F\u06CC\u062F\u0646\u0634\u062F\u0647",
+        legendVisitedHint: "\u0635\u0641\u062D\u0647\u200C\u0647\u0627\u06CC\u06CC \u06A9\u0647 \u062F\u0631 \u0627\u06CC\u0646 \u0645\u0631\u0648\u0631\u06AF\u0631 \u0628\u0627\u0632 \u06A9\u0631\u062F\u0647\u200C\u0627\u06CC\u062F",
+        legendTagsAlways: "\u0628\u0631\u0686\u0633\u0628\u200C\u0647\u0627 \u0647\u0645\u06CC\u0634\u0647 \u0628\u0627 \u0627\u06CC\u0646 \u0631\u0646\u06AF \u0646\u0645\u0627\u06CC\u0634 \u062F\u0627\u062F\u0647 \u0645\u06CC\u200C\u0634\u0648\u0646\u062F\u060C \u0686\u0647 \u0622\u0646\u200C\u0647\u0627 \u0631\u0627 \u0628\u0627\u0632 \u06A9\u0631\u062F\u0647 \u0628\u0627\u0634\u06CC\u062F \u0686\u0647 \u0646\u0647"
       }
     }
   }
@@ -189,12 +229,17 @@ var fi_FI_default = {
         sources: "L\xE4hteet",
         tags: "Tunnisteet",
         degree: "Linkkej\xE4 solmua kohden",
+        degreeMin: "Min",
+        degreeMax: "Maks",
+        degreeNoBound: "0 = ei rajaa",
         reset: "Palauta",
         legend: "Selite",
         legendPages: "Sivut",
         legendCurrent: "Nykyinen sivu",
         legendVisited: "Vierailtu",
-        legendUnvisited: "Ei vierailtu"
+        legendUnvisited: "Ei vierailtu",
+        legendVisitedHint: "Sivut, jotka olet avannut t\xE4ss\xE4 selaimessa",
+        legendTagsAlways: "Tunnisteet piirret\xE4\xE4n aina t\xE4ll\xE4 v\xE4rill\xE4 riippumatta siit\xE4, oletko avannut ne"
       }
     }
   }
@@ -211,12 +256,17 @@ var fr_FR_default = {
         sources: "Sources",
         tags: "\xC9tiquettes",
         degree: "Liens par n\u0153ud",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = sans limite",
         reset: "R\xE9initialiser",
         legend: "L\xE9gende",
         legendPages: "Pages",
         legendCurrent: "Page actuelle",
         legendVisited: "Visit\xE9es",
-        legendUnvisited: "Non visit\xE9es"
+        legendUnvisited: "Non visit\xE9es",
+        legendVisitedHint: "Pages que vous avez ouvertes dans ce navigateur",
+        legendTagsAlways: "Les \xE9tiquettes sont toujours affich\xE9es dans cette couleur, que vous les ayez ouvertes ou non"
       }
     }
   }
@@ -233,12 +283,17 @@ var he_IL_default = {
         sources: "\u05DE\u05E7\u05D5\u05E8\u05D5\u05EA",
         tags: "\u05EA\u05D2\u05D9\u05D5\u05EA",
         degree: "\u05E7\u05D9\u05E9\u05D5\u05E8\u05D9\u05DD \u05DC\u05DB\u05DC \u05E6\u05D5\u05DE\u05EA",
+        degreeMin: "\u05DE\u05D9\u05E0\u05D9\u05DE\u05D5\u05DD",
+        degreeMax: "\u05DE\u05E7\u05E1\u05D9\u05DE\u05D5\u05DD",
+        degreeNoBound: "0 = \u05DC\u05DC\u05D0 \u05D4\u05D2\u05D1\u05DC\u05D4",
         reset: "\u05D0\u05D9\u05E4\u05D5\u05E1",
         legend: "\u05DE\u05E7\u05E8\u05D0",
         legendPages: "\u05D3\u05E4\u05D9\u05DD",
         legendCurrent: "\u05D4\u05D3\u05E3 \u05D4\u05E0\u05D5\u05DB\u05D7\u05D9",
         legendVisited: "\u05D1\u05D9\u05E7\u05E8\u05EA",
-        legendUnvisited: "\u05DC\u05D0 \u05D1\u05D9\u05E7\u05E8\u05EA"
+        legendUnvisited: "\u05DC\u05D0 \u05D1\u05D9\u05E7\u05E8\u05EA",
+        legendVisitedHint: "\u05D3\u05E4\u05D9\u05DD \u05E9\u05E4\u05EA\u05D7\u05EA \u05D1\u05D3\u05E4\u05D3\u05E4\u05DF \u05D4\u05D6\u05D4",
+        legendTagsAlways: "\u05EA\u05D2\u05D9\u05D5\u05EA \u05DE\u05D5\u05E6\u05D2\u05D5\u05EA \u05EA\u05DE\u05D9\u05D3 \u05D1\u05E6\u05D1\u05E2 \u05D4\u05D6\u05D4, \u05D1\u05D9\u05DF \u05E9\u05E4\u05EA\u05D7\u05EA \u05D0\u05D5\u05EA\u05DF \u05D5\u05D1\u05D9\u05DF \u05E9\u05DC\u05D0"
       }
     }
   }
@@ -255,12 +310,17 @@ var hu_HU_default = {
         sources: "Forr\xE1sok",
         tags: "C\xEDmk\xE9k",
         degree: "Hivatkoz\xE1s csom\xF3pontonk\xE9nt",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = nincs korl\xE1t",
         reset: "Vissza\xE1ll\xEDt\xE1s",
         legend: "Jelmagyar\xE1zat",
         legendPages: "Oldalak",
         legendCurrent: "Jelenlegi oldal",
         legendVisited: "Megl\xE1togatott",
-        legendUnvisited: "Nem megl\xE1togatott"
+        legendUnvisited: "Nem megl\xE1togatott",
+        legendVisitedHint: "Oldalak, amelyeket megnyitott ebben a b\xF6ng\xE9sz\u0151ben",
+        legendTagsAlways: "A c\xEDmk\xE9k mindig ezzel a sz\xEDnnel jelennek meg, f\xFCggetlen\xFCl att\xF3l, hogy megnyitotta-e \u0151ket"
       }
     }
   }
@@ -277,12 +337,17 @@ var id_ID_default = {
         sources: "Sumber",
         tags: "Tag",
         degree: "Tautan per simpul",
+        degreeMin: "Min",
+        degreeMax: "Maks",
+        degreeNoBound: "0 = tanpa batas",
         reset: "Atur ulang",
         legend: "Legenda",
         legendPages: "Halaman",
         legendCurrent: "Halaman saat ini",
         legendVisited: "Dikunjungi",
-        legendUnvisited: "Belum dikunjungi"
+        legendUnvisited: "Belum dikunjungi",
+        legendVisitedHint: "Halaman yang pernah Anda buka di peramban ini",
+        legendTagsAlways: "Tag selalu digambar dengan warna ini, baik sudah Anda buka maupun belum"
       }
     }
   }
@@ -299,12 +364,17 @@ var it_IT_default = {
         sources: "Fonti",
         tags: "Tag",
         degree: "Collegamenti per nodo",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = nessun limite",
         reset: "Reimposta",
         legend: "Legenda",
         legendPages: "Pagine",
         legendCurrent: "Pagina corrente",
         legendVisited: "Visitate",
-        legendUnvisited: "Non visitate"
+        legendUnvisited: "Non visitate",
+        legendVisitedHint: "Pagine che hai aperto in questo browser",
+        legendTagsAlways: "I tag sono sempre disegnati con questo colore, che tu li abbia aperti o no"
       }
     }
   }
@@ -321,12 +391,17 @@ var ja_JP_default = {
         sources: "\u60C5\u5831\u6E90",
         tags: "\u30BF\u30B0",
         degree: "\u30CE\u30FC\u30C9\u3042\u305F\u308A\u306E\u30EA\u30F3\u30AF\u6570",
+        degreeMin: "\u4E0B\u9650",
+        degreeMax: "\u4E0A\u9650",
+        degreeNoBound: "0 \u306F\u5883\u754C\u306A\u3057",
         reset: "\u30EA\u30BB\u30C3\u30C8",
         legend: "\u51E1\u4F8B",
         legendPages: "\u30DA\u30FC\u30B8",
         legendCurrent: "\u73FE\u5728\u306E\u30DA\u30FC\u30B8",
         legendVisited: "\u8A2A\u554F\u6E08\u307F",
-        legendUnvisited: "\u672A\u8A2A\u554F"
+        legendUnvisited: "\u672A\u8A2A\u554F",
+        legendVisitedHint: "\u3053\u306E\u30D6\u30E9\u30A6\u30B6\u3067\u958B\u3044\u305F\u30DA\u30FC\u30B8",
+        legendTagsAlways: "\u30BF\u30B0\u306F\u958B\u3044\u305F\u304B\u3069\u3046\u304B\u306B\u95A2\u308F\u3089\u305A\u5E38\u306B\u3053\u306E\u8272\u3067\u63CF\u304B\u308C\u307E\u3059"
       }
     }
   }
@@ -343,12 +418,17 @@ var kk_KZ_default = {
         sources: "\u0414\u0435\u0440\u0435\u043A\u043A\u04E9\u0437\u0434\u0435\u0440",
         tags: "\u0422\u0435\u0433\u0442\u0435\u0440",
         degree: "\u0422\u04AF\u0439\u0456\u043D \u0441\u0456\u043B\u0442\u0435\u043C\u0435\u043B\u0435\u0440\u0456",
+        degreeMin: "\u041C\u0438\u043D",
+        degreeMax: "\u041C\u0430\u043A\u0441",
+        degreeNoBound: "0 = \u0448\u0435\u043A\u0442\u0435\u0443\u0441\u0456\u0437",
         reset: "\u049A\u0430\u043B\u043F\u044B\u043D\u0430 \u043A\u0435\u043B\u0442\u0456\u0440\u0443",
         legend: "\u0428\u0430\u0440\u0442\u0442\u044B \u0431\u0435\u043B\u0433\u0456\u043B\u0435\u0440",
         legendPages: "\u0411\u0435\u0442\u0442\u0435\u0440",
         legendCurrent: "\u0410\u0493\u044B\u043C\u0434\u0430\u0493\u044B \u0431\u0435\u0442",
         legendVisited: "\u049A\u0430\u0440\u0430\u043B\u0493\u0430\u043D",
-        legendUnvisited: "\u049A\u0430\u0440\u0430\u043B\u043C\u0430\u0493\u0430\u043D"
+        legendUnvisited: "\u049A\u0430\u0440\u0430\u043B\u043C\u0430\u0493\u0430\u043D",
+        legendVisitedHint: "\u041E\u0441\u044B \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0434\u0435 \u0430\u0448\u049B\u0430\u043D \u0431\u0435\u0442\u0442\u0435\u0440",
+        legendTagsAlways: "\u0422\u0435\u0433\u0442\u0435\u0440 \u0430\u0448\u044B\u043B\u0493\u0430\u043D-\u0430\u0448\u044B\u043B\u043C\u0430\u0493\u0430\u043D\u044B\u043D\u0430 \u049B\u0430\u0440\u0430\u043C\u0430\u0441\u0442\u0430\u043D \u04D9\u0440\u0434\u0430\u0439\u044B\u043C \u043E\u0441\u044B \u0442\u04AF\u0441\u043F\u0435\u043D \u0441\u0430\u043B\u044B\u043D\u0430\u0434\u044B"
       }
     }
   }
@@ -365,12 +445,17 @@ var ko_KR_default = {
         sources: "\uCD9C\uCC98",
         tags: "\uD0DC\uADF8",
         degree: "\uB178\uB4DC\uB2F9 \uB9C1\uD06C \uC218",
+        degreeMin: "\uCD5C\uC18C",
+        degreeMax: "\uCD5C\uB300",
+        degreeNoBound: "0 = \uC81C\uD55C \uC5C6\uC74C",
         reset: "\uCD08\uAE30\uD654",
         legend: "\uBC94\uB840",
         legendPages: "\uD398\uC774\uC9C0",
         legendCurrent: "\uD604\uC7AC \uD398\uC774\uC9C0",
         legendVisited: "\uBC29\uBB38\uD568",
-        legendUnvisited: "\uBC29\uBB38\uD558\uC9C0 \uC54A\uC74C"
+        legendUnvisited: "\uBC29\uBB38\uD558\uC9C0 \uC54A\uC74C",
+        legendVisitedHint: "\uC774 \uBE0C\uB77C\uC6B0\uC800\uC5D0\uC11C \uC5F0 \uC801\uC774 \uC788\uB294 \uD398\uC774\uC9C0",
+        legendTagsAlways: "\uD0DC\uADF8\uB294 \uC5F4\uC5C8\uB294\uC9C0\uC640 \uC0C1\uAD00\uC5C6\uC774 \uD56D\uC0C1 \uC774 \uC0C9\uC73C\uB85C \uD45C\uC2DC\uB429\uB2C8\uB2E4"
       }
     }
   }
@@ -387,12 +472,17 @@ var lt_LT_default = {
         sources: "\u0160altiniai",
         tags: "\u017Dymos",
         degree: "Nuorod\u0173 viename mazge",
+        degreeMin: "Min.",
+        degreeMax: "Maks.",
+        degreeNoBound: "0 = be ribos",
         reset: "Atstatyti",
         legend: "Legenda",
         legendPages: "Puslapiai",
         legendCurrent: "Dabartinis puslapis",
         legendVisited: "Aplankyti",
-        legendUnvisited: "Neaplankyti"
+        legendUnvisited: "Neaplankyti",
+        legendVisitedHint: "Puslapiai, kuriuos atidar\u0117te \u0161ioje nar\u0161ykl\u0117je",
+        legendTagsAlways: "\u017Dymos visada pie\u0161iamos \u0161ia spalva, nesvarbu, ar jas atidar\u0117te"
       }
     }
   }
@@ -409,12 +499,17 @@ var nb_NO_default = {
         sources: "Kilder",
         tags: "Etiketter",
         degree: "Lenker per node",
+        degreeMin: "Min",
+        degreeMax: "Maks",
+        degreeNoBound: "0 = ingen grense",
         reset: "Tilbakestill",
         legend: "Tegnforklaring",
         legendPages: "Sider",
         legendCurrent: "Gjeldende side",
         legendVisited: "Bes\xF8kt",
-        legendUnvisited: "Ikke bes\xF8kt"
+        legendUnvisited: "Ikke bes\xF8kt",
+        legendVisitedHint: "Sider du har \xE5pnet i denne nettleseren",
+        legendTagsAlways: "Etiketter tegnes alltid i denne fargen, uansett om du har \xE5pnet dem"
       }
     }
   }
@@ -431,12 +526,17 @@ var nl_NL_default = {
         sources: "Bronnen",
         tags: "Tags",
         degree: "Links per knooppunt",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = geen grens",
         reset: "Herstellen",
         legend: "Legenda",
         legendPages: "Pagina's",
         legendCurrent: "Huidige pagina",
         legendVisited: "Bezocht",
-        legendUnvisited: "Niet bezocht"
+        legendUnvisited: "Niet bezocht",
+        legendVisitedHint: "Pagina's die je in deze browser hebt geopend",
+        legendTagsAlways: "Tags worden altijd in deze kleur getekend, of je ze nu hebt geopend of niet"
       }
     }
   }
@@ -453,12 +553,17 @@ var pl_PL_default = {
         sources: "\u0179r\xF3d\u0142a",
         tags: "Tagi",
         degree: "Linki na w\u0119ze\u0142",
+        degreeMin: "Min",
+        degreeMax: "Maks",
+        degreeNoBound: "0 = bez ograniczenia",
         reset: "Resetuj",
         legend: "Legenda",
         legendPages: "Strony",
         legendCurrent: "Bie\u017C\u0105ca strona",
         legendVisited: "Odwiedzone",
-        legendUnvisited: "Nieodwiedzone"
+        legendUnvisited: "Nieodwiedzone",
+        legendVisitedHint: "Strony otwarte w tej przegl\u0105darce",
+        legendTagsAlways: "Tagi s\u0105 zawsze rysowane tym kolorem, niezale\u017Cnie od tego, czy je otwierano"
       }
     }
   }
@@ -475,12 +580,17 @@ var pt_BR_default = {
         sources: "Fontes",
         tags: "Tags",
         degree: "Links por n\xF3",
+        degreeMin: "M\xEDn",
+        degreeMax: "M\xE1x",
+        degreeNoBound: "0 = sem limite",
         reset: "Redefinir",
         legend: "Legenda",
         legendPages: "P\xE1ginas",
         legendCurrent: "P\xE1gina atual",
         legendVisited: "Visitadas",
-        legendUnvisited: "N\xE3o visitadas"
+        legendUnvisited: "N\xE3o visitadas",
+        legendVisitedHint: "P\xE1ginas que voc\xEA abriu neste navegador",
+        legendTagsAlways: "As tags s\xE3o sempre desenhadas nesta cor, tenha voc\xEA as aberto ou n\xE3o"
       }
     }
   }
@@ -497,12 +607,17 @@ var ro_RO_default = {
         sources: "Surse",
         tags: "Etichete",
         degree: "Leg\u0103turi per nod",
+        degreeMin: "Min",
+        degreeMax: "Max",
+        degreeNoBound: "0 = f\u0103r\u0103 limit\u0103",
         reset: "Resetare",
         legend: "Legend\u0103",
         legendPages: "Pagini",
         legendCurrent: "Pagina curent\u0103",
         legendVisited: "Vizitate",
-        legendUnvisited: "Nevizitate"
+        legendUnvisited: "Nevizitate",
+        legendVisitedHint: "Paginile pe care le-ai deschis \xEEn acest browser",
+        legendTagsAlways: "Etichetele sunt \xEEntotdeauna desenate cu aceast\u0103 culoare, indiferent dac\u0103 le-ai deschis"
       }
     }
   }
@@ -519,12 +634,17 @@ var ru_RU_default = {
         sources: "\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438",
         tags: "\u0422\u0435\u0433\u0438",
         degree: "\u0421\u0441\u044B\u043B\u043E\u043A \u043D\u0430 \u0443\u0437\u0435\u043B",
+        degreeMin: "\u041C\u0438\u043D",
+        degreeMax: "\u041C\u0430\u043A\u0441",
+        degreeNoBound: "0 = \u0431\u0435\u0437 \u043E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F",
         reset: "\u0421\u0431\u0440\u043E\u0441\u0438\u0442\u044C",
         legend: "\u0423\u0441\u043B\u043E\u0432\u043D\u044B\u0435 \u043E\u0431\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F",
         legendPages: "\u0421\u0442\u0440\u0430\u043D\u0438\u0446\u044B",
         legendCurrent: "\u0422\u0435\u043A\u0443\u0449\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430",
         legendVisited: "\u041F\u043E\u0441\u0435\u0449\u0451\u043D\u043D\u044B\u0435",
-        legendUnvisited: "\u041D\u0435\u043F\u043E\u0441\u0435\u0449\u0451\u043D\u043D\u044B\u0435"
+        legendUnvisited: "\u041D\u0435\u043F\u043E\u0441\u0435\u0449\u0451\u043D\u043D\u044B\u0435",
+        legendVisitedHint: "\u0421\u0442\u0440\u0430\u043D\u0438\u0446\u044B, \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u0432\u044B \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u043B\u0438 \u0432 \u044D\u0442\u043E\u043C \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0435",
+        legendTagsAlways: "\u0422\u0435\u0433\u0438 \u0432\u0441\u0435\u0433\u0434\u0430 \u043E\u0442\u043E\u0431\u0440\u0430\u0436\u0430\u044E\u0442\u0441\u044F \u044D\u0442\u0438\u043C \u0446\u0432\u0435\u0442\u043E\u043C, \u043D\u0435\u0437\u0430\u0432\u0438\u0441\u0438\u043C\u043E \u043E\u0442 \u0442\u043E\u0433\u043E, \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u043B\u0438 \u043B\u0438 \u0432\u044B \u0438\u0445"
       }
     }
   }
@@ -541,12 +661,17 @@ var th_TH_default = {
         sources: "\u0E41\u0E2B\u0E25\u0E48\u0E07\u0E02\u0E49\u0E2D\u0E21\u0E39\u0E25",
         tags: "\u0E41\u0E17\u0E47\u0E01",
         degree: "\u0E08\u0E33\u0E19\u0E27\u0E19\u0E25\u0E34\u0E07\u0E01\u0E4C\u0E15\u0E48\u0E2D\u0E42\u0E2B\u0E19\u0E14",
+        degreeMin: "\u0E15\u0E48\u0E33\u0E2A\u0E38\u0E14",
+        degreeMax: "\u0E2A\u0E39\u0E07\u0E2A\u0E38\u0E14",
+        degreeNoBound: "0 = \u0E44\u0E21\u0E48\u0E08\u0E33\u0E01\u0E31\u0E14",
         reset: "\u0E23\u0E35\u0E40\u0E0B\u0E47\u0E15",
         legend: "\u0E04\u0E33\u0E2D\u0E18\u0E34\u0E1A\u0E32\u0E22\u0E2A\u0E31\u0E0D\u0E25\u0E31\u0E01\u0E29\u0E13\u0E4C",
         legendPages: "\u0E2B\u0E19\u0E49\u0E32",
         legendCurrent: "\u0E2B\u0E19\u0E49\u0E32\u0E1B\u0E31\u0E08\u0E08\u0E38\u0E1A\u0E31\u0E19",
         legendVisited: "\u0E40\u0E04\u0E22\u0E40\u0E02\u0E49\u0E32\u0E0A\u0E21",
-        legendUnvisited: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E04\u0E22\u0E40\u0E02\u0E49\u0E32\u0E0A\u0E21"
+        legendUnvisited: "\u0E22\u0E31\u0E07\u0E44\u0E21\u0E48\u0E40\u0E04\u0E22\u0E40\u0E02\u0E49\u0E32\u0E0A\u0E21",
+        legendVisitedHint: "\u0E2B\u0E19\u0E49\u0E32\u0E17\u0E35\u0E48\u0E04\u0E38\u0E13\u0E40\u0E04\u0E22\u0E40\u0E1B\u0E34\u0E14\u0E43\u0E19\u0E40\u0E1A\u0E23\u0E32\u0E27\u0E4C\u0E40\u0E0B\u0E2D\u0E23\u0E4C\u0E19\u0E35\u0E49",
+        legendTagsAlways: "\u0E41\u0E17\u0E47\u0E01\u0E08\u0E30\u0E41\u0E2A\u0E14\u0E07\u0E14\u0E49\u0E27\u0E22\u0E2A\u0E35\u0E19\u0E35\u0E49\u0E40\u0E2A\u0E21\u0E2D \u0E44\u0E21\u0E48\u0E27\u0E48\u0E32\u0E04\u0E38\u0E13\u0E08\u0E30\u0E40\u0E04\u0E22\u0E40\u0E1B\u0E34\u0E14\u0E2B\u0E23\u0E37\u0E2D\u0E44\u0E21\u0E48"
       }
     }
   }
@@ -563,12 +688,17 @@ var tr_TR_default = {
         sources: "Kaynaklar",
         tags: "Etiketler",
         degree: "D\xFC\u011F\xFCm ba\u015F\u0131na ba\u011Flant\u0131",
+        degreeMin: "Min",
+        degreeMax: "Maks",
+        degreeNoBound: "0 = s\u0131n\u0131r yok",
         reset: "S\u0131f\u0131rla",
         legend: "G\xF6sterge",
         legendPages: "Sayfalar",
         legendCurrent: "Ge\xE7erli sayfa",
         legendVisited: "Ziyaret edildi",
-        legendUnvisited: "Ziyaret edilmedi"
+        legendUnvisited: "Ziyaret edilmedi",
+        legendVisitedHint: "Bu taray\u0131c\u0131da a\xE7t\u0131\u011F\u0131n\u0131z sayfalar",
+        legendTagsAlways: "Etiketler, a\xE7\u0131p a\xE7mad\u0131\u011F\u0131n\u0131za bak\u0131lmaks\u0131z\u0131n her zaman bu renkle \xE7izilir"
       }
     }
   }
@@ -585,12 +715,17 @@ var uk_UA_default = {
         sources: "\u0414\u0436\u0435\u0440\u0435\u043B\u0430",
         tags: "\u0422\u0435\u0433\u0438",
         degree: "\u041F\u043E\u0441\u0438\u043B\u0430\u043D\u044C \u043D\u0430 \u0432\u0443\u0437\u043E\u043B",
+        degreeMin: "\u041C\u0456\u043D",
+        degreeMax: "\u041C\u0430\u043A\u0441",
+        degreeNoBound: "0 = \u0431\u0435\u0437 \u043E\u0431\u043C\u0435\u0436\u0435\u043D\u043D\u044F",
         reset: "\u0421\u043A\u0438\u043D\u0443\u0442\u0438",
         legend: "\u0423\u043C\u043E\u0432\u043D\u0456 \u043F\u043E\u0437\u043D\u0430\u0447\u0435\u043D\u043D\u044F",
         legendPages: "\u0421\u0442\u043E\u0440\u0456\u043D\u043A\u0438",
         legendCurrent: "\u041F\u043E\u0442\u043E\u0447\u043D\u0430 \u0441\u0442\u043E\u0440\u0456\u043D\u043A\u0430",
         legendVisited: "\u0412\u0456\u0434\u0432\u0456\u0434\u0430\u043D\u0456",
-        legendUnvisited: "\u041D\u0435\u0432\u0456\u0434\u0432\u0456\u0434\u0430\u043D\u0456"
+        legendUnvisited: "\u041D\u0435\u0432\u0456\u0434\u0432\u0456\u0434\u0430\u043D\u0456",
+        legendVisitedHint: "\u0421\u0442\u043E\u0440\u0456\u043D\u043A\u0438, \u044F\u043A\u0456 \u0432\u0438 \u0432\u0456\u0434\u043A\u0440\u0438\u0432\u0430\u043B\u0438 \u0432 \u0446\u044C\u043E\u043C\u0443 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0456",
+        legendTagsAlways: "\u0422\u0435\u0433\u0438 \u0437\u0430\u0432\u0436\u0434\u0438 \u0432\u0456\u0434\u043E\u0431\u0440\u0430\u0436\u0430\u044E\u0442\u044C\u0441\u044F \u0446\u0438\u043C \u043A\u043E\u043B\u044C\u043E\u0440\u043E\u043C, \u043D\u0435\u0437\u0430\u043B\u0435\u0436\u043D\u043E \u0432\u0456\u0434 \u0442\u043E\u0433\u043E, \u0447\u0438 \u0432\u0438 \u0457\u0445 \u0432\u0456\u0434\u043A\u0440\u0438\u0432\u0430\u043B\u0438"
       }
     }
   }
@@ -607,12 +742,17 @@ var vi_VN_default = {
         sources: "Ngu\u1ED3n",
         tags: "Th\u1EBB",
         degree: "Li\xEAn k\u1EBFt m\u1ED7i n\xFAt",
+        degreeMin: "T\u1ED1i thi\u1EC3u",
+        degreeMax: "T\u1ED1i \u0111a",
+        degreeNoBound: "0 = kh\xF4ng gi\u1EDBi h\u1EA1n",
         reset: "\u0110\u1EB7t l\u1EA1i",
         legend: "Ch\xFA gi\u1EA3i",
         legendPages: "Trang",
         legendCurrent: "Trang hi\u1EC7n t\u1EA1i",
         legendVisited: "\u0110\xE3 xem",
-        legendUnvisited: "Ch\u01B0a xem"
+        legendUnvisited: "Ch\u01B0a xem",
+        legendVisitedHint: "C\xE1c trang b\u1EA1n \u0111\xE3 m\u1EDF trong tr\xECnh duy\u1EC7t n\xE0y",
+        legendTagsAlways: "Th\u1EBB lu\xF4n \u0111\u01B0\u1EE3c v\u1EBD b\u1EB1ng m\xE0u n\xE0y, d\xF9 b\u1EA1n \u0111\xE3 m\u1EDF hay ch\u01B0a"
       }
     }
   }
@@ -629,12 +769,17 @@ var zh_CN_default = {
         sources: "\u6765\u6E90",
         tags: "\u6807\u7B7E",
         degree: "\u6BCF\u4E2A\u8282\u70B9\u7684\u94FE\u63A5\u6570",
+        degreeMin: "\u6700\u5C0F",
+        degreeMax: "\u6700\u5927",
+        degreeNoBound: "0 = \u4E0D\u9650",
         reset: "\u91CD\u7F6E",
         legend: "\u56FE\u4F8B",
         legendPages: "\u9875\u9762",
         legendCurrent: "\u5F53\u524D\u9875\u9762",
         legendVisited: "\u5DF2\u8BBF\u95EE",
-        legendUnvisited: "\u672A\u8BBF\u95EE"
+        legendUnvisited: "\u672A\u8BBF\u95EE",
+        legendVisitedHint: "\u4F60\u5728\u6B64\u6D4F\u89C8\u5668\u4E2D\u6253\u5F00\u8FC7\u7684\u9875\u9762",
+        legendTagsAlways: "\u6807\u7B7E\u59CB\u7EC8\u4EE5\u6B64\u989C\u8272\u7ED8\u5236\uFF0C\u65E0\u8BBA\u4F60\u662F\u5426\u6253\u5F00\u8FC7"
       }
     }
   }
@@ -651,12 +796,17 @@ var zh_TW_default = {
         sources: "\u4F86\u6E90",
         tags: "\u6A19\u7C64",
         degree: "\u6BCF\u500B\u7BC0\u9EDE\u7684\u9023\u7D50\u6578",
+        degreeMin: "\u6700\u5C0F",
+        degreeMax: "\u6700\u5927",
+        degreeNoBound: "0 = \u4E0D\u9650",
         reset: "\u91CD\u8A2D",
         legend: "\u5716\u4F8B",
         legendPages: "\u9801\u9762",
         legendCurrent: "\u76EE\u524D\u9801\u9762",
         legendVisited: "\u5DF2\u9020\u8A2A",
-        legendUnvisited: "\u672A\u9020\u8A2A"
+        legendUnvisited: "\u672A\u9020\u8A2A",
+        legendVisitedHint: "\u4F60\u5728\u6B64\u700F\u89BD\u5668\u4E2D\u958B\u555F\u904E\u7684\u9801\u9762",
+        legendTagsAlways: "\u6A19\u7C64\u4E00\u5F8B\u4EE5\u6B64\u984F\u8272\u7E6A\u88FD\uFF0C\u7121\u8AD6\u4F60\u662F\u5426\u958B\u555F\u904E"
       }
     }
   }
@@ -700,10 +850,10 @@ function i18n(locale) {
 }
 
 // src/components/styles/graph.scss
-var graph_default = ".graph > h3 {\n  font-size: 1rem;\n  margin: 0;\n}\n.graph > .graph-outer {\n  border-radius: 5px;\n  border: 1px solid var(--lightgray);\n  box-sizing: border-box;\n  height: 250px;\n  margin: 0.5em 0;\n  position: relative;\n  overflow: hidden;\n}\n.graph > .graph-outer > .global-graph-icon {\n  cursor: pointer;\n  background: none;\n  border: none;\n  color: var(--dark);\n  opacity: 0.5;\n  width: 24px;\n  height: 24px;\n  position: absolute;\n  padding: 0.2rem;\n  margin: 0.3rem;\n  top: 0;\n  right: 0;\n  border-radius: 4px;\n  background-color: transparent;\n  transition: background-color 0.5s ease;\n}\n.graph > .graph-outer > .global-graph-icon:hover {\n  background-color: var(--lightgray);\n}\n.graph > .global-graph-outer {\n  position: fixed;\n  z-index: 9999;\n  left: 0;\n  top: 0;\n  width: 100vw;\n  height: 100%;\n  backdrop-filter: blur(4px);\n  display: none;\n  overflow: hidden;\n}\n.graph > .global-graph-outer.active {\n  display: inline-block;\n}\n.graph > .global-graph-outer > .global-graph-inner {\n  position: fixed;\n  top: 50%;\n  left: 50%;\n  transform: translate(-50%, -50%);\n  height: 80vh;\n  width: 80vw;\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 0.4rem;\n}\n@media all and (max-width: 800px) {\n  .graph > .global-graph-outer > .global-graph-inner {\n    width: 90%;\n  }\n}\n.graph > .global-graph-outer .global-graph-controls {\n  flex: 0 0 auto;\n  box-sizing: border-box;\n  min-height: 0;\n  max-height: 50%;\n  overflow-y: auto;\n  display: flex;\n  flex-wrap: wrap;\n  align-items: flex-end;\n  gap: 0.75rem;\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 5px;\n  padding: 0.4rem 0.5rem;\n}\n.graph > .global-graph-outer .global-graph-controls:empty {\n  display: none;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__field {\n  display: flex;\n  flex-direction: column;\n  gap: 0.15rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__field--inline {\n  flex-direction: row;\n  align-items: center;\n  gap: 0.3rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-items {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 0.1rem 0.6rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-item {\n  display: inline-flex;\n  align-items: center;\n  gap: 0.25rem;\n  white-space: nowrap;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-break {\n  flex-basis: 100%;\n  height: 0;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch {\n  flex: 0 0 auto;\n  width: 0.55rem;\n  height: 0.55rem;\n  border-radius: 50%;\n  box-sizing: border-box;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--entity {\n  background-color: var(--darkgray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--tag {\n  background-color: var(--light);\n  border: 2px solid var(--tertiary);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--source {\n  border-radius: 0;\n  background-color: var(--darkgray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--current {\n  background-color: var(--secondary);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--visited {\n  background-color: var(--tertiary);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--unvisited {\n  background-color: var(--gray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__range {\n  display: flex;\n  gap: 0.25rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__range input[type=number] {\n  width: 4rem;\n}\n.graph > .global-graph-outer .global-graph-controls select,\n.graph > .global-graph-outer .global-graph-controls input[type=number] {\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 4px;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle {\n  cursor: pointer;\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 4px;\n  padding: 0.2rem 0.6rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle:hover {\n  background-color: var(--lightgray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle[aria-pressed=true] {\n  background-color: var(--secondary);\n  border-color: var(--secondary);\n  color: var(--light);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle[aria-pressed=true]:hover {\n  filter: brightness(0.92);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__reset {\n  cursor: pointer;\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 4px;\n  padding: 0.2rem 0.6rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__reset:hover {\n  background-color: var(--lightgray);\n}\n.graph > .global-graph-outer .global-graph-container {\n  border: 1px solid var(--lightgray);\n  background-color: var(--light);\n  border-radius: 5px;\n  box-sizing: border-box;\n  flex: 1 1 auto;\n  min-height: 0;\n  width: 100%;\n}\n\n.graph-container {\n  width: 100%;\n  height: 100%;\n}";
+var graph_default = ".graph > h3 {\n  font-size: 1rem;\n  margin: 0;\n}\n.graph > .graph-outer {\n  border-radius: 5px;\n  border: 1px solid var(--lightgray);\n  box-sizing: border-box;\n  height: 250px;\n  margin: 0.5em 0;\n  position: relative;\n  overflow: hidden;\n}\n.graph > .graph-outer > .global-graph-icon {\n  cursor: pointer;\n  background: none;\n  border: none;\n  color: var(--dark);\n  opacity: 0.5;\n  width: 24px;\n  height: 24px;\n  position: absolute;\n  padding: 0.2rem;\n  margin: 0.3rem;\n  top: 0;\n  right: 0;\n  border-radius: 4px;\n  background-color: transparent;\n  transition: background-color 0.5s ease;\n}\n.graph > .graph-outer > .global-graph-icon:hover {\n  background-color: var(--lightgray);\n}\n.graph > .global-graph-outer {\n  position: fixed;\n  z-index: 9999;\n  left: 0;\n  top: 0;\n  width: 100vw;\n  height: 100%;\n  backdrop-filter: blur(4px);\n  display: none;\n  overflow: hidden;\n}\n.graph > .global-graph-outer.active {\n  display: inline-block;\n}\n.graph > .global-graph-outer > .global-graph-inner {\n  position: fixed;\n  top: 50%;\n  left: 50%;\n  transform: translate(-50%, -50%);\n  height: 80vh;\n  width: 80vw;\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 0.4rem;\n}\n@media all and (max-width: 800px) {\n  .graph > .global-graph-outer > .global-graph-inner {\n    width: 90%;\n  }\n}\n.graph > .global-graph-outer .global-graph-controls {\n  flex: 0 0 auto;\n  box-sizing: border-box;\n  min-height: 0;\n  max-height: 50%;\n  overflow-y: auto;\n  display: flex;\n  flex-wrap: wrap;\n  align-items: flex-end;\n  gap: 0.75rem;\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 5px;\n  padding: 0.4rem 0.5rem;\n}\n.graph > .global-graph-outer .global-graph-controls:empty {\n  display: none;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__field {\n  display: flex;\n  flex-direction: column;\n  gap: 0.15rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__field--inline {\n  flex-direction: row;\n  align-items: center;\n  gap: 0.3rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-items {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 0.1rem 0.6rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-item {\n  display: inline-flex;\n  align-items: center;\n  gap: 0.25rem;\n  white-space: nowrap;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-break {\n  flex-basis: 100%;\n  height: 0;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch {\n  flex: 0 0 auto;\n  width: 0.55rem;\n  height: 0.55rem;\n  border-radius: 50%;\n  box-sizing: border-box;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--entity {\n  background-color: var(--darkgray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--tag {\n  background-color: var(--light);\n  border: 2px solid var(--tertiary);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--source {\n  border-radius: 0;\n  background-color: var(--darkgray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--current {\n  background-color: var(--secondary);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--visited {\n  background-color: var(--tertiary);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__legend-swatch--unvisited {\n  background-color: var(--gray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__range {\n  display: flex;\n  gap: 0.5rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__range .global-graph-controls__range-item {\n  display: flex;\n  align-items: center;\n  gap: 0.25rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__range input[type=number] {\n  width: 4rem;\n}\n.graph > .global-graph-outer .global-graph-controls select,\n.graph > .global-graph-outer .global-graph-controls input[type=number] {\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 4px;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle {\n  display: inline-flex;\n  align-items: center;\n  gap: 0.3rem;\n  cursor: pointer;\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 4px;\n  padding: 0.2rem 0.6rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle:hover {\n  background-color: var(--lightgray);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle[aria-pressed=true] {\n  background-color: var(--secondary);\n  border-color: var(--secondary);\n  color: var(--light);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle[aria-pressed=true]:hover {\n  filter: brightness(0.92);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__toggle[aria-pressed=true] .global-graph-controls__legend-swatch--source {\n  box-shadow: 0 0 0 1px var(--light);\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__reset {\n  cursor: pointer;\n  font-size: 0.8rem;\n  color: var(--dark);\n  background-color: var(--light);\n  border: 1px solid var(--lightgray);\n  border-radius: 4px;\n  padding: 0.2rem 0.6rem;\n}\n.graph > .global-graph-outer .global-graph-controls .global-graph-controls__reset:hover {\n  background-color: var(--lightgray);\n}\n.graph > .global-graph-outer .global-graph-container {\n  border: 1px solid var(--lightgray);\n  background-color: var(--light);\n  border-radius: 5px;\n  box-sizing: border-box;\n  flex: 1 1 auto;\n  min-height: 0;\n  width: 100%;\n}\n\n.graph-container {\n  width: 100%;\n  height: 100%;\n}";
 
 // src/components/scripts/graph.inline.ts
-var graph_inline_default = `function It(e,t){let u={};for(let n of Object.keys(t).sort())u[n]=t[n];return JSON.stringify([e.langs,e.types,u])}function ue(e){if(e===""||e==="/"||e==="index")return{kind:"root",isIndex:!0};if(e==="tags"||e.startsWith("tags/"))return{kind:"tag",isIndex:!1};if(e==="sources"||e.startsWith("sources/"))return{kind:"source",isIndex:!1};if(e==="overview"||e.startsWith("overview/"))return{kind:"overview",isIndex:!1};let t=e.split("/").filter(l=>l.length>0),u=t[0];if(t.length===1)return{kind:"entity",lang:u,isIndex:!0};let n=t[1]==="custom"&&t.length>=3?[t[1],t[2]]:[t[1]],o=n.join("/"),a=t.length===n.length+1;return{kind:"entity",lang:u,type:o,isIndex:a}}function yu(e,t){let u=new Map;e.forEach(n=>u.set(n,0));for(let n of t)!e.has(n.source)||!e.has(n.target)||(u.set(n.source,(u.get(n.source)??0)+1),u.set(n.target,(u.get(n.target)??0)+1));return u}function Ot(e,t){let u=new Map;e.forEach(n=>u.set(n,0));for(let n of t)!e.has(n.source)||!e.has(n.target)||n.source!==n.target&&(ue(n.target).kind==="entity"&&u.set(n.source,(u.get(n.source)??0)+1),ue(n.source).kind==="entity"&&u.set(n.target,(u.get(n.target)??0)+1));return u}function Bu(e,t){return e.has(t)||e.has(\`custom/\${t}\`)}function Rt(e,t,u){let n=u.langs&&u.langs.length>0?new Set(u.langs):void 0,o=u.types&&u.types.length>0?new Set(u.types):void 0,a=u.showSources!==!1,l=new Set;for(let w of e)ue(w).kind!=="overview"&&l.add(w);let F=new Set;for(let w of l){let x=ue(w);x.kind==="source"&&!a||x.kind==="entity"&&(n&&(x.lang===void 0||!n.has(x.lang))||o&&x.type!==void 0&&!Bu(o,x.type))||F.add(w)}let E=u.minDegree??0,s=u.maxDegree??0,C=F.size!==l.size;if(!C&&E<=0&&s<=0)return F;let W=yu(F,t),r=C?Ot(F,t):void 0,_=C?Ot(l,t):void 0,L=new Set;return F.forEach(w=>{let x=W.get(w)??0;if(r&&_&&(r.get(w)??0)===0){let P=ue(w).kind;if((P==="tag"||P==="source")&&(_.get(w)??0)>0)return}E>0&&x<E||s>0&&x>s||L.add(w)}),L}function Ut(e){let t=new Set,u=new Set;for(let n of e){let o=ue(n);o.kind==="entity"&&(o.lang&&t.add(o.lang),o.type&&u.add(o.type))}return{langs:[...t].sort(),types:[...u].sort()}}var Hu=Object.hasOwnProperty;var Vt,j,Jt,bu,ae,Gt,qt,Kt,at,Je,we,Xt,ct,st,lt,xu,Yt={},Ke=[],Su=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,Ye=Array.isArray;function ne(e,t){for(var u in t)e[u]=t[u];return e}function Dt(e){e&&e.parentNode&&e.parentNode.removeChild(e)}function it(e,t,u,n,o){var a={type:e,props:t,key:u,ref:n,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:o??++Jt,__i:-1,__u:0};return o==null&&j.vnode!=null&&j.vnode(a),a}function Be(e){return e.children}function qe(e,t){this.props=e,this.context=t}function ge(e,t){if(t==null)return e.__?ge(e.__,e.__i+1):null;for(var u;t<e.__k.length;t++)if((u=e.__k[t])!=null&&u.__e!=null)return u.__e;return typeof e.type=="function"?ge(e):null}function wu(e){if(e.__P&&e.__d){var t=e.__v,u=t.__e,n=[],o=[],a=ne({},t);a.__v=t.__v+1,j.vnode&&j.vnode(a),tu(e.__P,a,t,e.__n,e.__P.namespaceURI,32&t.__u?[u]:null,n,u??ge(t),!!(32&t.__u),o),a.__v=t.__v,a.__.__k[a.__i]=a,Tu(n,a,o),t.__e=t.__=null,a.__e!=u&&Zt(a)}}function Zt(e){if((e=e.__)!=null&&e.__c!=null)return e.__e=e.__c.base=null,e.__k.some(function(t){if(t!=null&&t.__e!=null)return e.__e=e.__c.base=t.__e}),Zt(e)}function zt(e){(!e.__d&&(e.__d=!0)&&ae.push(e)&&!Xe.__r++||Gt!=j.debounceRendering)&&((Gt=j.debounceRendering)||qt)(Xe)}function Xe(){try{for(var e,t=1;ae.length;)ae.length>t&&ae.sort(Kt),e=ae.shift(),t=ae.length,wu(e)}finally{ae.length=Xe.__r=0}}function Qt(e,t,u,n,o,a,l,F,E,s,C){var W,r,_,L,w,x,P=n&&n.__k||Ke,y=t.length;for(E=ku(u,t,P,E,y),W=0;W<y;W++)(_=u.__k[W])!=null&&(r=_.__i!=-1&&P[_.__i]||Yt,_.__i=W,x=tu(e,_,r,o,a,l,F,E,s,C),L=_.__e,_.ref&&r.ref!=_.ref&&(r.ref&&Ft(r.ref,null,_),C.push(_.ref,_.__c||L,_)),w==null&&L!=null&&(w=L),4&_.__u?(E=eu(_,E,e),r.__e&&(r.__e=null)):typeof _.type=="function"&&x!==void 0?E=x:L&&(E=L.nextSibling),_.__u&=-7);return u.__e=w,E}function ku(e,t,u,n,o){var a,l,F,E,s,C=u.length,W=C,r=0;for(e.__k=new Array(o),a=0;a<o;a++)(l=t[a])!=null&&typeof l!="boolean"&&typeof l!="function"?(typeof l=="string"||typeof l=="number"||typeof l=="bigint"||l.constructor==String?l=e.__k[a]=it(null,l,null,null,null):Ye(l)?l=e.__k[a]=it(Be,{children:l},null,null,null):l.constructor===void 0&&l.__b>0?l=e.__k[a]=it(l.type,l.props,l.key,l.ref?l.ref:null,l.__v):e.__k[a]=l,E=a+r,l.__=e,l.__b=e.__b+1,F=null,(s=l.__i=Lu(l,u,E,W))!=-1&&(W--,(F=u[s])&&(F.__u|=2)),F==null||F.__v==null?(s==-1&&(o>C?r--:o<C&&r++),typeof l.type!="function"&&(l.__u|=4)):s!=E&&(s==E-1?r--:s==E+1?r++:(s>E?r--:r++,l.__u|=4))):e.__k[a]=null;if(W)for(a=0;a<C;a++)(F=u[a])!=null&&(2&F.__u)==0&&(F.__e==n&&(n=ge(F)),ru(F,F));return n}function eu(e,t,u){var n,o;if(typeof e.type=="function"){for(n=e.__k,o=0;n&&o<n.length;o++)n[o]&&(n[o].__=e,t=eu(n[o],t,u));return t}e.__e!=t&&(t&&e.type&&!t.parentNode&&(t=ge(e)),t=u.insertBefore(e.__e,t||null));do t=t&&t.nextSibling;while(t!=null&&t.nodeType==8);return t}function Lu(e,t,u,n){var o,a,l,F=e.key,E=e.type,s=t[u],C=s!=null&&(2&s.__u)==0;if(s===null&&F==null||C&&F==s.key&&E==s.type)return u;if(n>(C?1:0)){for(o=u-1,a=u+1;o>=0||a<t.length;)if((s=t[l=o>=0?o--:a++])!=null&&(2&s.__u)==0&&F==s.key&&E==s.type)return l}return-1}function Ht(e,t,u){t[0]=="-"?e.setProperty(t,u??""):e[t]=u==null?"":typeof u!="number"||Su.test(t)?u:u+"px"}function Ve(e,t,u,n,o){var a,l;e:if(t=="style")if(typeof u=="string")e.style.cssText=u;else{if(typeof n=="string"&&(e.style.cssText=n=""),n)for(t in n)u&&t in u||Ht(e.style,t,"");if(u)for(t in u)n&&u[t]==n[t]||Ht(e.style,t,u[t])}else if(t[0]=="o"&&t[1]=="n")a=t!=(t=t.replace(Xt,"$1")),l=t.toLowerCase(),t=l in e||t=="onFocusOut"||t=="onFocusIn"?l.slice(2):t.slice(2),e.l||(e.l={}),e.l[t+a]=u,u?n?u[we]=n[we]:(u[we]=ct,e.addEventListener(t,a?lt:st,a)):e.removeEventListener(t,a?lt:st,a);else{if(o=="http://www.w3.org/2000/svg")t=t.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if(t!="width"&&t!="height"&&t!="href"&&t!="list"&&t!="form"&&t!="tabIndex"&&t!="download"&&t!="rowSpan"&&t!="colSpan"&&t!="role"&&t!="popover"&&t in e)try{e[t]=u??"";break e}catch{}typeof u=="function"||(u==null||u===!1&&t[4]!="-"?e.removeAttribute(t):e.setAttribute(t,t=="popover"&&u==1?"":u))}}function $t(e){return function(t){if(this.l){var u=this.l[t.type+e];if(t[Je]==null)t[Je]=ct++;else if(t[Je]<u[we])return;return u(j.event?j.event(t):t)}}}function tu(e,t,u,n,o,a,l,F,E,s){var C,W,r,_,L,w,x,P,y,H,X,$,Z,_e,ie,se,N=t.type;if(t.constructor!==void 0)return null;128&u.__u&&(E=!!(32&u.__u),a=[F=t.__e=u.__e]),(C=j.__b)&&C(t);e:if(typeof N=="function"){W=l.length;try{if(y=t.props,H=N.prototype&&N.prototype.render,X=(C=N.contextType)&&n[C.__c],$=C?X?X.props.value:C.__:n,u.__c?P=(r=t.__c=u.__c).__=r.__E:(H?t.__c=r=new N(y,$):(t.__c=r=new qe(y,$),r.constructor=N,r.render=ju),X&&X.sub(r),r.state||(r.state={}),r.__n=n,_=r.__d=!0,r.__h=[],r._sb=[]),H&&r.__s==null&&(r.__s=r.state),H&&N.getDerivedStateFromProps!=null&&(r.__s==r.state&&(r.__s=ne({},r.__s)),ne(r.__s,N.getDerivedStateFromProps(y,r.__s))),L=r.props,w=r.state,r.__v=t,_)H&&N.getDerivedStateFromProps==null&&r.componentWillMount!=null&&r.componentWillMount(),H&&r.componentDidMount!=null&&r.__h.push(r.componentDidMount);else{if(H&&N.getDerivedStateFromProps==null&&y!==L&&r.componentWillReceiveProps!=null&&r.componentWillReceiveProps(y,$),t.__v==u.__v||!r.__e&&r.shouldComponentUpdate!=null&&r.shouldComponentUpdate(y,r.__s,$)===!1){t.__v!=u.__v&&(r.props=y,r.state=r.__s,r.__d=!1),t.__e=u.__e,t.__k=u.__k,t.__k.some(function(V){V&&(V.__=t)}),Ke.push.apply(r.__h,r._sb),r._sb=[],r.__h.length&&l.push(r),F=ge(u);break e}r.componentWillUpdate!=null&&r.componentWillUpdate(y,r.__s,$),H&&r.componentDidUpdate!=null&&r.__h.push(function(){r.componentDidUpdate(L,w,x)})}if(r.context=$,r.props=y,r.__P=e,r.__e=!1,Z=j.__r,_e=0,H)r.state=r.__s,r.__d=!1,Z&&Z(t),C=r.render(r.props,r.state,r.context),Ke.push.apply(r.__h,r._sb),r._sb=[];else do r.__d=!1,Z&&Z(t),C=r.render(r.props,r.state,r.context),r.state=r.__s;while(r.__d&&++_e<25);r.state=r.__s,r.getChildContext!=null&&(n=ne(ne({},n),r.getChildContext())),H&&!_&&r.getSnapshotBeforeUpdate!=null&&(x=r.getSnapshotBeforeUpdate(L,w)),ie=C!=null&&C.type===Be&&C.key==null?nu(C.props.children):C,F=Qt(e,Ye(ie)?ie:[ie],t,u,n,o,a,l,F,E,s),r.base=t.__e,t.__u&=-161,r.__h.length&&l.push(r),P&&(r.__E=r.__=null)}catch(V){if(l.length=W,t.__v=null,E||a!=null){if(V.then){for(t.__u|=E?160:128;F&&F.nodeType==8&&F.nextSibling;)F=F.nextSibling;a!=null&&(a[a.indexOf(F)]=null),t.__e=F}else if(a!=null)for(se=a.length;se--;)Dt(a[se])}else t.__e=u.__e;t.__k==null&&(t.__k=u.__k||[]),V.then||uu(t),j.__e(V,t,u)}}else a==null&&t.__v==u.__v?(t.__k=u.__k,t.__e=u.__e):F=t.__e=Pu(u.__e,t,u,n,o,a,l,E,s);return(C=j.diffed)&&C(t),128&t.__u?void 0:F}function uu(e){e&&(e.__c&&(e.__c.__e=!0),e.__k&&e.__k.some(uu))}function Tu(e,t,u){for(var n=0;n<u.length;n++)Ft(u[n],u[++n],u[++n]);j.__c&&j.__c(t,e),e.some(function(o){try{e=o.__h,o.__h=[],e.some(function(a){a.call(o)})}catch(a){j.__e(a,o.__v)}})}function nu(e){return typeof e!="object"||e==null||e.__b>0?e:Ye(e)?e.map(nu):e.constructor!==void 0?null:ne({},e)}function Pu(e,t,u,n,o,a,l,F,E){var s,C,W,r,_,L,w,x=u.props||Yt,P=t.props,y=t.type;if(y=="svg"?o="http://www.w3.org/2000/svg":y=="math"?o="http://www.w3.org/1998/Math/MathML":o||(o="http://www.w3.org/1999/xhtml"),a!=null){for(s=0;s<a.length;s++)if((_=a[s])&&"setAttribute"in _==!!y&&(y?_.localName==y:_.nodeType==3)){e=_,a[s]=null;break}}if(e==null){if(y==null)return document.createTextNode(P);e=document.createElementNS(o,y,P.is&&P),F&&(j.__m&&j.__m(t,a),F=!1),a=null}if(y==null)x===P||F&&e.data==P||(e.data=P);else{if(a=y=="textarea"&&P.defaultValue!=null?null:a&&Vt.call(e.childNodes),!F&&a!=null)for(x={},s=0;s<e.attributes.length;s++)x[(_=e.attributes[s]).name]=_.value;for(s in x)_=x[s],s=="dangerouslySetInnerHTML"?W=_:s=="children"||s in P||s=="value"&&"defaultValue"in P||s=="checked"&&"defaultChecked"in P||Ve(e,s,null,_,o);for(s in P)_=P[s],s=="children"?r=_:s=="dangerouslySetInnerHTML"?C=_:s=="value"?L=_:s=="checked"?w=_:F&&typeof _!="function"||x[s]===_||Ve(e,s,_,x[s],o);if(C)F||W&&(C.__html==W.__html||C.__html==e.innerHTML)||(e.innerHTML=C.__html),t.__k=[];else if(W&&(e.innerHTML=""),Qt(t.type=="template"?e.content:e,Ye(r)?r:[r],t,u,n,y=="foreignObject"?"http://www.w3.org/1999/xhtml":o,a,l,a?a[0]:u.__k&&ge(u,0),F,E),a!=null)for(s=a.length;s--;)Dt(a[s]);F&&y!="textarea"||(s="value",y=="progress"&&L==null?e.removeAttribute("value"):L!=null&&(L!==e[s]||y=="progress"&&!L||y=="option"&&L!=x[s])&&Ve(e,s,L,x[s],o),s="checked",w!=null&&w!=e[s]&&Ve(e,s,w,x[s],o))}return e}function Ft(e,t,u){try{if(typeof e=="function"){var n=typeof e.__u=="function";n&&e.__u(),n&&t==null||(e.__u=e(t))}else e.current=t}catch(o){j.__e(o,u)}}function ru(e,t,u){var n,o;if(j.unmount&&j.unmount(e),(n=e.ref)&&(n.current&&n.current!=e.__e||Ft(n,null,t)),(n=e.__c)!=null){if(n.componentWillUnmount)try{n.componentWillUnmount()}catch(a){j.__e(a,t)}n.base=n.__P=n.__n=null}if(n=e.__k)for(o=0;o<n.length;o++)n[o]&&ru(n[o],t,u||typeof e.type!="function");u||Dt(e.__e),e.__c=e.__=e.__e=void 0}function ju(e,t,u){return this.constructor(e,u)}Vt=Ke.slice,j={__e:function(e,t,u,n){for(var o,a,l;t=t.__;)if((o=t.__c)&&!o.__)try{if((a=o.constructor)&&a.getDerivedStateFromError!=null&&(o.setState(a.getDerivedStateFromError(e)),l=o.__d),o.componentDidCatch!=null&&(o.componentDidCatch(e,n||{}),l=o.__d),l)return o.__E=o}catch(F){e=F}throw e}},Jt=0,bu=function(e){return e!=null&&e.constructor===void 0},qe.prototype.setState=function(e,t){var u;u=this.__s!=null&&this.__s!=this.state?this.__s:this.__s=ne({},this.state),typeof e=="function"&&(e=e(ne({},u),this.props)),e&&ne(u,e),e!=null&&this.__v&&(t&&this._sb.push(t),zt(this))},qe.prototype.forceUpdate=function(e){this.__v&&(this.__e=!0,e&&this.__h.push(e),zt(this))},qe.prototype.render=Be,ae=[],qt=typeof Promise=="function"?Promise.prototype.then.bind(Promise.resolve()):setTimeout,Kt=function(e,t){return e.__v.__b-t.__v.__b},Xe.__r=0,at=Math.random().toString(8),Je="__d"+at,we="__a"+at,Xt=/(PointerCapture)$|Capture$/i,ct=0,st=$t(!1),lt=$t(!0),xu=0;function be(e){let t=Iu(Nu(e,"index"),!0);return t.length===0?"/":t}function ou(){let e=decodeURI(window.location.pathname);return e.endsWith("/")&&(e=e.slice(0,-1)),e.startsWith("/")&&(e=e.slice(1)),e}function ft(){return typeof document>"u"?"":document.body?.dataset?.basepath??""}function dt(e,t){let u=t??ft(),n=e.startsWith("/")?e:"/"+e;return u+n}function Mu(e,t){return e===t||e.endsWith("/"+t)}function Nu(e,t){return Mu(e,t)&&(e=e.slice(0,-t.length)),e}function Iu(e,t){return e.startsWith("/")&&(e=e.substring(1)),!t&&e.endsWith("/")&&(e=e.slice(0,-1)),e}function pt(e){for(;e.firstChild;)e.removeChild(e.firstChild)}(function(){function e(){var n=ou(),o=ft();return o&&n.startsWith(o.replace(/^\\//,""))&&(n=n.slice(o.replace(/^\\//,"").length),n.startsWith("/")&&(n=n.slice(1))),n}function t(n){var o=document.querySelector('script[src="'+n+'"]');return o?Promise.resolve():new Promise(function(a,l){var F=document.createElement("script");F.src=n,F.crossOrigin="anonymous",F.onload=a,F.onerror=l,document.head.appendChild(F)})}Promise.all([t("https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"),t("https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.js")]).then(function(){u()}).catch(function(n){console.error("[Graph] Failed to load libraries:",n);for(var o=document.querySelectorAll(".graph-container"),a=0;a<o.length;a++)o[a].textContent="Graph could not load. Check your network connection.",o[a].style.display="flex",o[a].style.alignItems="center",o[a].style.justifyContent="center",o[a].style.color="var(--gray)",o[a].style.fontSize="0.9rem"});function u(){var n=window.d3,o=window.PIXI;if(!n||!o){console.error("[Graph] Libraries not loaded");return}var a="graph-visited";function l(){return new Set(JSON.parse(localStorage.getItem(a)||"[]"))}function F(c){var d=l();d.add(c),localStorage.setItem(a,JSON.stringify(Array.from(d)))}function E(c,d){if(!c)return d;var v=document.createElement("div");v.style.color=c,v.style.position="absolute",v.style.visibility="hidden",document.body.appendChild(v);var h=getComputedStyle(v).color;return v.remove(),h||d}var s="wikicommit-graph-filters";function C(){try{var c=localStorage.getItem(s);if(!c)return null;var d=JSON.parse(c);return d&&typeof d=="object"?d:null}catch{return null}}function W(c){try{localStorage.setItem(s,JSON.stringify(c))}catch{}}var r=new WeakMap;function _(c){try{return JSON.parse(c.dataset.labels||"{}")}catch{return{}}}function L(c,d,v,h){var p=document.createElement("label");p.className="global-graph-controls__field";var f=document.createElement("span");f.textContent=c,p.appendChild(f);var A=document.createElement("select");A.multiple=!0,A.size=Math.min(Math.max(d.length,2),8);for(var m=0;m<d.length;m++){var B=document.createElement("option");B.value=d[m],B.textContent=d[m],B.selected=v.indexOf(d[m])!==-1,A.appendChild(B)}return A.addEventListener("change",function(){for(var k=[],M=0;M<A.options.length;M++)A.options[M].selected&&k.push(A.options[M].value);h(k)}),p.appendChild(A),{field:p,sync:function(k){for(var M=0;M<A.options.length;M++){var Q=k.indexOf(A.options[M].value)!==-1;A.options[M].selected!==Q&&(A.options[M].selected=Q)}}}}function w(c,d,v){var h=document.createElement("span");h.className="global-graph-controls__field global-graph-controls__field--inline";var p=document.createElement("button");p.type="button",p.className="global-graph-controls__toggle",p.textContent=c;var f=d;function A(m){f=m,p.setAttribute("aria-pressed",m?"true":"false")}return A(d),p.addEventListener("click",function(){A(!f),v(f)}),h.appendChild(p),{field:h,sync:function(m){A(m)}}}function x(c,d,v,h){var p=document.createElement("label");p.className="global-graph-controls__field";var f=document.createElement("span");f.textContent=c,p.appendChild(f);var A=document.createElement("span");A.className="global-graph-controls__range";var m=document.createElement("input");m.type="number",m.min="0",m.value=String(d||0);var B=document.createElement("input");B.type="number",B.min="0",B.value=String(v||0),m.title="0 = no lower bound",B.title="0 = no upper bound";function k(){h(Math.max(0,parseInt(m.value,10)||0),Math.max(0,parseInt(B.value,10)||0))}return m.addEventListener("change",k),B.addEventListener("change",k),A.appendChild(m),A.appendChild(B),p.appendChild(A),{field:p,sync:function(M,Q){var le=String(M||0),ce=String(Q||0);m.value!==le&&(m.value=le),B.value!==ce&&(B.value=ce)}}}function P(c){var d=document.createElement("div");d.className="global-graph-controls__field global-graph-controls__legend";var v=document.createElement("span");v.textContent=c.legend||"Legend",d.appendChild(v);var h=document.createElement("div");h.className="global-graph-controls__legend-items";function p(A,m){var B=document.createElement("span");B.className="global-graph-controls__legend-item";var k=document.createElement("span");k.className="global-graph-controls__legend-swatch global-graph-controls__legend-swatch--"+A,k.setAttribute("aria-hidden","true"),B.appendChild(k),B.appendChild(document.createTextNode(m)),h.appendChild(B)}p("entity",c.legendPages||"Pages"),p("tag",c.tags||"Tags"),p("source",c.sources||"Sources");var f=document.createElement("span");return f.className="global-graph-controls__legend-break",f.setAttribute("aria-hidden","true"),h.appendChild(f),p("current",c.legendCurrent||"Current page"),p("visited",c.legendVisited||"Visited"),p("unvisited",c.legendUnvisited||"Not visited"),d.appendChild(h),d}function y(c,d,v){var h=c.closest(".global-graph-outer");if(!h)return;var p=h.querySelector(".global-graph-controls");if(!p)return;var f=_(p),A=It(v,f),m=r.get(p);if(m&&m.signature===A&&m.graphContainer===c&&p.childElementCount>0){for(var B=0;B<m.syncers.length;B++)m.syncers[B](d);return}pt(p);var k=[];function M(T){var Fe;try{Fe=JSON.parse(c.dataset.cfg||"{}")}catch{Fe=d}var ee=Object.assign({},Fe,T);c.dataset.cfg=JSON.stringify(ee),W({langs:ee.langs||[],types:ee.types||[],showSources:ee.showSources!==!1,showTags:ee.showTags!==!1,minDegree:ee.minDegree||0,maxDegree:ee.maxDegree||0}),Pe()}if(v.langs.length>1){var Q=L(f.lang||"Language",v.langs,d.langs||[],function(T){M({langs:T})});p.appendChild(Q.field),k.push(function(T){Q.sync(T.langs||[])})}if(v.types.length>1){var le=L(f.type||"Type",v.types,d.types||[],function(T){M({types:T})});p.appendChild(le.field),k.push(function(T){le.sync(T.types||[])})}var ce=w(f.sources||"Sources",d.showSources!==!1,function(T){M({showSources:T})});p.appendChild(ce.field),k.push(function(T){ce.sync(T.showSources!==!1)});var We=w(f.tags||"Tags",d.showTags!==!1,function(T){M({showTags:T})});p.appendChild(We.field),k.push(function(T){We.sync(T.showTags!==!1)});var Me=x(f.degree||"Links per node",d.minDegree||0,d.maxDegree||0,function(T,Fe){M({minDegree:T,maxDegree:Fe})});p.appendChild(Me.field),k.push(function(T){Me.sync(T.minDegree||0,T.maxDegree||0)});var De=document.createElement("button");De.type="button",De.className="global-graph-controls__reset",De.textContent=f.reset||"Reset",De.addEventListener("click",function(){M({langs:[],types:[],showSources:!0,showTags:!0,minDegree:0,maxDegree:0})}),p.appendChild(De),p.appendChild(P(f)),r.set(p,{signature:A,graphContainer:c,syncers:k})}async function H(c,d,v){var h=be(d);h===""&&(h="index");var p=l();if(pt(c),v!==void 0&&v!==Z)return console.log("[Graph] Stale render, skipping"),function(){};var f=JSON.parse(c.dataset.cfg||"{}"),A=f.drag,m=f.zoom,B=f.depth,k=f.scale||1,M=f.repelForce||.5,Q=f.centerForce||.3,le=f.linkDistance||30,ce=f.fontSize||.6,We=f.opacityScale||1,Me=f.removeTags||[],De=f.showTags,T=f.focusOnHover,Fe=f.enableRadial,ee=f.showControls,iu={langs:f.langs||[],types:f.types||[],showSources:f.showSources!==!1,minDegree:f.minDegree||0,maxDegree:f.maxDegree||0},he;try{var ht=await fetchData;he=new Map;for(var vt in ht)he.set(be(vt),ht[vt])}catch(i){return console.error("[Graph] Error loading data:",i),function(){}}var fe=[],Ne=[],Qe=new Set(he.keys());he.forEach(function(i,D){for(var g=i.links||[],S=0;S<g.length;S++){var b=be(g[S]);Qe.has(b)&&fe.push({source:D,target:b})}if(De)for(var U=i.tags||[],S=0;S<U.length;S++){var te=U[S];if(Me.indexOf(te)===-1){var oe=be("tags/"+te);Ne.indexOf(oe)===-1&&Ne.push(oe),fe.push({source:D,target:oe})}}});var re=new Set;if(B>=0)for(var Ie=[h],Oe=new Set([h]),Ct=0;Ct<=B&&Ie.length>0;Ct++){for(var et=[],tt=0;tt<Ie.length;tt++){var ut=Ie[tt];re.add(ut);for(var nt=0;nt<fe.length;nt++){var G=fe[nt];G.source===ut&&!Oe.has(G.target)&&(Oe.add(G.target),et.push(G.target)),G.target===ut&&!Oe.has(G.source)&&(Oe.add(G.source),et.push(G.source))}}Ie=et}else{Qe.forEach(function(i){re.add(i)});for(var I=0;I<Ne.length;I++)re.add(Ne[I])}if(B<0&&(re=Rt(re,fe,iu)),ee&&B<0){var Et=new Set;Qe.forEach(function(i){Et.add(i)}),y(c,f,Ut(Et))}var J=c.offsetWidth,q=Math.max(c.offsetHeight,250),ve=[],rt=new Map;re.forEach(function(i){var D=i.startsWith("tags/"),g=D?"#"+i.substring(5):he.get(i)?.title||i,S=D?[]:he.get(i)?.tags||[],b={id:i,text:g,tags:S,x:Math.random()*J-J/2,y:Math.random()*q-q/2,vx:0,vy:0};ve.push(b),rt.set(i,b)});for(var Y=[],I=0;I<fe.length;I++){var G=fe[I];if(re.has(G.source)&&re.has(G.target)){var mt=rt.get(G.source),At=rt.get(G.target);mt&&At&&Y.push({source:mt,target:At})}}var de=getComputedStyle(document.documentElement),su=E(de.getPropertyValue("--secondary").trim(),"#c792ea"),yt=E(de.getPropertyValue("--tertiary").trim(),"#82aaff"),Bt=E(de.getPropertyValue("--gray").trim(),"#6c6c6c"),bt=E(de.getPropertyValue("--lightgray").trim(),"#d4d4d4"),lu=E(de.getPropertyValue("--dark").trim(),"#1a1a1a"),cu=E(de.getPropertyValue("--light").trim(),"#f5f5f5"),Du=de.getPropertyValue("--bodyFont").trim()||"inherit",pe=new o.Application;await pe.init({width:J,height:q,antialias:!0,backgroundAlpha:0,resolution:window.devicePixelRatio||1,autoDensity:!0,eventMode:"static"}),c.appendChild(pe.canvas);var Ce=new o.Container;pe.stage.addChild(Ce);var Ee=n.forceSimulation(ve).force("charge",n.forceManyBody().strength(-100*M)).force("center",n.forceCenter().strength(Q)).force("link",n.forceLink(Y).distance(le)).force("collide",n.forceCollide().radius(function(i){for(var D=0,g=0;g<Y.length;g++)(Y[g].source.id===i.id||Y[g].target.id===i.id)&&D++;return 2+Math.sqrt(D)}).iterations(3));if(Fe){var Re=Math.min(J,q)/2*.8;Ee.force("radial",n.forceRadial(Re).strength(.2))}var xt=new o.Container,St=new o.Container,Ue=new o.Container;Ce.addChild(xt),Ce.addChild(St),Ce.addChild(Ue);var O=[],K=[],Se=null,me=new Set,wt=0,Ge=!1,R=n.zoomIdentity;function kt(i){for(var D=0,g=0;g<Y.length;g++)(Y[g].source.id===i.id||Y[g].target.id===i.id)&&D++;return 2+Math.sqrt(D)}function Fu(i){var D=i.id===h;return D?su:p.has(i.id)||ue(i.id).kind==="tag"?yt:Bt}function ot(i){if(Se=i,i===null){me=new Set;for(var D=0;D<O.length;D++)O[D].active=!1;for(var D=0;D<K.length;D++)K[D].active=!1}else{me=new Set;for(var D=0;D<K.length;D++){var g=K[D].simulationData;g.source.id===i||g.target.id===i?(me.add(g.source.id),me.add(g.target.id),K[D].active=!0):K[D].active=!1}me.add(i);for(var D=0;D<O.length;D++)me.has(O[D].simulationData.id)?O[D].active=!0:O[D].active=!1}}function fu(){for(var i=0;i<K.length;i++){var D=K[i],g=1;Se!==null&&(g=D.active?1:.2),D.alpha=g,D.color=D.active?Bt:bt}}function du(){for(var i=1/k,D=i*1.1,g=0;g<O.length;g++){var S=O[g];Se===S.simulationData.id?(S.label.alpha=1,S.label.scale.set(D)):S.label.scale.set(i)}}function pu(){for(var i=0;i<O.length;i++){var D=O[i],g=1;Se!==null&&T&&(g=D.active?1:.2),D.gfx.alpha=g}}function ze(){pu(),fu(),du()}for(var I=0;I<ve.length;I++){var Ae=ve[I],Lt=Ae.id,Tt=ue(Lt).kind,Pt=Tt==="tag",gu=Tt==="source",Re=kt(Ae),jt=Fu(Ae),ye=new o.Text({text:Ae.text,style:{fontSize:ce*15,fill:lu,fontFamily:Du},resolution:window.devicePixelRatio*4});ye.anchor.set(.5,1.2),ye.alpha=0,ye.scale.set(1/k),Ue.addChild(ye);var z=new o.Graphics;if(gu){var He=Re*.9;z.rect(-He,-He,He*2,He*2)}else z.circle(0,0,Re);z.fill({color:Pt?cu:jt}),Pt&&z.stroke({width:2,color:yt}),z.eventMode="static",z.cursor="pointer",z.label=Lt,(function(g,S,b){var U=0;S.on("pointerover",function(te){ot(g.id),U=b.alpha,Ge||ze()}),S.on("pointerleave",function(){ot(null),b.alpha=U,Ge||ze()})})(Ae,z,ye),St.addChild(z),O.push({simulationData:Ae,gfx:z,label:ye,color:jt,alpha:1,active:!1})}for(var I=0;I<Y.length;I++){var G=Y[I],z=new o.Graphics;z.eventMode="none",xt.addChild(z),K.push({simulationData:G,gfx:z,color:bt,alpha:1,active:!1})}if(A){var _u=function(i){for(var D=(i.x-R.x)/R.k,g=(i.y-R.y)/R.k,S=0;S<ve.length;S++){var b=ve[S],U=D-b.x-J/2,te=g-b.y-q/2,oe=Math.sqrt(U*U+te*te),$e=kt(b);if(oe<$e+5)return b}return null},hu=function(i){i.active||Ee.alphaTarget(1).restart(),i.subject.fx=i.subject.x,i.subject.fy=i.subject.y;var D=(i.x-R.x)/R.k-J/2,g=(i.y-R.y)/R.k-q/2;i.subject.__dragOffset={x:D-i.subject.x,y:g-i.subject.y},wt=Date.now(),Ge=!0,Se=i.subject.id},vu=function(i){var D=(i.x-R.x)/R.k-J/2,g=(i.y-R.y)/R.k-q/2;i.subject.fx=D-i.subject.__dragOffset.x,i.subject.fy=g-i.subject.__dragOffset.y},Cu=function(i){if(i.active||Ee.alphaTarget(0),i.subject.fx=null,i.subject.fy=null,Ge=!1,ot(null),ze(),Date.now()-wt<500){var D=dt(i.subject.id);window.location.href=D}},Eu=n.drag().container(pe.canvas).subject(_u).on("start",hu).on("drag",vu).on("end",Cu);n.select(pe.canvas).call(Eu)}else for(var I=0;I<O.length;I++)(function(D){D.gfx.on("click",function(){var g=dt(D.simulationData.id);window.location.href=g})})(O[I]);if(m){var mu=function(i){R=i.transform,Ce.scale.set(R.k,R.k),Ce.position.set(R.x,R.y);for(var D=R.k*We,g=Math.max((D-1)/3.75,0),S=[],b=0;b<O.length;b++)O[b].active&&S.push(O[b].label);for(var b=0;b<Ue.children.length;b++){var U=Ue.children[b];S.indexOf(U)===-1&&(U.alpha=g)}},Au=n.zoom().extent([[0,0],[J,q]]).scaleExtent([.25,4]).on("zoom",mu);n.select(pe.canvas).call(Au)}var Wt=!1;function Mt(){if(!Wt){for(var i=0;i<O.length;i++){var D=O[i],g=D.simulationData.x,S=D.simulationData.y;g!=null&&S!=null&&(D.gfx.position.set(g+J/2,S+q/2),D.label&&D.label.position.set(g+J/2,S+q/2))}for(var i=0;i<K.length;i++){var b=K[i],U=b.simulationData,te=U.source.x,oe=U.source.y,$e=U.target.x,Nt=U.target.y;te!=null&&oe!=null&&$e!=null&&Nt!=null&&(b.gfx.clear(),b.gfx.moveTo(te+J/2,oe+q/2),b.gfx.lineTo($e+J/2,Nt+q/2),b.gfx.stroke({alpha:b.alpha,width:1,color:b.color}))}requestAnimationFrame(Mt)}}return Ee.on("tick",function(){}),Ee.restart(),ze(),Mt(),function(){Wt=!0,Ee.stop();try{pe.destroy(!0)}catch{}}}var X=[],$=[],Z=0,_e=0;function ie(){for(var c=0;c<X.length;c++)X[c]();X=[]}function se(){_e++;for(var c=0;c<$.length;c++)$[c]();$=[]}var N=[],V=[],ke=null,Le=null,Te=null;function Ze(){se();for(var c=0;c<N.length;c++){N[c].classList.remove("active");var d=N[c].closest(".sidebar");d&&(d.style.zIndex="")}}function xe(){for(var c=0;c<N.length;c++)if(N[c].classList.contains("active"))return!0;return!1}function Pe(){se();for(var c=_e,d=e(),v=0;v<N.length;v++){var h=N[v];h.classList.add("active");var p=h.closest(".sidebar");p&&(p.style.zIndex="1");var f=h.querySelector(".global-graph-container");if(f){var A=C();if(A)try{var m=JSON.parse(f.dataset.cfg||"{}");f.dataset.cfg=JSON.stringify(Object.assign(m,A))}catch{}(function(B){H(B,d,void 0).then(function(k){if(c!==_e){k();return}$.push(k)}).catch(function(k){console.error("[Graph] Global render error:",k)})})(f)}}}function gt(){xe()?Ze():Pe()}function _t(){ie();var c=++Z,d=e();F(d);for(var v=document.querySelectorAll(".graph-container"),h=0;h<v.length;h++)(function(p){H(p,d,c).then(function(f){c===Z&&X.push(f)}).catch(function(f){console.error("[Graph] Local render error:",f)})})(v[h])}function je(c){var d=c.detail?c.detail.url:e();if(F(be(d)),_t(),N=Array.from(document.querySelectorAll(".global-graph-outer")),Te)for(var v=0;v<V.length;v++)V[v].removeEventListener("click",Te);V=Array.from(document.querySelectorAll(".global-graph-icon")),Te=function(){gt()};for(var v=0;v<V.length;v++)V[v].addEventListener("click",Te);ke&&document.removeEventListener("click",ke),ke=function(h){if(xe()){var p=h.target.closest(".global-graph-container"),f=h.target.closest(".global-graph-icon"),A=h.target.closest(".global-graph-controls"),m=h.target.closest(".global-graph-inner");!p&&!f&&!A&&!m&&Ze()}},document.addEventListener("click",ke),Le&&document.removeEventListener("keydown",Le),Le=function(h){if(h.key==="Escape"){xe()&&Ze();return}h.key==="g"&&(h.ctrlKey||h.metaKey)&&!h.shiftKey&&(h.preventDefault(),gt())},document.addEventListener("keydown",Le),xe()&&Pe()}document.readyState==="loading"?document.addEventListener("DOMContentLoaded",function(){je({detail:{url:e()}})}):je({detail:{url:e()}}),document.addEventListener("prenav",function(){ie(),se()}),document.addEventListener("nav",je),document.addEventListener("render",je);function au(){_t(),xe()&&Pe()}document.addEventListener("themechange",au)}})();
+var graph_inline_default = `function Gt(e,t){let u={};for(let n of Object.keys(t).sort())u[n]=t[n];return JSON.stringify([e.langs,e.types,u])}function oe(e){if(e===""||e==="/"||e==="index")return{kind:"root",isIndex:!0};if(e==="tags"||e.startsWith("tags/"))return{kind:"tag",isIndex:!1};if(e==="sources"||e.startsWith("sources/"))return{kind:"source",isIndex:!1};if(e==="overview"||e.startsWith("overview/"))return{kind:"overview",isIndex:!1};let t=e.split("/").filter(D=>D.length>0),u=t[0];if(t.length===1)return{kind:"entity",lang:u,isIndex:!0};let n=t[1]==="custom"&&t.length>=3?[t[1],t[2]]:[t[1]],o=n.join("/"),a=t.length===n.length+1;return{kind:"entity",lang:u,type:o,isIndex:a}}function Tu(e,t){let u=new Map;e.forEach(n=>u.set(n,0));for(let n of t)!e.has(n.source)||!e.has(n.target)||(u.set(n.source,(u.get(n.source)??0)+1),u.set(n.target,(u.get(n.target)??0)+1));return u}function zt(e,t){let u=new Map;e.forEach(n=>u.set(n,0));for(let n of t)!e.has(n.source)||!e.has(n.target)||n.source!==n.target&&(oe(n.target).kind==="entity"&&u.set(n.source,(u.get(n.source)??0)+1),oe(n.source).kind==="entity"&&u.set(n.target,(u.get(n.target)??0)+1));return u}function Vt(e,t){let u=at(t);return e.has(u)||e.has(\`custom/\${u}\`)}function ot(e,t){if(e.length===0)return[];let u=new Set(e.map(at));return t.filter(n=>Vt(u,n))}function at(e){return e.toLowerCase()}function Lu(e){if(!e.startsWith("tags/"))return;let t=e.slice(5);return t.length>0?t:void 0}function Ht(e){return e.toLowerCase().replace(/\\s+/g,"-")}function $t(e,t,u){let n=u.langs&&u.langs.length>0?new Set(u.langs):void 0,o=u.types&&u.types.length>0?new Set(u.types.map(at)):void 0,a=u.showSources!==!1,D=u.showTags!==!1,f=u.showIndexes===!0,E=u.removeTags&&u.removeTags.length>0?new Set(u.removeTags.map(Ht)):void 0,s=new Set;for(let h of e){let B=oe(h);B.kind!=="overview"&&(!f&&B.kind==="entity"&&B.isIndex||s.add(h))}let _=new Set;for(let h of s){let B=oe(h);if(!(B.kind==="source"&&!a)){if(B.kind==="tag"){if(!D)continue;let U=Lu(h);if(E&&U!==void 0&&E.has(Ht(U)))continue}B.kind==="entity"&&(n&&(B.lang===void 0||!n.has(B.lang))||o&&B.type!==void 0&&!Vt(o,B.type))||_.add(h)}}let T=u.minDegree??0,r=u.maxDegree??0,p=_.size!==s.size;if(!p&&T<=0&&r<=0)return _;let k=Tu(_,t),R=p?zt(_,t):void 0,j=p?zt(s,t):void 0,L=new Set;return _.forEach(h=>{let B=k.get(h)??0;if(R&&j&&(R.get(h)??0)===0){let U=oe(h).kind;if((U==="tag"||U==="source")&&(j.get(h)??0)>0)return}T>0&&B<T||r>0&&B>r||L.add(h)}),L}function Jt(e){let t=new Set,u=new Set;for(let n of e){let o=oe(n);o.kind==="entity"&&(o.lang&&t.add(o.lang),o.type&&u.add(o.type))}return{langs:[...t].sort(),types:[...u].sort()}}function qt(e,t){return Math.max((e*t-1)/3.75,0)}function Kt(e,t,u,n){return e?1:u?t?1:0:n}var Zu=Object.hasOwnProperty;var eu,P,tu,Pu,De,Xt,uu,nu,it,$e,Te,ru,Dt,lt,ct,ju,ou={},qe=[],Nu=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,Xe=Array.isArray;function ae(e,t){for(var u in t)e[u]=t[u];return e}function Ft(e){e&&e.parentNode&&e.parentNode.removeChild(e)}function st(e,t,u,n,o){var a={type:e,props:t,key:u,ref:n,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:o??++tu,__i:-1,__u:0};return o==null&&P.vnode!=null&&P.vnode(a),a}function xe(e){return e.children}function Je(e,t){this.props=e,this.context=t}function _e(e,t){if(t==null)return e.__?_e(e.__,e.__i+1):null;for(var u;t<e.__k.length;t++)if((u=e.__k[t])!=null&&u.__e!=null)return u.__e;return typeof e.type=="function"?_e(e):null}function Mu(e){if(e.__P&&e.__d){var t=e.__v,u=t.__e,n=[],o=[],a=ae({},t);a.__v=t.__v+1,P.vnode&&P.vnode(a),lu(e.__P,a,t,e.__n,e.__P.namespaceURI,32&t.__u?[u]:null,n,u??_e(t),!!(32&t.__u),o),a.__v=t.__v,a.__.__k[a.__i]=a,Ru(n,a,o),t.__e=t.__=null,a.__e!=u&&au(a)}}function au(e){if((e=e.__)!=null&&e.__c!=null)return e.__e=e.__c.base=null,e.__k.some(function(t){if(t!=null&&t.__e!=null)return e.__e=e.__c.base=t.__e}),au(e)}function Yt(e){(!e.__d&&(e.__d=!0)&&De.push(e)&&!Ke.__r++||Xt!=P.debounceRendering)&&((Xt=P.debounceRendering)||uu)(Ke)}function Ke(){try{for(var e,t=1;De.length;)De.length>t&&De.sort(nu),e=De.shift(),t=De.length,Mu(e)}finally{De.length=Ke.__r=0}}function iu(e,t,u,n,o,a,D,f,E,s,_){var T,r,p,k,R,j,L=n&&n.__k||qe,h=t.length;for(E=Wu(u,t,L,E,h),T=0;T<h;T++)(p=u.__k[T])!=null&&(r=p.__i!=-1&&L[p.__i]||ou,p.__i=T,j=lu(e,p,r,o,a,D,f,E,s,_),k=p.__e,p.ref&&r.ref!=p.ref&&(r.ref&&ft(r.ref,null,p),_.push(p.ref,p.__c||k,p)),R==null&&k!=null&&(R=k),4&p.__u?(E=su(p,E,e),r.__e&&(r.__e=null)):typeof p.type=="function"&&j!==void 0?E=j:k&&(E=k.nextSibling),p.__u&=-7);return u.__e=R,E}function Wu(e,t,u,n,o){var a,D,f,E,s,_=u.length,T=_,r=0;for(e.__k=new Array(o),a=0;a<o;a++)(D=t[a])!=null&&typeof D!="boolean"&&typeof D!="function"?(typeof D=="string"||typeof D=="number"||typeof D=="bigint"||D.constructor==String?D=e.__k[a]=st(null,D,null,null,null):Xe(D)?D=e.__k[a]=st(xe,{children:D},null,null,null):D.constructor===void 0&&D.__b>0?D=e.__k[a]=st(D.type,D.props,D.key,D.ref?D.ref:null,D.__v):e.__k[a]=D,E=a+r,D.__=e,D.__b=e.__b+1,f=null,(s=D.__i=Iu(D,u,E,T))!=-1&&(T--,(f=u[s])&&(f.__u|=2)),f==null||f.__v==null?(s==-1&&(o>_?r--:o<_&&r++),typeof D.type!="function"&&(D.__u|=4)):s!=E&&(s==E-1?r--:s==E+1?r++:(s>E?r--:r++,D.__u|=4))):e.__k[a]=null;if(T)for(a=0;a<_;a++)(f=u[a])!=null&&(2&f.__u)==0&&(f.__e==n&&(n=_e(f)),Fu(f,f));return n}function su(e,t,u){var n,o;if(typeof e.type=="function"){for(n=e.__k,o=0;n&&o<n.length;o++)n[o]&&(n[o].__=e,t=su(n[o],t,u));return t}e.__e!=t&&(t&&e.type&&!t.parentNode&&(t=_e(e)),t=u.insertBefore(e.__e,t||null));do t=t&&t.nextSibling;while(t!=null&&t.nodeType==8);return t}function Iu(e,t,u,n){var o,a,D,f=e.key,E=e.type,s=t[u],_=s!=null&&(2&s.__u)==0;if(s===null&&f==null||_&&f==s.key&&E==s.type)return u;if(n>(_?1:0)){for(o=u-1,a=u+1;o>=0||a<t.length;)if((s=t[D=o>=0?o--:a++])!=null&&(2&s.__u)==0&&f==s.key&&E==s.type)return D}return-1}function Zt(e,t,u){t[0]=="-"?e.setProperty(t,u??""):e[t]=u==null?"":typeof u!="number"||Nu.test(t)?u:u+"px"}function Ve(e,t,u,n,o){var a,D;e:if(t=="style")if(typeof u=="string")e.style.cssText=u;else{if(typeof n=="string"&&(e.style.cssText=n=""),n)for(t in n)u&&t in u||Zt(e.style,t,"");if(u)for(t in u)n&&u[t]==n[t]||Zt(e.style,t,u[t])}else if(t[0]=="o"&&t[1]=="n")a=t!=(t=t.replace(ru,"$1")),D=t.toLowerCase(),t=D in e||t=="onFocusOut"||t=="onFocusIn"?D.slice(2):t.slice(2),e.l||(e.l={}),e.l[t+a]=u,u?n?u[Te]=n[Te]:(u[Te]=Dt,e.addEventListener(t,a?ct:lt,a)):e.removeEventListener(t,a?ct:lt,a);else{if(o=="http://www.w3.org/2000/svg")t=t.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if(t!="width"&&t!="height"&&t!="href"&&t!="list"&&t!="form"&&t!="tabIndex"&&t!="download"&&t!="rowSpan"&&t!="colSpan"&&t!="role"&&t!="popover"&&t in e)try{e[t]=u??"";break e}catch{}typeof u=="function"||(u==null||u===!1&&t[4]!="-"?e.removeAttribute(t):e.setAttribute(t,t=="popover"&&u==1?"":u))}}function Qt(e){return function(t){if(this.l){var u=this.l[t.type+e];if(t[$e]==null)t[$e]=Dt++;else if(t[$e]<u[Te])return;return u(P.event?P.event(t):t)}}}function lu(e,t,u,n,o,a,D,f,E,s){var _,T,r,p,k,R,j,L,h,B,U,J,ne,ve,Fe,fe,W=t.type;if(t.constructor!==void 0)return null;128&u.__u&&(E=!!(32&u.__u),a=[f=t.__e=u.__e]),(_=P.__b)&&_(t);e:if(typeof W=="function"){T=D.length;try{if(h=t.props,B=W.prototype&&W.prototype.render,U=(_=W.contextType)&&n[_.__c],J=_?U?U.props.value:_.__:n,u.__c?L=(r=t.__c=u.__c).__=r.__E:(B?t.__c=r=new W(h,J):(t.__c=r=new Je(h,J),r.constructor=W,r.render=Uu),U&&U.sub(r),r.state||(r.state={}),r.__n=n,p=r.__d=!0,r.__h=[],r._sb=[]),B&&r.__s==null&&(r.__s=r.state),B&&W.getDerivedStateFromProps!=null&&(r.__s==r.state&&(r.__s=ae({},r.__s)),ae(r.__s,W.getDerivedStateFromProps(h,r.__s))),k=r.props,R=r.state,r.__v=t,p)B&&W.getDerivedStateFromProps==null&&r.componentWillMount!=null&&r.componentWillMount(),B&&r.componentDidMount!=null&&r.__h.push(r.componentDidMount);else{if(B&&W.getDerivedStateFromProps==null&&h!==k&&r.componentWillReceiveProps!=null&&r.componentWillReceiveProps(h,J),t.__v==u.__v||!r.__e&&r.shouldComponentUpdate!=null&&r.shouldComponentUpdate(h,r.__s,J)===!1){t.__v!=u.__v&&(r.props=h,r.state=r.__s,r.__d=!1),t.__e=u.__e,t.__k=u.__k,t.__k.some(function(q){q&&(q.__=t)}),qe.push.apply(r.__h,r._sb),r._sb=[],r.__h.length&&D.push(r),f=_e(u);break e}r.componentWillUpdate!=null&&r.componentWillUpdate(h,r.__s,J),B&&r.componentDidUpdate!=null&&r.__h.push(function(){r.componentDidUpdate(k,R,j)})}if(r.context=J,r.props=h,r.__P=e,r.__e=!1,ne=P.__r,ve=0,B)r.state=r.__s,r.__d=!1,ne&&ne(t),_=r.render(r.props,r.state,r.context),qe.push.apply(r.__h,r._sb),r._sb=[];else do r.__d=!1,ne&&ne(t),_=r.render(r.props,r.state,r.context),r.state=r.__s;while(r.__d&&++ve<25);r.state=r.__s,r.getChildContext!=null&&(n=ae(ae({},n),r.getChildContext())),B&&!p&&r.getSnapshotBeforeUpdate!=null&&(j=r.getSnapshotBeforeUpdate(k,R)),Fe=_!=null&&_.type===xe&&_.key==null?Du(_.props.children):_,f=iu(e,Xe(Fe)?Fe:[Fe],t,u,n,o,a,D,f,E,s),r.base=t.__e,t.__u&=-161,r.__h.length&&D.push(r),L&&(r.__E=r.__=null)}catch(q){if(D.length=T,t.__v=null,E||a!=null){if(q.then){for(t.__u|=E?160:128;f&&f.nodeType==8&&f.nextSibling;)f=f.nextSibling;a!=null&&(a[a.indexOf(f)]=null),t.__e=f}else if(a!=null)for(fe=a.length;fe--;)Ft(a[fe])}else t.__e=u.__e;t.__k==null&&(t.__k=u.__k||[]),q.then||cu(t),P.__e(q,t,u)}}else a==null&&t.__v==u.__v?(t.__k=u.__k,t.__e=u.__e):f=t.__e=Ou(u.__e,t,u,n,o,a,D,E,s);return(_=P.diffed)&&_(t),128&t.__u?void 0:f}function cu(e){e&&(e.__c&&(e.__c.__e=!0),e.__k&&e.__k.some(cu))}function Ru(e,t,u){for(var n=0;n<u.length;n++)ft(u[n],u[++n],u[++n]);P.__c&&P.__c(t,e),e.some(function(o){try{e=o.__h,o.__h=[],e.some(function(a){a.call(o)})}catch(a){P.__e(a,o.__v)}})}function Du(e){return typeof e!="object"||e==null||e.__b>0?e:Xe(e)?e.map(Du):e.constructor!==void 0?null:ae({},e)}function Ou(e,t,u,n,o,a,D,f,E){var s,_,T,r,p,k,R,j=u.props||ou,L=t.props,h=t.type;if(h=="svg"?o="http://www.w3.org/2000/svg":h=="math"?o="http://www.w3.org/1998/Math/MathML":o||(o="http://www.w3.org/1999/xhtml"),a!=null){for(s=0;s<a.length;s++)if((p=a[s])&&"setAttribute"in p==!!h&&(h?p.localName==h:p.nodeType==3)){e=p,a[s]=null;break}}if(e==null){if(h==null)return document.createTextNode(L);e=document.createElementNS(o,h,L.is&&L),f&&(P.__m&&P.__m(t,a),f=!1),a=null}if(h==null)j===L||f&&e.data==L||(e.data=L);else{if(a=h=="textarea"&&L.defaultValue!=null?null:a&&eu.call(e.childNodes),!f&&a!=null)for(j={},s=0;s<e.attributes.length;s++)j[(p=e.attributes[s]).name]=p.value;for(s in j)p=j[s],s=="dangerouslySetInnerHTML"?T=p:s=="children"||s in L||s=="value"&&"defaultValue"in L||s=="checked"&&"defaultChecked"in L||Ve(e,s,null,p,o);for(s in L)p=L[s],s=="children"?r=p:s=="dangerouslySetInnerHTML"?_=p:s=="value"?k=p:s=="checked"?R=p:f&&typeof p!="function"||j[s]===p||Ve(e,s,p,j[s],o);if(_)f||T&&(_.__html==T.__html||_.__html==e.innerHTML)||(e.innerHTML=_.__html),t.__k=[];else if(T&&(e.innerHTML=""),iu(t.type=="template"?e.content:e,Xe(r)?r:[r],t,u,n,h=="foreignObject"?"http://www.w3.org/1999/xhtml":o,a,D,a?a[0]:u.__k&&_e(u,0),f,E),a!=null)for(s=a.length;s--;)Ft(a[s]);f&&h!="textarea"||(s="value",h=="progress"&&k==null?e.removeAttribute("value"):k!=null&&(k!==e[s]||h=="progress"&&!k||h=="option"&&k!=j[s])&&Ve(e,s,k,j[s],o),s="checked",R!=null&&R!=e[s]&&Ve(e,s,R,j[s],o))}return e}function ft(e,t,u){try{if(typeof e=="function"){var n=typeof e.__u=="function";n&&e.__u(),n&&t==null||(e.__u=e(t))}else e.current=t}catch(o){P.__e(o,u)}}function Fu(e,t,u){var n,o;if(P.unmount&&P.unmount(e),(n=e.ref)&&(n.current&&n.current!=e.__e||ft(n,null,t)),(n=e.__c)!=null){if(n.componentWillUnmount)try{n.componentWillUnmount()}catch(a){P.__e(a,t)}n.base=n.__P=n.__n=null}if(n=e.__k)for(o=0;o<n.length;o++)n[o]&&Fu(n[o],t,u||typeof e.type!="function");u||Ft(e.__e),e.__c=e.__=e.__e=void 0}function Uu(e,t,u){return this.constructor(e,u)}eu=qe.slice,P={__e:function(e,t,u,n){for(var o,a,D;t=t.__;)if((o=t.__c)&&!o.__)try{if((a=o.constructor)&&a.getDerivedStateFromError!=null&&(o.setState(a.getDerivedStateFromError(e)),D=o.__d),o.componentDidCatch!=null&&(o.componentDidCatch(e,n||{}),D=o.__d),D)return o.__E=o}catch(f){e=f}throw e}},tu=0,Pu=function(e){return e!=null&&e.constructor===void 0},Je.prototype.setState=function(e,t){var u;u=this.__s!=null&&this.__s!=this.state?this.__s:this.__s=ae({},this.state),typeof e=="function"&&(e=e(ae({},u),this.props)),e&&ae(u,e),e!=null&&this.__v&&(t&&this._sb.push(t),Yt(this))},Je.prototype.forceUpdate=function(e){this.__v&&(this.__e=!0,e&&this.__h.push(e),Yt(this))},Je.prototype.render=xe,De=[],uu=typeof Promise=="function"?Promise.prototype.then.bind(Promise.resolve()):setTimeout,nu=function(e,t){return e.__v.__b-t.__v.__b},Ke.__r=0,it=Math.random().toString(8),$e="__d"+it,Te="__a"+it,ru=/(PointerCapture)$|Capture$/i,Dt=0,lt=Qt(!1),ct=Qt(!0),ju=0;function we(e){let t=Vu(Hu(e,"index"),!0);return t.length===0?"/":t}function fu(){let e=decodeURI(window.location.pathname);return e.endsWith("/")&&(e=e.slice(0,-1)),e.startsWith("/")&&(e=e.slice(1)),e}function dt(){return typeof document>"u"?"":document.body?.dataset?.basepath??""}function pt(e,t){let u=t??dt(),n=e.startsWith("/")?e:"/"+e;return u+n}function zu(e,t){return e===t||e.endsWith("/"+t)}function Hu(e,t){return zu(e,t)&&(e=e.slice(0,-t.length)),e}function Vu(e,t){return e.startsWith("/")&&(e=e.substring(1)),!t&&e.endsWith("/")&&(e=e.slice(0,-1)),e}function gt(e){for(;e.firstChild;)e.removeChild(e.firstChild)}(function(){function e(){var n=fu(),o=dt();return o&&n.startsWith(o.replace(/^\\//,""))&&(n=n.slice(o.replace(/^\\//,"").length),n.startsWith("/")&&(n=n.slice(1))),n}function t(n){var o=document.querySelector('script[src="'+n+'"]');return o?Promise.resolve():new Promise(function(a,D){var f=document.createElement("script");f.src=n,f.crossOrigin="anonymous",f.onload=a,f.onerror=D,document.head.appendChild(f)})}Promise.all([t("https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"),t("https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.js")]).then(function(){u()}).catch(function(n){console.error("[Graph] Failed to load libraries:",n);for(var o=document.querySelectorAll(".graph-container"),a=0;a<o.length;a++)o[a].textContent="Graph could not load. Check your network connection.",o[a].style.display="flex",o[a].style.alignItems="center",o[a].style.justifyContent="center",o[a].style.color="var(--gray)",o[a].style.fontSize="0.9rem"});function u(){var n=window.d3,o=window.PIXI;if(!n||!o){console.error("[Graph] Libraries not loaded");return}var a="graph-visited";function D(){return new Set(JSON.parse(localStorage.getItem(a)||"[]"))}function f(l){var d=D();d.add(l),localStorage.setItem(a,JSON.stringify(Array.from(d)))}function E(l,d){if(!l)return d;var v=document.createElement("div");v.style.color=l,v.style.position="absolute",v.style.visibility="hidden",document.body.appendChild(v);var g=getComputedStyle(v).color;return v.remove(),g||d}var s="wikicommit-graph-filters";function _(){try{var l=localStorage.getItem(s);if(!l)return null;var d=JSON.parse(l);return d&&typeof d=="object"?d:null}catch{return null}}function T(l){try{localStorage.setItem(s,JSON.stringify(l))}catch{}}var r=new WeakMap;function p(l){try{return JSON.parse(l.dataset.labels||"{}")}catch{return{}}}function k(l,d,v,g){var C=document.createElement("label");C.className="global-graph-controls__field";var c=document.createElement("span");c.textContent=l,C.appendChild(c);var y=document.createElement("select");y.multiple=!0,y.size=Math.min(Math.max(d.length,2),8);for(var w=0;w<d.length;w++){var x=document.createElement("option");x.value=d[w],x.textContent=d[w],x.selected=v.indexOf(d[w])!==-1,y.appendChild(x)}return y.addEventListener("change",function(){for(var A=[],b=0;b<y.options.length;b++)y.options[b].selected&&A.push(y.options[b].value);g(A)}),C.appendChild(y),{field:C,sync:function(A){for(var b=0;b<y.options.length;b++){var te=A.indexOf(y.options[b].value)!==-1;y.options[b].selected!==te&&(y.options[b].selected=te)}}}}function R(l,d,v,g){var C=document.createElement("span");C.className="global-graph-controls__field global-graph-controls__field--inline";var c=document.createElement("button");if(c.type="button",c.className="global-graph-controls__toggle",g){var y=document.createElement("span");y.className="global-graph-controls__legend-swatch global-graph-controls__legend-swatch--"+g.modifier,y.setAttribute("aria-hidden","true"),c.appendChild(y),g.hint&&(c.title=g.hint)}c.appendChild(document.createTextNode(l));var w=d;function x(A){w=A,c.setAttribute("aria-pressed",A?"true":"false")}return x(d),c.addEventListener("click",function(){x(!w),v(w)}),C.appendChild(c),{field:C,sync:function(A){x(A)}}}function j(l,d,v,g){var C=document.createElement("div");C.className="global-graph-controls__field";var c=document.createElement("span");c.textContent=l.degree||"Links per node",C.appendChild(c);var y=document.createElement("span");y.className="global-graph-controls__range";var w=l.degreeNoBound||"0 = no bound";function x(ie,se){var K=document.createElement("label");K.className="global-graph-controls__range-item";var Z=document.createElement("span");Z.textContent=ie,K.appendChild(Z);var G=document.createElement("input");return G.type="number",G.min="0",G.value=String(se||0),G.title=w,K.appendChild(G),y.appendChild(K),G}var A=x(l.degreeMin||"Min",d),b=x(l.degreeMax||"Max",v);function te(){g(Math.max(0,parseInt(A.value,10)||0),Math.max(0,parseInt(b.value,10)||0))}return A.addEventListener("change",te),b.addEventListener("change",te),C.appendChild(y),{field:C,sync:function(ie,se){var K=String(ie||0),Z=String(se||0);A.value!==K&&(A.value=K),b.value!==Z&&(b.value=Z)}}}function L(l){var d=document.createElement("div");d.className="global-graph-controls__field global-graph-controls__legend";var v=document.createElement("span");v.textContent=l.legend||"Legend",d.appendChild(v);var g=document.createElement("div");g.className="global-graph-controls__legend-items";function C(y,w,x){var A=document.createElement("span");A.className="global-graph-controls__legend-item",x&&(A.title=x);var b=document.createElement("span");b.className="global-graph-controls__legend-swatch global-graph-controls__legend-swatch--"+y,b.setAttribute("aria-hidden","true"),A.appendChild(b),A.appendChild(document.createTextNode(w)),g.appendChild(A)}C("entity",l.legendPages||"Pages");var c=document.createElement("span");return c.className="global-graph-controls__legend-break",c.setAttribute("aria-hidden","true"),g.appendChild(c),C("current",l.legendCurrent||"Current page"),C("visited",l.legendVisited||"Visited",l.legendVisitedHint||"Pages you have opened in this browser"),C("unvisited",l.legendUnvisited||"Not visited"),d.appendChild(g),d}function h(l,d,v){var g=l.closest(".global-graph-outer");if(!g)return;var C=g.querySelector(".global-graph-controls");if(!C)return;var c=p(C),y=Gt(v,c),w=r.get(C);if(w&&w.signature===y&&w.graphContainer===l&&C.childElementCount>0){for(var x=0;x<w.syncers.length;x++)w.syncers[x](d);return}gt(C);var A=[];function b(S){var de;try{de=JSON.parse(l.dataset.cfg||"{}")}catch{de=d}var re=Object.assign({},de,S);l.dataset.cfg=JSON.stringify(re),T({langs:re.langs||[],types:re.types||[],showSources:re.showSources!==!1,showTags:re.showTags!==!1,minDegree:re.minDegree||0,maxDegree:re.maxDegree||0}),Ne()}if(v.langs.length>1){var te=k(c.lang||"Language",v.langs,d.langs||[],function(S){b({langs:S})});C.appendChild(te.field),A.push(function(S){te.sync(S.langs||[])})}if(v.types.length>1){var ie=k(c.type||"Type",v.types,ot(d.types||[],v.types),function(S){b({types:S})});C.appendChild(ie.field),A.push(function(S){ie.sync(ot(S.types||[],v.types))})}var se=R(c.sources||"Sources",d.showSources!==!1,function(S){b({showSources:S})},{modifier:"source"});C.appendChild(se.field),A.push(function(S){se.sync(S.showSources!==!1)});var K=R(c.tags||"Tags",d.showTags!==!1,function(S){b({showTags:S})},{modifier:"tag",hint:c.legendTagsAlways||"Tags always use this color, whether or not you have opened them"});C.appendChild(K.field),A.push(function(S){K.sync(S.showTags!==!1)});var Z=j(c,d.minDegree||0,d.maxDegree||0,function(S,de){b({minDegree:S,maxDegree:de})});C.appendChild(Z.field),A.push(function(S){Z.sync(S.minDegree||0,S.maxDegree||0)});var G=document.createElement("button");G.type="button",G.className="global-graph-controls__reset",G.textContent=c.reset||"Reset",G.addEventListener("click",function(){b({langs:[],types:[],showSources:!0,showTags:!0,minDegree:0,maxDegree:0})}),C.appendChild(G),C.appendChild(L(c)),r.set(C,{signature:y,graphContainer:l,syncers:A})}async function B(l,d,v){var g=we(d);g===""&&(g="index");var C=D();if(gt(l),v!==void 0&&v!==ne)return console.log("[Graph] Stale render, skipping"),function(){};var c=JSON.parse(l.dataset.cfg||"{}"),y=c.drag,w=c.zoom,x=c.depth,A=c.scale||1,b=c.repelForce||.5,te=c.centerForce||.3,ie=c.linkDistance||30,se=c.fontSize||.6,K=c.opacityScale||1,Z=c.removeTags||[],G=c.showTags,S=c.focusOnHover,de=c.enableRadial,re=c.showControls,pu={langs:c.langs||[],types:c.types||[],showSources:c.showSources!==!1,showTags:!!G,removeTags:Z,showIndexes:c.showIndexes===!0,minDegree:c.minDegree||0,maxDegree:c.maxDegree||0},Ce;try{var vt=await fetchData;Ce=new Map;for(var Ct in vt)Ce.set(we(Ct),vt[Ct])}catch(i){return console.error("[Graph] Error loading data:",i),function(){}}var pe=[],We=[],Ze=new Set(Ce.keys()),mt=x<0;Ce.forEach(function(i,F){for(var m=i.links||[],N=0;N<m.length;N++){var M=we(m[N]);Ze.has(M)&&pe.push({source:F,target:M})}if(mt||G)for(var V=i.tags||[],N=0;N<V.length;N++){var ee=V[N];if(mt||Z.indexOf(ee)===-1){var ce=we("tags/"+ee);We.indexOf(ce)===-1&&We.push(ce),pe.push({source:F,target:ce})}}});var le=new Set;if(x>=0)for(var Ie=[g],Re=new Set([g]),Et=0;Et<=x&&Ie.length>0;Et++){for(var Qe=[],et=0;et<Ie.length;et++){var tt=Ie[et];le.add(tt);for(var ut=0;ut<pe.length;ut++){var z=pe[ut];z.source===tt&&!Re.has(z.target)&&(Re.add(z.target),Qe.push(z.target)),z.target===tt&&!Re.has(z.source)&&(Re.add(z.source),Qe.push(z.source))}}Ie=Qe}else{Ze.forEach(function(i){le.add(i)});for(var I=0;I<We.length;I++)le.add(We[I])}if(x<0&&(le=$t(le,pe,pu)),re&&x<0){var At=new Set;Ze.forEach(function(i){At.add(i)}),h(l,c,Jt(At))}var X=l.offsetWidth,Y=Math.max(l.offsetHeight,250),me=[],nt=new Map;le.forEach(function(i){var F=i.startsWith("tags/"),m=F?"#"+i.substring(5):Ce.get(i)?.title||i,N=F?[]:Ce.get(i)?.tags||[],M={id:i,text:m,tags:N,x:Math.random()*X-X/2,y:Math.random()*Y-Y/2,vx:0,vy:0};me.push(M),nt.set(i,M)});for(var ue=[],I=0;I<pe.length;I++){var z=pe[I];if(le.has(z.source)&&le.has(z.target)){var yt=nt.get(z.source),Bt=nt.get(z.target);yt&&Bt&&ue.push({source:yt,target:Bt})}}var ge=getComputedStyle(document.documentElement),gu=E(ge.getPropertyValue("--secondary").trim(),"#c792ea"),bt=E(ge.getPropertyValue("--tertiary").trim(),"#82aaff"),xt=E(ge.getPropertyValue("--gray").trim(),"#6c6c6c"),wt=E(ge.getPropertyValue("--lightgray").trim(),"#d4d4d4"),hu=E(ge.getPropertyValue("--dark").trim(),"#1a1a1a"),_u=E(ge.getPropertyValue("--light").trim(),"#f5f5f5"),vu=ge.getPropertyValue("--bodyFont").trim()||"inherit",he=new o.Application;await he.init({width:X,height:Y,antialias:!0,backgroundAlpha:0,resolution:window.devicePixelRatio||1,autoDensity:!0,eventMode:"static"}),l.appendChild(he.canvas);var Ee=new o.Container;he.stage.addChild(Ee);var Ae=n.forceSimulation(me).force("charge",n.forceManyBody().strength(-100*b)).force("center",n.forceCenter().strength(te)).force("link",n.forceLink(ue).distance(ie)).force("collide",n.forceCollide().radius(function(i){for(var F=0,m=0;m<ue.length;m++)(ue[m].source.id===i.id||ue[m].target.id===i.id)&&F++;return 2+Math.sqrt(F)}).iterations(3));if(de){var Oe=Math.min(X,Y)/2*.8;Ae.force("radial",n.forceRadial(Oe).strength(.2))}var St=new o.Container,kt=new o.Container,Tt=new o.Container;Ee.addChild(St),Ee.addChild(kt),Ee.addChild(Tt);var H=[],Q=[],ye=null,Be=new Set,Lt=0,Ue=!1,O=n.zoomIdentity;function Pt(i){for(var F=0,m=0;m<ue.length;m++)(ue[m].source.id===i.id||ue[m].target.id===i.id)&&F++;return 2+Math.sqrt(F)}function Cu(i){var F=i.id===g;return F?gu:C.has(i.id)||oe(i.id).kind==="tag"?bt:xt}function rt(i){if(ye=i,i===null){Be=new Set;for(var F=0;F<H.length;F++)H[F].active=!1;for(var F=0;F<Q.length;F++)Q[F].active=!1}else{Be=new Set;for(var F=0;F<Q.length;F++){var m=Q[F].simulationData;m.source.id===i||m.target.id===i?(Be.add(m.source.id),Be.add(m.target.id),Q[F].active=!0):Q[F].active=!1}Be.add(i);for(var F=0;F<H.length;F++)Be.has(H[F].simulationData.id)?H[F].active=!0:H[F].active=!1}}function mu(){for(var i=0;i<Q.length;i++){var F=Q[i],m=1;ye!==null&&(m=F.active?1:.2),F.alpha=m,F.color=F.active?xt:wt}}function jt(){for(var i=1/A,F=i*1.1,m=qt(O.k,K),N=ye!==null&&S,M=0;M<H.length;M++){var V=H[M],ee=ye===V.simulationData.id;V.label.scale.set(ee?F:i),V.label.alpha=Kt(ee,V.active,N,m)}}function Eu(){for(var i=0;i<H.length;i++){var F=H[i],m=1;ye!==null&&S&&(m=F.active?1:.2),F.gfx.alpha=m}}function Ge(){Eu(),mu(),jt()}for(var I=0;I<me.length;I++){var be=me[I],Nt=be.id,Mt=oe(Nt).kind,Wt=Mt==="tag",Au=Mt==="source",Oe=Pt(be),It=Cu(be),ke=new o.Text({text:be.text,style:{fontSize:se*15,fill:hu,fontFamily:vu},resolution:window.devicePixelRatio*4});ke.anchor.set(.5,1.2),ke.alpha=0,ke.scale.set(1/A),Tt.addChild(ke);var $=new o.Graphics;if(Au){var ze=Oe*.9;$.rect(-ze,-ze,ze*2,ze*2)}else $.circle(0,0,Oe);$.fill({color:Wt?_u:It}),Wt&&$.stroke({width:2,color:bt}),$.eventMode="static",$.cursor="pointer",$.label=Nt,(function(m,N){N.on("pointerover",function(){rt(m.id),Ue||Ge()}),N.on("pointerleave",function(){rt(null),Ue||Ge()})})(be,$),kt.addChild($),H.push({simulationData:be,gfx:$,label:ke,color:It,alpha:1,active:!1})}for(var I=0;I<ue.length;I++){var z=ue[I],$=new o.Graphics;$.eventMode="none",St.addChild($),Q.push({simulationData:z,gfx:$,color:wt,alpha:1,active:!1})}if(y){var yu=function(i){for(var F=(i.x-O.x)/O.k,m=(i.y-O.y)/O.k,N=0;N<me.length;N++){var M=me[N],V=F-M.x-X/2,ee=m-M.y-Y/2,ce=Math.sqrt(V*V+ee*ee),He=Pt(M);if(ce<He+5)return M}return null},Bu=function(i){i.active||Ae.alphaTarget(1).restart(),i.subject.fx=i.subject.x,i.subject.fy=i.subject.y;var F=(i.x-O.x)/O.k-X/2,m=(i.y-O.y)/O.k-Y/2;i.subject.__dragOffset={x:F-i.subject.x,y:m-i.subject.y},Lt=Date.now(),Ue=!0,ye=i.subject.id},bu=function(i){var F=(i.x-O.x)/O.k-X/2,m=(i.y-O.y)/O.k-Y/2;i.subject.fx=F-i.subject.__dragOffset.x,i.subject.fy=m-i.subject.__dragOffset.y},xu=function(i){if(i.active||Ae.alphaTarget(0),i.subject.fx=null,i.subject.fy=null,Ue=!1,rt(null),Ge(),Date.now()-Lt<500){var F=pt(i.subject.id);window.location.href=F}},wu=n.drag().container(he.canvas).subject(yu).on("start",Bu).on("drag",bu).on("end",xu);n.select(he.canvas).call(wu)}else for(var I=0;I<H.length;I++)(function(F){F.gfx.on("click",function(){var m=pt(F.simulationData.id);window.location.href=m})})(H[I]);if(w){var Su=function(i){O=i.transform,Ee.scale.set(O.k,O.k),Ee.position.set(O.x,O.y),jt()},ku=n.zoom().extent([[0,0],[X,Y]]).scaleExtent([.25,4]).on("zoom",Su);n.select(he.canvas).call(ku)}var Rt=!1;function Ot(){if(!Rt){for(var i=0;i<H.length;i++){var F=H[i],m=F.simulationData.x,N=F.simulationData.y;m!=null&&N!=null&&(F.gfx.position.set(m+X/2,N+Y/2),F.label&&F.label.position.set(m+X/2,N+Y/2))}for(var i=0;i<Q.length;i++){var M=Q[i],V=M.simulationData,ee=V.source.x,ce=V.source.y,He=V.target.x,Ut=V.target.y;ee!=null&&ce!=null&&He!=null&&Ut!=null&&(M.gfx.clear(),M.gfx.moveTo(ee+X/2,ce+Y/2),M.gfx.lineTo(He+X/2,Ut+Y/2),M.gfx.stroke({alpha:M.alpha,width:1,color:M.color}))}requestAnimationFrame(Ot)}}return Ae.on("tick",function(){}),Ae.restart(),Ge(),Ot(),function(){Rt=!0,Ae.stop();try{he.destroy(!0)}catch{}}}var U=[],J=[],ne=0,ve=0;function Fe(){for(var l=0;l<U.length;l++)U[l]();U=[]}function fe(){ve++;for(var l=0;l<J.length;l++)J[l]();J=[]}var W=[],q=[],Le=null,Pe=null,je=null;function Ye(){fe();for(var l=0;l<W.length;l++){W[l].classList.remove("active");var d=W[l].closest(".sidebar");d&&(d.style.zIndex="")}}function Se(){for(var l=0;l<W.length;l++)if(W[l].classList.contains("active"))return!0;return!1}function Ne(){fe();for(var l=ve,d=e(),v=0;v<W.length;v++){var g=W[v];g.classList.add("active");var C=g.closest(".sidebar");C&&(C.style.zIndex="1");var c=g.querySelector(".global-graph-container");if(c){var y=_();if(y)try{var w=JSON.parse(c.dataset.cfg||"{}");c.dataset.cfg=JSON.stringify(Object.assign(w,y))}catch{}(function(x){B(x,d,void 0).then(function(A){if(l!==ve){A();return}J.push(A)}).catch(function(A){console.error("[Graph] Global render error:",A)})})(c)}}}function ht(){Se()?Ye():Ne()}function _t(){Fe();var l=++ne,d=e();f(d);for(var v=document.querySelectorAll(".graph-container"),g=0;g<v.length;g++)(function(C){B(C,d,l).then(function(c){l===ne&&U.push(c)}).catch(function(c){console.error("[Graph] Local render error:",c)})})(v[g])}function Me(l){var d=l.detail?l.detail.url:e();if(f(we(d)),_t(),W=Array.from(document.querySelectorAll(".global-graph-outer")),je)for(var v=0;v<q.length;v++)q[v].removeEventListener("click",je);q=Array.from(document.querySelectorAll(".global-graph-icon")),je=function(){ht()};for(var v=0;v<q.length;v++)q[v].addEventListener("click",je);Le&&document.removeEventListener("click",Le),Le=function(g){if(Se()){var C=g.target.closest(".global-graph-container"),c=g.target.closest(".global-graph-icon"),y=g.target.closest(".global-graph-controls"),w=g.target.closest(".global-graph-inner");!C&&!c&&!y&&!w&&Ye()}},document.addEventListener("click",Le),Pe&&document.removeEventListener("keydown",Pe),Pe=function(g){if(g.key==="Escape"){Se()&&Ye();return}g.key==="g"&&(g.ctrlKey||g.metaKey)&&!g.shiftKey&&(g.preventDefault(),ht())},document.addEventListener("keydown",Pe),Se()&&Ne()}document.readyState==="loading"?document.addEventListener("DOMContentLoaded",function(){Me({detail:{url:e()}})}):Me({detail:{url:e()}}),document.addEventListener("prenav",function(){Fe(),fe()}),document.addEventListener("nav",Me),document.addEventListener("render",Me);function du(){_t(),Se()&&Ne()}document.addEventListener("themechange",du)}})();
 `;
 var l;
 l = { __e: function(n2, l2, u3, t2) {
@@ -763,7 +913,8 @@ var defaultOptions = {
     maxDegree: 0,
     langs: [],
     types: [],
-    showSources: true
+    showSources: true,
+    showIndexes: false
   }
 };
 var WikiCommitGraph_default = ((userOpts) => {

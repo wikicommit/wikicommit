@@ -185,7 +185,7 @@ def test_both_reference_paths_still_run_the_guard(path):
         pytest.param(
             SKILLS / "wikicommit-fix" / "SKILL.md",
             "use the parent page's `sources` instead",
-            "For each element of `sources`, fetch",
+            "For each element of `sources`, get the source document",
             id="fix-skill",
         ),
     ],

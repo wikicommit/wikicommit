@@ -69,6 +69,16 @@ export interface ExplorerOptions {
 export const explorerSortFn = (a: FileTrieNode, b: FileTrieNode): number => {
   const LANG_SEGMENT_RE = /^[a-z]{2}$/
   const sortTier = (n: FileTrieNode): number => {
+    // Everything below compares against the **published slug**, not the source path.
+    // Quartz lowercases every segment when it slugifies (the same rule
+    // convert_wikilinks.py's _quartz_slugify_segment() ports to Python, ending in
+    // .lower()), so contentIndex.json holds slug "en/view/index" for filePath
+    // "en/View/index.md". A reserved name spelled in PascalCase on disk — a Type
+    // segment — has to be written here in lowercase. Issue #946 added the View tier
+    // with "View" and it never fired once in production: "sources" and "overview"
+    // happened to be right only because both come from lowercase directory-name
+    // constants on the Python side, while View comes from VIEW_TYPE_SEGMENT, which
+    // follows the PascalCase Type-naming convention (Issue #981).
     // Root-level only (slugSegments.length === 1): a Type/custom-type schema could in
     // principle define a page or folder also named "sources" nested deeper in the tree
     // (e.g. under a Type folder), which must sort as an ordinary tier-0 entry, not get
@@ -89,9 +99,9 @@ export const explorerSortFn = (a: FileTrieNode, b: FileTrieNode): number => {
     }
     // No depth guard here, deliberately. foldLang.ts leaves node.slug alone when it lifts the
     // current language's children to the root, so a folded View still carries slugSegments
-    // ["ja", "View"] — a length check would miss exactly the case this exists for. Without
+    // ["ja", "view"] — a length check would miss exactly the case this exists for. Without
     // one, a sibling language's en/View also leads that language's Type folders, which is the
-    // same ordering one level down. "View" is a reserved Type segment (Issue #675), so under
+    // same ordering one level down. View is a reserved Type segment (Issue #675), so under
     // content/<lang>/ it cannot collide with a Type or a custom type.
     //
     // It can collide under content/sources/, which mirrors arbitrary repository paths and URL
@@ -100,7 +110,7 @@ export const explorerSortFn = (a: FileTrieNode, b: FileTrieNode): number => {
     // that subtree. Left as is: the effect is confined to the ordering within one already
     // tier-2 subtree, and narrowing this to <lang>/View would re-introduce the depth
     // assumption the paragraph above exists to avoid.
-    if (n.isFolder && n.slugSegment === "View") {
+    if (n.isFolder && n.slugSegment === "view") {
       return -1
     }
     return 0

@@ -2,8 +2,8 @@
 // Fork of github:quartz-community/graph's graph.inline.ts (Issue #584).
 //
 // The upstream file is left alone apart from the insertions marked
-// "WikiCommit:" below. The first four leave the D3 force simulation and the
-// PixiJS drawing code untouched; (6) is the first that does not.
+// "WikiCommit:" below. Most leave the D3 force simulation and the PixiJS
+// drawing code untouched; (6) and (8) are the two that do not.
 //   1. filter config read out of dataset.cfg alongside the upstream keys
 //   2. the filter applied to `neighbourhood` once it is settled and before
 //      `nodes` is built — the single chokepoint downstream of which node
@@ -19,10 +19,24 @@
 //      in the drawing code, which the other five are not: the wiki gained a
 //      third kind of node that upstream has no concept of, and there is no
 //      other layer where a node can be told apart from the node next to it.
+//   7. the page -> tag pseudo-links are built unconditionally for the global
+//      graph, and stay gated by showTags/removeTags for the local one
+//      (Issue #982). See the comment at the link-building loop for why the two
+//      branches differ.
+//   8. label opacity has a single owner, `renderLabels()`, and reads the hover
+//      state (Issue #986). This is the second insertion in the drawing code:
+//      three separate places used to write `label.alpha`, and between them the
+//      neighbourhood of a hovered node was never distinguished from the rest.
 //
 // The D3 force simulation is untouched.
 import { controlsSignature } from "../../util/controlBar";
-import { classifyNode, collectFacets, filterNodes } from "../../util/nodeFilter";
+import {
+  classifyNode,
+  collectFacets,
+  filterNodes,
+  selectedTypeFacets,
+} from "../../util/nodeFilter";
+import { labelAlpha, zoomLabelAlpha } from "../../util/labelOpacity";
 
 import {
   removeAllChildren,
@@ -214,13 +228,37 @@ import {
     // The `{field, sync}` contract is unchanged, so the write-back path that
     // updates the bar in place rather than rebuilding it (Issue #651) does not
     // know this changed.
-    function buildToggle(labelText, checked, onChange) {
+    //
+    // `swatch` (optional) puts the legend's mark for the kind this toggle shows
+    // inside the button (Issue #985). The legend used to carry "Sources" and
+    // "Tags" rows of its own, so the same two words appeared twice in one bar —
+    // once pressable, once not. §8.7.1 already holds that a toggle's *state*
+    // belongs to the control rather than to the graph; its *explanation*
+    // belongs there for the same reason. The swatch reuses the legend's own
+    // class, so the two cannot drift apart by one being restyled, and it is
+    // `aria-hidden` for the reason the legend's are: a screen reader should
+    // read the label, not "square Sources". `swatch.hint` goes on the button's
+    // `title`, where the legend used to carry it (Issue #984).
+    //
+    // A toggle for something drawn with no shape of its own (a type index is a
+    // circle, indistinguishable from a page) passes no swatch. That asymmetry
+    // is honest: there is no mark to show.
+    function buildToggle(labelText, checked, onChange, swatch) {
       var wrapper = document.createElement("span");
       wrapper.className = "global-graph-controls__field global-graph-controls__field--inline";
       var button = document.createElement("button");
       button.type = "button";
       button.className = "global-graph-controls__toggle";
-      button.textContent = labelText;
+      if (swatch) {
+        var mark = document.createElement("span");
+        mark.className =
+          "global-graph-controls__legend-swatch global-graph-controls__legend-swatch--" +
+          swatch.modifier;
+        mark.setAttribute("aria-hidden", "true");
+        button.appendChild(mark);
+        if (swatch.hint) button.title = swatch.hint;
+      }
+      button.appendChild(document.createTextNode(labelText));
       var pressed = checked;
       function apply(next) {
         pressed = next;
@@ -240,28 +278,50 @@ import {
       };
     }
 
-    function buildDegreeRange(labelText, min, max, onChange) {
-      var wrapper = document.createElement("label");
+    // The two inputs are labelled individually (Issue #984). One caption over a
+    // pair of identical number boxes leaves nothing on screen saying which end
+    // is which; the only hint used to be a `title`, which needs a hover — and
+    // §8.7.1 had already recorded once that a reader cannot tell what this
+    // control does from its caption alone. The `title` stays for the one thing
+    // that has no natural place on the face of the control (what 0 means), and
+    // is now read from `labels` like every other string here rather than being
+    // hardcoded English.
+    function buildDegreeRange(labels, min, max, onChange) {
+      // A <div>, not a <label>: each input now carries its own <label>, and a
+      // label may not contain another. The CSS selects on the class, so the
+      // element change is invisible to it.
+      var wrapper = document.createElement("div");
       wrapper.className = "global-graph-controls__field";
       var caption = document.createElement("span");
-      caption.textContent = labelText;
+      caption.textContent = labels.degree || "Links per node";
       wrapper.appendChild(caption);
 
       var row = document.createElement("span");
       row.className = "global-graph-controls__range";
-      var minInput = document.createElement("input");
-      minInput.type = "number";
-      minInput.min = "0";
-      minInput.value = String(min || 0);
-      var maxInput = document.createElement("input");
-      maxInput.type = "number";
-      maxInput.min = "0";
-      maxInput.value = String(max || 0);
-      // 0 at either end means "no bound"; a reader who wants to see isolated
-      // pages leaves the low end at 0, and one hunting a hub raises the high
-      // end off 0.
-      minInput.title = "0 = no lower bound";
-      maxInput.title = "0 = no upper bound";
+      var noBound = labels.degreeNoBound || "0 = no bound";
+
+      function buildEnd(text, value) {
+        var item = document.createElement("label");
+        item.className = "global-graph-controls__range-item";
+        var itemCaption = document.createElement("span");
+        itemCaption.textContent = text;
+        item.appendChild(itemCaption);
+        var input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.value = String(value || 0);
+        // 0 at either end means "no bound"; a reader who wants to see isolated
+        // pages leaves the low end at 0, and one hunting a hub raises the high
+        // end off 0. Which end this is now reads off the visible caption, so
+        // one shared string covers both.
+        input.title = noBound;
+        item.appendChild(input);
+        row.appendChild(item);
+        return input;
+      }
+
+      var minInput = buildEnd(labels.degreeMin || "Min", min);
+      var maxInput = buildEnd(labels.degreeMax || "Max", max);
       function emit() {
         onChange(
           Math.max(0, parseInt(minInput.value, 10) || 0),
@@ -270,8 +330,6 @@ import {
       }
       minInput.addEventListener("change", emit);
       maxInput.addEventListener("change", emit);
-      row.appendChild(minInput);
-      row.appendChild(maxInput);
       wrapper.appendChild(row);
       return {
         field: wrapper,
@@ -293,6 +351,14 @@ import {
     // left alone. Both halves are shown because they are read together: a node
     // says what it is by its shape and where you have been by its colour, and
     // neither is guessable from the graph.
+    //
+    // The shape half is only "Pages" now (Issue #985): the square and the
+    // hollow circle moved into the Sources / Tags toggles, which name the same
+    // two kinds. The legend stays wholly non-interactive — a legend where two
+    // rows were pressable and "Pages", the one that looks most like them, was
+    // not is the arrangement the move avoided. "Pages" has no toggle (turning
+    // pages off would empty the graph through Issue #839's prune), so its mark
+    // has nowhere else to live.
     function buildLegend(labels) {
       var wrapper = document.createElement("div");
       wrapper.className = "global-graph-controls__field global-graph-controls__legend";
@@ -304,9 +370,16 @@ import {
       var items = document.createElement("div");
       items.className = "global-graph-controls__legend-items";
 
-      function addItem(modifier, text) {
+      // `hint` is optional and goes on `title` (Issue #984): "Visited" does not
+      // define what it counts. The other hint Issue #984 added — that tags are
+      // drawn in the visited colour whether or not they were opened — moved
+      // with the tag mark to the Tags toggle (Issue #985). Prose in the bar was
+      // rejected: the legend's shape is two groups (Issue #841) and the bar is
+      // already crowded (Issue #838).
+      function addItem(modifier, text, hint) {
         var item = document.createElement("span");
         item.className = "global-graph-controls__legend-item";
+        if (hint) item.title = hint;
         var swatch = document.createElement("span");
         swatch.className =
           "global-graph-controls__legend-swatch global-graph-controls__legend-swatch--" + modifier;
@@ -319,8 +392,6 @@ import {
       }
 
       addItem("entity", labels.legendPages || "Pages");
-      addItem("tag", labels.tags || "Tags");
-      addItem("source", labels.sources || "Sources");
 
       var wrap = document.createElement("span");
       wrap.className = "global-graph-controls__legend-break";
@@ -328,7 +399,11 @@ import {
       items.appendChild(wrap);
 
       addItem("current", labels.legendCurrent || "Current page");
-      addItem("visited", labels.legendVisited || "Visited");
+      addItem(
+        "visited",
+        labels.legendVisited || "Visited",
+        labels.legendVisitedHint || "Pages you have opened in this browser",
+      );
       addItem("unvisited", labels.legendUnvisited || "Not visited");
 
       wrapper.appendChild(items);
@@ -413,14 +488,16 @@ import {
         var typeControl = buildMultiSelect(
           labels.type || "Type",
           facets.types,
-          config.types || [],
+          // Folded onto the facet spelling so a config written as `Person`
+          // marks the `person` option (Issue #1005).
+          selectedTypeFacets(config.types || [], facets.types),
           function (v) {
             update({ types: v });
           },
         );
         bar.appendChild(typeControl.field);
         syncers.push(function (cfg) {
-          typeControl.sync(cfg.types || []);
+          typeControl.sync(selectedTypeFacets(cfg.types || [], facets.types));
         });
       }
       var sourcesControl = buildToggle(
@@ -429,22 +506,35 @@ import {
         function (v) {
           update({ showSources: v });
         },
+        { modifier: "source" },
       );
       bar.appendChild(sourcesControl.field);
       syncers.push(function (cfg) {
         sourcesControl.sync(cfg.showSources !== false);
       });
-      // Tags reuse the upstream showTags key, which is read where links are
-      // built — so this toggle needs no filtering code of its own.
-      var tagsControl = buildToggle(labels.tags || "Tags", config.showTags !== false, function (v) {
-        update({ showTags: v });
-      });
+      // Tags reuse the upstream showTags key, but for the global graph it is
+      // read by filterNodes() rather than where links are built (Issue #982):
+      // Quartz publishes each tag as a real page, so gating only the links left
+      // the tag pages behind as unlinked dots.
+      var tagsControl = buildToggle(
+        labels.tags || "Tags",
+        config.showTags !== false,
+        function (v) {
+          update({ showTags: v });
+        },
+        {
+          modifier: "tag",
+          hint:
+            labels.legendTagsAlways ||
+            "Tags always use this color, whether or not you have opened them",
+        },
+      );
       bar.appendChild(tagsControl.field);
       syncers.push(function (cfg) {
         tagsControl.sync(cfg.showTags !== false);
       });
       var degreeControl = buildDegreeRange(
-        labels.degree || "Links per node",
+        labels,
         config.minDegree || 0,
         config.maxDegree || 0,
         function (min, max) {
@@ -515,6 +605,20 @@ import {
         langs: config.langs || [],
         types: config.types || [],
         showSources: config.showSources !== false,
+        // Mirrors the link gate's truthiness (`if (showTags)`) rather than
+        // showSources' `!== false`, so the node set and the links can never
+        // disagree about a missing key — disagreeing is the defect Issue #982
+        // is about. D3Config declares showTags non-optional and both graphs
+        // default it to true, so the two spellings only differ if a caller
+        // omits it entirely.
+        showTags: !!showTags,
+        removeTags: removeTags,
+        // Defaults to hidden, so the spelling is `=== true` rather than
+        // showSources' `!== false` (Issue #983). No control writes this key —
+        // the control bar's exposure is Issue #985's — so it arrives only from
+        // `quartz.config.yaml`, and storeFilters()'s fixed key list leaves a
+        // YAML-set `true` alone when stored filters merge over dataset.cfg.
+        showIndexes: config.showIndexes === true,
         minDegree: config.minDegree || 0,
         maxDegree: config.maxDegree || 0,
       };
@@ -534,6 +638,7 @@ import {
       var links = [];
       var allTags = [];
       var validLinks = new Set(data.keys());
+      var globalGraph = depth < 0;
 
       data.forEach(function (details, source) {
         var outgoing = details.links || [];
@@ -544,11 +649,30 @@ import {
           }
         }
 
-        if (showTags) {
+        // WikiCommit (7): the two branches are not the same rule stated twice
+        // (Issue #982). Both read the same `links` array afterwards, so
+        // unconditionally building for one would break the other.
+        //
+        //   global (depth < 0): build every page -> tag link whatever the
+        //     toggles say, and let filterNodes() take the tag *nodes* away.
+        //     That keeps `pageDegreesBefore` — the "did this node reach a page
+        //     before the selection narrowed things?" baseline the Issue #839
+        //     prune reads — computed over the widest link set there is. Gating
+        //     here instead would hand that baseline a graph with the tag edges
+        //     already missing, so every tag would read as "isolated to begin
+        //     with" and the prune's own guard (never hide what was already
+        //     isolated) would protect exactly the nodes it should remove.
+        //
+        //   local (depth >= 0): keep gating, because filterNodes() is never
+        //     called on that branch (removing a node after the BFS has settled
+        //     would cut the path that put its neighbours there). An
+        //     unconditional link is a link the BFS walks, so the tag node would
+        //     reappear in the local graph with Tags turned off.
+        if (globalGraph || showTags) {
           var tags = details.tags || [];
           for (var i = 0; i < tags.length; i++) {
             var tag = tags[i];
-            if (removeTags.indexOf(tag) === -1) {
+            if (globalGraph || removeTags.indexOf(tag) === -1) {
               var tagSlug = simplifySlug("tags/" + tag);
               if (allTags.indexOf(tagSlug) === -1) {
                 allTags.push(tagSlug);
@@ -791,18 +915,26 @@ import {
         }
       }
 
+      // WikiCommit (8): the one place that writes `label.alpha` (Issue #986).
+      // The decision itself is in `util/labelOpacity.ts` so it can be
+      // unit-tested; this loop only supplies the state and carries the scale
+      // bump the hovered label has always had.
+      //
+      // `zoomLabelAlpha()` is computed once per render, from `currentTransform`
+      // rather than from a hoisted copy: upstream derived it inside the zoom
+      // handler and wrote it straight onto the labels there, which is why
+      // nothing outside a zoom event could ask what the resting opacity was.
       function renderLabels() {
         var defaultScale = 1 / scale;
         var activeScale = defaultScale * 1.1;
+        var zoomAlpha = zoomLabelAlpha(currentTransform.k, opacityScale);
+        var focusing = hoveredNodeId !== null && focusOnHover;
 
         for (var i = 0; i < nodeRenderData.length; i++) {
           var nodeData = nodeRenderData[i];
-          if (hoveredNodeId === nodeData.simulationData.id) {
-            nodeData.label.alpha = 1;
-            nodeData.label.scale.set(activeScale);
-          } else {
-            nodeData.label.scale.set(defaultScale);
-          }
+          var hovered = hoveredNodeId === nodeData.simulationData.id;
+          nodeData.label.scale.set(hovered ? activeScale : defaultScale);
+          nodeData.label.alpha = labelAlpha(hovered, nodeData.active, focusing, zoomAlpha);
         }
       }
 
@@ -850,6 +982,11 @@ import {
           resolution: window.devicePixelRatio * 4,
         });
         label.anchor.set(0.5, 1.2);
+        // The starting value, before `renderPixiFromD3()` has run for the first
+        // time. `renderLabels()` owns it from then on (Issue #986) and this is
+        // the one other place the property is written — kept so that a frame
+        // drawn between creation and that first render cannot flash every label
+        // at full opacity.
         label.alpha = 0;
         label.scale.set(1 / scale);
         labelsContainer.addChild(label);
@@ -873,11 +1010,17 @@ import {
         gfx.cursor = "pointer";
         gfx.label = nodeId;
 
-        (function (n, g, labelRef) {
-          var oldLabelOpacity = 0;
-          g.on("pointerover", function (e) {
+        // WikiCommit (8): upstream saved this label's alpha on pointerover and
+        // wrote it back on pointerleave, because nothing else would have put
+        // the hovered node's label back down. `renderLabels()` now derives
+        // every label's alpha from the current hover and zoom state, so the
+        // saved value is both unnecessary and unreachable — the restore ran and
+        // was overwritten by the `renderPixiFromD3()` on the next line
+        // (Issue #986). Keeping it would leave a third writer of `label.alpha`,
+        // which is the shape this change exists to remove.
+        (function (n, g) {
+          g.on("pointerover", function () {
             updateHoverInfo(n.id);
-            oldLabelOpacity = labelRef.alpha;
             if (!dragging) {
               renderPixiFromD3();
             }
@@ -885,12 +1028,11 @@ import {
 
           g.on("pointerleave", function () {
             updateHoverInfo(null);
-            labelRef.alpha = oldLabelOpacity;
             if (!dragging) {
               renderPixiFromD3();
             }
           });
-        })(node, gfx, label);
+        })(node, gfx);
 
         nodesContainer.addChild(gfx);
 
@@ -999,22 +1141,14 @@ import {
           stage.scale.set(currentTransform.k, currentTransform.k);
           stage.position.set(currentTransform.x, currentTransform.y);
 
-          var newScale = currentTransform.k * opacityScale;
-          var scaleOpacity = Math.max((newScale - 1) / 3.75, 0);
-
-          var activeLabels = [];
-          for (var i = 0; i < nodeRenderData.length; i++) {
-            if (nodeRenderData[i].active) {
-              activeLabels.push(nodeRenderData[i].label);
-            }
-          }
-
-          for (var i = 0; i < labelsContainer.children.length; i++) {
-            var label = labelsContainer.children[i];
-            if (activeLabels.indexOf(label) === -1) {
-              label.alpha = scaleOpacity;
-            }
-          }
+          // WikiCommit (8): ask the one owner to redraw rather than writing
+          // label opacity here (Issue #986). The loop this replaces walked the
+          // label container and, for each child, searched a list of the active
+          // labels with `.indexOf()` — so a zoom or a pan on a 969-node graph
+          // cost ~1M comparisons; this is one linear pass. It also means a zoom
+          // during a hover no longer wipes out the distinction the hover just
+          // drew.
+          renderLabels();
         };
 
         var zoom = d3

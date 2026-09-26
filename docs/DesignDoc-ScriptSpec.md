@@ -79,6 +79,7 @@ view ツリー（`.wikicommit/view/<lang>/<slug>.md`。Wiki 自身のページ�
 | `check_ingest_freshness.py` | ingest ハッシュずれ検出 | なし（常に 0） |
 | `check_distribution_freshness.py` | インストール済み配布物とテンプレートの差分検出（古い・欠落・孤児。読み取り専用） | なし（常に 0） |
 | `read_policy.py` | ポリシーファイルが実際に述べている散文方針の抽出（記入例・HTML コメントを除去。読み取り専用。Issue #844） | なし（常に 0） |
+| `match_index_only.py` | `source-policy.md` の `index_only:`（ドメインとページの 2 形）に URL が該当するかの判定（読み取り専用。Issue #1032） | なし（常に 0） |
 | `search_index.py` | FTS5 trigram 検索インデックスの構築・クエリ（`wikicommit-search`・`wikicommit-ask` 共有） | SQLite が trigram トークナイザ非対応、または `.wikicommit/entity/` が存在しない |
 | `check_schema_coverage.py` | `.wikicommit/schema/` に専用ファイルのない `type:` 値の集計（`wikicommit-generate`・`wikicommit-schema-propose`・`wikicommit-status` 共有） | なし（常に 0） |
 | `check_schema_org_type.py` | Schema.org 語彙に対する型・プロパティの実在検証、型名一覧の取得と候補型の説明文の取得（2 段階。Issue #798）（`wikicommit-generate`・`wikicommit-schema-propose` 共有） | 型が語彙に存在しない、プロパティが型（祖先型含む）に属さない、語彙の取得・パースに失敗、または `--type`/`--list-type-names`/`--describe`/`--list-installed-hierarchy` のいずれも未指定 |
@@ -245,12 +246,14 @@ python .wikicommit/scripts/build_survey_view.py [--lang <lang>|all] [--max-pages
 SURVEY: pages=83, types=12, lang=ja, all_langs=en,ja
 TYPE: Place 24
 TYPE: AdministrativeArea 11
-PAGE: Place/minuma | 見沼田んぼ | backlinks=12 | tags=治水,農業 | links=Event/minuma-reclamation,Place/minuma-tsusenbori
+PAGE: Place/minuma | 見沼田んぼ | backlinks=12 | sources=3 | tags=治水,農業 | links=Event/minuma-reclamation,Place/minuma-tsusenbori
   DESC: 江戸時代に干拓された低湿地帯。
   HEADINGS: 歴史 / 治水との関係 / 現在
 HUB: Place/minuma 12
 TAG: 治水 7
 ```
+
+`sources=N` はそのページの `sources[]` のエントリ数である（Issue #990）。`/wikicommit-collect` Step 3.5 が「中心概念が 1 本の資料にしか立っていない」ことを着眼点の材料にするためのもので、`check_orphans.py` の `ORPHAN:` が出自付きで「端が薄い」を出すのと対になる。**翻訳ページ（親から継承する）と view ページ（`derived_from` であって `sources` ではない）では区画ごと省く** — `0` は「ソースが無い」と読めるため。**`HUB:` 行には置かない** — `HUB:` はキー単位で、そこに出すと「どのページの `sources[]` を代表させるか」の判定がもう 1 箇所要る。`HUB:` に出るキーには必ず対応する `PAGE:` 行がある（`hubs` は `listed_keys` でフィルタされる）ので、単位の不一致を作らずに同じ情報が届く。frontmatter の読み取りは `title` / `tags` と同じ 1 回に相乗りし、走査は増えない。数字の意味と決定事項の全体は `docs/DesignDoc-publish.md` §8.8.1 の該当コールアウトにある。
 
 ### 終了コード
 
@@ -334,7 +337,7 @@ python .wikicommit/scripts/check_extraction_quality.py check-density [<file>]
 MISSING_PACKAGE: youtube.com requires the youtube-transcript-api package to extract the video's transcript (without it, only the title, keywords, runtime and description are extracted — the video's actual content is missing). Install it with: pip install youtube-transcript-api
 OK: youtube.com: youtube_transcript_api is installed
 OK: example.com needs no extra extraction package
-BLOCKED: x.com is a known JS-rendering-required domain; static fetch (markitdown/curl) has been confirmed to sometimes return an empty content shell with no meaningful text. See docs/DesignDoc-pipeline.md §6.1 (Issue #425).
+BLOCKED: x.com is a known JS-rendering-required domain; static fetch (markitdown/curl) has been confirmed to sometimes return an empty content shell with no meaningful text.
 OK: example.com is not a known JS-shell domain
 LOW_DENSITY: .wikicommit/.cache/ingest-fetch/x.com/karpathy-status-1886192184808149383.md (natural-language character ratio: 0.09, threshold: 0.3) — extracted text looks like boilerplate/markup rather than real content. non-prose breakdown: links 12%, numbers/tables 3%, other markup 85%.
 OK: .wikicommit/.cache/ingest-fetch/example.com/article.md (natural-language character ratio: 0.72)
@@ -938,6 +941,50 @@ NONE: .wikicommit/source-policy.md is not present, so there is no prose policy
 
 ---
 
+## match_index_only.py
+
+### 目的
+
+`.wikicommit/source-policy.md` の `index_only:` に URL が該当するかを判定する（Issue #1032）。エントリは 2 形あり、形が意味を決める — パスが無ければ**ドメイン**（そのホスト全体）、パスがあれば**ページ**（その 1 ページ）。従来この照合は `wikicommit-collect` Step 5 と `wikicommit-generate` Step 0 の散文が行っており、規則はパスを捨てていた。規則が 2 形に増えると 2 か所の散文が別々にずれる余地が大きくなるため、決定論的な照合をここに 1 つだけ置く（Issue #474）。設計判断の全体は `docs/DesignDoc-data.md` §3.4 の該当コールアウト。
+
+### 使用場面
+
+- `wikicommit-collect` Skill：Step 2.5（`list-pages`。能動的に掘るページのエントリを得る）・Step 5（`match`。検索結果を Step 5.5 へ振り分ける）
+- `wikicommit-generate` Skill：Step 0（`match`。引数の URL が索引なら登録前に確認を求める）
+
+### コマンド
+
+```
+python .wikicommit/scripts/match_index_only.py match <url>
+python .wikicommit/scripts/match_index_only.py list-pages
+```
+
+### 正規化
+
+| エントリ | 正規化 | 照合 |
+|---|---|---|
+| ドメイン | スキーム・ポート・先頭 `www.` を落とし小文字化 | ホストの完全一致（サブドメインは覆わない。`exclude_domains` と同じ） |
+| ページ | 上に加えフラグメント・末尾スラッシュを落とし、パスとクエリをパーセントデコード。**クエリは保持** | ホストとパス＋クエリの完全一致 |
+
+正規化後にホスト以外が何も残らないエントリがドメインである。
+
+### 出力フォーマット
+
+```
+INDEX_ONLY: https://github.com/example/awesome-foo/ (matches https://github.com/example/awesome-foo, page)
+OK: https://github.com/example/some-tool is not listed under index_only
+PAGE: https://github.com/example/awesome-foo
+SUMMARY: index_only_pages=1
+```
+
+ファイルが無い・キーが無い・値がリストでない場合は該当なしとして扱う。**ファイルが在るのにパースできない場合は stderr に `WARNING:` を出す**（`check_extraction_quality.py` が `exclude_domains` について採るのと同じ理由 — `rejected:` への追記ミス 1 回で一覧全体が黙って無効化されないため）。
+
+### 終了コード
+
+- 常に `0`（接頭辞が答えである）
+
+---
+
 ## check_distribution_freshness.py
 
 ### 目的
@@ -1055,6 +1102,41 @@ python .wikicommit/scripts/check_distribution_freshness.py [--variant <none|quar
 > **キーの比較は再帰的に行う（ドット区切りのパス）**。Issue 本文は「トップレベルキー」としていたが、同じ Issue が挙げている実例 `pageTitleSuffix`（Issue #679）は `configuration:` の下にある。`quartz.config.yaml` のトップレベルキーは `configuration`/`layout`/`plugins` の 3 つで今後増えないため、トップレベルのみの比較では**この機能が意図した用途に対して恒久的に何も報告しない**。
 >
 > **テンプレート側の `{NAME}` プレースホルダーは比較前に無害化する**。YAML はクォートされていない `{THEME}` をフロー マッピングとして読むため、`theme: {THEME}` は「`theme.THEME` という入れ子キー」に見え、実際の値を持つ config.yml には当然そのキーが無い。無害化しないと、**init 直後のリポジトリが自分の `config.yml` と `quartz.config.yaml` を永久に `OUTDATED` として報告する**（実装中に clean init に対して実行して発見した）。`options: {}` のような本物の空マッピングは正規表現に一致しないためそのまま解釈される。**置換先は空文字列ではなく素のスカラー**にする — プレースホルダーは常に裸で書かれているとは限らず、`config.yml` の 1 行目は `wikicommit_version: "{VERSION}"` とクォートの内側にあるため、`""` で置換すると引用符が 4 つ並んで**テンプレート全体が YAML として読めなくなる**。そうなるとテンプレート側のキー集合が空になり、`テンプレート − ローカル` も空になるので、**`config.yml` は上流で増えたキーを永久に報告しない** — 比較が止まっているのに正常な結果に見える。なお、テンプレート側のパースに失敗した場合は `WARNING:` を 1 行出す（空のキー集合は「上流で何も増えていない」と見分けがつかないため）。
+>
+> **リストへも降りる — キーで止めると 47 プラグインが 1 本のパスに畳まれる（Issue #950）**。`_key_paths()` は当初「リストの中身はユーザーの値であってスキーマではない」としてマッピングのキーだけを辿っていた。実測すると `quartz.config.yaml` のキーパスは 61 本で、**うち `plugins` 以下は `plugins` の 1 本だけ**だった — プラグインの追加・削除・ローカルビルドへの差し替えも、`layout.byPageType.*.exclude` への項目追加も、**どれも既存リポジトリには一切報告されない**。手順書が「自動検出されない手作業」として挙げていた 5 点のうち 4 点がこの形であり、しかもその列挙自体が 1 点（`comments`。Issue #755）を取りこぼしたまま 3 パイロット中 2 件で欠落していた。**列挙ではなくリストそのものを比較するのが本則である**（案 B 単独を採らなかった理由。Issue #842 / #556 が繰り返した「列挙は 1 つ欠けると静かに落ちる」）。
+>
+> 降下には 3 つの制約があり、いずれも 3 パイロットの実クローンに当てて決まった。**起票時の草案が案 A（リストへ降りる）を退けた理由「ユーザーが意図的に消したエントリを毎回報告する」は、実測では 1 件も起きなかった** — このファイルで「ユーザーの内容判断」を持つリストは `configuration.ignorePatterns` の 1 本だけであり、実際に点灯するのは `exclude`（WikiCommit のコンポーネント名）と `plugins[].source` だからである。
+>
+> | 制約 | 内容 | 外したときに何が起きるか（実測） |
+> |---|---|---|
+> | 1 | **加算のみ**（テンプレート − ローカル） | 減算方向にすると、ユーザーが足したものを全部報告する |
+> | 2 | **位置ではなく識別子で照合する**（スカラーは値そのもの、マッピングは `source` の値） | 上流がプラグインを 1 本足した瞬間に 47 件すべてがずれる |
+> | 3 | **リスト要素のマッピングの内側へは降りない** | `enabled` を見ると giscus を意図的に有効化したリポジトリが誤検知になり（**その機能を入れた Issue #755 の利用者が最初の誤検知になる**）、`options` を見るとフッターの `{REPO_URL}` がテンプレート側でプレースホルダーのままなので**3 件とも必ず差分になる** |
+>
+> したがって `plugins` について見るのは**どのプラグインが在るか**だけで、`enabled` / `order` / `options` は見ない。**識別子は `source` のみとし、`name` / `id` を推測で足さない** — テンプレート群でマッピングのリストは `plugins` 1 本だけであり、2 つ目の候補は消費者のいない受け皿になる（Issue #553）。識別子を持たない要素は**比較せず飛ばす**（劣化の向きが「今日と同じ沈黙」であり、ノイズにはならない）。
+>
+> **変更したのは `_key_paths()` 1 関数で足りる。** 同関数は `yaml_keys` / `json_keys` / `frontmatter_keys` の 3 モードが共有するが、加算的比較はテンプレート側が持つものしか報告しないため、**テンプレート側にリストが無ければ挙動は 1 ビットも変わらない**。実測: `config.yml` はテンプレート側のリストが `schema.base_types`（11 件。`translation.targets` はプレースホルダーなのでスカラーになる）のみで 3 件とも完全一致＝誤検知 0、**上流が基本型を足したときに初めて報告されるという純増**になる。ポリシーファイル 2 つ（`frontmatter_keys`）は空リストのみ、`.claude/settings.json`（`json_keys`）はリストを持たないため、どちらも**変化なし**。`COMPARISONS` にも `_root_outputs.py` にも新しい値は要らない。
+
+### `quartz.config.yaml` の 2 つは、テンプレート比較では原理的に答えられない（Issue #950）
+
+上のリスト降下でも届かない 2 点がある。**テンプレート側が `{LOCALE}` / `{REPO_URL}` というプレースホルダーであり、照合すべき上流の literal が存在しない**ためである。一方その正解は init が**既存の決定論的な関数で計算している**。したがって問いは「テンプレートと違うか」ではなく「**いま init が書くとしたら、この値になるか**」になる。
+
+| 検査 | 正解の出どころ | 報告する形 |
+|---|---|---|
+| `configuration.locale` の**言語サブタグ** | `quartz_locale_for(config.yml の translation.primary_lang)` | `configuration.locale is en-US, but translation.primary_lang is it, which init writes as it-IT` |
+| フッターの `links.GitHub` | `git remote get-url origin` を `owner/repo` に正規化したもの | `the footer's links.GitHub points at jackyzha0/quartz, not at this repository (wikicommit/decameron-wiki)` |
+
+**`locale` は言語サブタグだけを比較する。** 地域サブタグは `init.py` 自身のコメントが「A wiki that wants a regional variant edits the one line by hand」と書いている正当な手編集であり、そこまで比較すると `en-GB` を選んだ利用者を毎回叱ることになる。**リモートの URL 形式も同様に利用者のものである** — SSH 形式（`git@github.com:owner/repo.git`）と HTTPS 形式を別のリポジトリと読むと、SSH で clone した Wiki が軒並み点灯する。末尾の `.git` とスラッシュも落としてから比較する。
+
+**`pageTitle` / `pageTitleSuffix` は同じ扱いにしない。** ディレクトリ名由来の値は init の**既定値**であって正解ではなく、Wiki が表示名を変えるのは正当な編集である。比較すると利用者を叱る側に倒れるため、これは手作業として残る。
+
+**置き場はこのスクリプト側であり、`_root_outputs.py` にフィールドを足さない。** あの一覧は `init.py` と `print_next_steps.py` も読むが、どちらも「値の検査」を使わない — 3 消費者のうち 1 つしか読まないフィールドを共有リストへ入れることになる。同ファイルには既に同型の前例がある（`_consequence(path)` が `.wikicommit/scripts` だけに帰結の 1 文を付けている）。同じくパスで分岐する小さなディスパッチとして書く。
+
+**どちらも `OUTDATED:` 行として出す**（新しい接頭辞を足さない — `wikicommit-status` / `wikicommit-update` 側の読み取りを変えずに済む）。そのため**1 エントリが複数の `OUTDATED:` 行を出しうる**: 加算的なキー比較と値の検査は同じファイルについて別の問いに答えており、1 行に畳むと一方が他方を隠す。`SUMMARY:` の `outdated` は行数を数える。
+
+`quartz_locale_for()` は `.claude/skills/wikicommit-init/scripts/init.py` にある。**Skill が未インストールなら 2 検査とも黙って飛ばす** — `_load_root_outputs()` と同じ非ブロッキングな劣化であり、`primary_lang` が読めない・`locale` が無い・`GitHub` エントリが無い（init が `links: {}` に潰した場合を含む）・remote が無い、のいずれでも同様である。
+
+**Skill は在るのに `init.py` が読めない場合だけは黙らない。** そこへ到達した時点で「未インストール」は消えている（`check()` が自分の `WARNING:` を出して先に return する）ので、残る原因は WikiCommit 自身の問題 — 壊れた `init.py`、または `quartz_locale_for()` を持たない古い Skill ツリー — であり、症状は**検査が止まったまま `SUMMARY: outdated=0` が「同期済み」の顔をする**ことだけになる。`_yaml_keys()` がテンプレートのパース失敗に対して採っているのと同じ扱いで、どの検査が走らなかったかを `WARNING:` で述べる。**関数は属性として取り出してから呼ぶ** — 属性が無いだけで `AttributeError` を投げると、検査 1 本のために**レポート全体が traceback で落ち**、このスクリプトの「終了コードは常に 0」という契約が破れる（`npx skills add` と `/wikicommit-init` が 2 つのツリーを別々に更新する以上、版ずれはこのファイル自身が `_SCRIPTS_CONSEQUENCE` で想定している状態である）。**このとき止まるのは `locale` の検査だけで、フッターの検査は走る** — あちらが読むのはローカルの config とこのリポジトリ自身の remote だけで、`init.py` に依存しないためである。
 
 ### ORPHAN は `overwrite` のツリーにのみ報告する
 
@@ -1067,6 +1149,7 @@ python .wikicommit/scripts/check_distribution_freshness.py [--variant <none|quar
 | 状況 | 挙動 |
 |---|---|
 | `wikicommit-init` が未インストール | `WARNING:` を 1 行出し `SUMMARY:` 全 0 で終了（`check_property_wikilink_reinforcement.py` が語彙を引けないときと同じ非ブロッキングな劣化）。`.wikicommit/scripts/` は wiki リポジトリにコミットされるが `.claude/skills/` は別途インストールするものなので、無いことは十分あり得る |
+| `wikicommit-init` が `.agents/skills/` にだけある（Codex 単独配置） | **未インストールとは扱わない**。Skill ツリーは `_skill_tree.py` の探索順（`.claude/skills` → `.agents/skills`）で引く（Issue #1021）。以前は `.claude/skills/` 固定だったため、Skill が在るのに別の場所にあることを「無い」と区別できず、上の行の劣化に黙って落ちていた |
 | `wikicommit_version` が無い | `synced=unknown` と表示する。版は読者向けの情報であり比較を左右しないため、それ以外は通常どおり動く（Issue #577 より前に init されたリポジトリが該当） |
 | `update` が未知の値 | `review` として扱う。`npx skills add` は `.claude/skills/` を更新するが `.wikicommit/scripts/` は次の init まで古いままなので、**古いスクリプトが新しいリストを読む**組み合わせが起こりうる。表示するラベルも `review` に正規化する — 適用していない扱いを名乗らせないため |
 
@@ -1076,16 +1159,27 @@ python .wikicommit/scripts/check_distribution_freshness.py [--variant <none|quar
 VERSION: synced=0.2.0, installed=0.3.0
 OUTDATED: quartz-plugins (overwrite) — 6 file(s) differ from the template
 OUTDATED: .wikicommit/source-policy.md (review) — the template has wikicommit: key(s) this file lacks: index_only
+OUTDATED: quartz.config.yaml (review) — the template has key(s) this file lacks: layout.byPageType.folder.exclude[comments], layout.byPageType.tag.exclude[comments], plugins[../quartz-plugins/wikicommit-graph]
+OUTDATED: quartz.config.yaml (review) — configuration.locale is en-US, but translation.primary_lang is it, which init writes as it-IT
+OUTDATED: quartz.config.yaml (review) — the footer's links.GitHub points at jackyzha0/quartz, not at this repository (wikicommit/decameron-wiki)
 MISSING: .wikicommit/entity-policy.md (review) — not present locally
 ORPHAN: .wikicommit/scripts/check_old_name.py — no counterpart in the template
-SUMMARY: outdated=2, missing=1, orphan=1
+SUMMARY: outdated=5, missing=1, orphan=1
 ```
+
+`quartz.config.yaml` が 3 行を占めているのが上記「1 エントリが複数の `OUTDATED:` 行を出しうる」の実例である（リスト要素の欠落・`locale`・フッターのリンク）。
 
 ### 既知の限界
 
 `.gitignore` の比較対象は `templates/.gitignore` のみで、`--quartz` 時に追記される `templates/gitignore-quartz.txt` は見ない。後者に追加されたパターンは報告されない。
 
-`package.json` は `review` かつバイト比較のため（Issue #712 の分類表どおり）、**init 前から自前の `package.json` を持っていたリポジトリでは毎回 `OUTDATED` が出続ける** — `init.py` はその場合コピーをスキップするので、テンプレートと一致することが構造的にありえない。上記 5 ファイルと同じ「常時点灯」の形だが、扱いを変えていない理由は 2 つある: (1) 大半のリポジトリはテンプレートをそのまま受け取るため一致し、点灯が普遍的ではない（`.gitignore` は `--quartz` の全リポジトリで必ず点灯する点が決定的に異なる）、(2) この点灯は実際に行動を促す — Issue #556 は新しい `*.cjs` が `package.json` の `postinstall` から呼ばれず全 Pages ビルドが失敗した事例であり、「テンプレートの `package.json` が変わった」は取り込むべきものがあるという正しいシグナルである。加算的比較へ移す（テンプレートに増えた `scripts` エントリだけを見る）ことは可能だが、実測の裏付けが無いまま Issue の分類から離れるため見送った。
+**`configuration.ignorePatterns` はこのファイルで唯一「ユーザーの内容判断」を持つリストであり、既知の誤検知候補である**（Issue #950）。ユーザーが `private` を公開したくて消した場合、既存の 1 行の中に 1 項目が増える形で点灯し続ける。それでも対象に含めるのは 3 つの理由による: (1) 3 パイロットの実測で 3 件とも一致しており現に発現していない、(2) `.gitignore` の `compare: lines` が既に同じ性質（ユーザーが消した行を報告し続ける）を受け入れている前例がある、(3) 除外すると小さな列挙を持つことになり、上流が `configuration` にリストを足したときに覆われない。
+
+**ローカル側にしか無いエントリは、どの設計でも構造的に検出できない**（同）。`quartz.config.yaml` のフッターに残っている Discord 行がこれにあたる — 見るには減算比較が要るが、それはユーザーが足したものを全部報告する向きであり、上記の制約 1 が退けたものである。**1 行の手作業として残す**。プラグインの `enabled` / `options` の上流変更も同じく「今日と同じ沈黙」に留める（制約 3）。
+
+`package.json` は `review` かつバイト比較のため（Issue #712 の分類表どおり）、**init 前から自前の `package.json` を持っていたリポジトリでは毎回 `OUTDATED` が出続ける** — `init.py` はその場合コピーをスキップするので、テンプレートと一致することが構造的にありえない。上記 5 ファイルと同じ「常時点灯」の形だが、扱いを変えていない理由は 2 つある: (1) 大半のリポジトリはテンプレートをそのまま受け取るため一致し、点灯が普遍的ではない（`.gitignore` は `--quartz` の全リポジトリで必ず点灯する点が決定的に異なる）、(2) この点灯は実際に行動を促す — Issue #556 は新しい `*.cjs` が `package.json` の `postinstall` から呼ばれず全 Pages ビルドが失敗した事例であり、「テンプレートの `package.json` が変わった」は取り込むべきものがあるという正しいシグナルである。
+
+> **この保留は Issue #950 の実測で解消し、据え置きで確定した**。3 パイロットとも配布テンプレートと**完全にバイト一致していた** — 上記の限界は実在するが未発現である。さらに、加算的比較へ移すと **Issue #556 の再発を検出できなくなる**: あれで変わったのは `scripts.postinstall` の**値**であり、加算的比較には原理的に見えない。両者を貫く軸はこう置ける — **ローカルが設計上テンプレートから乖離するファイルは加算的に、テンプレートが全体にわたって正本であるファイルはバイトで比較する**。`quartz.config.yaml` が前者、`package.json` が後者であり、同じ Issue で片方だけを動かしたのはこの軸に従った結果である。
 
 ### 終了コード
 
@@ -1119,14 +1213,18 @@ python .wikicommit/scripts/search_index.py query --expand "<語>|<語>" --expand
 
 1. `.wikicommit/entity/**/*.md` を走査する（`index.md` と `status: removed` のページは対象外）
 2. 各ページから `title`・`lang`・`type`・`tags`・`review_status`・本文（frontmatter を除いた Markdown 全文）を抽出する。frontmatter が YAML として解析できない、またはマッピング型でない場合はそのページ全体をインデックス対象から除外する（`status: removed` かどうか判定できないページを誤って検索可能にしないための安全側の挙動）
-3. `.wikicommit/.cache/search_index.sqlite3` に FTS5 仮想テーブル（`tokenize="trigram"`）を作成し投入する。`path`・`lang`・`type`・`review_status` は `UNINDEXED`（全文検索対象外・フィルタ／表示用）
-4. 実行のたびにテーブルを `DROP` してから全件再構築する（差分更新なし）
+3. `.wikicommit/.cache/` の中に一意な名前の一時ファイルを作り、そこへ FTS5 仮想テーブル（`tokenize="trigram"`）を作成し投入する。`path`・`lang`・`type`・`review_status` は `UNINDEXED`（全文検索対象外・フィルタ／表示用）。同じファイルに `meta` テーブル（`key`, `value`）を作り、ページ集合の fingerprint（下記）を `key = 'fingerprint'` で記録する
+4. すべてをコミットして接続を閉じてから、`os.replace()` で一時ファイルを `search_index.sqlite3` に置き換える（原子的な置き換え。差分更新はしない）。途中で失敗した場合は一時ファイルを消し、既存のインデックスには触れない — 既存ファイルに対して `DROP` → `INSERT` すると、途中で落ちたときに空か途中までのインデックスが残り、fingerprint を持つせいで「最新」と判定されてしまうため。2 つのプロセスが同時に作り直しても、それぞれ別の一時ファイルに書くので壊れない（最後に置き換えた方が残る）
 5. `.wikicommit/.cache/` が存在しない場合は作成する。Git 管理対象外（`.gitignore` に `.wikicommit/.cache/` を追加済み）
-6. SQLite が `trigram` トークナイザ（SQLite 3.34+、3.38+ 推奨）に対応しない場合、エラーメッセージを出力し終了コード 1 で終了する（インデックスファイルは残さない）
+6. SQLite が `trigram` トークナイザ（SQLite 3.34+、3.38+ 推奨）に対応しない場合、エラーメッセージを出力し終了コード 1 で終了する（一時ファイルは残さず、既存のインデックスにも触れない）
+
+**fingerprint**（Issue #1061）: `collect_pages()` と同じページ集合（entity ＋ view、`assets/` と `index.md` を除く）について、`(パス, st_mtime_ns, st_size)` を 1 行ずつ並べた列の SHA-256（先頭にインデックスの形式番号 `INDEX_FORMAT` を混ぜる — ページが 1 つも変わっていなくても、列や索引の仕方を変えた版のスクリプトが古い形式のインデックスを使い続けないため。`_build()` の出力の形を変えたら上げる）。ページの追加・削除・編集をすべて捕まえる（削除すると集合から 1 行消える。最新 mtime だけを比べる形では削除を捕まえられない）。`git pull`・`/wikicommit-fix`・`/wikicommit-remove`・Close 同期による `review_status` の書き換えもファイルが変わるので同じように拾う。読むのは `stat()` だけでページの中身は読まない（判定は `query` のたびに走るため。実測 1,100 ページで約 9 ms、全件の作り直しは約 1 秒）。`git checkout` や clone で mtime だけが変わると中身が同じでも作り直すが、誤りは「約 1 秒余計にかかる」側に倒れるので受け入れる
 
 ### `query` サブコマンド
 
-1. `.wikicommit/.cache/search_index.sqlite3` が存在しない場合、先に `build` を自動実行する
+1. 現在のページ集合の fingerprint を計算し、インデックスの `meta` テーブルに記録された値と比べる。インデックスが無い・`meta` テーブルが無い（この変更より前に作られた）・読めない・値が違う、のいずれでも先に作り直してから検索する。既存のインデックスを作り直したときは `NOTE: search index was stale (<理由>); rebuilding` を 1 行出す（`SUMMARY:` 行の形式は変えない — 呼び出し側は `hits=` を読んでいる）。fingerprint を読む接続は作り直しの前に閉じる（Windows では開いているファイルに対する `os.replace()` が失敗するため）。別プロセスが同時に開いていて置き換えに失敗した場合は、一時ファイルを消し、`WARNING:` を出して古いインデックスのまま検索する（検索は止めない）
+
+   > **以前は「ファイルが存在しないときだけ」作っていた（Issue #1061）**。ファイルがあれば中身が古くても何も確かめずに使い、`build` を呼ぶ Skill は 1 つも無かったため、最初の検索のときに作られたインデックスがその後ずっと使われた。`wikicommit/ai-driven-dev-wiki`（2026-09-25）では実ページ 1,080 に対しインデックスは 373 ページ（すべて en）で、ja の検索は必ず 0 件になり、それが出力のどこにも現れず「Wiki にその知識が無い」と区別できなかった。**generate / translate / synthesize の最後に `build` を呼ばせる案は採らない** — 指示に頼る形で、手順の末尾が落ちる失敗クラス（Issue #406 / #474）を再現するうえ、`git pull`・`/wikicommit-fix`・`/wikicommit-remove`・Close 同期には届かない。**`query` のたびに必ず作り直す案も採らない** — search / ask は言語ごとに `query` を何回か呼ぶので 1 回の実行で数秒かかる
 2. `MATCH` 演算子で全文検索する。MATCH 式の組み立ては指定形式で分かれる:
    - **位置引数**: 空白区切りの各語を個別にフレーズクエリとしてクォートし、暗黙の AND で連結する（ユーザー入力をそのまま FTS5 クエリ構文として解釈すると `-`・`"` 等でクエリ構文エラーになりうるため語ごとにクォートする。クエリ全体を単一フレーズにすると隣接した語順の完全一致でしか検索できなくなるため、キーワード検索として機能するよう語ごとに分割する）
    - **`--expand`**（Issue #581）: 各 `--expand` の値を `|` で分割して 1 グループとし（各語は前後の空白を除去し、内部の連続空白も 1 個の半角空白に潰す — 複数語の語は 1 つの隣接フレーズとして扱う一方、語の中に改行が残ると `SUMMARY:` 行が複数行に割れて、行単位で `hits=` を読む呼び出し側が値を取り落とすため）、**グループ内は OR・グループ間は AND** の式を組み立てる（`("児童手当" OR "子ども手当") AND ("申請手続き")`）。各語のクォート・`"` の `""` エスケープは位置引数と同一のルールで行う。単一語のグループも含め**すべてのグループを括弧で囲み、明示的な `AND` で連結する** — FTS5 は括弧で囲んだ式と裸のフレーズの並置（`("a" OR "b") "c"`）も、括弧同士の並置も構文エラーとするため、グループが 1 つでも存在する時点で明示的な演算子が必須になる。空白区切りの語を空文字列に潰す・分割記号 `|` 自体を語に含める、といったケースは扱わない（前者は落とし、後者は現実的な検索語に現れないため専用のエスケープ構文を設けない）
@@ -1646,6 +1744,20 @@ RECORDED: .wikicommit/review/entity/ja/Person/yamada-taro/20260905-142233-ai.md 
 - `0`: 記録を 1 件書いた
 - `1`: 引数不正、entity/view ツリーの外、ページが存在しない（`discarded` 以外）、JSON が読めない／壊れている、書き込み失敗
 
+### `page_at_fault` は検証も消費もされていない（Issue #987）
+
+`page_at_fault` は `FINDING_FIELDS` の射影に乗って記録されるが、**値を検証する箇所も読む主体も 1 つも無い**。`type` には enum 外のときの `WARNING:`（as-is で記録する）があるが、`page_at_fault` にはそれも無い。
+
+**その結果、実データの 67% が仕様外だった**。`wikicommit/ai-driven-dev-wiki` のレビュー記録 705 件のうち、このフィールドを持つ 95 件の内訳は `this` 52・`under-review` 17・`other` 14・`self` 12 で、仕様の 2 値（`under-review` / `other`）に当たるのは 31 件だけである。**誤りは片側に寄っていた** — `other` は素の英単語なので綴り違いが 1 件も無く、このプロジェクトの造語である `under-review` だけが負けている。
+
+**原因は `review-rules.md` の返却形式の節（Part 1 rule 4）にあった**。同じ JSON オブジェクトの兄弟フィールド `type` はそこで値を列挙しており、仕様外は 303 件中 2 件（0.7%）に留まる一方、`page_at_fault` は「cross-page エントリにだけ付く」としか書かれず、2 値は 240 行あまり後の check 8 の散文にしか無かった。同一文書・同一モデル・同一出力オブジェクトで、違いは返却形式の節が値を述べているかどうかだけである。**対処は rule 4 に 2 値を明記したこと**（`type` と同じ形。`rules_version` 3 → 4）。
+
+**本スクリプトに検証は足していない**。`type` の低い drift 率は警告の産物ではない — 仕様外の `type` 2 件は警告が出たうえで記録に残っている。値を書くのはレビューサブエージェントで、警告が出る先は `record_review.py` を実行する orchestrator であり、両者は別のコンテキストにいるので警告は誰の行動も変えない。argparse の `choices` による強制も使えない（値は `--json` の中にあり、強制は「記録を書かない」か「フィールドを落とす」のどちらかで、いずれも仕様外の値より悪い）。**効果の測定にも警告は要らない** — 記録は受け取った値をそのまま持つので、rule 4 を直した後の記録（`rules_version: 4` 以降）を数えれば drift が残ったかが分かる。
+
+**`this` / `self` を `under-review` へ正規化もしない**。仕様が静かに 4 値になるうえ、rule 4 が効けば新しい記録には現れなくなり、表を持つ理由自体が消える。効果を測ってから判断する。**既存の記録は書き換えない**（記録は不変。Issue #750）。
+
+**「相手が悪い」（`other`）の行き先は本節の対象外**である。同じ調査で、告発した側が `RISKY:` に載り、最も告発された側は載らないことが分かっている（`RISKY:` は findings を `page_at_fault` を見ずに数える）。ただし告発先を引くには `page_at_fault` と `source_file` が信頼できる必要があり、いまはどちらも満たさないので、rule 4 の効果が出た後の実データで判断する。
+
 ---
 
 ## check_review_coverage.py
@@ -1929,7 +2041,7 @@ halted_reason: ""
 
 Issue #752 が `rules_version` の echo 検証を成立させられたのは、サブエージェントが JSON を返し orchestrator がそれを照合するという **2 者**がいたためで、同 Issue 自身が「`wikicommit-review` はサブエージェントを使わないため echo 検証が効かない」と限界を明記している。単一エージェントでは「自分が読んだと自分に申告する」だけになり何も検証しない。
 
-`--token` を渡すと `record_run.py` が `.claude/skills/<skill>/references/<pass>.md` を**自分でディスクから開いて** frontmatter の `pass_token` と突き合わせる。**照合先のパスは引数で受け取らない** — 呼び出し側がファイルを指定できるなら、自分で書いたファイルを指すこともできてしまい、第三者性が消える。
+`--token` を渡すと `record_run.py` が `<Skill ツリー>/<skill>/references/<pass>.md`（Skill ツリーは `.claude/skills` → `.agents/skills` の順に探す。Issue #1021。どちらかの写しが裏づければ `ok`）を**自分でディスクから開いて** frontmatter の `pass_token` と突き合わせる。**照合先のパスは引数で受け取らない** — 呼び出し側がファイルを指定できるなら、自分で書いたファイルを指すこともできてしまい、第三者性が消える。
 
 | 失敗 | 検出 |
 |---|---|
@@ -1980,6 +2092,8 @@ Issue #752 が `rules_version` の echo 検証を成立させられたのは、�
 ### ローテーション
 
 書き込み時（`start`）に、新しい順で `KEEP_RECORDS`（50）件を残して残りを削除する。順序は `run_sort_key()` が決める — ファイル名は `<YYYYMMDD>-<HHMMSS>` で始まるので素の辞書順でもほぼ時刻順になるが、同一秒の衝突サフィックス（`...-generate-2.md`）は `-` が `.` より小さいため未サフィックスの名前より**前**に来る。素の辞書順で回すとその秒の最も新しい記録から先に消え、`check_run_records.py` が最後の 1 件を `LAST_RUN:` に採ると最も古い記録を拾う。`record_review.py` が `record_sort_key()` を書き手と読み手で共有しているのと同じ理由で、こちらも同じキーを共有する。**未完了の記録も例外にしない** — ディレクトリを有界に保つことが目的であり、末尾から落ちるほど古い実行は対処対象ではなくなっている。削除に失敗しても実行は止めない（後始末が、それが付随する実行を道連れにしてはならない）。件数で回すのは 1 ファイルが数百バイトだからで、日数の判定に時計を持ち込む必要が無い。
+
+> **その順序が壁時計に依存していたため、後方ステップで最新の実行を削除しうる状態だった（Issue #991）**。`allocate_run_path()` は `datetime.now()` のスタンプをそのまま使っており、ホストが時計を後方へ動かすコンテナでは連続する 2 件が逆順のスタンプを得る。現在は**そのディレクトリに既にある最新記録まで切り上げてから採番する**（`record_review.py` の `allocate_record_path()` とまったく同じ形。決定の全体は `docs/DesignDoc-data.md` §4.8）。**採番はファイル名ではなくスタンプを見る**（`next_seq()`）— skill スラッグは `run_sort_key()` の一部ではないため、`generate` の隣へ切り上げた `merge` の記録は空いている `<stamp>-merge.md` を取って**同値になり**、安定ソートである `sorted()` は `LAST_RUN:` の選択もこのローテーションの削除対象も `glob()` の順に委ねてしまう。同じ理由で、ローテーションがそのスタンプの seq 1 を削って空けた未サフィックスの名前も再利用しない（再利用すると最新の実行が最古の位置に着地する）。こちらの影響が一段重いのは、`run_sort_key()` が `LAST_RUN:` の選択だけでなく**このローテーションが何を消すか**も決めるためである。
 
 ### 出力フォーマット
 
@@ -2204,7 +2318,7 @@ SUMMARY: enabled=true
 ```
 
 ```
-WARNING: acme/example-wiki: "Allow GitHub Actions to create and approve pull requests" is disabled, so review-issue-close-sync.yml cannot auto-merge after a review tracking Issue is closed (Issue #403). Enable it with: gh api -X PUT repos/acme/example-wiki/actions/permissions/workflow -F can_approve_pull_request_reviews=true -f default_workflow_permissions=write
+WARNING: acme/example-wiki: "Allow GitHub Actions to create and approve pull requests" is disabled, so review-issue-close-sync.yml cannot auto-merge after a review tracking Issue is closed. Enable it with: gh api -X PUT repos/acme/example-wiki/actions/permissions/workflow -F can_approve_pull_request_reviews=true -f default_workflow_permissions=write
 SUMMARY: enabled=false
 ```
 

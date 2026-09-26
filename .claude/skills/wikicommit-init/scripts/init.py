@@ -81,7 +81,7 @@ def parse_args() -> argparse.Namespace:
         "--exclude-living-persons",
         action="store_true",
         help="Set exclude_living_persons: true in the entity-policy.md this run writes "
-        "(Issue #837; default false, which generates every entity as before). Applies "
+        "(default false, which generates every entity as before). Applies "
         "only to a freshly created file — a re-init never rewrites an existing one.",
     )
     parser.add_argument(
@@ -104,7 +104,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="VERSION",
         help="Rewrite only the wikicommit_version field of an already-existing "
-        ".wikicommit/config.yml (Issue #713 — the field records the version this "
+        ".wikicommit/config.yml (the field records the version this "
         "repository was last brought in step with, and /wikicommit-update restamps it). "
         "Runs standalone and ignores every other flag except --repo-root.",
     )
@@ -114,9 +114,24 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="KEY",
         help="Append top-level keys the template has and .wikicommit/config.yml lacks, "
-        "carrying each key's commented example across with it (Issue #713). Only appends, "
+        "carrying each key's commented example across with it. Only appends, "
         "never rewrites an existing value. Runs standalone and ignores every other flag "
         "except --repo-root.",
+    )
+    parser.add_argument(
+        "--finish-readme",
+        action="store_true",
+        help="Resolve the published-site marker in the README.md this run's init just "
+        "created: replace it with a link to --site-url, or remove it when no "
+        "URL is given. Only for a README init created in this same run — a README from an "
+        "earlier run is the user's file. Runs standalone and ignores every other flag except "
+        "--repo-root and --site-url.",
+    )
+    parser.add_argument(
+        "--site-url",
+        default=None,
+        metavar="URL",
+        help="With --finish-readme: the GitHub Pages html_url, used as-is.",
     )
     parser.add_argument(
         "--repo-root",
@@ -129,7 +144,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="URL",
         help="This repository's own GitHub URL, substituted into quartz.config.yaml's footer "
-        "links (Issue #557). Omit it when no GitHub remote can be resolved: the footer's GitHub "
+        "links. Omit it when no GitHub remote can be resolved: the footer's GitHub "
         "entry is then dropped rather than left pointing at upstream Quartz. Ignored without --quartz.",
     )
     parser.add_argument(
@@ -145,6 +160,84 @@ def parse_args() -> argparse.Namespace:
         "(.github/workflows/deploy.yml). Requires --quartz.",
     )
     return parser.parse_args()
+
+
+# ── README.md for a repository that has none (Issue #1034) ─────────────────────────────
+#
+# Issue #282 decided init never edits README.md, because a README is usually already there
+# with a structure of its own. That reason does not hold when there is no README at all, so
+# init writes one then — and only then. What it writes is a fixed template with the
+# repository name filled in: no LLM-written text, which is what lets it ride in the
+# foundational commit (Issue #843). English only for now; more languages than ja/en are
+# planned, so this does not switch on primary_lang.
+#
+# The published-site link cannot be written here: GitHub Pages is enabled, and its
+# `html_url` learned, in SKILL.md step 3 — after this script has run. So a marker holds the
+# place, and `--finish-readme` replaces it (or removes it) once step 3 knows. The marker is
+# written only under --quartz-pages; without it no step 3 URL can exist, and a README must
+# not be handed over with a marker left in it.
+README_SITE_MARKER = "<!-- wikicommit:published-site -->"
+
+# GitHub shows a README from the repository root, `.github/` or `docs/`, under any
+# extension (or none) and in any case. One of them is enough to count as "there is a README".
+README_LOCATIONS = (".", ".github", "docs")
+
+
+def find_existing_readme(repo_root: Path) -> Path | None:
+    """Any README GitHub would display for this repository, or None."""
+    for location in README_LOCATIONS:
+        directory = repo_root / location
+        if not directory.is_dir():
+            continue
+        for entry in sorted(directory.iterdir()):
+            name = entry.name.lower()
+            if entry.is_file() and (name == "readme" or name.startswith("readme.")):
+                return entry
+    return None
+
+
+def render_readme(page_title: str, *, with_site_marker: bool) -> str:
+    lines = [
+        f"# {page_title}",
+        "",
+        "This repository is a knowledge wiki built with "
+        "[WikiCommit](https://github.com/wikicommit/wikicommit).",
+        "Pages are generated from registered sources by an LLM and checked against those sources",
+        "when they are generated. A person reads some of them; a page that someone has read all",
+        "the way through, without anything obviously wrong standing out, says so at its top.",
+        "",
+        "<!-- Describe what this wiki covers, for readers. This is yours to write. -->",
+        "",
+    ]
+    if with_site_marker:
+        lines += [README_SITE_MARKER, ""]
+    lines += ["## License", "", _root_outputs.README_LICENSE_TEXT, ""]
+    return "\n".join(lines)
+
+
+def _finish_readme(repo_root: Path, site_url: str | None) -> int:
+    readme = repo_root / "README.md"
+    try:
+        text = readme.read_text(encoding="utf-8")
+    except OSError:
+        print("NOTE: README.md not found; nothing to finish.")
+        return 0
+    lines = text.split("\n")
+    if README_SITE_MARKER not in lines:
+        # The user already rewrote that part, or it was never written (no --quartz-pages).
+        print("NOTE: README.md has no published-site marker; left as it is.")
+        return 0
+    index = lines.index(README_SITE_MARKER)
+    if site_url:
+        lines[index:index + 1] = ["## Published site", "", f"📖 [View the wiki]({site_url})"]
+        print("UPDATED: README.md (published-site link)")
+    else:
+        # Drop the marker and the blank line that followed it, so no double gap remains.
+        end = index + 2 if index + 1 < len(lines) and lines[index + 1] == "" else index + 1
+        del lines[index:end]
+        print("UPDATED: README.md (published-site marker removed; no site URL)")
+    readme.write_text("\n".join(lines), encoding="utf-8")
+    return 0
 
 
 # Matches quartz.config.yaml's footer `links:` mapping together with its single
@@ -623,6 +716,9 @@ def main() -> int:
     if args.add_config_keys is not None:
         return _add_config_keys(repo_root, templates_dir, args.add_config_keys)
 
+    if args.finish_readme:
+        return _finish_readme(repo_root, args.site_url)
+
     for lang in [args.primary_lang] + (args.targets or []):
         if not _LANG_RE.match(lang):
             print(f"ERROR: invalid language code {lang!r} (expected ISO 639-1 e.g. 'ja')", file=sys.stderr)
@@ -1007,6 +1103,21 @@ def main() -> int:
                 exclude=_root_outputs.is_quartz_plugin_dev_artifact,
                 **_flags("quartz-plugins"),
             )
+
+        # README.md only when the repository has none GitHub would show (Issue #1034).
+        # Checked across every place and spelling GitHub reads, not by dest.exists():
+        # a `readme.rst`, a bare `README` or a `.github/README.md` is just as much a README.
+        existing_readme = find_existing_readme(repo_root)
+        if existing_readme is not None:
+            print(f"SKIPPED: README.md (a README already exists: {rel(existing_readme)})")
+            skipped.append("README.md")
+        else:
+            readme_path = repo_root / "README.md"
+            readme_path.write_text(
+                render_readme(repo_root.name, with_site_marker=args.quartz_pages), encoding="utf-8"
+            )
+            print(f"CREATED: {rel(readme_path)}")
+            created.append(rel(readme_path))
 
         # 基盤コミットの提案（SKILL.md step 3）を出してよいかの判定材料。**printed after the
         # Quartz append above**, deliberately: that append does not branch on whether the copy

@@ -51,6 +51,7 @@ source.type に基づいてソースを取得
   └─ type: wikicommit → 同上（独自UA付きmarkitdown・フェデレーション取得）
   ↓ 抽出 Skill でテキスト変換
   ↓ 失敗（空・読み取り不能・既知JS-shellドメインでブロック） → そのソースをスキップ（エラーをコンソールに出力）
+  ↓ 取得が接続段階で失敗（NETWORK_UNAVAILABLE。名前解決・接続拒否・プロキシ拒否） → status を変えず保留（## Deferred Reason）。連続 2 件で処理全体を停止（Issue #1020。環境の問題であってソースの問題ではない）
   ↓ 低情報密度チェック（ガードA。下記 callout 参照）→ 低密度なら人間に続行可否を確認（非対話実行時はそのソースをスキップ）
 LLM への入力:
   - 抽出テキスト
@@ -84,8 +85,10 @@ exclude したエンティティの理由と coverage_gap_note は ## Generation
 影響を受けた Type ディレクトリの index.md をローカルで更新
   ↓
 各管理ファイルの status をローカルで即時更新:
-  ├─ 全エンティティ成功（exclude なし）        → status: generated、generated_pages を記録
-  ├─ 一部失敗 or 一部 exclude（1件以上は成功）  → status: partial、generated_pages と failed_pages を記録
+  ├─ 失敗・ambiguous なし、1件以上は成功        → status: generated、generated_pages を記録
+  │   （exclude が混ざっていてもよい。ポリシーが書かないと決めたものを書かなかったのは
+  │     設計どおりの完了であり、除外は ## Generation Notes と Completion Notice に残る。Issue #992）
+  ├─ 一部失敗 or ambiguous あり                 → status: partial、generated_pages と failed_pages を記録
   ├─ 全エンティティが exclude（成功 0 件）      → status: excluded
   └─ 全エンティティが生成失敗                  → status: failed
 ```
@@ -277,10 +280,12 @@ PR 作成（本文に warning の件数と先頭数件を書く。Issue #945） 
          （wikicommit-review 経由の経路 B では review_status: reviewed が設定済みのため対象外）
   - Issue のラベル: `wikicommit-review`
   - Issue 本文に機械可読マーカー `<!-- wikicommit-page: .wikicommit/entity/<lang>/<Type>/<slug>.md -->` を埋め込む（重複作成防止・後続の自動処理の両方がこれを頼りにページを特定する）
-  ※ 既に同じページを指す open な `wikicommit-review` ラベル Issue が存在するページはスキップ（`gh issue list --label wikicommit-review --state open --json number,body` を取得し、`body` を機械可読マーカーで局所的に照合する。`gh issue list --search` には頼らない — GitHub の検索インデックスがこの形式の HTML コメントをどう扱うかの保証がなく、取りこぼすと重複 Issue を作ってしまうため）
+  ※ 既に同じページを指す open な `wikicommit-review` ラベル Issue が存在するページはスキップ（`gh api "repos/{owner}/{repo}/issues?labels=wikicommit-review&state=open&per_page=100" --paginate` で REST の一覧を全件取得し、`body` を機械可読マーカーで局所的に照合する。`gh issue list --search` には頼らない — GitHub の検索インデックスがこの形式の HTML コメントをどう扱うかの保証がなく、取りこぼすと重複 Issue を作ってしまうため。ラベル指定の `gh issue list --label … --limit 1000` も使わない — ラベルで絞った時点で検索 API を通り、`--limit` に関わらず 1000 件で警告なく止まる〈Issue #1062。gh 2.95.0・`cli/cli` の `bug` ラベルで 1,993 件中 1,000 件〉。人間のレビューは抜取〈Issue #800〉なので開いた追跡 Issue は減らず、1000 件は設計上超える。Step 9 と `wikicommit-review` Step 5 も同じ取得方法を使う）
   ↓
 生成失敗トラッキング Issue を ソース管理ファイル単位で作成（`.wikicommit/source/` 配下で `failed_pages` が空でない管理ファイルが対象。Issue #452 — 上記レビュー追跡 Issue と同じ全件走査・マーカー埋め込みパターンをそのまま踏襲するが、対象は「生成されたが未レビューのページ」ではなく「生成自体が失敗し何も書き出されなかったソース」で、ラベルも別（`wikicommit-generation-failure`）。Close しても `review_status` のような自動書き換えは走らない可視化専用の記録用 Issue — 再試行するには `/wikicommit-generate` を再実行する）
   ※ **理由欄はレビュー記録から取る**（Issue #969）。Pass 4 step 7 は `## Failure Reason` を `partial` 分岐で削除するが、`partial` こそが普通の失敗の形であるため、管理ファイルだけを読むと理由が**構造的に必ず `unknown`** になる。`check_review_coverage.py --discarded-reason <failed_pages...>` が `result: discarded` の最新記録から `type` / `source_lines` / `instruction` を返す（`source_file` は gitignored なキャッシュを指すため印字しない）。管理ファイルの節がある場合（`status: failed`。ページが 1 枚も試みられていないためレビュー記録が存在しない）はそちらを、どちらも無い場合は「記録されていない」と書く — **`unknown` とは書かない**。詳細は `docs/DesignDoc-ScriptSpec.md` の同スクリプトの節
+  ※ **「gap を許容する」出口は `## User Notes` で実現する**（Issue #977）。Step 9 の重複判定は open な Issue しか見ないため、`failed_pages` が非空のまま Close すると次の `/wikicommit-merge` が同じ Issue を立て直す — Step 8 では Close が `review_status` を変えて走査対象から外れるので同じ判定で閉じているが、Step 9 の Close は状態を変えない。本文の旧案内「gap を許容するならメモを付けて Close」は、それを選んだ人だけを Issue が無限に湧く状態に入れていた。**そして「許容」は generate 側でも保たれていなかった** — `failed_pages` が非空の `partial` は Pass 1 の収集条件に一致し続ける（Issue #567）ため、許容したはずのエンティティが再び切り出され、同じく却下される余地が残る。現在は「許容する」を「このソースからそのエンティティを切り出さない、と人が決めること」と定義し直し、その置き場に管理ファイルの `## User Notes`（Pass 2c が既に読む）を使う: ① `## User Notes` にページ化しない旨と理由を書く → ② `status: failed`（全エンティティが失敗）なら先に `pending` へ書き戻し（名指しの実行は `type: path` では `SKIP` → 「変更なし」で、`type: url` では `RECHECK` → ハッシュ一致で終わり、どちらも Pass 2c に届かない。`/wikicommit-reconcile` は `failed` を意図的にスキップする）、`/wikicommit-generate <このソース>` を**名指しで**実行する（引数なしでは 5 件ガードの順番が来ないことがある） → ③ `failed_pages` が空になったことを確認する（Pass 4 step 7 が全分岐で全面的に書き直すため、切り出さなくなれば `[]` になり書き戻されない） → ④ `/wikicommit-merge` のあと Close する。**機構は 1 つも増えない**（新しいキーも `status` 値も足さない。Issue #553）。
+    退けた 3 案: **重複判定を `--state all` にする**（本当に再発した失敗も黙るうえ、generate 側の再試行は止まらない）／**許容を記録する専用の器を置く**（Step 9 だけが読むなら generate 側は止まらず、両方が読むなら `status` 語彙の解釈者が増える）／**文面だけ直す**（Issue #969 が入れた「Close しても立て直される」の 1 文は残すが、それだけでは正しい出口が存在しない）。**代償は 2 つ**: 効くかどうかは Pass 2c の LLM が `## User Notes` に従うかに依存し決定論的ではない（効かなければ `failed_pages` が非空のまま残って Issue が立ち直るので、失敗は見える側に倒れる）。名指しの 1 回で同じソースの成功済みページも `action: update` で書き直され、内容が変われば `pending` に戻る（Issue #724）— 本文でそれを予告する。`## User Notes` はソース単位でしか書けず、恒久的な一般則は抽出側の規則（Issue #968）が担う。**既存の open / closed な Issue への遡及は行わない**
   ↓（GitHub Actions により自動実行。Phase 2 以降）
 main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Quartz v5 ビルド → GitHub Pages 公開（§8 参照）
 ```
@@ -572,7 +577,7 @@ main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Q
   [1] frontmatter 補完（必須フィールドが欠けていたら LLM が補完提案）
   [2] sources チェック（なければ type: manual の設定を促す）
   [3] 整合性チェック（sources: がある場合、hash と sources.path の実ファイルを比較し不一致を指摘）
-  [4] sources を再取得し、独立した事実確認を実施（Issue #455 — DesignDoc-pipeline.md §6.2 が人間に示す観点に沿って所見を出力する。全文再掲はデフォルトでは行わず、ソースが取得できない場合や人間が希望した場合のみのフォールバックとする）→ 所見を提示し人間に明示確認を求める（Issue #313 — 構造チェック通過だけでなく実際にレビューしたことを担保する）
+  [4] sources を取得し、独立した事実確認を実施（取得はまず `wikicommit-generate` の抽出キャッシュ〈`resolve_source_cache_path.py`〉、無ければ `type: path` は抽出 Skill・URL は `add_source.py --fetch-url`。エージェントの Web 取得ツールは要約を返しうるため使わず、管理ファイルにも書き込まない。照合に使った URL の版の hash がページの `sources[].hash` と違えば、所見ではなくレビュー記録の本文に 1 行残す — 取得のたびに本文以外が揺れるホストが多く、不一致自体は内容の変化を意味しないため。Issue #1047。Issue #455 — DesignDoc-pipeline.md §6.2 が人間に示す観点に沿って所見を出力する。全文再掲はデフォルトでは行わず、ソースが取得できない場合や人間が希望した場合のみのフォールバックとする）→ 所見を提示し人間に明示確認を求める（Issue #313 — 構造チェック通過だけでなく実際にレビューしたことを担保する）
   [5] 対応するレビュー追跡 Issue の有無を確認（経路B は通常無い）→ 無ければ review_status: reviewed をローカルに書き込む
   ↓
 /wikicommit-merge → 品質チェック → PR 作成（review_status: reviewed の変更を含む） → 自動マージ
@@ -849,6 +854,22 @@ Reviewed-by:    Taro Yamada <taro@users.noreply.github.com>    # レビュー追
 > **`closed_by` が空になる理由と `sender` という代替候補**（`ai-driven-dev-wiki` での実地検証、2026-08-05）: GitHub 公式ドキュメント上、`closed_by` は `GET /repos/{owner}/{repo}/issues/{issue_number}`（単一 Issue 取得エンドポイント）のレスポンススキーマとしてのみ定義されている。GitHub Community での報告（[Discussion #136301](https://github.com/orgs/community/discussions/136301)）によれば、この `closed_by` は「List repository issues」（一覧取得エンドポイント）のレスポンスには含まれないという既知の非対称があり、GitHub からの公式な説明はない。Issue #403 が実地で踏んだ `issues.closed` webhook ペイロード内 `issue.closed_by` の欠落は、この非対称パターンの webhook 版とみられる（webhook ペイロードに埋め込まれる `issue` オブジェクトは一覧取得に近いスナップショットで、単一 Issue 取得時のみ計算される値が省かれる）が、webhook ペイロードのケースを名指しで扱った公式ドキュメントは見つからなかった。
 >
 > この整理と並行して、`issues` webhook ペイロードのトップレベルには `sender`（"the user that triggered the event"）という別フィールドが公式に文書化されており存在する。`review-issue-close-sync.yml` に一時的なデバッグステップを追加し、実際に `ai-driven-dev-wiki` でテスト用 Issue を Close して確認したところ、`github.event.sender.login` は Close 実行者（`joyk0117`）を正しく返し、同時に `github.event.issue.closed_by`（生値）は `null` だった — Issue #403 の実地確認結果を追試する形で再確認できた。デバッグステップは検証後に revert 済み、検証用 Issue も削除済みで、本番の自動マージパイプラインには影響していない。`sender` を使えば `gh api repos/.../issues/{number}` によるライブ再取得（および付随する `issues: read` 権限）を省略できる可能性があるが、公式ドキュメントは「GitHub がイベントの実行者を特定できない場合 `sender` が "ghost" ユーザーに解決されることがある」と注記しており、この置き換えを行うかどうかは別途検討する（`Issues/p3-166-review-issue-close-sync-sender-vs-closed-by.md` として草案化（非公開の開発リポジトリ側の記録））。
+>
+> **配布物の規約: `Co-Authored-By` は実行中のモデルのベンダーで決め、表に無ければ書かない（Issue #1019）**: 上のブロックはこのリポジトリ自身の開発規約（Claude Code で開発しているという事実の記述）であり、**配布 Skill の規約はこのコールアウトが正本である**。Issue #559 は `<current model ID>` と `<Claude display name>` を穴埋めにしたが、メールアドレスは固定値、表示名の既定値は `Claude` のまま残った。Claude Code 以外で実行すると `Co-Authored-By: Claude <noreply@anthropic.com>` と `Generated-By: gpt-5-codex` が同じコミットに並び、**GitHub は実行していないベンダーのアバターを共同作成者として表示する** — Issue #559 が名指しで避けた自己矛盾が、ベンダーの粒度で残っていた。同じ文面が開発規約と配布物の両方に書かれていたことが、この固定値が問われずに残った理由である。
+>
+> Git に書く配布 Skill 4 本（`wikicommit-merge` / `wikicommit-schema-propose` / `wikicommit-update` / `wikicommit-init` の基盤コミット）は、次の表で `Co-Authored-By` 行を選ぶ:
+>
+> | `Generated-By` に書くモデル ID の先頭 | 書く `Co-Authored-By` |
+> |---|---|
+> | `claude-`（Bedrock の `us.anthropic.claude-…` のように `anthropic.` で終わる接頭辞の後に来る場合を含む） | `<Claude display name> <noreply@anthropic.com>`（表示名が不確かなら `Claude`。従来どおり） |
+> | `gpt-` または `codex` | `Codex <noreply@openai.com>`（表示名は固定。Codex CLI 自身が付ける既定の行と同じ文字列） |
+> | それ以外 | **書かない**（`Generated-By` だけを書く） |
+>
+> **判定はハーネスではなくモデルで、`Generated-By` の値の先頭で行う** — 1 つのハーネスが複数ベンダーのモデルを走らせうるため（Copilot）、ハーネス基準では Copilot 上の Claude を誤って落とす。すぐ隣に書く値から導くので 2 行が食い違わない。**会社の命名規則はモデル ID より変わりにくい**ので、上で退けた「モデル ID の正規化表」の理由はこの粒度には当たらない。`o3` のように区別しにくい短い ID は表に入れず、書かない側に落ちる（`Generated-By` に情報は残る）。Gemini（コードレビュー用ボットのアドレスの借用であり公式の帰属ではない）と Copilot（モデルの会社ではなくハーネスであり、自前で co-author 行を付ける）は表に入れない。ハーネスが自前で付ける行との重複は Skill からは見えないため扱わない（同一内容の重複は実害がほぼ無い。実際に重なるかは Issue #732 の実機で見る）。
+>
+> **採らなかった案**: Claude のときだけ書く案（表は Anthropic 行だけの場合としてこれを包含し、OpenAI には確認済みの解決されるアドレスが実在するので落とす理由がない）／`Co-Authored-By` の全廃（Claude・Codex で実行したときの正しい表示まで失う）／何もしない（Claude 以外で実行した全コミットが誤帰属になることは実機を待たずに確定している）。
+>
+> **トレーラー段落の写し 4 つは各 Skill に置いたまま**、`tests/test_commit_trailer_vendor_table.py` が一致を固定する（共有ファイルにまとめるほどの長さではない。Issue #875 の基準）。**`Reviewed-By-AI:` は配布 Skill が書かない**（上のブロックにあるのは開発規約としての行であり、配布 Skill に書かせるのは本 Issue の範囲外）。Claude Code での出力は従来と同一である。**既存コミットは書き換えない**。
 
 ---
 

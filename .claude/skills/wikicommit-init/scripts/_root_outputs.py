@@ -53,7 +53,7 @@ ORIGINS = ("init", "install", "submodule", "npm")
 
 # When the path exists. Each value needs its own answer in git_add_paths(); a new one must be
 # wired up there rather than silently falling through to whatever the last branch tests.
-CONDITIONS = ("always", "vocab_cache")
+CONDITIONS = ("always", "vocab_cache", "readme_created")
 
 # How an update should treat the path (Issue #712). This is an ownership question, not a
 # question about file type: `overwrite` is WikiCommit's own payload, which a re-init
@@ -143,8 +143,12 @@ class RootOutput:
     stays written out in init.py."""
 
     condition: str = "always"
-    """One of CONDITIONS: `always`, or `vocab_cache` for the path that exists only
-    when a type-proposal step created the Schema.org vocabulary cache."""
+    """One of CONDITIONS: `always`; `vocab_cache` for the path that exists only
+    when a type-proposal step created the Schema.org vocabulary cache; or
+    `readme_created` for README.md, which init writes only into a repository that
+    had no README at all (Issue #1034). The last one is about staging, not
+    existence: a README the repository already had may carry the user's own
+    uncommitted edits, so the selective list names it only when this run wrote it."""
 
     in_git_add: bool = True
     """False for a path the guidance covers with its own separate command.
@@ -405,6 +409,27 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         update="skip",
         compare="none",
     ),
+    # Issue #1034: written only when the repository has no README anywhere GitHub would
+    # show one, and the user's file from then on — never refreshed, never compared.
+    RootOutput(
+        "README.md",
+        ALL,
+        origin="init",
+        condition="readme_created",
+        update="skip",
+        compare="none",
+    ),
+)
+
+# The licensing paragraph a README should carry (Issue #645's layer 4). One string, used
+# twice (Issue #1034): init.py writes it into the README it creates, and
+# print_next_steps.py offers it as paste-in wording when the README was already there.
+# Two copies would drift, and the drift would be a README and a suggestion that disagree
+# about what the repository's licensing is.
+README_LICENSE_TEXT = (
+    "Code in this repository and the wiki content it publishes are licensed separately. "
+    "Page content is derived from the sources listed on each page; terms differ per source "
+    "and no single license covers the wiki as a whole. See each page's sources for its terms."
 )
 
 
@@ -460,7 +485,7 @@ def for_variant(variant: str) -> tuple[RootOutput, ...]:
     return tuple(entry for entry in ROOT_OUTPUTS if variant in entry.variants)
 
 
-def _condition_holds(condition: str, *, vocab_cache_created: bool) -> bool:
+def _condition_holds(condition: str, *, vocab_cache_created: bool, readme_created: bool = False) -> bool:
     """Whether a conditional path exists for this run.
 
     Spelled out per value rather than as "not always means the vocab cache flag": a new
@@ -471,16 +496,24 @@ def _condition_holds(condition: str, *, vocab_cache_created: bool) -> bool:
         return True
     if condition == "vocab_cache":
         return vocab_cache_created
+    if condition == "readme_created":
+        return readme_created
     raise ValueError(f"unknown condition: {condition!r}")
 
 
-def git_add_paths(variant: str, *, vocab_cache_created: bool = False) -> list[str]:
+def git_add_paths(
+    variant: str, *, vocab_cache_created: bool = False, readme_created: bool = False
+) -> list[str]:
     """The paths the printed `git add` command should list, in order."""
     return [
         entry.path
         for entry in for_variant(variant)
         if entry.in_git_add
-        and _condition_holds(entry.condition, vocab_cache_created=vocab_cache_created)
+        and _condition_holds(
+            entry.condition,
+            vocab_cache_created=vocab_cache_created,
+            readme_created=readme_created,
+        )
     ]
 
 

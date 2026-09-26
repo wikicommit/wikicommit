@@ -112,6 +112,10 @@ class FileTrieNode {
 const defaultSortFn = (a, b) => {
   const LANG_SEGMENT_RE = /^[a-z]{2}$/;
   const sortTier = (n) => {
+    // Compares against the published slug, which Quartz lowercases, not the source path: a
+    // reserved name spelled in PascalCase on disk (a Type segment such as View) has to be
+    // written here in lowercase. See WikiCommitExplorer.tsx's sortTier for the full note and
+    // the contentIndex.json evidence (Issue #981).
     if (n.isFolder && n.slugSegment === "sources" && (n.slugSegments?.length ?? 0) === 1) {
       return 2;
     }
@@ -121,7 +125,7 @@ const defaultSortFn = (a, b) => {
     if (n.isFolder && n.slugSegment === "overview" && (n.slugSegments?.length ?? 0) === 1) {
       return -2;
     }
-    if (n.isFolder && n.slugSegment === "View") {
+    if (n.isFolder && n.slugSegment === "view") {
       return -1;
     }
     return 0;

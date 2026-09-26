@@ -214,7 +214,7 @@ def policy_exclude_domains(path: Path = SOURCE_POLICY_PATH) -> set[str]:
     if error:
         print(
             f"WARNING: {path}: {error} — wikicommit.exclude_domains is being ignored "
-            f"for this check (Issue #564).",
+            f"for this check.",
             file=sys.stderr,
         )
         return set()
@@ -236,15 +236,14 @@ def check_domain(url: str) -> int:
         print(
             f"BLOCKED: {domain} is a known JS-rendering-required domain; "
             f"static fetch (markitdown/curl) has been confirmed to sometimes "
-            f"return an empty content shell with no meaningful text. "
-            f"(Issue #425)."
+            f"return an empty content shell with no meaningful text."
         )
         return 1
     if domain in policy_exclude_domains():
         print(
             f"BLOCKED: {domain} is listed under wikicommit.exclude_domains in "
             f".wikicommit/source-policy.md — this wiki has decided against it. "
-            f"Edit that file to take it back. (Issue #564)."
+            f"Edit that file to take it back."
         )
         return 1
     print(f"OK: {domain} is not a known JS-shell domain")

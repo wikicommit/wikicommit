@@ -54,7 +54,7 @@ Each front page carries its own counts, recomputed on every build: how many page
 
 **Whether a relevant subject may be written about at all** is a separate question, and lives in `.wikicommit/entity-policy.md` (also created by `/wikicommit-init`). `theme` decides relevance; this file decides permissibility — a living person at the centre of your subject scores highest on relevance and may still be someone you do not want a page about. It ships inert, with one switch (`exclude_living_persons`, off by default) and room for prose covering anything else you want kept out (private individuals, minors, matters under dispute, your own unreleased information). It applies when a page is generated and does not reach back; use `/wikicommit-remove` for a page that already exists.
 
-That last one matters when an encyclopedia covers your subject. A page written from one encyclopedia article and nothing else tends to be a shorter version of that article, without its footnotes — and if the article is share-alike licensed, your page may inherit that obligation. Listing the domain under `index_only:`, or passing `--index <url>`, makes `/wikicommit-collect` read the article's **citations** and offer those primary sources instead; the article itself is never registered. Take the structural overview from a primary source, use the encyclopedia to find out what exists, and register an encyclopedia article outright only where no primary source does — which keeps the pages that may carry a share-alike obligation few and deliberate.
+That last one matters when an encyclopedia covers your subject. A page written from one encyclopedia article and nothing else tends to be a shorter version of that article, without its footnotes — and if the article is share-alike licensed, your page may inherit that obligation. Listing the domain under `index_only:`, or passing `--index <url>`, makes `/wikicommit-collect` read the article's **citations** and offer those primary sources instead; the article itself is never registered. The same works for a curated list — an awesome list, a "Further reading" page: list the page's URL (not its whole host) under `index_only:`, and `/wikicommit-collect` reads the sections that bear on each run's focus. Take the structural overview from a primary source, use the encyclopedia to find out what exists, and register an encyclopedia article outright only where no primary source does — which keeps the pages that may carry a share-alike obligation few and deliberate.
 
 ```
 /wikicommit-collect --index https://en.wikipedia.org/wiki/<subject>
@@ -102,6 +102,30 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 - [lychee](https://github.com/lycheeverse/lychee) (for external link validation; if not installed, `/wikicommit-init` makes a best-effort attempt to auto-install it)
 
 > Because the Skills are a set of SKILL.md files compliant with the [agentskills.io](https://agentskills.io) standard, they should in principle work with other compatible coding agents such as Codex, but Claude Code is currently the only environment we've verified.
+>
+> **Under Codex, keeping a writing Skill from starting on its own rests on different mechanisms.** Nine Skills (`collect`, `fix`, `init`, `reconcile`, `remove`, `review`, `schema-propose`, `synthesize`, `update`) carry `disable-model-invocation: true`, a Claude Code setting that Codex ignores, and `.claude/settings.json`'s `skillOverrides` is likewise read only by Claude Code. For Codex each of those nine also ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`, and its description says to use it only when explicitly asked. Whether Codex actually honors that setting has not been verified on Codex itself yet; until it has, invoke those Skills by name (`$wikicommit-…`) and review what they leave before running `wikicommit-merge`.
+>
+> **WikiCommit needs network access and write access to `.git`.** The network is used to fetch URL sources (`/wikicommit-generate <url>`), by `gh` (the PR, the merge and the tracking Issues in `/wikicommit-merge`) and by lychee; `.git` is written by `/wikicommit-merge` (branch, commit) and by `/wikicommit-init` (its foundation commit). **Codex's default sandbox blocks both.** According to Codex's documentation ([Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security), checked 2026-09-24), an interactive session in a version-controlled folder defaults to `workspace-write`, where network access is off and `.git` (together with `.agents` and `.codex`) is kept read-only:
+>
+> - **Network** — enable it with `network_access = true` under `[sandbox_workspace_write]` in the Codex config. Without it, `/wikicommit-generate <url>` defers each source it cannot reach and stops after two in a row, and `/wikicommit-merge` fails at its first `gh` call.
+> - **`.git`** — we have not found a setting in that documentation that makes `.git` alone writable while staying in `workspace-write`. What remains is to approve the git commands when Codex prompts for them, or to run in a mode that lifts the sandbox; the latter lowers the safety the sandbox provides, so it is listed here as a fact, not a recommendation.
+> - **Non-interactive runs (`codex exec`)** — with `--ask-for-approval never`, a command that needs approval is not run and no prompt appears, so both of the above have to be opened in the configuration before the run.
+>
+> These settings are quoted from Codex's documentation; WikiCommit has not verified them on Codex itself yet, and this section will be updated once it has.
+
+### Supported agents
+
+| Agent | Status |
+|---|---|
+| Claude Code | **Verified** — the environment WikiCommit is developed and tested on. |
+| Codex | **Expected to work, not yet verified on Codex itself** — the Skills follow the agentskills.io standard; see the notes above for the settings Codex needs. |
+| GitHub Copilot — VS Code agent mode | **Targeted, hands-on verification pending.** According to its documentation it reads `.claude/skills/`, invokes Skills as `/wikicommit-…`, and honors `disable-model-invocation`, so none of the Codex caveats above should apply. |
+| GitHub Copilot CLI | **Not verified.** It asks for approval before every shell command, and a Skill run makes dozens of script calls, so expect many prompts. The Skills deliberately do not declare `allowed-tools` to lift them (see below). |
+| GitHub Copilot cloud agent | **Not supported.** It works inside a single PR it opens itself, so `/wikicommit-merge` would have to open and merge a second PR from inside that one; its default firewall blocks fetching URL sources; and a session is capped at 59 minutes. Supporting it needs a different merge step, not a setting. |
+
+> **Fewer prompts in Copilot CLI is your call, not the Skills'.** Copilot CLI can pre-approve a command at launch with `copilot --allow-tool='shell(python)'`, which covers the WikiCommit scripts. It narrows only to the command name, so it also lets `python -c "…"` run unasked — in practice, permission to run arbitrary code while the session reads the text of external pages (`/wikicommit-generate <url>`, `/wikicommit-collect`). The Skills do not ship that permission for you. Adding `--deny-tool='shell(git push)'` stops pushes, but `/wikicommit-merge` pushes its PR branch with `git push`, so it stops merging as well.
+>
+> **Installing for Copilot alone?** Install for `--agent claude-code` only. Copilot reads both `.claude/skills/` and `.agents/skills/`, so an install that leaves Skills in both — a `--copy` install for Claude Code and Codex together, or any install to two or more agents without `--copy`, which puts the real files in `.agents/skills/` and symlinks them from `.claude/skills/` — may show each Skill twice; what Copilot does with two Skills of the same name is not documented and has not been checked yet.
 
 ### Context window
 
@@ -145,15 +169,19 @@ npx skills add wikicommit/wikicommit --skill '*' --agent claude-code -y --copy
 git clone --depth 1 https://github.com/wikicommit/wikicommit.git /tmp/wikicommit
 cd /path/to/your-wiki-repo
 bash /tmp/wikicommit/install.sh
+# For Codex, add --agents to install into .agents/skills/ instead of .claude/skills/
 ```
 
 > **Why `--copy`?** Whenever you install to two or more agents at once, `npx skills add` writes the real
 > files to `.agents/skills/<name>/` and makes each agent's entry — including `.claude/skills/<name>` — a
 > relative symlink pointing at them. That causes two problems for WikiCommit: (1) the symlinks do not
 > survive being carried across a host → container filesystem boundary (observed with a devcontainer built
-> after installing on the host — the Skills were simply not visible inside the container), and (2)
-> WikiCommit expects `.claude/skills/` to be committed to your wiki repository, and a committed symlink
-> breaks on clone unless you also commit `.agents/skills/`. `--copy` gives you real files under
+> after installing on the host — the Skills were simply not visible inside the container), and (2) a
+> symlink committed to your wiki repository comes back as a plain text file in a clone made without
+> symlink support — Windows' default `core.symlinks=false` — so the Skills are missing there. (Committing
+> the symlinked layout otherwise works: `/wikicommit-init` and `/wikicommit-update` stage `.agents/` and
+> `skills-lock.json` along with `.claude/`, so a clone does not end up with links pointing nowhere.)
+> `--copy` gives you real files under
 > `.claude/skills/`, matching what Method 2 does. (If you pick Claude Code alone in the picker the CLI
 > already copies, so `--copy` simply makes that outcome explicit — keep it either way.)
 >
@@ -183,7 +211,7 @@ are installed into your own repository at `.wikicommit/guides/` — one file per
 refreshed whenever you re-init or run `/wikicommit-update`. They are not in this repository's
 `docs/`, because a change made there would never reach a wiki that is already installed.
 
-Two so far:
+Three so far:
 
 - `applying-entity-policy-to-existing-pages.md` — what to do after changing
   `.wikicommit/entity-policy.md`. That policy is read only while a page is being generated, so a
@@ -192,6 +220,9 @@ Two so far:
 - `enabling-comments.md` — turning on the giscus comment box (off by default, and its
   prerequisites fail silently if you miss one), so this one only has something to say on a wiki
   initialized with `--quartz`.
+- `updating-the-quartz-submodule.md` — moving the `quartz/` submodule to a newer Quartz. No Skill
+  does this, the build leaves a change inside `quartz/` that makes a plain `git pull` there stop,
+  and it is optional — the published site keeps the commit you recorded until you move it.
 
 The directory is WikiCommit's rather than yours: a refresh overwrites what is there, and a file
 of your own added alongside them is reported as an orphan by `/wikicommit-status` and offered

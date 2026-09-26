@@ -51,8 +51,15 @@ from _wikilink import (
 # answers "is this verdict still valid?" for the operator and this script asks
 # the same question for the reader, and two copies of that judgement would
 # drift into a banner that contradicts `/wikicommit-status`.
-from check_review_coverage import load_records, stale_reasons, standing_verdict
-from record_review import ACCEPTED_PREFIXES, RecordError, compute_page_content_hash
+from check_review_coverage import latest_by_kind, load_records, stale_reasons, standing_verdict
+from record_review import ACCEPTED_PREFIXES, REVIEW_DIR, RecordError, compute_page_content_hash
+
+# The finding types `.wikicommit/review-rules.md` defines, in the order the
+# overview lists them. Anything else a record carries — a missing `type`, or a
+# value outside this set — is counted under OTHER_FINDING_TYPE rather than
+# guessed into one of these (Issue #1063).
+FINDING_TYPES = ("HALLUCINATION", "CONTRADICTION", "MISSING_SOURCE")
+OTHER_FINDING_TYPE = "OTHER"
 
 
 # The page trees this script reserves directly under `content/` (Issue #957).
@@ -170,12 +177,69 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
         print(f"WARNING: {src_path}: a review record value contains a line break, so it is not displayed")
         return None
 
-    findings = record.get("findings")
     return {
         "model": model,
         "reviewed_at": reviewed_at,
-        "findings": len(findings) if isinstance(findings, list) else 0,
+        "findings_by_type": count_findings_by_type(record.get("findings")),
     }
+
+
+def count_findings_by_type(findings: object) -> dict[str, int]:
+    """Tally a record's findings by `type`, leaving out the ones about other pages.
+
+    A `page_at_fault: other` entry reports that a *neighbouring* page looks wrong
+    (a non-blocking cross-page finding); nothing was rewritten on this page for
+    it, so counting it among the findings "raised and fixed before publishing"
+    would overstate what the check did here (Issue #1063). Only the exact string
+    `other` is dropped: drifted values such as `this` / `self` are about this
+    page and stay counted.
+    """
+    counts: dict[str, int] = {}
+    if not isinstance(findings, list):
+        return counts
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        if str(finding.get("page_at_fault") or "") == "other":
+            continue
+        kind = str(finding.get("type") or "")
+        key = kind if kind in FINDING_TYPES else OTHER_FINDING_TYPE
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def count_unpublished_pages(repo_root: Path) -> int:
+    """How many pages the review threw away before they were ever published.
+
+    A page counts when its newest `kind: ai` record is `result: discarded` and
+    the page is not on disk. A discarded `action: update` does not count: the
+    earlier version stays published, so "not published" would be false for it.
+    Neither does a page discarded once and passed on a later run — its newest
+    record is the pass. Entity and view pages alike (synthesize Step 5.5 also
+    discards).
+
+    This is the one tally on the overview that is not a by-product of the page
+    walk: a page that is not on disk is never reached by it, so the record tree
+    is walked once more (Issue #1063). Records are read with the same helpers
+    `/wikicommit-status` uses, relative to the working directory, as
+    load_ai_review() does.
+    """
+    root = repo_root / REVIEW_DIR
+    if not root.is_dir():
+        return 0
+    count = 0
+    for directory in sorted({p.parent for p in root.rglob("*.md")}):
+        page_rel = f".wikicommit/{directory.relative_to(root).as_posix()}.md"
+        if not page_rel.startswith(ACCEPTED_PREFIXES) or (repo_root / page_rel).exists():
+            continue
+        try:
+            latest = latest_by_kind(load_records(page_rel), "ai")
+        except OSError as e:
+            print(f"WARNING: {directory}: review records could not be read: {e}")
+            continue
+        if latest is not None and str(latest.get("result") or "") == "discarded":
+            count += 1
+    return count
 
 
 def inject_frontmatter_lines(content: str, lines: list[str]) -> str:
@@ -1302,7 +1366,15 @@ def generate_source_pages(
         "type_counts": {},        # source.type -> management file count
         "status_counts": {},      # registration status -> management file count
         "host_counts": {},        # URL host -> management file count
+        # source.lang (ISO 639-1) -> management file count; None for a file
+        # that carries no language yet (Issue #989)
+        "lang_counts": {},
         "type_x_page_type": {},   # source.type -> {published page type -> page count}
+        # source.url / source.path -> this source's page under content/sources/
+        # (Issue #1006). Keyed by the identity string the management file
+        # records, not by the derived file name (Issue #572 / #573), so the
+        # overview can link a hub concentration to the page listing it.
+        "page_for_source": {},
     }
 
     if mgmt_dir.is_dir():
@@ -1330,6 +1402,9 @@ def generate_source_pages(
 
             source_type = source["type"]
             entries.append({"type": source_type, "rel": mgmt_rel.as_posix(), "title": title})
+            for ident in (source.get("url"), source.get("path")):
+                if isinstance(ident, str) and ident:
+                    stats["page_for_source"].setdefault(ident, out_rel)
 
             stats["type_counts"][source_type] = stats["type_counts"].get(source_type, 0) + 1
             status_key = str(fm.get("status") or "pending")
@@ -1337,6 +1412,19 @@ def generate_source_pages(
             host = url_host(source.get("url")) if source_type in ("url", "wikicommit") else None
             if host:
                 stats["host_counts"][host] = stats["host_counts"].get(host, 0) + 1
+            # Issue #989: a missing or empty source.lang is counted under None and
+            # shown as its own "not recorded" row — never dropped. Dropping it would
+            # make a wiki of mostly English sources, only a few of them re-read since
+            # the field was added, look as if every source were in those few
+            # languages.
+            raw_lang = source.get("lang")
+            # YAML 1.1 reads an unquoted `lang: no` (Norwegian, a valid ISO 639-1
+            # code) as the boolean False; without this it would be counted as
+            # "false". Pass 2a writes the code unquoted, so this is reachable.
+            if raw_lang is False:
+                raw_lang = "no"
+            lang_key = (str(raw_lang).strip().lower() or None) if raw_lang is not None else None
+            stats["lang_counts"][lang_key] = stats["lang_counts"].get(lang_key, 0) + 1
             per_page_type = stats["type_x_page_type"].setdefault(source_type, {})
             for wiki_rel in linked_wiki_rels:
                 resolved = parse_wiki_path(entity_dir / wiki_rel, entity_dir)
@@ -1408,18 +1496,59 @@ OVERVIEW_LABELS = {
         # (Issue #722 on completeness, Issue #723 on harm and on the reader's
         # own knowledge).
         "ai_reviewed": "出典と照合済み（AI）",
+        # Issue #1030: the subject is pages generated from sources, not every
+        # page — a translation inherits its sources and is not checked.
         "ai_reviewed_note": (
-            "生成時に、ページの記述をその出典と照合しています。"
+            "出典から生成されたページは、生成時にその記述を出典と照合しています。"
             "照合しているのは出典との一致だけで、"
             "網羅性・実在の人物や組織への影響・読者自身の知識との食い違いは見ていません。"
         ),
+        # Issue #1030: shown only when the wiki has translation pages. They are
+        # left out of the ratio above (they carry no record of their own), and
+        # saying so where it happens keeps a reader from assuming they are part
+        # of it.
+        "translation_pages": "翻訳ページ",
+        "translation_pages_value": "{n}（原文との照合は記録されていません）",
+        "translation_pages_note": "翻訳ページはこの照合の対象外であり、上の割合にも含めていません。",
         "ai_findings": "うち指摘を受けて書き直された箇所",
+        # Issue #1063: reader-facing names for review-rules.md's finding types,
+        # never the enum names themselves.
+        "finding_type_HALLUCINATION": "出典に書かれていない記述",
+        "finding_type_CONTRADICTION": "出典と食い違う記述",
+        "finding_type_MISSING_SOURCE": "手元に無い文書に依拠した記述",
+        "finding_type_OTHER": "その他",
+        # Issue #1063: a count only, never page names — naming a page that was
+        # withheld would publish the heading of what was decided not to publish.
+        "unpublished": "検査を通らず公開されなかったページ",
+        "unpublished_note": (
+            "生成の過程で出典に照らして直せなかったページは公開していません。"
+            "この数は Wiki の欠陥ではなく、検査が働いた記録です。"
+        ),
         "type_count": "型数",
         "by_lang": "言語別ページ数",
         "translation_coverage": "翻訳カバレッジ",
         "hubs": "知識の中心",
         "hubs_desc": "他のページから参照されている回数が多いページ。",
         "backlinks": "被リンク数",
+        # Issue #990: a separate key from `sources` (the `## Sources` heading),
+        # never a reuse of it — the same rule Issue #664 / #751 set for
+        # `reviewed` and `ai_reviewed`.
+        "sources_count": "情報源",
+        "sources_count_note": (
+            "「情報源」はそのページに記録されている出典の件数であり、"
+            "独立した裏付けの数ではありません。"
+            "ある文書そのものについてのページは、構造上 1 件になります。"
+            "少ないことは劣っていることを意味しません。"
+        ),
+        # Issue #1006
+        "hub_concentration": "上位 {n} 件のうち、次の情報源だけに立つもの:",
+        "hub_concentration_count": "{n} 件",
+        "hub_concentration_note": (
+            "ここに挙がるのは、上の一覧で情報源が 1 件のページのうち、"
+            "同じ情報源を共有しているものです。判定ではありません。"
+            "ある文書そのものについてのページや、1 つの文書を主題とする Wiki では、"
+            "集中するのが正しい形です。"
+        ),
         "col_status": "ステータス",
         "col_host": "ホスト",
         "by_type": "型別の傾向",
@@ -1437,6 +1566,17 @@ OVERVIEW_LABELS = {
         "by_source_type": "種別別",
         "by_status": "ステータス別",
         "by_host": "ホスト別（URL ソース）",
+        # Issue #989
+        "by_source_lang": "言語別",
+        "col_source_lang": "言語",
+        "source_lang_unknown": "未記録",
+        "source_lang_note": (
+            "ソースの抽出テキストが主として書かれている言語（生成時に LLM が判断）。"
+            "ページは常にこの Wiki の主言語で書かれるため、"
+            "主言語以外の行があるのは正常であり、"
+            "そのソースから書かれたページは要約・翻訳を経ていることを意味します。"
+            "「未記録」はこの記録が始まる前に取り込まれ、まだ読み直されていないソースです。"
+        ),
         "cross_tab": "情報源の種別 × 生成されたページの型",
         "col_source_type": "情報源の種別",
         "col_total": "合計",
@@ -1464,17 +1604,47 @@ DEFAULT_OVERVIEW_LABELS = {
     ),
     "ai_reviewed": "Checked against sources (AI)",
     "ai_reviewed_note": (
-        "Every page is checked against its own sources when it is generated. That check "
+        "Each page generated from sources is checked against those sources when it is "
+        "generated. That check "
         "covers agreement with those sources and nothing else — not completeness, not "
         "the effect on real people and organizations, not conflicts with what you know."
     ),
+    "translation_pages": "Translation pages",
+    "translation_pages_value": "{n} (no check against the original is recorded)",
+    "translation_pages_note": (
+        "Translation pages are outside this check and are left out of the ratio above."
+    ),
     "ai_findings": "Findings raised and fixed before publishing",
+    "finding_type_HALLUCINATION": "Statements the sources do not make",
+    "finding_type_CONTRADICTION": "Statements that contradict the sources",
+    "finding_type_MISSING_SOURCE": "Statements resting on a document not among the sources",
+    "finding_type_OTHER": "Other",
+    "unpublished": "Pages withheld because they did not pass the check",
+    "unpublished_note": (
+        "A page that could not be brought in line with its sources while it was being "
+        "generated is not published. This counts the check at work, not a defect in the wiki."
+    ),
     "type_count": "Types in use",
     "by_lang": "Pages per language",
     "translation_coverage": "Translation coverage",
     "hubs": "Knowledge hubs",
     "hubs_desc": "The pages other pages link to most.",
     "backlinks": "Backlinks",
+    # Not "Sources": that is already the `## Sources` heading.
+    "sources_count": "Sources recorded",
+    "sources_count_note": (
+        "\"Sources recorded\" is the number of sources recorded on the page, not the number "
+        "of independent confirmations. A page about one particular document has "
+        "exactly one by construction — fewer is not worse."
+    ),
+    # Issue #1006
+    "hub_concentration": "Of the top {n}, these stand on one source alone:",
+    "hub_concentration_count": "{n} hubs",
+    "hub_concentration_note": (
+        "Listed here are the hubs above with a single recorded source that share that "
+        "source. This is not a verdict: a page about one particular document, or a wiki "
+        "whose subject is one document, is concentrated because it should be."
+    ),
     "col_status": "Status",
     "col_host": "Host",
     "by_type": "By type",
@@ -1492,6 +1662,16 @@ DEFAULT_OVERVIEW_LABELS = {
     "by_source_type": "By type",
     "by_status": "By status",
     "by_host": "By host (URL sources)",
+    "by_source_lang": "By language",
+    "col_source_lang": "Language",
+    "source_lang_unknown": "Not recorded",
+    "source_lang_note": (
+        "The language a source's extracted text is mainly written in, as judged by the "
+        "LLM at generation time. Pages are always written in this wiki's primary "
+        "language, so a row for another language is expected: the pages written from "
+        "those sources went through a summarizing translation. \"Not recorded\" counts "
+        "sources taken in before this was recorded that have not been re-read since."
+    ),
     "cross_tab": "Source type x generated page type",
     "col_source_type": "Source type",
     "col_total": "Total",
@@ -1552,6 +1732,48 @@ def _truncated(items: list, limit: int, labels: dict) -> tuple[list, str | None]
     return items[:limit], labels["more"].format(n=len(items) - limit)
 
 
+def _hub_concentration_lines(shown_pages: list[dict], source_stats: dict, labels: dict) -> list[str]:
+    """Lines reporting that several of the shown hubs stand on one source alone
+    (Issue #1006).
+
+    Issue #990 put a source count on each hub row, but a column of "1"s cannot
+    say that seven of them are the *same* 1. This groups the one-source hubs
+    by that source's identity and reports each source holding two or more.
+
+    Only one-source hubs are counted. Counting every hub a source appears on
+    would light up a healthy wiki's main article (a novel's Wikipedia entry is
+    on most of its hubs alongside other sources), which is not concentration.
+    Translation and view pages carry no identity (`source_ids` is None) and are
+    outside the count, as they are outside the per-row figure.
+
+    A report, not a verdict — the lead note says why, in the same register as
+    `sources_count_note`. The rows are not marked (marking is a verdict, Issue
+    #990); the reader follows the link to the source page, which lists the
+    pages it generated. Nothing is emitted when no source holds two, not even
+    "none": an absence of concentration is not a finding.
+    """
+    counts: dict[str, int] = {}
+    for p in shown_pages:
+        ids = p.get("source_ids")
+        # A hand-written `url: [a, b]` or `path: 2024` is not an identity: an
+        # unhashable value would crash the build here, and a non-string one in
+        # _escape_md_link_text below.
+        if p.get("source_count") != 1 or not ids or not isinstance(ids[0], str) or not ids[0]:
+            continue
+        counts[ids[0]] = counts.get(ids[0], 0) + 1
+    shared = sorted(((i, n) for i, n in counts.items() if n >= 2), key=lambda x: (-x[1], x[0]))
+    if not shared:
+        return []
+    page_for_source = source_stats.get("page_for_source", {})
+    out = ["", labels["hub_concentration_note"], "", labels["hub_concentration"].format(n=len(shown_pages)), ""]
+    for ident, n in shared:
+        text = _escape_md_link_text(ident)
+        target = page_for_source.get(ident)
+        shown = f"[{text}]({overview_link(target)})" if target is not None else text
+        out.append(f"- {shown} — {labels['hub_concentration_count'].format(n=n)}")
+    return out
+
+
 def generate_overview_page(
     output_dir: Path,
     primary_lang: str,
@@ -1559,6 +1781,7 @@ def generate_overview_page(
     referrers: dict[str, set[str]],
     removed_keys: set[str],
     source_stats: dict,
+    unpublished_pages: int = 0,
 ) -> Path:
     """Write content/overview/index.md and return its output-dir-relative path.
 
@@ -1645,12 +1868,27 @@ def generate_overview_page(
     # "2 findings" beside one page reads as "this page is bad" when it means the
     # opposite — a finding was raised and the page was rewritten until it passed.
     # Aggregated, the same number says the check has teeth.
-    ai_reviewed = [p for p in content_pages if p.get("ai_review")]
+    # Issue #1030: the ratio is taken over pages that can carry a check against
+    # sources at all. A translation inherits its sources (translated_from) and
+    # wikicommit-translate writes no review record (Issue #750), so counting it
+    # in the denominator made every translation lower the figure. Numerator and
+    # denominator are narrowed together — a translation that does carry an AI
+    # record (/wikicommit-review run on it) would otherwise push the ratio past
+    # 100%. Split on translated_from, not on language (Issue #769 split the root
+    # index by language for a different purpose): a language can hold both
+    # originals and translations.
+    checkable_pages = [p for p in content_pages if not p["is_translation"]]
+    translation_count = total_pages - len(checkable_pages)
+    ai_reviewed = [p for p in checkable_pages if p.get("ai_review")]
     ai_models = sorted({p["ai_review"]["model"] for p in ai_reviewed})
     # The total, not the number of pages carrying one: what this number is for
     # is showing that the check has teeth, and a page caught three times says
     # more about that than a page caught once.
-    ai_findings_total = sum(p["ai_review"]["findings"] for p in ai_reviewed)
+    findings_by_type: dict[str, int] = {}
+    for p in ai_reviewed:
+        for kind, n in p["ai_review"]["findings_by_type"].items():
+            findings_by_type[kind] = findings_by_type.get(kind, 0) + n
+    ai_findings_total = sum(findings_by_type.values())
 
     lang_summary = ", ".join(f"{lang} {len(ps)}" for lang, ps in sorted(pages_by_lang.items()))
     lines += [
@@ -1665,11 +1903,24 @@ def generate_overview_page(
     if ai_reviewed:
         model_note = f" ({', '.join(ai_models)})" if ai_models else ""
         lines.append(
-            f"- **{labels['ai_reviewed']}**: {len(ai_reviewed)} / {total_pages} "
-            f"({_pct(len(ai_reviewed), total_pages)}){model_note}"
+            f"- **{labels['ai_reviewed']}**: {len(ai_reviewed)} / {len(checkable_pages)} "
+            f"({_pct(len(ai_reviewed), len(checkable_pages))}){model_note}"
         )
+        if translation_count:
+            lines.append(
+                f"- **{labels['translation_pages']}**: "
+                + labels["translation_pages_value"].format(n=translation_count)
+            )
         if ai_findings_total:
             lines.append(f"- **{labels['ai_findings']}**: {ai_findings_total}")
+            # The breakdown sums to the total by construction (same records, same
+            # exclusion), and must: a reader would take a mismatch to mean one of
+            # the two is wrong. Types with no findings are not listed.
+            for kind in (*FINDING_TYPES, OTHER_FINDING_TYPE):
+                if findings_by_type.get(kind):
+                    lines.append(f"  - {labels['finding_type_' + kind]}: {findings_by_type[kind]}")
+    if unpublished_pages:
+        lines.append(f"- **{labels['unpublished']}**: {unpublished_pages}")
     lines += [
         f"- **{labels['reviewed']}**: {reviewed_pages} / {total_pages} ({_pct(reviewed_pages, total_pages)})",
         f"- **{labels['type_count']}**: {len(pages_by_type)}",
@@ -1697,6 +1948,10 @@ def generate_overview_page(
     # correcting on the human side — made once in each direction is still twice.
     if ai_reviewed:
         lines += [labels["ai_reviewed_note"], ""]
+        if translation_count:
+            lines += [labels["translation_pages_note"], ""]
+    if unpublished_pages:
+        lines += [labels["unpublished_note"], ""]
 
     # ── 2. Knowledge hubs ─────────────────────────────────────────────────────
     # One row per key, not per page: a key's backlink count is language-neutral
@@ -1714,14 +1969,26 @@ def generate_overview_page(
     lines += [f"## {labels['hubs']}", "", labels["hubs_desc"], ""]
     shown_hubs, more_hubs = _truncated(hub_keys, OVERVIEW_HUB_LIMIT, labels)
     if shown_hubs:
+        # Issue #990: said once, before the rows, because the number is easy to
+        # misread as a verdict — see `sources_count_note`.
+        lines += [labels["sources_count_note"], ""]
         for key in shown_hubs:
             p = best_page_for_key[key]
+            # Issue #990: the source count is omitted, not written as 0, on a
+            # page that does not carry its own sources[] (translation, view).
+            n_sources = p["source_count"]
+            sources_part = (
+                f" / {labels['sources_count']}: {n_sources}" if n_sources is not None else ""
+            )
             lines.append(
                 f"- [{_escape_md_link_text(p['title'])}]({overview_link(p['out_rel'])})"
-                f" — {labels['backlinks']}: {backlink_count[key]}"
+                f" — {labels['backlinks']}: {backlink_count[key]}{sources_part}"
             )
         if more_hubs:
             lines.append(f"- {more_hubs}")
+        lines += _hub_concentration_lines(
+            [best_page_for_key[k] for k in shown_hubs], source_stats, labels
+        )
     else:
         lines.append(labels["none"])
     lines.append("")
@@ -1854,6 +2121,25 @@ def generate_overview_page(
             [[f"`{h}`", str(n)] for h, n in shown_hosts]
             + ([[more_hosts, ""]] if more_hosts else []),
         )
+    else:
+        lines += [labels["none"], ""]
+
+    # Issue #989: which languages the wiki's knowledge stands on. Hosts cannot
+    # answer this — a host does not say its language, and the per-host table is
+    # truncated at OVERVIEW_HOST_LIMIT exactly where the few non-English hosts
+    # sit — while the number of languages is small, so this table is never cut.
+    # The unrecorded row always comes last, whatever its size.
+    lang_counts = source_stats.get("lang_counts", {})
+    lines += [f"### {labels['by_source_lang']}", ""]
+    if lang_counts:
+        lines += [labels["source_lang_note"], ""]
+        known = sorted(
+            ((k, n) for k, n in lang_counts.items() if k is not None), key=lambda e: (-e[1], e[0])
+        )
+        lang_rows = [[f"`{k}`", str(n)] for k, n in known]
+        if lang_counts.get(None):
+            lang_rows.append([labels["source_lang_unknown"], str(lang_counts[None])])
+        lines += _md_table([labels["col_source_lang"], labels["col_count"]], lang_rows)
     else:
         lines += [labels["none"], ""]
 
@@ -2294,10 +2580,10 @@ def main() -> int:
         if claimed_by.get(out_rel_path) != src_path:
             remedy = (
                 "`View` is a reserved Type segment for the view tree; rename the entity type "
-                "that collides with it (Issue #675)."
+                "that collides with it."
                 if is_view
                 else "Rename the custom type so the two no longer collide once the custom/ "
-                "segment is dropped (Issue #576)."
+                "segment is dropped."
             )
             print(
                 f"WARNING: {src_path}: publishes to {output_dir / out_rel_path}, already claimed by "
@@ -2378,8 +2664,34 @@ def main() -> int:
             # unlinked at birth, so it is never a meaningful orphan finding
             # (Issue #675).
             "is_view": is_view,
+            # Issue #1030: a translation is left out of the overview's "checked
+            # against sources" ratio — it has no sources of its own to check.
+            "is_translation": bool(fm.get("translated_from")),
             "has_manual_source": isinstance(sources, list) and any(
                 isinstance(e, dict) and e.get("type") == "manual" for e in sources
+            ),
+            # Issue #990: how many sources the page stands on, derived from the
+            # sources[] already read above (no extra I/O). None — never 0 — for
+            # a translation (it inherits sources from its parent) and a view
+            # page (derived_from, not sources; a different thing to count), so
+            # the hubs row can drop the figure instead of implying "no source".
+            "source_count": (
+                len(sources)
+                if isinstance(sources, list) and not is_view and not fm.get("translated_from")
+                else None
+            ),
+            # Issue #1006: which sources, not only how many, so the overview can
+            # tell that several one-source hubs stand on the *same* document.
+            # Same sources[] as above (no extra I/O), same None cases as
+            # source_count. The identity is `url` / `path` as recorded (Issue
+            # #572 / #573); a `manual` entry has neither and yields None.
+            "source_ids": (
+                [
+                    (e.get("url") or e.get("path")) if isinstance(e, dict) else None
+                    for e in sources
+                ]
+                if isinstance(sources, list) and not is_view and not fm.get("translated_from")
+                else None
             ),
         })
         # Type index.md pages link to every page of their type, which would make
@@ -2445,7 +2757,8 @@ def main() -> int:
     written_rel_paths.add(Path("index.md"))
     written_rel_paths.add(
         generate_overview_page(
-            output_dir, primary_lang, page_stats, referrers, removed_keys, source_stats
+            output_dir, primary_lang, page_stats, referrers, removed_keys, source_stats,
+            count_unpublished_pages(repo_root),
         )
     )
 

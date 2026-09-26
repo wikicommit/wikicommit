@@ -136,6 +136,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from _skill_tree import skill_dirs  # noqa: E402
 from _version import get_version  # noqa: E402
 
 RUN_DIR = Path(".wikicommit/run")
@@ -264,15 +265,75 @@ def run_sort_key(path: Path) -> tuple[str, int]:
     return (stem, 0)
 
 
+def _stamped_keys(directory: Path):
+    """`(stamp, seq)` for every name in `directory` that is a real record.
+
+    Screened through `_STAMP_RE` exactly as `rotate()` screens what it may delete,
+    so the same population decides the order and gets pruned by it. `run_sort_key()`
+    alone is not that screen: it checks that the first two segments are digits but
+    not how many, so `1-2-generate.md` would parse, and `max()` over stamps being a
+    *string* comparison it would sort above every real stamp and pin the directory.
+    """
+    for path in directory.glob("*.md"):
+        if _STAMP_RE.match(path.name):
+            yield run_sort_key(path)
+
+
+def newest_stamp(directory: Path) -> str | None:
+    """The stamp of the newest well-formed record already in `directory`, or None."""
+    stamps = [stamp for stamp, _ in _stamped_keys(directory)]
+    return max(stamps) if stamps else None
+
+
+def next_seq(directory: Path, stamp: str) -> int:
+    """The lowest `run_sort_key()` seq that sorts after everything stamped `stamp`.
+
+    Allocation cannot key off "is this exact filename free". The skill slug is not
+    part of the sort key, and `.wikicommit/run/` holds every Skill's runs together —
+    so clamping a `merge` run onto the stamp of the `generate` run it follows (the
+    documented main flow) leaves `<stamp>-merge.md` free, and the two records then
+    compare *equal*. `check_run_records.py` takes `sorted(...)[-1]` and `rotate()`
+    takes `records[:-keep]`, both stable, so equal keys hand `LAST_RUN:` and the
+    prune list back to `glob()` order.
+
+    Reading the next slot from the stamp also closes the gap rotation opens: once
+    it has deleted the seq-1 record of a stamp, the unsuffixed name is free again,
+    and allocating by filename would reuse it and sort the newest run oldest.
+    """
+    seqs = [seq for existing, seq in _stamped_keys(directory) if existing == stamp]
+    return max(seqs) + 1 if seqs else 1
+
+
 def allocate_run_path(directory: Path, stamp: str, skill: str) -> Path:
     """`<YYYYMMDD>-<HHMMSS>-<skill>.md`, suffixed on collision.
 
     Two runs starting in the same second is not something this can produce in
     practice, but overwriting a record is not a thing this file is allowed to do.
+
+    **The stamp is clamped to the newest record already here (Issue #991.)** Same
+    defect and same fix as `record_review.py`'s `allocate_record_path()` — see the
+    reasoning there. It matters at least as much on this side: `run_sort_key()` does
+    not only pick what `LAST_RUN:` reports, it also decides which records rotation
+    *deletes*, so a backwards clock step can drop the newest run instead of the
+    oldest.
+
+    The suffix is allocated from `next_seq()` — the stamp, not the exact filename —
+    because the skill slug is not part of the sort key and rotation can free the
+    unsuffixed slot of a stamp that is still the newest. See `next_seq()`.
     """
+    newest = newest_stamp(directory)
+    if newest is not None and stamp < newest:
+        print(
+            f"WARNING: {directory}: the clock reads {stamp}, older than the newest "
+            f"record already here ({newest}). Recording under {newest} so these "
+            "records keep the order they were written in.",
+            file=sys.stderr,
+        )
+        stamp = newest
+    seq = next_seq(directory, stamp)
     base = f"{stamp}-{_slug(skill)}"
-    path = directory / f"{base}.md"
-    n = 2
+    path = directory / (f"{base}.md" if seq == 1 else f"{base}-{seq}.md")
+    n = 2 if seq == 1 else seq + 1
     while path.exists():
         path = directory / f"{base}-{n}.md"
         n += 1
@@ -383,9 +444,17 @@ def expected_passes(record: dict) -> tuple[str, ...]:
     return EXPECTED_PASSES.get(skill, ())
 
 
-def pass_file_for(skill: str, pass_name: str) -> Path:
-    """`.claude/skills/<skill>/references/<pass>.md` — the file `--token` reads."""
-    return Path(".claude/skills") / skill / PASS_FILE_DIR / f"{pass_name}.md"
+def pass_files_for(skill: str, pass_name: str) -> list[Path]:
+    """`<skill tree>/<skill>/references/<pass>.md` for every installed copy of `skill`.
+
+    The Skill tree may sit under `.claude/skills/` or `.agents/skills/` (Issue #1021);
+    the search order is `_skill_tree.SKILL_TREE_ROOTS`. When neither holds the Skill,
+    the `.claude/skills` path is still returned so the failure message names a file.
+    The path is never taken from the caller: a script that opens the file itself is
+    the third party the token check rests on (Issue #797).
+    """
+    dirs = skill_dirs(skill) or [Path(".claude") / "skills" / skill]
+    return [d / PASS_FILE_DIR / f"{pass_name}.md" for d in dirs]
 
 
 def read_pass_token(path: Path) -> str | None:
@@ -437,8 +506,22 @@ def cmd_checkpoint(args) -> int:
     token_state = TOKEN_UNCHECKED
     failure = ""
     if args.token:
-        pass_file = pass_file_for(skill, args.pass_name)
-        declared = read_pass_token(pass_file)
+        # A token backed by any installed copy counts. With `--copy` for two agents
+        # both trees hold the same file; if they have drifted apart, the agent read
+        # whichever copy its own runtime loads, and this script cannot tell which
+        # runtime that was — so it must not call a pass skipped because the *other*
+        # copy disagrees. `mismatch` still means no copy on disk backs the token.
+        pass_files = pass_files_for(skill, args.pass_name)
+        declared_tokens = [read_pass_token(f) for f in pass_files]
+        pass_file = pass_files[0]
+        if args.token in declared_tokens:
+            declared = args.token
+        else:
+            declared = next((t for t in declared_tokens if t is not None), None)
+            pass_file = next(
+                (f for f, t in zip(pass_files, declared_tokens) if t is not None),
+                pass_files[0],
+            )
         if declared is None:
             token_state = TOKEN_MISSING
             failure = (
@@ -540,7 +623,7 @@ def cmd_end(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Record one run of a Skill, keyed on the run rather than its output (Issue #790)."
+        description="Record one run of a Skill, keyed on the run rather than its output."
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -550,7 +633,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--arg", dest="args", action="append", default=[], metavar="ARG",
                        help="an argument this run was invoked with (repeatable)")
 
-    check = sub.add_parser("checkpoint", help="stamp the entry to one pass (Issue #797)")
+    check = sub.add_parser("checkpoint", help="stamp the entry to one pass")
     check.add_argument("run", help="path printed by `start`")
     check.add_argument("--pass", dest="pass_name", required=True, metavar="NAME",
                        help="the pass being entered, e.g. pass1-extract")

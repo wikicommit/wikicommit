@@ -231,29 +231,29 @@ def main() -> int:
     parser.add_argument("--property", action="append", default=[], dest="properties", metavar="<PropertyName>")
     parser.add_argument(
         "--list-type-names", action="store_true",
-        help="Print every Schema.org type name (no descriptions), then exit (Issue #798). "
+        help="Print every Schema.org type name (no descriptions), then exit. "
         "Stage one of type recall; pair it with --describe for the candidates you pick. "
         "Ignores --type/--property.",
     )
     parser.add_argument(
         "--describe", nargs="+", default=None, metavar="<TypeName>",
-        help="Print name and one-line description for the named types, then exit (Issue #798). "
+        help="Print name and one-line description for the named types, then exit. "
         "Stage two of type recall. A name not in the vocabulary is an ERROR.",
     )
     parser.add_argument(
         "--list-installed-hierarchy", action="store_true",
         help="Print each Schema.org type installed in .wikicommit/schema/ with its "
-        "installed ancestor types, then exit (Issue #565). Takes no other arguments.",
+        "installed ancestor types, then exit. Takes no other arguments.",
     )
     parser.add_argument(
         "--show-range", action="store_true",
         help="For each verified --property, also print a RANGE: line classifying its rangeIncludes "
-        "as entity/DataType/mixed (Issue #496). Informational only — never affects the exit code.",
+        "as entity/DataType/mixed. Informational only — never affects the exit code.",
     )
     parser.add_argument(
         "--list-properties", action="store_true",
         help="With --type, list every property available to that type (own + inherited via "
-        "rdfs:subClassOf ancestry), then exit (Issue #497). Requires --type; ignores --property/"
+        "rdfs:subClassOf ancestry), then exit. Requires --type; ignores --property/"
         "--show-range. Takes priority over the --property verification mode when both are given.",
     )
     args = parser.parse_args()

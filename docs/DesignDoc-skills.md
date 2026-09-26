@@ -103,7 +103,7 @@ Step 1 の配置方法は 2 つ提供する：
 `npx skills add` は、**2 つ以上のエージェント（正確には 2 つ以上の異なる skills ディレクトリ）を同時に対象にした場合**、Skill の実体を `<project>/.agents/skills/<name>/` に置き、各エージェントのエントリ（`<project>/.claude/skills/<name>` を含む）をそこへの**相対シンボリックリンク**にする（本節「`npx skills add` 仕様確認結果」項目7）。この配置は WikiCommit の前提と 2 箇所で噛み合わない:
 
 1. **host → container の境界をまたげない**。`dev/pilot-ai-driven-dev-wiki-round5.md` で、ホスト側にこの方式で配置してから devcontainer を作成したところ、コンテナ内から Skills が認識されなかった。round2〜round4 のパイロットは `install.sh`（`cp` による実体コピー）で同じ「ホスト側に配置 → devcontainer に持ち込む」手順を採っており一度も起きていないため、シンボリックリンク方式に切り替えたことが分水嶺である。**正確な機構は特定していない**（ホスト OS 側でのリンク作成失敗か、bind mount でのリンク変換不良か）。実務上は下記 2 つの回避策のどちらでも解消するため、切り分け自体は未実施のままとする。
-2. **Git 管理の前提と食い違う**。本節冒頭のとおり「Skills は常にプロジェクトの `.claude/skills/` に配置し、リポジトリで Git 管理する」「`claude-code-action` が参照する」のが WikiCommit の前提だが、シンボリックリンクのままコミットすると、リンク先である `.agents/skills/` も併せてコミットしない限り clone 先でリンク切れになる（`skills-lock.json` はリンクの解決には関与しない）。また `skills-lock.json` は `--copy` の使用有無を記録しないため、`experimental_install` による復元は配置方式の指定なし（＝対象エージェントが複数ならシンボリックリンク）で行われる（本節「`npx skills add` 仕様確認結果」項目3）。
+2. **Git 管理の前提と食い違う**。本節冒頭のとおり「Skills は常にプロジェクトの `.claude/skills/` に配置し、リポジトリで Git 管理する」「`claude-code-action` が参照する」のが WikiCommit の前提だが、シンボリックリンクのままコミットすると、リンク先である `.agents/skills/` も併せてコミットしない限り clone 先でリンク切れになる（`skills-lock.json` はリンクの解決には関与しない）。また `skills-lock.json` は `--copy` の使用有無を記録しないため、`experimental_install` による復元は配置方式の指定なし（＝対象エージェントが複数ならシンボリックリンク）で行われる（本節「`npx skills add` 仕様確認結果」項目3）。 **この壊れ方は Issue #948 以降、WikiCommit 経由のコミットでは起きない**（下のコールアウト — `/wikicommit-init` と `/wikicommit-update` が `.agents/` と `skills-lock.json` もステージする）。**2 点目として今も残るのは Windows である**（Issue #1037）: `core.symlinks=false`（Windows の既定）で clone するとシンボリックリンクがリンク先のパスを書いたテキストファイルになり、`.claude/skills/<name>` が Skill として読めない。README の「Why `--copy`?」はこの 2 点（コンテナ境界と Windows）を理由に挙げている。
 
 **方針**: ドキュメント（README・`README_ja.md`）が案内する `npx skills add` のコマンド例には **`--copy` を付ける**。`--copy` は上記 2 点の両方に同時に効き、結果として `install.sh`（実体コピー）と同じ配置になるため、2 つのインストール方法の間で「インストール後の `.claude/skills/` がどうなっているか」を揃えられる。コピー方式では対象エージェントごとに独立した実体が作られる（`.agents/skills/` 側の実体は、対象に universal エージェントが含まれない限り作られない）。Skill は SKILL.md と小さな `scripts/` のみで構成され合計 3MB 程度（本節冒頭の実測値）のため、Claude Code を対象とする通常の使い方であればこの重複コストは問題にならない。**ただし `--all`（＝ `--skill '*' --agent '*' -y`）と `--copy` を組み合わせてはいけない** — コピー方式は、シンボリックリンク方式が持つ「プロジェクトに存在しないエージェントディレクトリは作らない」というスキップ判定を経ないため、対応する約 50 個すべてのエージェントディレクトリに全 Skill の実体コピーが作られる（実測: 空プロジェクトに対し既定の `--all` はトップレベル 4 エントリ・48K、`--all --copy` は 57 ディレクトリ・908K）。README の一括インストール例は `--skill '*' --agent claude-code -y --copy` としてエージェントを明示する（`--skill '*'` は `--all` と同じく内部限定 Skill を除外するため、対象集合は変わらない）。
 
@@ -206,12 +206,16 @@ description: Register a source file or URL and generate WikiCommit wiki pages lo
 
 | | 件数 | 扱い |
 |---|---|---|
-| `disable-model-invocation: true` を持つ | 9（`collect` / `fix` / `init` / `reconcile` / `remove` / `review` / `schema-propose` / `synthesize` / `update`） | **対象外。** モデルが自律起動しないので triggering は働かない |
+| `disable-model-invocation: true` を持つ | 9（`collect` / `fix` / `init` / `reconcile` / `remove` / `review` / `schema-propose` / `synthesize` / `update`） | **Claude Code では対象外。** モデルが自律起動しないので triggering は働かない。**ただし Codex ではこの除外が成り立たない**（下記コールアウト。Issue #1014） |
 | 持たない配布 Skill | 8（`ask` / `generate` / `merge` / `quiz` / `search` / `serve` / `status` / `translate`） | **対象。** 「いつ使うか」を書く |
 
 **かつて後者は読み取り専用の 5 件とちょうど一致していた。その一致は Issue #945 で崩れた** — 書き込み系である `generate` / `merge` / `translate` の 3 本が対象側へ移ったためである。**これは「読み取り専用だけが自律起動してよい」という規則に例外を 3 つ作ったのではなく、規則の立て方が誤っていたことの訂正である。**
 
 フラグは 2 つの仕事を兼ねていた — (i) 通りすがりの依頼で自律発火しないこと、(ii) 副次的に、人以外のあらゆる起動経路を塞ぐこと。**(ii) は意図されたものではなく、無人運用の経路を丸ごと消す** — 公式ドキュメントが挙げるのは description 一致による自律ロード・**サブエージェントへのプリロード**・**スケジュール実行の発火**の 3 つであり、加えて Skill ツールからの明示起動も（フラグを持つ Skill がモデルに一覧表示されないという別の機構の帰結として）塞がる。残るのは人が `/name` と打つ経路だけである。結果として `dev/` の無人運用の手順書 2 本が原理的に成立しない状態にあり、そのことは実行するまで誰も気づかなかった。(i) は description（全リポジトリに届く）と `skillOverrides`（リポジトリごと・運用者が持つ）が担い、フラグが残るのは**無人経路そのものを一切望まない Skill** に限る（`collect` は登録前の人間承認が設計の中核であり、`fix` / `remove` は `merge` 経由で PR を作る側である）。
+
+> **上表の「対象外」は Claude Code に固有の判断である（Issue #1014）**: `disable-model-invocation` は Claude Code の frontmatter キーであり、**Codex はこれを読まない**（Codex が SKILL.md の frontmatter から認識するのは `name` と `description` の 2 つだけ）。したがって Codex では、#912 が除外したちょうどその 9 本で description が暗黙起動を決める材料になり、しかもその文面は「何をするか」の 1 文で、止める側の防御として書かれていなかった。9 本はいずれも書き込みを伴い、`merge` がフラグを持たないため、暗黙起動した 1 本が残した変更に続けて `merge` が起動すれば既定ブランチまで届く。
+>
+> **現在は 9 本とも「明示的に頼まれたときだけ使え・いつ使うな」を description に書く**（`Use this only when someone explicitly asks …` と `do not use it …`。代わりに呼ぶべき読み取り専用 Skill を名指しする）。方向は #912 の pushy ではなく `generate` / `merge` と同じ**止める側**である。**Claude Code 側の代償はほぼ無い** — 9 本はモデルに一覧表示されないので、変わるのは `/` メニューの説明文だけであり、#912 の「誰も読まない」は Claude Code については引き続き正しい。`tests/test_skill_descriptions.py` がフラグを持つ配布 Skill 全件についてこの 2 句を固定する。
 
 #### 自律起動を絞る手段は 2 層あり、所有者が違う（Issue #945）
 
@@ -221,6 +225,29 @@ description: Register a source file or URL and generate WikiCommit wiki pages lo
 |---|---|---|
 | ① | `description` を絞る | **全リポジトリ**。`npx skills add` で既存の Wiki にも届く |
 | ② | `.claude/settings.json` の `skillOverrides` | **そのリポジトリだけ**。新規リポジトリへ配る経路は Issue #953 |
+
+**エージェントごとにどの層が効くかは違う（Issue #1014）**。上の 2 層と frontmatter のフラグ（③）は、いずれも Claude Code を前提に組まれていた:
+
+| | 手段 | Claude Code | Codex | 置き場 |
+|---|---|---|---|---|
+| ① | `description` | 効く（フラグを持たない 8 本のみ。9 本は一覧表示されない） | **効く（17 本すべて）** | SKILL.md |
+| ② | `.claude/settings.json` の `skillOverrides` | 効く | **効かない**（Claude Code の設定ファイル） | リポジトリ |
+| ③ | `disable-model-invocation: true` | 効く | **効かない**（Codex は読まない） | SKILL.md |
+| ④ | `agents/openai.yaml` の `policy.allow_implicit_invocation: false` | 読まない | **効く見込み**（明示起動 `$skill` は通る） | Skill ディレクトリ |
+
+> **Copilot CLI のシェル承認は、配布物ではなく利用者の起動フラグが担う（Issue #1048）**: 上の層はいずれも「Skill が勝手に起動しないこと」を扱うが、Copilot CLI にはもう 1 つ、**起動した Skill が呼ぶシェルコマンドごとに承認を求める**という層がある。Skill の frontmatter に `allowed-tools: shell` と書けばその承認を事前に済ませられる — **配布 Skill には全件書かない**。決め手は粒度で、Copilot CLI の起動フラグ `--allow-tool='shell(COMMAND)'` でも絞れるのはコマンド名まで（`git` / `gh` のみサブコマンドまで）であり、Skill の `allowed-tools` はコマンド単位の指定に触れてすらいない。最も細かくしても `shell(python)` で、`python -c "..."` を通すので任意のコード実行とほぼ同じになる。WikiCommit は外部 URL の本文を読むので、公式ドキュメントが名指しする警告（プロンプトインジェクションによる任意のコマンド実行）がそのまま当たる。
+>
+> | 選ばなかった案 | 理由 |
+> |---|---|
+> | 全 Skill に `allowed-tools: shell` | Skill が走る間、任意のシェルコマンドが承認なしになる |
+> | 読み取り専用の Skill だけに書く | 事前承認の範囲はシェル全体であって Skill の意図ではない。読み取り専用の Skill も外部由来の文字列を扱う（`ask --include-source` はソース本文を載せ、`search` / `ask` / `quiz` はクエリをコマンドに埋め込む） |
+> | コマンド単位で絞って書く | フラグでもコマンド名までしか絞れず、Skill 側がこの形を受け付けるかも不明 |
+>
+> **書かないので Claude Code・Codex への影響は無い** — Claude Code でも `allowed-tools` は事前承認のキーであり、Copilot の使い勝手のために Claude Code 上の承認の挙動を変えるのは筋が逆で、`shell` という値を Claude Code がどう扱うかという未知も避けられる。承認を減らしたい利用者には、README が `copilot --allow-tool='shell(python)'` を**利用者の判断で**付けられることと、その意味（実質的に任意のコード実行の許可）を案内する。**安全装置を外す判断は配布物ではなく利用者の手元に残す** — Issue #945 が自律起動の抑止を frontmatter のフラグから運用者の `skillOverrides` へ寄せたのと同じ置き場の考え方である。`tests/test_skill_descriptions.py` が配布 Skill の frontmatter に `allowed-tools` が無いことを固定する。**実機で確かめること**（Issue #732 / #1022 の CLI 検証へ引き継ぐ）: `shell(python)` が `python3` やパス付きの呼び出しにも一致するか、フラグを付けた場合に承認がどの程度減るか。
+
+**④ は ③ を持つ 9 本にだけ置く**（Issue #1014）。キーは `policy:` の下に置く — トップレベルに書くと読まれない（OpenAI 公式の `openai/skills` の実ファイルが `policy:` の下に持つ）。`install.sh`（`find -type f`）・`.claude-plugin/plugin.json`（ディレクトリ単位）・公開スナップショット（`.claude/skills/wikicommit-*` の glob）は変更なしで運び、`npx skills add` は `--agent codex` / symlink 方式 / `--copy` / 再 `add` / lock からの復元のいずれでも残すことを実測で確認した（2026-09-24。`skills` CLI v1.7.0）。**利用者が手で足した `agents/openai.yaml` は再インストールで Skill ディレクトリごと置き換わって消える**ので、配布物に入れる以外に恒久的な形は無い。
+
+**④ が実際に暗黙起動を止めるかは未確認である**。OpenAI 公式の `migrate-to-codex` は `disable-model-invocation` を「直接の対応物なし」とし、`policy.allow_implicit_invocation` を「意図は近いが同じ意味ではない」としている。①を 9 本でも書いたのはそのためで、④が効かなかった場合でも description が判断材料として残る。実機での確認は Issue #732。**`tests/test_skill_descriptions.py` が ③ と ④ の対応を両方向で固定する** — フラグを持つ配布 Skill には `policy.allow_implicit_invocation: false` があり、持たない Skill が Codex でだけ止められていることもない。
 
 `skillOverrides` の取りうる値は 4 つで、**軸が「Claude への見せ方を絞る」方向にしかない**（フラグを設定で打ち消すことはできない）:
 
@@ -366,7 +393,7 @@ trigger eval と behavioral eval は別の機構である — 前者は `[{"quer
 | `wikicommit-ask` | `/wikicommit-ask <question>` | `.wikicommit/entity/` を検索し、LLM が回答を生成。MCP なしで知識参照を可能にする |
 | `wikicommit-search` | `/wikicommit-search <query> [--lang <lang>] [--no-expand]` | `.wikicommit/entity/` をキーワード検索し、結果を列挙する。クエリ語は同義語・上位語・略語へ拡張され（Issue #581。`--no-expand` で無効化）、さらに `config.yml` の対象言語ごとに翻訳して言語ごとに逐次検索し、結果をマージする（Issue #582。`translated_from` で結ばれた同一ページは1件に集約し、抑制された他言語版は `(also in: <lang>)` として表示する。`--lang` 明示時は言語をまたぐ fan-out をスキップ＝オプトアウト手段を兼ねる。ただし `<lang>` への翻訳は止めない）。対象言語は `config.yml` に加えて `.wikicommit/entity/` 直下に実在する言語ディレクトリも含める（全クエリが `--lang` を伴うため、含めないと未設定言語のページが端から届かなくなる）。`--limit` は言語数に関わらず言語ごと10件・マージ後10件まで |
 | `wikicommit-status` | `/wikicommit-status` | 未処理ファイル数・未審査ページ数・孤立ページ数・wanted ページ数・Type セグメント取り違え数・スキーマファイル未整備の型数・expires_at 期限切れ数を表示。`check_orphans.py` / `check_wanted_pages.py` / `check_expires.py` / `check_ingest_freshness.py` / `check_translation_status.py` / `check_derivation_freshness.py` を呼び出して集計するほか、`check_actions_pr_permission.py`（Issue #478）でGitHub Actions PR権限設定も、`check_property_wikilink_reinforcement.py`（Issue #539）で型テンプレートのproperty-value WikiLink補強の非対称性も、`check_recurring_characters.py`（Issue #560）で `properties.character` にプレーンテキストのまま埋もれた登場人物も、`check_unlinked_entity_mentions.py`（Issue #561）で実在するページを指すのにリンクされていない `properties:` 値も、`check_installed_type_usage.py`（Issue #565）でページが 0 件のインストール済み型・祖先型に落ちている可能性も、`check_self_referential_tags.py`（Issue #571）でページ自身の title/type を繰り返すだけのタグも、`check_retracted_sources.py`（Issue #737）で人間が取り下げたソースになお立っているページも、`check_schema_coverage.py`（Issue #575）で専用スキーマファイルが無いまま使われている `type:` 値も確認する |
-| `wikicommit-collect`（Phase 3〜） | `/wikicommit-collect` | `config.yml` の `theme` に基づき、ローカルフォルダおよび Web から未取り込みの関連ソース候補を探索し一覧提示する。引数なし（research guidance が渡されなかった）実行では、探索の前に Step 3.5（俯瞰ステップ）が走る（Issue #672。`wikicommit-synthesize` の Step 0〈Issue #586〉と同型のものを探索側に置いたもの）— `build_survey_view.py`・`check_wanted_pages.py`・`check_orphans.py` の 3 本を呼んで Wiki の現状を俯瞰し、着眼点を最大 5 件提案して人間が選ぶ。選ばれた着眼点はそのまま Step 2 が保持する research guidance になり（`theme` を置き換えない）、Step 4/5 がそれを使う。合流点は既存であり新しい概念は要らない。`theme` は Wiki 全体の内容スコープ（Issue #564 がその役割に限定した）であり、1 回の探索の方向づけとしては粗すぎる — 方向づけの受け口自体は元からあったが、そこに何を打てばよいかを知る手段が collect の中に無く、引数なし実行が毎回同じ広さで探して既に厚い領域の候補を繰り返し拾っていた。**自動探索にはしない**: 判断するのは人間で、俯瞰は材料を出すだけである（Issue #586 と同じく idea support であって品質ゲートではない）。何も選ばれなければ何も探索せず停止し、非対話実行でも停止する（`/wikicommit-collect <guidance>` と明示すれば俯瞰を飛ばせる）。却下された着眼点はどこにも永続化しない — Step 8 が `source-policy.md` の `rejected:` に書くのは「人間が却下したソース URL」であって着眼点ではなく、混ぜない。`--index <url>` だけが渡された場合は guidance が空なので発動する（`--index` は探索の入口であって着眼点ではない）。`TYPE_MISMATCH:` は着眼点の候補にしない（実体は在りリンク 1 語の誤りで、要求される行動が `WANTED:` と正反対。Issue #563）。`/wikicommit-status` を丸ごと呼ぶこともしない（`check_ingest_freshness.py` が管理ファイルを書き換える副作用を持ち、探索の前に副作用を起こす理由が無い）。Claude Code のネイティブ Web 検索・既存 Skills を活用し専用クローラは自作しない。Web 探索は theme の抽象度そのままの広いクエリ 1 本ではなく、6 つのパス（theme の具体語・`filetype:pdf`・既登録ソースのホストへの `site:`・`theme`／`source-policy.md` が名指しする発信元への `site:`・`check_wanted_pages.py` の `WANTED:` を検索語にするパス・リポジトリホスト）からなるクエリ群として投げる（Issue #666。1 パスあたり最大 5 本・1 実行あたり最大 20 本。広いクエリ 1 本が返すのは分布のヘッドであり、theme が名指しする個人ブログ・小さな OSS リポジトリ等のテールには構造的に到達しないため。探索履歴は永続化せず、各パスは実行のたびに Wiki の現在の状態から導出される）。候補提示直後、候補群のタイトル・要約を俯瞰して `installed schema/` 外の Schema.org 標準型が明確に良い適合先と判断した場合、`wikicommit-generate` Pass 2b の対話実行時と同じ Enter ベース承認 UX で型を提案し、承認されれば `.wikicommit/schema/<Type>.md` をその場で新規作成する（Issue #489。候補提示自体が対話的なためバッチ実行特有の「確認が取れずデフォルト却下」問題が起こらない — Pass 2b 自身は非対話実行検出時に別の自動承認経路を持つ〈Issue #507〉が、`wikicommit-collect` のこのステップは常に対話実行される前提のため対象外）。`.wikicommit/source-policy.md` の `index_only:`（またはコマンド引数 `--index <url>`）に該当するページは候補にせず、**その参照節から一次資料 URL を掘って候補に流し込む**（Issue #570。索引ページ自身は決して登録しない — 本文を読んで「何を書くか」を決めると、そのページが `sources:` に無いため Pass 4 の照合も帰属表示も効かない無帰属の二次的著作物になる）。候補は人間が確認・選択した分のみ `.wikicommit/source/` に登録（`wikicommit-generate` を内部呼び出し）。著作権・ライセンスリスクを踏まえ、登録前の人間承認を必須とする |
+| `wikicommit-collect`（Phase 3〜） | `/wikicommit-collect` | `config.yml` の `theme` に基づき、ローカルフォルダおよび Web から未取り込みの関連ソース候補を探索し一覧提示する。引数なし（research guidance が渡されなかった）実行では、探索の前に Step 3.5（俯瞰ステップ）が走る（Issue #672。`wikicommit-synthesize` の Step 0〈Issue #586〉と同型のものを探索側に置いたもの）— `build_survey_view.py`・`check_wanted_pages.py`・`check_orphans.py` の 3 本を呼んで Wiki の現状を俯瞰し、着眼点を最大 5 件提案して人間が選ぶ。`build_survey_view.py` の `PAGE:` 行はソースの件数（`sources=N`。Issue #990）も持つので、被リンクが多いのに `sources=1` のページ — 「何が欠けているか」ではなく「**何が薄く支えられているか**」 — も着眼点の材料になる（`ORPHAN:` が出自付きで「端が薄い」を出すのと対になる。1 本の文書についてのページのように 1 件が正しい場合もあるので、判定ではなく材料として読む）。選ばれた着眼点はそのまま Step 2 が保持する research guidance になり（`theme` を置き換えない）、Step 4/5 がそれを使う。合流点は既存であり新しい概念は要らない。`theme` は Wiki 全体の内容スコープ（Issue #564 がその役割に限定した）であり、1 回の探索の方向づけとしては粗すぎる — 方向づけの受け口自体は元からあったが、そこに何を打てばよいかを知る手段が collect の中に無く、引数なし実行が毎回同じ広さで探して既に厚い領域の候補を繰り返し拾っていた。**自動探索にはしない**: 判断するのは人間で、俯瞰は材料を出すだけである（Issue #586 と同じく idea support であって品質ゲートではない）。何も選ばれなければ何も探索せず停止し、非対話実行でも停止する（`/wikicommit-collect <guidance>` と明示すれば俯瞰を飛ばせる）。却下された着眼点はどこにも永続化しない — Step 8 が `source-policy.md` の `rejected:` に書くのは「人間が却下したソース URL」であって着眼点ではなく、混ぜない。`--index <url>` だけが渡された場合は guidance が空なので発動する（`--index` は探索の入口であって着眼点ではない）。`TYPE_MISMATCH:` は着眼点の候補にしない（実体は在りリンク 1 語の誤りで、要求される行動が `WANTED:` と正反対。Issue #563）。`/wikicommit-status` を丸ごと呼ぶこともしない（`check_ingest_freshness.py` が管理ファイルを書き換える副作用を持ち、探索の前に副作用を起こす理由が無い）。Claude Code のネイティブ Web 検索・既存 Skills を活用し専用クローラは自作しない。Web 探索は theme の抽象度そのままの広いクエリ 1 本ではなく、6 つのパス（theme の具体語・`filetype:pdf`・既登録ソースのホストへの `site:`・`theme`／`source-policy.md` が名指しする発信元への `site:`・`check_wanted_pages.py` の `WANTED:` を検索語にするパス・リポジトリホスト）からなるクエリ群として投げる（Issue #666。1 パスあたり最大 5 本・1 実行あたり最大 20 本。広いクエリ 1 本が返すのは分布のヘッドであり、theme が名指しする個人ブログ・小さな OSS リポジトリ等のテールには構造的に到達しないため。探索履歴は永続化せず、各パスは実行のたびに Wiki の現在の状態から導出される）。候補提示直後、候補群のタイトル・要約を俯瞰して `installed schema/` 外の Schema.org 標準型が明確に良い適合先と判断した場合、`wikicommit-generate` Pass 2b の対話実行時と同じ Enter ベース承認 UX で型を提案し、承認されれば `.wikicommit/schema/<Type>.md` をその場で新規作成する（Issue #489。候補提示自体が対話的なためバッチ実行特有の「確認が取れずデフォルト却下」問題が起こらない — Pass 2b 自身は非対話実行検出時に別の自動承認経路を持つ〈Issue #507〉が、`wikicommit-collect` のこのステップは常に対話実行される前提のため対象外）。`.wikicommit/source-policy.md` の `index_only:`（またはコマンド引数 `--index <url>`）に該当するページは候補にせず、**その参照節から一次資料 URL を掘って候補に流し込む**（Issue #570。索引ページ自身は決して登録しない — 本文を読んで「何を書くか」を決めると、そのページが `sources:` に無いため Pass 4 の照合も帰属表示も効かない無帰属の二次的著作物になる）。候補は人間が確認・選択した分のみ `.wikicommit/source/` に登録（`wikicommit-generate` を内部呼び出し）。著作権・ライセンスリスクを踏まえ、登録前の人間承認を必須とする |
 | `wikicommit-quiz`（Phase 3〜） | `/wikicommit-quiz [--topic <keyword>] [--lang <lang>] [--difficulty=easy\|medium\|hard]` | `.wikicommit/entity/` 全体から `wikicommit-search` 相当の検索で関連ページを収集し、LLM がクイズを生成して会話内に出力する。ファイル書き出しは行わない。`--topic` 指定時は `wikicommit-search` と同じクエリ語拡張（Issue #581）・クロスリンガル検索（Issue #582。`--lang` でオプトアウト）を行う — 同一ページの複数言語版が両方ヒットすると同じ事実についての設問が2問できてしまうため、重複排除はここでは必須。出題・解説の言語は `--topic` の言語（省略時は `primary_lang`）に固定し、grounding ページの言語に引きずられない。`--topic` 省略時の分岐（`primary_lang` 配下からランダムサンプリング）はクエリ自体が存在しないため対象外 |
 | `wikicommit-synthesize`（Phase 3〜） | `/wikicommit-synthesize [<topic>]` | 指定した概念・用語について `wikicommit-ask` と同様に関連ページを収集し、LLM が新規ページを合成する。`generate` が外部ソースから作るのに対し、こちらは既存 `entity/` ページ群から作る（Issue #283。`wikicommit-document` からの改名・全面改訂）。出力先は **`.wikicommit/view/<lang>/<slug>.md`**（Issue #675。旧 `.wikicommit/entity/<lang>/<Type>/<slug>.md` から移動。旧来の `.wikicommit/exports/` という仮置き概念は Issue #283 が既に廃止済み）で、品質ゲート対象・`/wikicommit-merge` でPR化可能な点は変わらない。**`type:` を持たず**、代わりに任意の `kind`（`practice` / `landscape` / `comparison` / `pattern` / `timeline` / `debate` の 6 値。「複数ページを見て何をするか」を表し、Schema.org 型の「何についてか」とは直交する）を持つ — 型選択ステップは削除され、同じ topic の 2 回の実行が別々のパスに解決される問題（Issue #545）も構造的に消えた。公開先は `content/<lang>/View/<slug>.md`、WikiLink は `[[View/<slug>]]`（`View` は予約 Type セグメント。言語を先頭に保つことで breadcrumbs / language-switcher / explorer の 3 プラグインが無改修で済む）。詳細は `docs/DesignDoc-data.md` §4.5.1。出自は `derived_from`（`{path, source_commit}` の配列）フロントマターに記録し、`sources` は書かない。本文生成後・書き出し前に、`wikicommit-generate` Pass 4 と同型のレビューサブエージェント（Step 5.5）がgrounding ページ群と照合する（Issue #674。3 つの生成経路のうち合成だけが検証を持たなかった。返却形式は §4.6 のエージェント間 JSON をそのまま使い、`source_file` には grounding ページのパスが入る。再試行は `generate.max_retries` を流用し、上限超過時は書き出さずに停止・報告する。grounding ページ同士の食い違いは `page_at_fault: "other"` と同じ扱いで FAIL にせず完了報告に列挙する）。grounding set には `derived_from` を持つページを入れない（同 Issue。合成ページを通常ページの 1 段上に留める。索引からは除外しないため `/wikicommit-search` からは引き続き見つかる）。grounding のうち `review_status: pending` のページは本文生成の前に列挙して伝える（警告でありゲートではない）。書き出し後、そのページの言語の view index（`.wikicommit/view/<lang>/index.md`）を `rebuild_index.py` で再構築する（Issue #547。Issue #675 以降は Type 別ではなく言語別）。引数なしで実行した場合は Step 0（俯瞰モード。Issue #586）が先行し、`build_survey_view.py` が返す Wiki 全体の縮約ビュー（各ページの title/type/tags/`properties.description`/`##` 見出し/発リンク + リンクグラフ由来のハブ・タグ集計）から、複数ページを横断して初めて見える着眼点を最大5件提案する（他 Skill 群と同じ 5 件閾値）。人間が選んだ着眼点がそのまま `<topic>` として Step 1 以降に合流し、選ばれなかった候補はどこにも永続化しない。候補提示は非決定論的（実行ごとに結果が変わる）であり、品質ゲートではなく着想支援である |
 | `wikicommit-serve`（Phase 3〜） | `/wikicommit-serve [--build]` | `npm run preview` / `npm run build`（Quartz v5 のローカルビルド・プレビューサーバー）の薄いラッパー。Git 操作を行わない読み取り専用 Skill（Issue #276。`wikicommit-review` との名称衝突解消のため Issue #381 で `wikicommit-preview` から改名）。`quartz.config.yaml`（`/wikicommit-init --quartz`）の存在が前提。既存の `package.json` に WikiCommit のビルドスクリプトがマージされていない場合はその旨を案内して停止する |
@@ -448,6 +475,26 @@ WikiCommit ソース登録 + Wiki ページ生成 Skill。Git 操作は行わな
 ...
 ```
 
+#### Skill ツリーの位置を仮定してよい箇所・してはならない箇所（Issue #1021）
+
+**Skill は `.claude/skills/` にあるとは限らない。** Claude Code はそこを読むが、Codex は `.agents/skills/` を読み、`npx skills add --agent codex` 単独では `.claude/skills/` は作られない（Copilot は公式ドキュメント上 `.github/skills/`・`.claude/skills/`・`.agents/skills/` のいずれも読むので、`.claude/skills/` に実体を置く限り当たらない見込みが高い — 実機確認は Issue #732）。上の図が `.claude/skills/` で描かれているのは開発リポジトリの配置であって、配布先の前提ではない。
+
+| 誰が | Skill の場所を | 書き方 |
+|---|---|---|
+| 指示文（`SKILL.md`・`references/*.md`）が**同じ Skill 内**を指す | 仮定しない | Skill ディレクトリ相対（`references/pass1-extract.md`・`python scripts/add_source.py`） |
+| 指示文が**別の Skill** を指す | 兄弟であることだけを仮定する | 兄弟 Skill 相対（`../wikicommit-init/scripts/init.py`） |
+| `.wikicommit/scripts/` のスクリプトが Skill ツリーを**読みに行く** | 仮定しない | `_skill_tree.py` の探索順（`.claude/skills` → `.agents/skills`） |
+| Skill 内スクリプトが自分のファイルを指す | 仮定しない | 自分の `__file__` から辿る |
+| 人が手で打つ手順書（`guides/`）・人向けの案内文 | 仮定してよいが**併記する** | `.claude/skills/…` と書き、Codex の場合は `.agents/skills/` である旨を添える。スクリプトが印字する案内は自分の `__file__` から実際のパスを出す |
+
+**指示文の相対パスが成り立つのは、両ランタイムが Skill の場所をエージェントに渡すからである。** Claude Code は Skill を起動すると本文の冒頭に `Base directory for this skill: <絶対パス>` を注入し、Codex は Skill 一覧に各 Skill のファイルパスを含める。agentskills.io 標準も「Skill 内の他ファイルは Skill ルートからの相対パスで参照せよ」と定め、Anthropic 公式 Skill（xlsx 等）は `python scripts/recalc.py` のようなスクリプト呼び出しまで Skill 相対で書き、"Script paths below are relative to this skill's directory." と 1 行断っている。WikiCommit も相対パスを持つ各ファイルの冒頭に同じ趣旨の断りを 1 つ置く。**コマンドは引き続きリポジトリルートで実行する** — 断りは「パスをリポジトリルートから綴り直せ」と述べており、スクリプトが `.wikicommit/` を読む処理は cwd に依存したまま壊れない。
+
+**兄弟 Skill 相対（`../`）は agentskills.io の "Keep file references one level deep from `SKILL.md`" を意図して外れる。** 推奨であって禁止ではない。外れる理由は、WikiCommit の Skill 群が 1 つの配布物として同時にインストールされ、スクリプト（`add_source.py`・`init.py`）とテンプレート（`schema-authoring.md`・`check_distribution_freshness.py`）を共有するためである — `.claude/skills/` でも `.agents/skills/` でも全 Skill が同じ親ディレクトリに並ぶので、`../<skill>/` はどちらでも解決する。Codex が `../` を実際に解決するかは Issue #732 の実機で確かめる。成り立たなかった場合でも、影響は Skill をまたぐ参照に限られ、同じ Skill 内の参照（`references/` へのポインタを含む）には及ばない。
+
+**再混入は `tools/check_skill_tree_paths.py` が止める**（blocking。`docs/DesignDoc-TestSpec.md` L14）。固定パスは Issue #732 の起票時の 22 箇所から Issue #1021 の時点で 57 箇所へ、止めるものが無いまま増えていた。
+
+**採らなかった案**（詳細は Issue #1021 のコメント）: 実行時に自分のディレクトリを解決する手順を指示文に書かせる案（B1。標準が既に定めている書き方を独自の手順で再現することになる）、共有スクリプトを `.wikicommit/scripts/` へ移す案（B2。問題の 2 本は既にそこにあり、Skill ツリーを読みに行く側である）、`--agent claude-code` の併用を必須にする案（B3）、symlink 配置を推奨にする案（B5。どちらも Codex 単独配置のサポートと矛盾し、B5 は Windows で `core.symlinks` を持たない clone の Claude Code 側を壊しうる）。
+
 ### 11.4 将来のマルチエージェント対応
 
 MVP では Claude Code のみを対応対象とする。`.wikicommit/schema/` は将来の全エージェントで共通利用できるように維持し、他エージェントへの対応時はそのエージェントが要求する配置場所に薄い連携ファイルを追加する。
@@ -455,12 +502,37 @@ MVP では Claude Code のみを対応対象とする。`.wikicommit/schema/` �
 | エージェント | エントリポイント |
 |---|---|
 | Claude Code | Skill 定義（`.wikicommit/schema/` を参照） |
-| GitHub Copilot | 任意の既存プロジェクト設定（`.wikicommit/schema/` を参照） |
+| GitHub Copilot — VS Code エージェントモード | Skill 定義（`.claude/skills/`・`.agents/skills/`・`.github/skills/` のいずれも読む）。**対象・実機検証待ち** |
+| GitHub Copilot CLI | 同上。**未検証**。配布 Skill は `allowed-tools` を書かない（Issue #1048。上記 §11.1 の層の表の後の注記） |
+| GitHub Copilot クラウドエージェント | 同上だが**非対応**（構造的に WikiCommit の Git フローと衝突する） |
 | その他 | エージェント固有の設定ファイル → `.wikicommit/schema/` を参照 |
+
+> **GitHub Copilot は実行面が 3 つあり、前提がそれぞれ違う（Issue #1022）**: 以前この表は Copilot を 1 行で扱い、Issue #732 は「Codex と同じ `.agents/skills/` を読むので同じ結果になる」前提を置いていた。公式ドキュメント（2026-09-24 確認。実機ではない）によれば Copilot は **Codex とほぼ正反対の性質**を持つ — `.claude/skills/` も読み（固定パス〈Issue #1021〉で壊れない）、明示起動は `/<skill>`（`$` の読み替え〈Issue #1015〉が要らない）、VS Code は `disable-model-invocation` を尊重する（自律起動の抑止〈Issue #1014〉が既存の仕組みで効く）。**したがって Codex の結果は流用できず、面ごとに扱いを決めた**:
+>
+> | 面 | 扱い | 理由 |
+> |---|---|---|
+> | VS Code エージェントモード | **対象にし、実機で検証する** | Codex で起きた 3 つの問題がいずれも発生しない見込みで、検証が最も安い |
+> | Copilot CLI | **README に「未検証」と書き、検証しない** | シェルコマンドごとの承認を省く `allowed-tools: shell` を配布物に書くか（書き込み系 Skill では安全装置を外す）を先に決める必要がある。決めずに試しても「承認の往復が多い」という既知の結果しか得られない（Issue #1048） |
+> | クラウドエージェント | **非対応とし、README に理由を書く** | 実機を見なくても構造的に衝突する — 自分で開く 1 本の PR の中で作業するため `/wikicommit-merge` が PR の中で別の PR を作ってマージすることになり、既定のファイアウォールで URL ソースも取得できない（Issue #1020）、セッションは 59 分が上限 |
+>
+> **選ばなかった案**: 3 面すべて（クラウドエージェントは壊れ方が事前に分かっており、実機で得られるのは確認だけ）／VS Code ＋ CLI（`allowed-tools` を決めないまま CLI を試しても判断材料が増えない）／README から Copilot を外す（VS Code 版は動く見込みが高く、安い検証 1 回で「対応」と書ける。外すのは検証で壊れた場合の最後の手段）。
+>
+> **Copilot にしか無い問題 — 二重発見**: `.claude/skills/` と `.agents/skills/` の両方に Skill が置かれるインストール（`--agent claude-code --agent codex --copy`、および `--copy` なしで 2 つ以上のエージェントに入れた場合 — 実体が `.agents/skills/` に置かれ `.claude/skills/` はそこへのシンボリックリンクになる。§11.1）では、両方を読む Copilot に同名の Skill が 2 つずつ見える可能性がある。同名の扱いは文書に無い。VS Code で (1) `--agent claude-code --copy` のみ、(2) 両エージェント向け、の 2 通りを試して確かめる。README は当面「Copilot 単独なら `--agent claude-code` のみ」と案内する。**実機での確認は未了**であり、結果が出たらこの節と README を更新する。
+>
+> **指示文の語彙 — ツール名と起動記法（Issue #1015）**: 配布 Skill の指示文は Claude Code の**ツールの固有名**（`Read tool` 17 箇所・`WebFetch` 3・`Write tool` 3・`Bash tool` 2・`Grep tool`・`Edit tool`。2026-09-23 実測）と**スラッシュコマンド記法**（`/wikicommit-*` が約 350 箇所）を前提に書かれていた。Codex にはこれらの名前のツールが無く、Skill の明示起動は `$wikicommit-generate` である（`/skills` は一覧を開くだけ）。**2 つは宛先が違うので別々に決めた**（§11.8 の「読み手が誰か」）。
+>
+> | 語彙 | 読み手 | 決定 |
+> |---|---|---|
+> | ツール名 | エージェントのみ | **役割で書き直す**（案 A）。`tools/check_skill_tool_names.py`（blocking。`docs/DesignDoc-TestSpec.md` L15）が再混入を止める |
+> | `WebFetch` によるソース再取得（`wikicommit-fix` Step 3・`wikicommit-review` Step 4） | エージェント | **`add_source.py --fetch-url` に寄せる**。ツールの選択で取得内容が変わる箇所であり（エージェントによっては要約を返す）、`wikicommit-generate` が既に同じ理由でそこへ寄せている（Issue #189 / #527）。出力は `.wikicommit/.cache/refetch/` に置き、`ingest-fetch/` の抽出キャッシュを上書きしない |
+> | `/wikicommit-*`（指示文内の相互参照） | エージェント | **据え置く**。Skill 名として読めれば足り、354 箇所を 2 表記にすると指示面積だけが増える |
+> | `/wikicommit-*`（利用者に届く出力） | 人 | **1 度だけ `$` の表記を併記する**（案 C の限定形）。対象は `print_next_steps.py` の「次のステップ」案内と、`wikicommit-merge` Step 8 / Step 9 が GitHub に書き出す Issue 本文 — 後者は Claude Code のセッションを持たない読者が読む（Issue #313） |
+>
+> **採らなかった案**: 冒頭に読み替え表を置く（案 B。SKILL.md は起動のたび全文が載るため 17 Skill 分の指示面積が増え、`references/` に置けば読まれる保証が無い。しかも読み替えが起きたかは依然出力に現れない）／何もしない（案 D。Issue #732 が README の互換性主張を実態に合わせる材料が減る）。**案 A の代償**は Claude Code 側でどのツールを使うかの指示が緩むことだが、全箇所を確認した結果、`Read tool` が担っていた含意は「全文を読め」（途中で切らない）であり、それは「in full」として残した。**Codex での実機確認は Issue #732 のスコープ**である。
 
 ### 11.5 スクリプト委譲パターン
 
-Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論的な操作・全ファイル走査・グラフ解析のような**再現性・網羅性が必要な操作**を LLM だけで行うと漏れや誤差が生じる。このような操作はスクリプトに委譲し、Claude Code が Bash ツール経由で呼び出す。
+Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論的な操作・全ファイル走査・グラフ解析のような**再現性・網羅性が必要な操作**を LLM だけで行うと漏れや誤差が生じる。このような操作はスクリプトに委譲し、エージェントがシェルから呼び出す。
 
 スクリプトの置き場所は **ブートストラップと所有権** で決まる：
 
@@ -479,11 +551,17 @@ Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論�
 > | `remove_page.py` | 下記の自己矛盾した理由 | 崩れている |
 > | `resolve_source_cache_path.py` | **`sys.path.insert(0, ".wikicommit/scripts")` で `_frontmatter` を import している** | 反例 |
 >
-> **`remove_page.py` に書かれていた複製理由（「サブプロセスとして実行され、呼び出し元の cwd から `.wikicommit/scripts/` が解決できるとは限らない」）は成立しない。** 全 SKILL.md の呼び出しは `python .claude/skills/<skill>/scripts/<x>.py` という**リポジトリルート相対**であり、cwd がルートでなければ Python が起動する前にコマンド自体が落ちる — **cwd への同じ仮定を、同じコマンドラインの 1 語手前で既に置いている**。理由の文言は訂正したが、**複製そのものは残してある**（誤った理由を正すことと、それに基づいて書かれたコードを書き換えることは別の判断であり、後者は独立に決められる）。
+> **`remove_page.py` に書かれていた複製理由（「サブプロセスとして実行され、呼び出し元の cwd から `.wikicommit/scripts/` が解決できるとは限らない」）は成立しない。** 全 SKILL.md の呼び出しは `python <Skill ツリー>/<skill>/scripts/<x>.py`（Issue #1021 以降、指示文は Skill ディレクトリ相対で書き、エージェントがリポジトリルートから綴り直して実行する）という**リポジトリルート相対**であり、cwd がルートでなければ Python が起動する前にコマンド自体が落ちる — **cwd への同じ仮定を、同じコマンドラインの 1 語手前で既に置いている**。理由の文言は訂正したが、**複製そのものは残してある**（誤った理由を正すことと、それに基づいて書かれたコードを書き換えることは別の判断であり、後者は独立に決められる）。
 >
 > **判断基準は「写しが何本増えるか」である。** `build_onehop_context.py`（Issue #947）は `WIKILINK_RE`・エンティティ / view 走査・`parse_wiki_path`・frontmatter 読み・クロス言語解決一式を要し、Skill 内に置いて import を避けると **Issue #677 が集約したばかりのものの 3 つ目の写し**を作ることになる。Skill 内に置いて import する形は、共有側に置くのと結果が同じで木をまたぐ import が 1 本増えるだけである。したがって共有側に置いた。
 >
 > **版ずれ（Issue #930）は判定材料にならない。** どちらの置き場でも効き、どちらも #930 が危険とした「静かに変わる」形を含む — Skill 内 + import で版ずれが `ImportError` になるのは symbol が消えたか改名されたときだけであり、古い `_wikilink.py` が `WIKILINK_RE` を**名前はそのままに別の文字クラスで**持っていれば import は通って結果だけが黙って変わる。共有側には `wikicommit-generate` Step 0 の `check_distribution_freshness.py --only .wikicommit/scripts` という検出が既にあるが、非ブロッキングの警告であり置き場所を決めるほどの差にはならない。
+>
+> **Skill ツリーを読みに行く共有スクリプトは、その位置を `_skill_tree.py` から引く（Issue #1021）**: `.wikicommit/scripts/` のうち 2 本が実行時に Skill ツリーを読む — `record_run.py`（`--token` の照合先 `<skill>/references/<pass>.md`）と `check_distribution_freshness.py`（`wikicommit-init/scripts/` のテンプレート）。どちらも `.claude/skills/` を固定で持っていたため、Codex 単独配置（`.agents/skills/` のみ）では前者が正しく手順を読んだ実行を `token: missing` と記録し（Issue #925 が版ずれについて直したのと同じ向きの誤り）、後者は「wikicommit-init が未インストール」と全 0 の `SUMMARY:` を出して Issue #930 の版ずれ検査を黙って空振りさせた。
+>
+> 探索順（`.claude/skills` → `.agents/skills`）は `_skill_tree.py` に 1 か所だけ置く。**Skill 内スクリプトにも写しは要らなかった** — Skill 内スクリプトは自分の `__file__` から兄弟を辿れるので、Skill ツリーの位置を知る必要があるのは、`.wikicommit/scripts/` から Skill ツリーを覗く側だけである（Issue #1021 の本文は写しが 2 か所要ると見込んでいた）。
+>
+> **両方に実体がある場合（`--copy` で 2 エージェントに入れた場合）**: 同じインストールから来た写しなので通常は同一バイトであり、順序は答えを変えない。食い違っている場合、`check_distribution_freshness.py` は `.claude/skills` 側と比較する（Claude Code が実行する写しであり、Issue #1021 より前から動いていたリポジトリの答えが変わらない）。`record_run.py` は **どちらかの写しが `--token` を裏づければ `ok`** とする — エージェントは自分のランタイムが読む写しを読んだのであり、このスクリプトにはどちらのランタイムかが分からないので、もう一方の写しが違うことを理由に「読まずに実行した」と記録してはならない。`mismatch` は引き続き「ディスク上のどの写しも裏づけない」を意味する。**照合先を引数で受け取る形にはしない** — スクリプトが自分でファイルを開くことが第三者性の根拠である（Issue #797）。
 
 #### Skill 内スクリプト（`.claude/skills/<name>/scripts/`）
 
@@ -496,7 +574,7 @@ Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論�
 | `wikicommit-init` | `scripts/_root_outputs.py` | ルート生成物の宣言的な一覧。上記 2 スクリプトが共有する単一の情報源で、`init.py` の verbatim コピーと `print_next_steps.py` の `git add` 案内の両方をここから組み立てる（Issue #642。下記コールアウト参照） |
 | `wikicommit-generate` | `scripts/add_source.py` | 管理ファイルのパス計算・SHA-256・生成・status 更新・ソースの同一性判定（URL: Issue #572／ファイルパス: Issue #573）・`source.license` の初期値決定（既知ドメイン対応表と `--license`。Issue #558。`docs/DesignDoc-data.md` §4.3）・登録時の partial extraction 通知（`partial_extraction_note()`。Issue #715 — 静的取得で本文は取れるが一部が黙って落ちる URL 形〈GitHub の Issue / PR スレッド〉を、ブロックせず登録時に一度だけ知らせる。ShareAlike 通知と同じ形）。`--license-for-url` は同じ対応表を引くだけの読み取り専用モードで、**この 1 モードに限り `wikicommit-collect` からも呼ばれる**（Issue #646。下記コールアウト参照）。`--check-path-cache` / `--path-cache-path` は `type: path` の抽出テキストキャッシュの有効性確認と置き場の印字（Issue #885。前者は read-only で `source.hash` に一切触れない — `type: path` のそれは生ファイルのハッシュであり、キャッシュのハッシュで上書きすると `check_ingest_freshness.py` の鮮度判定が壊れる。`docs/DesignDoc-pipeline.md` §6.1） |
 | `wikicommit-remove` | `scripts/remove_page.py` | frontmatter への `status: removed` / `removed_at` 付与 |
-| `wikicommit-ask` | `scripts/resolve_source_cache_path.py` | `--include-source`（Issue #470）専用。**`--type url` / `--type path` の 2 モードを持つ**（後者は Issue #885 で追加）。`--type url` は `sources[].url` から `.wikicommit/source/url/` 配下を実走査して一致する ソース管理ファイルを特定し、その実パスから scratch-path を導出して `.wikicommit/.cache/ingest-fetch/` 内のキャッシュファイルを解決する。`--type path` は同じ実走査を `.wikicommit/source/path/`（`source.path` で照合）に対して行い、`.wikicommit/.cache/extract-path/` 内の**抽出テキスト**キャッシュを解決する — こちらは管理ファイルの相対パスを**末尾の `.md` ごと**使う（`raw/paper.pdf.md`。Issue #573 の衝突回避をそのまま継ぐため。落として付け直すとあの衝突が戻る）。`type: path` 側を足した理由は、同 `--include-source` がそれまで生ファイルを Read しており、`.docx`/`.pptx`/`.xlsx`/`.epub`/スキャン画像では読めないテキストになるという限界を自ら抱えていたことにある（キャッシュがあればそこが解消し、無ければ従来の限界に戻る）。`.md`/`.txt` のソースはキャッシュを持たないため常に後者の経路になる（`docs/DesignDoc-pipeline.md` §6.1）。**両モードとも、キャッシュを探す前に管理ファイルの `status` を見る** — `retracted`（Issue #737）なら `RETRACTED: <識別子> (<管理ファイルのパス>)` を印字して **exit code 2** を返す（Issue #918）。exit 1 に畳めないのは、あちらが既に 2 つの意味を畳んでおり、かつ `type: path` の経路では呼び出し側が exit 1 を**生ファイルを読む**ことで答えるためで、キャッシュを持たない取り下げ済みソースが素通りする。順序も同じ理由で、後に置くと「たまたまキャッシュがあるソースだけ」を守ることになる。読むのは `retracted` だけである（他の `status` 値は取り込み処理の状態であって文書への評価ではない）。URL から `add_source.py` の `url_to_filename()` を再計算する方式は Issue #191 以前の旧フラット命名の管理ファイル（自動移行されない）で実際の scratch-path と食い違うため、実ファイルを走査して特定する方式を採る。**登録側の `add_source.py` も同じ走査方式に移行した** — `process_url()` が Issue #572 で（`find_mgmt_file_for_url()`）、`process_file()` が Issue #573 で（`find_mgmt_file_for_path()`。`type: path` 側は導出が拡張子を捨てていたため `paper.pdf` と `paper.docx` が衝突し、しかも `SKIP` で止まらず既存管理ファイルを `status: outdated` に書き換えていた）— それまでは導出ファイル名の存在有無を同一性キーにしていたため、クエリ文字列で区別される URL（YouTube の `?v=` 等）が同じ名前に解決されて未登録のまま `SKIP`／別 URL に対する `RECHECK` を返していた。参照側だけが `source.url` を正としていた非対称を解消したもので、2スクリプトは同じ「ファイル名を再計算せず `source.url` で照合する」規約を共有する（実装は共有せず各自に持つ — `add_source.py` は `.wikicommit/scripts/` からの import を一切持たない自己完結スクリプトである。なお `remove_page.py` の複製も長らく同じ理由づけを掲げていたが、そちらの理由は成立しないことが分かっている〈Issue #947。本節冒頭のコールアウト〉ため、根拠として引かない） |
+| `wikicommit-ask` | `scripts/resolve_source_cache_path.py` | `--include-source`（Issue #470）が主な呼び出し元。**`wikicommit-review` Step 4 / `wikicommit-fix` Step 3 もソースを読む前にこれを引く**（Issue #1047。Skill 内スクリプトへの越境呼び出しは `add_source.py --license-for-url` に続く 2 例目 — 同一性キーの規則〈Issue #572 / #573〉の写しを増やさないため。キャッシュが無ければ `add_source.py --fetch-url` で `.wikicommit/.cache/refetch/` に取得する）。**`--type url` / `--type path` の 2 モードを持つ**（後者は Issue #885 で追加）。`--type url` は `sources[].url` から `.wikicommit/source/url/` 配下を実走査して一致する ソース管理ファイルを特定し、その実パスから scratch-path を導出して `.wikicommit/.cache/ingest-fetch/` 内のキャッシュファイルを解決する。`--type path` は同じ実走査を `.wikicommit/source/path/`（`source.path` で照合）に対して行い、`.wikicommit/.cache/extract-path/` 内の**抽出テキスト**キャッシュを解決する — こちらは管理ファイルの相対パスを**末尾の `.md` ごと**使う（`raw/paper.pdf.md`。Issue #573 の衝突回避をそのまま継ぐため。落として付け直すとあの衝突が戻る）。`type: path` 側を足した理由は、同 `--include-source` がそれまで生ファイルを Read しており、`.docx`/`.pptx`/`.xlsx`/`.epub`/スキャン画像では読めないテキストになるという限界を自ら抱えていたことにある（キャッシュがあればそこが解消し、無ければ従来の限界に戻る）。`.md`/`.txt` のソースはキャッシュを持たないため常に後者の経路になる（`docs/DesignDoc-pipeline.md` §6.1）。**両モードとも、キャッシュを探す前に管理ファイルの `status` を見る** — `retracted`（Issue #737）なら `RETRACTED: <識別子> (<管理ファイルのパス>)` を印字して **exit code 2** を返す（Issue #918）。exit 1 に畳めないのは、あちらが既に 2 つの意味を畳んでおり、かつ `type: path` の経路では呼び出し側が exit 1 を**生ファイルを読む**ことで答えるためで、キャッシュを持たない取り下げ済みソースが素通りする。順序も同じ理由で、後に置くと「たまたまキャッシュがあるソースだけ」を守ることになる。読むのは `retracted` だけである（他の `status` 値は取り込み処理の状態であって文書への評価ではない）。URL から `add_source.py` の `url_to_filename()` を再計算する方式は Issue #191 以前の旧フラット命名の管理ファイル（自動移行されない）で実際の scratch-path と食い違うため、実ファイルを走査して特定する方式を採る。**登録側の `add_source.py` も同じ走査方式に移行した** — `process_url()` が Issue #572 で（`find_mgmt_file_for_url()`）、`process_file()` が Issue #573 で（`find_mgmt_file_for_path()`。`type: path` 側は導出が拡張子を捨てていたため `paper.pdf` と `paper.docx` が衝突し、しかも `SKIP` で止まらず既存管理ファイルを `status: outdated` に書き換えていた）— それまでは導出ファイル名の存在有無を同一性キーにしていたため、クエリ文字列で区別される URL（YouTube の `?v=` 等）が同じ名前に解決されて未登録のまま `SKIP`／別 URL に対する `RECHECK` を返していた。参照側だけが `source.url` を正としていた非対称を解消したもので、2スクリプトは同じ「ファイル名を再計算せず `source.url` で照合する」規約を共有する（実装は共有せず各自に持つ — `add_source.py` は `.wikicommit/scripts/` からの import を一切持たない自己完結スクリプトである。なお `remove_page.py` の複製も長らく同じ理由づけを掲げていたが、そちらの理由は成立しないことが分かっている〈Issue #947。本節冒頭のコールアウト〉ため、根拠として引かない） |
 
 #### 共有スクリプト（`.wikicommit/scripts/`）
 
@@ -533,10 +611,11 @@ Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論�
 | `wikicommit-reconcile` | `set_frontmatter_field.py` | 管理ファイルの `status` を `pending` に書き戻す（Issue #874）。新しいスクリプトを足さずに済むのは、同スクリプトがパス非依存（frontmatter ブロックを持つ任意のファイルを受ける）であり、`--require KEY=VALUE` で現在値を確認してから書く冪等な経路を既に持つためである。**検出用のスクリプトは新設しない** — ポリシー変更の判定器は Pass 2c 自身であり、もう一度呼べないことだけが問題だった |
 | `wikicommit-schema-propose` | `check_schema_coverage.py` / `check_schema_org_type.py` | schema/ 未カバー type の網羅的集計、および型・プロパティが Schema.org 語彙に実在するかの決定論的検証（オフライン・遅延生成、Git管理下の`.wikicommit/schemaorg-vocab.json`。Issue #319）が必要なため（Issue #285） |
 | `wikicommit-generate` / `wikicommit-collect` | `read_policy.py` | ポリシーファイルの本文が「配布時の記入例のままか」は配布した本文が手元にある以上バイト比較で決まるのに、2 つの SKILL.md の 4 箇所に散った同じ散文が LLM にそれを判定させていたため（Issue #844。Issue #474 が名指しした「決定論的に判定できる操作を instruction にする」形）。しかも両ファイルの記入例はすべて除外を促す内容なので、誤適用は常に「書かれるはずだったものが書かれない」方向にしか働かない。スクリプトは記入例と HTML コメントを落とすだけで、散文の解釈は引き続き LLM が行う |
+| `wikicommit-generate` / `wikicommit-collect` | `match_index_only.py` | `index_only:` がドメインとページの 2 形を取るようになり（Issue #1032）、2 つの SKILL.md の散文がそれぞれ照合していた規則が別々にずれる余地が大きくなったため（Issue #474 と同じ形）。collect はページのエントリを能動的に掘るための一覧（`list-pages`）も得る |
 | `wikicommit-collect` | `check_extraction_quality.py`（`check-domain` のみ。`check-fetch-capability`〈Issue #574〉・`check-density` は候補提示ステップでは使わない — 前者は取得を実際に行う Pass 1 の関心事、後者は取得後にしか判定できないため） | Web候補提示ステップで、既知JS-shellドメインの候補を `wikicommit-generate` と同じ判定ロジックで事前に除外するため（Issue #425） |
 | `wikicommit-collect` | `check_wanted_pages.py`（`WANTED:` 行のみ。`TYPE_MISMATCH:` は対象外 — 実体は別 Type に在るので欠けているものが無く、必要なのは新しいソースではなくリンク 1 語の修正であるため） | Web候補探索で「この Wiki が WikiLink で参照しているのに実体ページが無い概念」を検索語として使うため（Issue #666）。「Wiki に何が欠けているか」は既に決定論的に計算されており、それを探索の入力に回していないだけだった — 新機構を作らずに Purpose → Knowledge Gap → Source の転換を最小の形で実装したものにあたる。取得失敗・`WANTED:` 0 件のときは黙って飛ばし実行をブロックしない（複数ある探索パスの 1 つに過ぎないため）。**限界**: `WANTED:` が持つ slug は言語中立な英語識別子（Issue #193）であり、非英語 Wiki では原語の検索語に一致しないことがある |
 | `wikicommit-collect` | `build_survey_view.py` / `check_orphans.py`、および `check_wanted_pages.py`（Step 3.5 では上記の探索語用途とは別に、`WANTED:` を着眼点の根拠として読む） | Step 3.5 の俯瞰ステップで、Wiki の現状を 1 つのコンテキストに収まる形で読むため（Issue #672）。3 本はそれぞれ別の問いに答える — `build_survey_view.py` は「何があるか」（`TYPE:` 件数・`HUB:`・`TAG:`・各ページの見出しと発リンク。1〜2 ページしかない型が手つかずの領域として見える）、`check_wanted_pages.py` の `WANTED:` は「Wiki 自身が書きたいと表明した穴」、`check_orphans.py` の `ORPHAN:` は出自ソース付き（Issue #570）なので「1 ページしか作っていないソース」＝薄い領域が見える。いずれも読み取り専用で、スクリプトの新設も変更もしない。`build_survey_view.py` はこれにより `wikicommit-synthesize` 専用ではなくなった |
-| `wikicommit-collect` | `wikicommit-generate/scripts/add_source.py --license-for-url`（Skill 内スクリプトへの唯一の越境呼び出し。下記コールアウト参照） | Web候補提示ステップで、登録時に記録されるのと同じ既知ライセンスを候補行に併記するため（Issue #646。ShareAlike の警告を登録の 1 段手前へ前倒しする〈Issue #570〉） |
+| `wikicommit-collect` | `wikicommit-generate/scripts/add_source.py --license-for-url`（Skill 内スクリプトへの越境呼び出しの最初の例。下記コールアウト参照） | Web候補提示ステップで、登録時に記録されるのと同じ既知ライセンスを候補行に併記するため（Issue #646。ShareAlike の警告を登録の 1 段手前へ前倒しする〈Issue #570〉） |
 
 > **ルート生成物の一覧は 1 つに保つ（Issue #642）**: `init.py` が書き出すルートレベルのファイルと、`print_next_steps.py` がユーザーに提示する `git add` 案内は、長らく互いに独立した 2 つの手動リストだった（`wikicommit-init/SKILL.md` の散文を数えれば 3 つ）。この構造の実害は仮定の話ではない — Issue #434 で追加された `install-local-plugins.cjs` が `init.py` にだけ入り案内から漏れた結果、`--quartz --quartz-pages` で init した全リポジトリで初回 push の GitHub Pages ビルドが `postinstall` の MODULE_NOT_FOUND により必ず失敗した（Issue #556。パイロット 2 例で再現）。
 >
@@ -628,12 +707,15 @@ wikicommit-init/scripts/init.py ───────────┬── init
 wikicommit-init/scripts/_root_outputs.py ──┬── init.py（verbatim コピーの駆動）
                                            └── print_next_steps.py（git add 案内）
 wikicommit-generate/scripts/add_source.py ─┬── generate
-                                           └── collect（--license-for-url のみ。唯一の越境）
+                                           ├── collect（--license-for-url のみ。越境）
+                                           └── review / fix（--fetch-url のみ。越境。Issue #1015 / #1047）
 wikicommit-remove/scripts/remove_page.py
-wikicommit-ask/scripts/resolve_source_cache_path.py   ※--include-source 専用（--type url/path）
+wikicommit-ask/scripts/resolve_source_cache_path.py ─┬── ask（--include-source）
+                                                     ├── review（Step 4。越境）
+                                                     └── fix   （Step 3。越境）
 ```
 
-> **`add_source.py --license-for-url` — Skill 内スクリプトへの唯一の越境呼び出し（Issue #646）**: 本節冒頭の置き場所の規則（呼び出し元が 1 Skill なら `.claude/skills/<name>/scripts/`、複数なら `.wikicommit/scripts/`）に対する、意図的な 1 件の例外である。`wikicommit-collect` が `wikicommit-generate` の Skill 内スクリプトを直接呼ぶ。
+> **`add_source.py --license-for-url` — Skill 内スクリプトへの越境呼び出しの最初の例（Issue #646）**（その後 `wikicommit-review` / `wikicommit-fix` が同じ `add_source.py` の `--fetch-url` と `wikicommit-ask` の `resolve_source_cache_path.py` を呼ぶようになった — いずれも取得・同一性判定の実装を 1 つに保つためで、下の理由と同じ形である。Issue #1015 / #1047）: 本節冒頭の置き場所の規則（呼び出し元が 1 Skill なら `.claude/skills/<name>/scripts/`、複数なら `.wikicommit/scripts/`）に対する、意図的な 1 件の例外である。`wikicommit-collect` が `wikicommit-generate` の Skill 内スクリプトを直接呼ぶ。
 >
 > **`.wikicommit/scripts/` へ移さなかった理由**: 移すべき実体は `KNOWN_SOURCE_LICENSES`（登録可能ドメイン → SPDX 識別子の対応表）とそれを引く 2 関数だが、`add_source.py` は `.wikicommit/scripts/` からの import を一切持たない自己完結スクリプトである（上表の `resolve_source_cache_path.py` の行が述べる既存の制約。**慣行であって硬い制約ではない** — その区別は本節冒頭のコールアウト〈Issue #947〉を参照）。したがって共有モジュール化には (a) この制約を壊す、(b) 対応表を 2 か所に複製する、のどちらかが要る。(b) は「登録時に記録される値」と「候補提示で見せる値」が食い違いうるという、この機能が防ごうとしているものそのものを作り込む（食い違ったときの見え方が最悪 — 人間は提示された条件で承認し、記録されるのは別の条件になる）。(a) は 1 モードのために既存の設計制約を壊す。
 >
@@ -693,7 +775,13 @@ SKILL.md での記述例（`wikicommit-status`）:
 | **既定を決めておく** | 待つ先が無いか、既定が明らかに安全側で、かつ取り返しがつく | Step 0 のポリシー確認（登録せず報告）・5 件ガード（(b) 先頭 5 件）・`wikicommit-merge` の warning 続行確認（中断） |
 | **保留する** | **人間が見れば答えが変わりうる**判断で、かつ保留したものが後から拾われる経路がある | ガード A の `LOW_DENSITY:`・Pass 2b の閾値未達・`ambiguous` |
 | **失敗にする** | 決定論的な判定。人間が見ても答えが変わらない | ガード B・抽出結果が空／読み取り不能・YouTube の URL 形式違い |
-| **処理全体を停止する** | 環境の問題であってソースの問題ではない | ガード C（Issue #574）・`rules_version` 不一致（Issue #752） |
+| **処理全体を停止する** | 環境の問題であってソースの問題ではない | ガード C（Issue #574）・`rules_version` 不一致（Issue #752）・`NETWORK_UNAVAILABLE:` の連続 2 件（Issue #1020。1 件目は下記） |
+
+> **ネットワークの不在は 2 行にまたがる（Issue #1020）**: `add_source.py --fetch-url` はかつて取得中のあらゆる例外を `ERROR:` に畳み、Pass 1 はそれを「このソースの抽出失敗」として `status: failed` にしていた。したがってネットワークが使えない環境 — Codex の既定サンドボックス（`workspace-write` はネットワーク無効）・プロキシ・オフライン — では**全 URL ソースが誤った `failed` として記録され**、次の `/wikicommit-merge` がソースごとに生成失敗トラッキング Issue を立てた。ネットワークの不在はパッケージの不在（ガード C）と同じ「環境の問題」であり、404 と同じ箱に入っていたことが誤りだった。
+>
+> 現在 `--fetch-url` は `requests.exceptions.ConnectionError` の系列（名前解決・接続拒否・`ProxyError`・`ConnectTimeout`）を `NETWORK_UNAVAILABLE:`（exit 3）で返し、`ReadTimeout`・HTTP エラー・変換失敗は従来どおり `ERROR:` のままとする — `ReadTimeout` は `ConnectionError` の子ではなく、接続はできたが遅い＝そのサーバーの問題である。`SSLError` は `ConnectionError` の子だが**除外する** — TLS ハンドシェイクまで進んだ＝サーバーには届いており、証明書の失効・自己署名はそのサイト固有の問題である（TLS を中継するプロキシ下では逆向きに誤るが、それはこの変更より前と同じ `failed` に落ちるだけである）。**1 件目は保留し、連続 2 件で停止する。** 1 件で停止しない理由は、消えたドメイン（ソース固有の問題）も同じく名前解決の失敗になるためで、1 件ではどちらか区別できない。保留は上表の「保留する」行と同じ実現方法（`status` を書き換えず `## Deferred Reason` を書く）を使うが、**適用条件は「人間が見れば答えが変わる」ではなく「後で再試行すれば答えが変わる」**であり、対話実行でも保留する。また強制リチェック由来でも `pending` に戻さない — 取得していないので `source.hash` は元のままで、ソースは何も失っていない。
+>
+> **採らなかった案**: 1 件目で全体停止（消えたドメイン 1 件でバッチが止まる）、実行の最初に到達性を確認する（確認先が恣意的で、特定ホストへ届くことは任意の URL へ届くことを意味しない。連続 2 件での停止が同じ役割を事後に果たす）、何もしない（誤った記録とゴミの追跡 Issue が残る）。`/wikicommit-merge` の事前確認（`.git` への書き込み可否・`gh auth status`）は、Codex の中で書き込み可否をどう判定すれば正しいかが実機でしか分からないため Issue #732 の後に回す。
 
 **保留の適用条件は「保留したものが後から拾われる経路が存在すること」である。** 無いところには当たらない — `wikicommit-init` の対話プロンプト（`exclude_living_persons`。Issue #837）は 1 回きりでファイルを作る操作なので待つ先が無く、フィールドの欠如も `false` として扱われるため「未決」を表現できない。既定値で進んで `NOTE:` を出す扱いを変えない。
 
@@ -733,7 +821,8 @@ pending / outdated な .wikicommit/source/**/*.md を 1 件ずつ順次処理
 
 [Pass 2a] サマリ作成
   ├─ summary（primary_lang で記述。## Summary に上書き）
-  ├─ ソース言語と primary_lang の不一致を検出（情報提供のみ・挙動は変わらない）
+  ├─ 抽出テキストの主言語を ISO 639-1 で 1 つ判断し source.lang に書く（Issue #989。
+  │    primary_lang と違えば Completion Notice にも列挙。生成の挙動は変わらない）
   └─ source-as-entity 判定 … ソース文書自身も独立した「作品」ならエンティティ候補に追加
 
 [Pass 2b] 型の要否判断（ソース 1 件につき 1 回）
@@ -1045,7 +1134,7 @@ Pass 2b が親に来るのは、summary だけで判断でき本文が要らな�
 ```
 
 - `summary` はソース全体の 2〜3 文要約（`config.yml` の `theme` が空でも常に生成する）。ソース管理ファイル body の `## Summary` に書き込まれる（§4.3・`DesignDoc-data.md`）。言語は `primary_lang` とする（Issue #314 — 従来この指定がなかったため、`summary` 自体は結果的に `primary_lang` で書かれる一方、`exclude_note`/`coverage_gap_note` にはエージェントのセッション言語が漏れ込み、同一 `## Summary` 内で言語が混在する不具合が実際に発生した）。付記フィールド（`exclude_note`・`coverage_gap_note`）は `## Summary` ではなく **`## Generation Notes`** に書かれる（Issue #831 — `## Summary` は `content/sources/` の公開ページに載る唯一の節であり、そこへ除外理由を追記していたために実在の人物名と内部識別子が読者に届いていた）。言語はこの `summary` と同じ（＝ `primary_lang`）で統一する。**見出しラベル自体（`## Summary`・`## Generation Notes`・`## User Notes`）は本文の言語（`primary_lang`）に関わらず常に固定の英語**（Issue #405 — `primary_lang: en` パイロットで本文は正しく英語なのに見出しラベルだけ `## サマリ`/`## ユーザーメモ` と日本語固定になっていたことが判明。見出しラベルは機械が照合する識別子でありローカライズ対象外という判断。詳細は `docs/DesignDoc-data.md` §4.3）
-- `lang` はパス 2 実行前に `.wikicommit/config.yml` の `primary_lang` を読んで全エンティティに設定する。**この設定はソース文書自体の言語に関わらず常に行われる**（意図的な既存設計）——`primary_lang: ja` のリポジトリに英語ソースを ingest しても、生成されるページの `lang` は `en` にはならず `ja` になる（内容は要約・翻訳された上で統合される）。この暗黙の挙動に気づかないまま運用が進むと、例えば翻訳品質を実在する外国語原文と突き合わせて検証するような用途で、比較対象のはずのページ自体が既にその原文を読んで書かれてしまっており検証が無効化される、といった問題が起こりうる（`Paperwork-Navigator-wikicommit-pilot` で実際に発生。Issue #336）。この問題自体（`lang` を `primary_lang` に固定する仕様）を変更する対応ではなく、Pass 2a がソース言語と `primary_lang` の明らかな不一致を検出した場合に Completion Notice で一言注記する形で可視化する（`.claude/skills/wikicommit-generate/SKILL.md` Pass 2a・Completion Notice 参照）
+- `lang` はパス 2 実行前に `.wikicommit/config.yml` の `primary_lang` を読んで全エンティティに設定する。**この設定はソース文書自体の言語に関わらず常に行われる**（意図的な既存設計）——`primary_lang: ja` のリポジトリに英語ソースを ingest しても、生成されるページの `lang` は `en` にはならず `ja` になる（内容は要約・翻訳された上で統合される）。この暗黙の挙動に気づかないまま運用が進むと、例えば翻訳品質を実在する外国語原文と突き合わせて検証するような用途で、比較対象のはずのページ自体が既にその原文を読んで書かれてしまっており検証が無効化される、といった問題が起こりうる（`Paperwork-Navigator-wikicommit-pilot` で実際に発生。Issue #336）。この問題自体（`lang` を `primary_lang` に固定する仕様）を変更する対応ではなく、Pass 2a がソース言語と `primary_lang` の明らかな不一致を検出した場合に Completion Notice で一言注記する形で可視化する（`.claude/skills/wikicommit-generate/SKILL.md` Pass 2a・Completion Notice 参照）。**Issue #989 で判断の性質を変えた** — 「明白な不一致を旗立てる」から「抽出テキストが主として書かれている言語を ISO 639-1 で常に 1 つ答える」へ。前者のままでは永続化したときに欠如が「同じ」と「微妙」の 2 つを指すためで、答えは管理ファイルの `source.lang` に Pass 2a の時点で書かれ、俯瞰ページのソース言語別集計が読む（詳細は `docs/DesignDoc-data.md` §4.3 の該当コールアウト）。Completion Notice の注記は残す
 - `action: update` かつ `existing_path` がある場合は、既存ページを LLM コンテキストに追加してから生成する（既存情報を失わず新情報を統合）
 - **`existing_path` は `action: exclude` のエントリにも設定する（Issue #876）**。照合は `action: update` のための既存ページ走査と同一で、`(lang, Type, slug)` は Pass 2c がそのエンティティに付けた値そのものである。**生成側はページを削除しない**（削除経路は `/wikicommit-remove` だけ）ため、今回除外されたエンティティに前回以前の実行が作ったページが公開されたまま残ることがあり、それを名指しする主体が他にいなかった。`## Generation Notes` が記録するのはエンティティの**タイトル**であり、ファイル名は言語中立な英語 slug で、その導出規則（普通名詞は英訳／確立した原綴り／それ以外はローマ字。Issue #193）は**逆算できない** — `primary_lang` が英語でない Wiki（このポリシーが実際に効いた `wikicommit/saitama-city-wiki`〈ja〉・`wikicommit/decameron-wiki`〈it〉がまさにそれ）では、人は `title:` を grep することになる。**機械はそのエンティティに名前を付けた副産物として答えを既に持っている。**
   - **このフィールドは `exclude` では情報であり、何も駆動しない。** `create`/`update` では Pass 3 が既存ページを読む分岐を駆動するが、Pass 3 はその 2 つしか処理しないため、`exclude` の `existing_path` は読み込みも書き込みも起こさない。**暗黙にせず明記する**（書かれていない前提は drift する）
@@ -1350,7 +1439,6 @@ SKILL.md の手順（`### Step N`・`#### Pass N` 等の見出しや、`Route A`
 
 **ルール**: 配布物の中に `docs/DesignDoc-*.md`・`Issues/`・`dev/` へのパスを書かない。`docs/` プレフィックスを外した素の `DesignDoc-data.md §4.2` のような書き方も同じく不可（同じ未配布ファイルを指しており、配布先では同様に追跡できないため）。設計根拠を残したい場合は次のいずれかにする:
 
-- **GitHub Issue 番号のみを残す**（`Issue #523` 等）。短く、public 化後は GitHub 上で誰でも引ける
 - **要点を1文で内在化する**。参照先の内容を知らないとエージェントが判断できない場合はこちら（結果として短くなるとは限らないが、追跡不能なパスを残すよりは良い）
 - **注記ごと削除する**。指示自体が SKILL.md 内で完結しており、参照先が「なぜそうなっているか」を示すだけの場合はこれで十分（大半がこれに当たる）
 
@@ -1359,3 +1447,53 @@ SKILL.md の手順（`### Step N`・`#### Pass N` 等の見出しや、`Route A`
 逆方向（`docs/DesignDoc-*.md` から SKILL.md への参照）は開発リポジトリ内に閉じているため本ルールの対象外であり、既存の多数の参照もそのまま維持する。追跡の担い手を「配布物 → docs」の双方向から「docs → 配布物」の一方向に寄せる、という整理になる。
 
 `tools/check_distributed_path_refs.py`（`docs/DesignDoc-TestSpec.md` L9）が CI で blocking の回帰ガードとして走り、再混入をその場で止める。
+
+> **Issue 番号も残さない — 「番号のみを残す」は推奨から外した（Issue #1054）**: 本節はかつて、パスの代わりに「GitHub Issue 番号のみを残す（public 化後は GitHub 上で誰でも引ける）」を 1 つ目の選択肢に挙げていた。**その前提は成立しなかった** — 公開リポジトリは開発リポジトリのスナップショット push であり、Issue を 1 件も持たない。利用者から見ると `Issue #527` は `docs/DesignDoc-*.md` と同じく辿れない参照であり、上の理由 (1)〜(3) がそのまま当てはまる。開発者は経緯を配布物からではなく `docs/` から辿る（docs → 配布物の参照は上のとおり対象外として残る）ので、**経緯が `docs/` その他の開発ドキュメントに書かれていれば、配布物からは外してよい**。
+>
+> 配布物の指示文（`SKILL.md`・`references/*.md`・`templates/review-rules.md`・`templates/schema-authoring.md`）の文は 3 種類に分けて扱う:
+>
+> | 種類 | 例 | 扱い |
+> |---|---|---|
+> | (a) 指示 | `add_source.py --fetch-url` で取得する | 残す |
+> | (b) 誤った代替案を封じる理由 | curl で落としてから変換すると charset ヘッダが失われ文字化けする | **1 文に縮めて残す** |
+> | (c) 経緯 | 以前は WebFetch だった／ある Issue の実装中に確認した／Issue 番号 | 外す |
+>
+> **(b) を (c) と一緒に消してはならない。** エージェントは指示の外側を即興で埋めるので、「なぜ curl ではないか」が無いと curl に切り替える余地が生まれる。判定の基準は「**この文を消したら、エージェントがもっともらしい別の手を取りうるか**」である。外す段落ごとに `docs/` 側に経緯があることを確かめ、無ければ先に `docs/` へ書く。
+>
+> **スクリプトが出力する文字列も同じ扱いにする**（実行時の `BLOCKED:` / `WARNING:` / 案内文、argparse の `description` / `help`）。どちらも読み手は Issue を引けず、実行時の出力は指示文と同じくエージェントのコンテキストに載る。コメント・docstring は読み手が開発者なので対象外。`templates/guides/*.md`（人が 1 度読む手順書）も対象外とする。
+>
+> **移行は段階的に行う**。パイロットとして `wikicommit-generate/references/pass1-extract.md` を書き直し（47,171 B → 36,835 B・−22%、`Issue #` 36 → 0）、同時にスクリプトの出力文字列（34 箇所）と `review-rules.md` / `schema-authoring.md` を 0 にした。残りの指示文は Skill 単位で進める。`tools/check_distributed_issue_refs.py`（`docs/DesignDoc-TestSpec.md` L16）が、スクリプトの出力は 0 件を blocking で、指示文は Skill ごとの件数の上限（減らす方向にしか動かないラチェット）で守る。経緯の文（「以前は」等）は機械的に検出できないので、ガードが見るのは番号だけである。**移行は Issue #1056〜#1060 で全 Skill について完了し、`CAPS` はすべて 0 である**（上限表そのものを「0 件」の 1 規則に畳むかは別に決める）。
+>
+> **`CHANGELOG.md` は本規則の対象外**（`CONTRIBUTING.md` の「Issue 番号で指してください」は変えない）。同じく公開側では辿れないが、変更の記録であって毎回コンテキストに載る指示ではなく、番号は開発リポジトリ側の読み手（版を上げる人）にとっての索引として働くため。
+>
+> **外した経緯のうち、`docs/` に他の置き場が無かったもの**（移行の過程で見つかった分をここに集める。各子 Issue は外す前に `docs/` を検索し、無ければここへ書く）:
+>
+> | Issue | 配布物に残した指示 | 外した経緯 |
+> |---|---|---|
+> | #272 | `markitdown` の呼び出しには必ず `PYTHONIOENCODING=utf-8` を前置する（`wikicommit-generate` の `SKILL.md` / `references/text-extraction-routing.md`） | Windows の日本語ロケール（コンソールコードページ `cp932`）では `markitdown` サブプロセスの stdout の符号化が、リダイレクト先・読み戻し・ハッシュ計算が前提とする UTF-8 と食い違い、Pass 2 に届く前に抽出テキストが文字化けしていた。`VAR=value command` は POSIX シェルの構文で、Windows でエージェントがコマンドを走らせる Git Bash / WSL のどちらでもそのまま動く（PowerShell / cmd.exe では別構文が要るが、Skill はそこでは走らない） |
+> | #491 | Pass 2b が却下した型候補を Completion Notice に列挙する（`references/pass2b-type.md` / `references/completion-notice.md`） | 却下した候補は永続化しない（Issue #315）ため、その実行の出力に出さなければ人間が知る機会がどこにも無かった。まず却下候補の列挙として入り、Issue #507 が非対話実行の保留・自動承認の候補も同じ実行中リストに載せる形に広げた |
+> | #428 | 素材の薄いソースではテンプレートの節を埋め草で膨らませず、ソースが支える分だけを書く（`references/pass3-generate.md` の Thin-source discipline） | `ai-driven-dev-wiki` パイロットで `Person/` の 5 ページすべての `## Background` が、ソースがその人物について述べている量に関わらず同じ定型の言い回しに収束していた |
+> | #943 | `summary` にはソースの内容の要約だけを書き、除外の理由は各エンティティの `exclude_reason` / `exclude_note` に書く（`references/pass2c-entities.md`） | Issue #831 が書き戻しの手順を直した後も、分析 JSON の `summary` フィールドの説明に「理由もここに」と求める文が残っており、フィールドを埋めただけのモデルが `_write_source_page()` の公開する場所へ除外理由を書き続けていた |
+> | #917 | `--skill-blob` に渡す `git hash-object` が失敗するのはファイルが読めないときだけであり、未追跡でも Git リポジトリの外でも失敗しない（`references/pass4-review.md` step 6） | 以前この行は失敗の理由を「コミットが無い」としていたが、それは起こりえず（未追跡でもリポジトリ外でも blob ハッシュを返して exit 0 になることを実測した）、実際の失敗に当たった人を存在しないコミットを探しに行かせていた |
+> | #351 | 既定ブランチを `gh repo view --json defaultBranchRef` で調べ、以後は `main` の代わりにそれを使う（`wikicommit-merge` Step 1） | 既存リポジトリの既定ブランチは `main` とは限らない（2020 年以前からの `master` 等）。`main` を固定で書くと、そうしたリポジトリで PR 作成・マージがすべて失敗していた |
+> | #355 | 新規 schema ファイルの検出では `.wikicommit/schema/*.md` と `.wikicommit/schema/**/*.md` の両方を 1 回の `git status --porcelain` に渡す（`wikicommit-merge` Step 2） | pathspec の `**` は 0 段ではなく 1 段以上のディレクトリにしか一致しない（git 2.54.0 で確認）ため、後者だけでは Pass 2b が直下に書く標準型ファイルを取りこぼしていた。両方に一致したファイルは `git status` が重複を除く |
+> | #368 | 新規ソースファイルの判定では、`git status` を呼ぶ**前に** `source.path` がディスクに在るかを確かめて分岐する（`wikicommit-merge` Step 2） | `git status --porcelain` は作業ツリーに在るパスしか報告しないため、登録後に削除された `source.path` と、追跡済みで変更の無い `source.path` が同じ空の出力になり、区別できなかった |
+> | #208 | `markitdown` が無ければ init が導入を手伝う（`wikicommit-init`） | Issue #189 で `wikicommit-generate` の URL 取得経路が `markitdown` 必須になったのに、init には lychee と違って導入を手伝う手順が無かった。`[pdf]` extra は後に Issue #242 で加わった |
+> | #214 | `package.json` の `postinstall` は `quartz/` の存在を確かめてから動く（`wikicommit-init` のテンプレート） | 以前は `git submodule add` を実行する前の初回 `--quartz` 実行で、`postinstall` が捕捉されない ENOENT で毎回落ちていた |
+> | #229 | Quartz のセットアップ状態の判定は `check_quartz_setup.py` が行う（`wikicommit-init`） | 複数分岐の `test -d` による判定を散文でたどらせていたのをスクリプトへ移した（Issue #474 と同じ、決定論的な判定を指示に書かない形） |
+> | #333 | Pages を有効化する前に、解決したリポジトリを `Detected repository` として印字する（`wikicommit-init`） | 残っていた別の remote を拾って、意図しないリポジトリの Pages を有効化しうるため |
+> | #339 | `.github/ISSUE_TEMPLATE/report.md` を配布する（`wikicommit-init`、Quartz 選択時） | 公開ページのバナーの報告リンクが指すテンプレートの実体として必要になった |
+> | #353 | `npm run install-plugins` は「Set up Quartz v5」の案内に含める（`wikicommit-init`） | 以前は `/wikicommit-serve --build` が初回にこれを実行しており、フォアグラウンド実行の 5 分制限でタイムアウトしていた |
+> | #373 | `gh repo view` の前に `origin` という名前の remote を要求しない（`wikicommit-init`） | 以前は `git remote get-url origin` を先に要求しており、remote の名前が `origin` でないリポジトリで手動手順へ誤って落ちていた |
+> | #374 | 既存リポジトリの `theme` 更新は `--theme` ではなく `--update-theme` で行う（`wikicommit-init`） | `--no-overwrite` の下では `config.yml` が丸ごとスキップされるため、`--theme` は何の効果も持たなかった |
+> | #380 | `--no-overwrite --quartz` の再 init でも `check_quartz_setup.py` が `install-plugins` を実行し `install_plugins_ok` を報告する（`wikicommit-init`） | 以前は Quartz がセットアップ済みと判定された再 init で `install-plugins` の案内が丸ごと落ちていた |
+> | #836 | 「Wiki is healthy」の判定から `Pages not yet read by a person` と `Wanted pages` を外す（`wikicommit-status` Step 17） | 前者を 0 にせよとは 100% の人間レビューを求めることであり、AI レビューは全件・人間は抜取とした Issue #800 と食い違う。後者を 0 にせよとは、Issue #340 がブロックをやめた理由（WikiLink を書くのを避けさせる圧力）を逆向きに戻すことになり、ソースが支えないページを書かせる方へ押す |
+> | #801 | 読む変更履歴は Step 1 で得た 2 つの版の間だけ（`wikicommit-update`） | 変更履歴は版ごとに 1 ファイルに分けてあり、全版を読むと分割した意味が無くなる |
+> | #338 | Type 別 `index.md` の更新は `rebuild_index.py` に委ねる（`wikicommit-translate`） | 以前はこの Skill がディレクトリごとに LLM で index を更新しており、`wikicommit-generate` と同じスクリプトへ寄せた（Issue #406 と同じ、末尾の手順が落ちる失敗クラス） |
+> | #823 | 完了コメントの言語判定で挙げる綴りは 4 つで足りる（`wikicommit-fix` Step 7） | バナーが持つロケールは 2 つだけで、それ以外の言語のページでは英語で描画されるため |
+> | #808 | 一括選択は `all` / `*` だけを保証し、訳語（「全部」等）を足さない（`wikicommit-collect` Step 8） | 以前は「全部」も受け付けていたが、手で保守する訳語の表には終わりが無く、表に無い言語の運用者だけが答え方を 1 つ失う。`*` は言語に依らず、このプロンプトが既に求める番号と同じ語彙に属する |
+> | #356 | 検索には質問文をそのまま渡さず、語に分けて渡す（`wikicommit-ask` Step 2 / `wikicommit-search` Step 0.5） | 文全体が 1 つの逐語フレーズになり、Wiki がその話題を扱っていても本文と一致せず 0 件になっていた。CJK に限らず英語の文でも同じ |
+> | #458 | 翻訳ページの `sources` は `translated_from` をたどって親ページから読む（`wikicommit-search` Step 2.5 / `wikicommit-ask`） | 検索インデックスは `sources` を持たず、翻訳ページ自身も `sources` を省略できるため |
+> | #537 | 合成ページ（`derived_from`）のレビューでは grounding ページを読む第 3 の経路を持つ（`wikicommit-review` Step 4） | `wikicommit-fix` Step 3 の 2 経路（ソース・翻訳元）だけでは、`sources` を持たない合成ページを照合する材料が無かった |
+> | #370 / #371 | `review_status` の書き換えは `set_frontmatter_field.py` を `review-issue-close-sync.yml` と共有して行う（`wikicommit-review` Step 5） | 以前は両者が独立に同じ処理を持っており、ワークフロー側だけが「現在値が `pending` であること」を確かめていた（Issue #370 のレビューで判明）。Issue #371 が 1 本のスクリプトへまとめた |
+> | #865 | Quartz のセットアップが残っている場合、基盤コミットの提案はスキップせず、セットアップの完了を待ってから提案に戻る（`wikicommit-init`） | 初回の `--quartz` 実行では `quartz/` がまだ無いため `check_quartz_setup.py` は必ず「未完了」と答え、スキップにすると Quartz を選んだ利用者は提案に一度も到達しなかった |

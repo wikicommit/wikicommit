@@ -20,7 +20,7 @@ docstring・アサーションメッセージ・コメントの多くが日本�
 ## 3. 公開リポジトリでは一部が skip されます
 
 このリポジトリは公開対象のホワイトリストをコピーして作られるため、
-`dev/`・`Issues/`・`CLAUDE.md`・`CONTRIBUTING.md`・`CHANGELOG_ja.md`・`.gitignore`・
+`dev/`・`Issues/`・`CLAUDE.md`・`CONTRIBUTING.md`・`.gitignore`・
 `.wikicommit/config.yml` は含まれません。それらを読むテストは skip されます —
 判定は [`_publication.py`](_publication.py) が 1 箇所で持っており、**ファイルが無いこと
 自体は判定に使いません**（リネームと見分けが付かなくなるため）。skip されるのは
@@ -30,7 +30,6 @@ docstring・アサーションメッセージ・コメントの多くが日本�
 |---|---|
 | `test_check_issue_registration.py`（モジュール全体） | `dev/scripts/check_issue_registration.py` |
 | `test_config_has_no_dead_review_block.py`（`[own]`） | このリポジトリ自身の `.wikicommit/config.yml` |
-| `test_changelog_sync.py`（日本語版の位置づけ） | `CHANGELOG_ja.md` |
 | `test_run_record_tree.py`（ルート側の `.gitignore`） | ルートの `.gitignore` |
 | `test_commit_trailer_placeholders.py`（規約文の所在） | `CLAUDE.md` / `CONTRIBUTING.md` |
 

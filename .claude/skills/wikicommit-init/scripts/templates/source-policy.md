@@ -11,12 +11,19 @@ wikicommit:
   # `www.example.com` and `https://example.com/` are the same entry.
   exclude_domains: []
 
-  # Domains to read but never register. /wikicommit-collect mines a page on one
-  # of these for the primary sources it cites and offers those instead; the page
-  # itself never becomes a candidate. Use it for encyclopedias and other indexes
-  # whose value here is telling you what exists, not being quoted. Matched the
-  # same way as exclude_domains: one host per entry, exact match after stripping
-  # a scheme, a path and a leading `www.`.
+  # What to read but never register. /wikicommit-collect mines a page listed
+  # here for the sources it links to and offers those instead; the page itself
+  # never becomes a candidate. Use it for encyclopedias, awesome lists, "Further
+  # reading" pages and other indexes whose value here is telling you what
+  # exists, not being quoted. An entry takes one of two shapes:
+  #   - a domain (no path), e.g. `en.wikipedia.org`: every page on that host.
+  #     Used when a search result lands there; matched on the exact host after
+  #     stripping a scheme and a leading `www.`, like exclude_domains.
+  #   - a page (a URL with a path), e.g. `https://github.com/example/awesome-foo`:
+  #     that one page. /wikicommit-collect also goes and reads it on its own,
+  #     mining only the sections that bear on the run's focus.
+  # A path used to be stripped, so an entry with one meant its whole host; it
+  # now means that page only.
   index_only: []
 
   # Sources considered and turned down, so nothing proposes them again. A
@@ -60,7 +67,9 @@ together:
      area pages, so the encyclopedia was not needed for the skeleton — and a
      primary source carries no share-alike obligation.
   2. Use the encyclopedia as an index: list index_only above, let it tell you
-     what exists, and take in the primary sources it cites.
+     what exists, and take in the primary sources it cites. A curated list
+     works the same way — list the page (an awesome list, a "Resources" page)
+     rather than its whole host.
   3. Register the encyclopedia article itself only where no primary source
      exists — a shrine's founding legend, a local custom. Some subjects will
      always be like that; record the license and move on.

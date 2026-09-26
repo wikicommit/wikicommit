@@ -1,12 +1,14 @@
 ---
 name: wikicommit-update
-description: Bring an initialized wiki repository in step with the installed WikiCommit distribution — refresh WikiCommit's own payload, show what changed in files you may have edited, restamp the synced version, verify, and open a PR for review
+description: Bring an initialized wiki repository in step with the installed WikiCommit distribution — refresh WikiCommit's own payload, show what changed in files you may have edited, restamp the synced version, verify, and open a PR for review. Use this only when someone explicitly asks to update or sync the repository with a newer WikiCommit. It overwrites WikiCommit's files and opens a PR, so do not use it to check whether the repository is out of date — wikicommit-status reports that without writing.
 disable-model-invocation: true
 ---
 
 # wikicommit-update
 
-Brings this repository in step with the WikiCommit distribution currently installed under `.claude/skills/`, and opens a pull request with the result.
+> **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to this Skill's directory — the one holding this `SKILL.md`, which the runtime names when it loads the Skill — not to the repository root, because the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there (`python <this Skill's directory>/scripts/…`). Paths starting with `.wikicommit/` are repository-root paths as before.
+
+Brings this repository in step with the WikiCommit distribution currently installed in the Skill tree (`.claude/skills/`, or `.agents/skills/` for Codex), and opens a pull request with the result.
 
 A wiki repository holds three kinds of thing, and only the first is yours:
 
@@ -18,10 +20,16 @@ This Skill refreshes the second, shows you the first so you can decide, and neve
 
 ## Update the Skills first
 
-**This Skill does not update `.claude/skills/` itself.** Do that before running it:
+**This Skill does not update the Skill tree itself.** Do that before running it:
 
 ```bash
 npx skills add wikicommit/wikicommit --skill '*' --agent claude-code -y --copy
+```
+
+If the Skills were installed under `.agents/skills/` (Codex), update that tree instead — the command above writes only `.claude/skills/` and leaves the tree Codex reads at the old version:
+
+```bash
+npx skills add wikicommit/wikicommit --skill '*' --agent codex -y --copy
 ```
 
 The reason is not caution: a Skill that rewrites its own `SKILL.md` mid-run leaves the agent executing the instructions it loaded at the start, which are now the old ones. So the order is: update the Skills, then run this.
@@ -38,13 +46,13 @@ No arguments. Everything it needs is on disk.
 
 ### Step 1: Compare Versions
 
-Read `wikicommit_version` from `.wikicommit/config.yml` — the version this repository was last brought in step with — and the `VERSION` in `.claude/skills/wikicommit-init/scripts/templates/scripts/_version.py`, which is what is installed now.
+Read `wikicommit_version` from `.wikicommit/config.yml` — the version this repository was last brought in step with — and the `VERSION` in `../wikicommit-init/scripts/templates/scripts/_version.py`, which is what is installed now.
 
 - **Equal** → tell the user there is nothing to update and stop. Do not run the rest.
 - **Different** → record both. The pair bounds which changelog entries are new.
 - **`wikicommit_version` absent** → this repository predates the stamp. Treat every entry in the changelog as new, and say so: the report will be long, and that is expected once.
 
-If `.wikicommit/config.yml` does not exist, stop and tell the user to run `/wikicommit-init` first. If `.claude/skills/wikicommit-init/` does not exist, stop and tell them to install the Skills (the command above).
+If `.wikicommit/config.yml` does not exist, stop and tell the user to run `/wikicommit-init` first. If `../wikicommit-init/` does not exist, stop and tell them to install the Skills (the command above).
 
 ### Step 2: Detect Drift
 
@@ -55,7 +63,7 @@ python .wikicommit/scripts/check_distribution_freshness.py
 **If that file does not exist, use the copy in the Skill tree instead** — it resolves everything from `--repo-root`, so it reports the same thing:
 
 ```bash
-python .claude/skills/wikicommit-init/scripts/templates/scripts/check_distribution_freshness.py
+python ../wikicommit-init/scripts/templates/scripts/check_distribution_freshness.py
 ```
 
 A repository initialized before this script shipped does not have it under `.wikicommit/scripts/`, and that is exactly the repository this Skill exists for. The installed copy only arrives with Step 3, which runs after this.
@@ -75,13 +83,19 @@ git status --porcelain -- .wikicommit/entity .wikicommit/view .wikicommit/schema
 ### Step 3: Refresh WikiCommit's Own Payload
 
 ```bash
-python .claude/skills/wikicommit-init/scripts/init.py --no-overwrite \
+python ../wikicommit-init/scripts/init.py --no-overwrite \
   --primary-lang "<translation.primary_lang from config.yml>"
 ```
 
 **Pass `--primary-lang`, taken from this repository's `config.yml`.** It defaults to `en`, and the flag decides which language directories get created — omit it on a `ja` wiki and the refresh creates an empty `.wikicommit/entity/en/` and `.wikicommit/view/en/`, which Step 8 then commits. `config.yml` itself is not rewritten either way (it is the user's).
 
 Add `--quartz` and `--quartz-pages` to match how this repository was set up (`quartz.config.yaml` present → `--quartz`; `.github/workflows/deploy.yml` present → also `--quartz-pages`). Omitting a flag the repository was initialized with does not damage anything, but it leaves that half of the distribution un-refreshed.
+
+**If the output logs `CREATED: README.md`**, the repository had no README and init wrote one; under `--quartz-pages` it carries a published-site marker that only `--finish-readme` resolves. Resolve it now, passing the Pages URL when `gh api repos/{owner}/{repo}/pages --jq .html_url` returns one and omitting `--site-url` otherwise (the marker is then removed), and add `README.md` to Step 8's `git add`:
+
+```bash
+python ../wikicommit-init/scripts/init.py --finish-readme [--site-url "<html_url>"]
+```
 
 This refreshes the payload listed above and leaves everything else alone. **Keep `--no-overwrite`.** It is no longer the only thing protecting your files — each path now declares whether it is WikiCommit's or yours — but there is no reason to drop it, and older installations of the Skills still rely on it.
 
@@ -100,12 +114,14 @@ For each remaining `OUTDATED:` / `MISSING:` line, one file at a time. Never edit
 **`.wikicommit/config.yml`** — the finding names settings the template has that this file lacks. Offer to add them:
 
 ```bash
-python .claude/skills/wikicommit-init/scripts/init.py --add-config-keys <key> [<key> ...]
+python ../wikicommit-init/scripts/init.py --add-config-keys <key> [<key> ...]
 ```
 
 This appends each setting with the commented example that documents it, and never rewrites a value already there. Explain what each new setting does (the changelog entry from Step 9 usually says) and let the user pick. A setting they decline is simply not added — every one of them is optional and inert until filled in.
 
 **`quartz.config.yaml`** — show the new keys and where they sit in the file. **Do not present the repository's own settings as differences**: `pageTitle`, `pageTitleSuffix`, `locale`, `baseUrl`, `links`, `theme` and anything under `translation` are this wiki's, and listing them as drift buries the one line that actually matters. Four of those (`pageTitle`, `pageTitleSuffix`, `locale`, `links`) are written by substituting a `{...}` placeholder at init time, so the template still holds the placeholder — copying one across would put the literal `{LOCALE}` into the config, where YAML reads it as a mapping rather than a locale string. Apply what the user accepts by hand, in place, preserving their formatting and comments.
+
+> **One exception, and it is the opposite case rather than a loophole.** The rule above exists to stop a `{...}` placeholder being copied into the config. When `check_distribution_freshness.py` reports `configuration.locale` or the footer's `links.GitHub`, it is not offering the template's value — it compares against what `init.py` **computes** for this repository (its `primary_lang`, its own git remote), and what it names is the computed value. Pass those two reports through as they came. Everything else in the list above (`pageTitle`, `pageTitleSuffix`, `baseUrl`, `theme`, `translation.*`) stays suppressed, and the template's own values for any key stay out of the diff.
 
 **`.wikicommit/schema/`** — this is the one tree a person is meant to edit directly, so it is compared byte for byte and any difference shows up. For each differing type template, show the diff **together with the changelog entry that explains it** (Step 9) — a diff on a type template without the reason for it is not something anyone can act on. Apply only what the user accepts. Where they have their own edits in the same file, merging is theirs to do: point at both sides rather than choosing.
 
@@ -114,7 +130,7 @@ This appends each setting with the commented example that documents it, and neve
 ### Step 6: Restamp the Synced Version
 
 ```bash
-python .claude/skills/wikicommit-init/scripts/init.py --update-version <installed version>
+python ../wikicommit-init/scripts/init.py --update-version <installed version>
 ```
 
 Only after Steps 3–5 are done. This records what this repository is now in step with, so the next update knows where to start reading from — and it is the only thing that writes this field.
@@ -168,7 +184,7 @@ after=$(git rev-parse -q --verify refs/stash || true)
 [ -n "$after" ] && [ "$after" != "$before" ] && git stash pop
 ```
 
-**Narrowing the pathspec is the whole point.** `.wikicommit/scripts/` and `.claude/skills/` stay refreshed, so the *new* checker examines the *old* pages — which is the actual question being asked. A bare `git stash` rolls the checker back as well, and then a check that has merely grown stricter finds nothing, and you conclude the update broke something it never touched.
+**Narrowing the pathspec is the whole point.** `.wikicommit/scripts/` and the Skill tree stay refreshed, so the *new* checker examines the *old* pages — which is the actual question being asked. A bare `git stash` rolls the checker back as well, and then a check that has merely grown stricter finds nothing, and you conclude the update broke something it never touched.
 
 Same error → pre-existing. Error gone → this update caused it.
 
@@ -230,7 +246,7 @@ git add .wikicommit .claude .agents skills-lock.json .github quartz-plugins .git
 #
 # `.agents` looks like a build directory but holds the Skills themselves. When `npx skills
 # add` targets two or more agents it writes each Skill's real files to .agents/skills/<name>/
-# and makes .claude/skills/<name> a relative symlink into it (Issue #555), so staging .claude
+# and makes .claude/skills/<name> a relative symlink into it, so staging .claude
 # without .agents commits a tree of links with nothing to point at — every clone gets a broken
 # .claude/skills/. skills-lock.json records what was installed and plays no part in resolving
 # those links, so it is a separate path rather than a substitute for either. A repository
@@ -240,7 +256,7 @@ git add .wikicommit .claude .agents skills-lock.json .github quartz-plugins .git
 git commit -m "$(cat <<'EOF'
 chore: sync distribution to <installed version>
 
-Co-Authored-By: <Claude display name> <noreply@anthropic.com>
+<Co-Authored-By line>
 Generated-By:   <current model ID>
 EOF
 )"
@@ -248,7 +264,17 @@ git push -u origin "wikicommit/update-<installed version>"
 gh pr create --base "<default branch>" --title "..." --body "..."
 ```
 
-**The trailer's model fields are placeholders, not literals.** Write the ID of the model actually running this Skill, exactly as the runtime reports it (keep any suffix; do not shorten or normalize it), and its human-readable display name — or just `Claude` when that name is not known with confidence. `<noreply@anthropic.com>` is a fixed literal. Never hardcode a model ID.
+<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update and -init; tests/test_commit_trailer_vendor_table.py holds them together) -->
+**Commit trailers.** Always write `Generated-By:   <current model ID>`: the ID of the model actually running this Skill, exactly as the runtime reports it — the same self-reported value `wikicommit-generate` writes into a page's `generated_by` (keep any suffix; do not shorten or normalize it; never hardcode one). Then choose `<Co-Authored-By line>` from the start of that same ID, so the two lines can never name different vendors:
+
+| `<current model ID>` starts with | `<Co-Authored-By line>` |
+|---|---|
+| `claude-`, or `claude-` after a provider prefix ending in `anthropic.` (Bedrock, e.g. `us.anthropic.claude-…`) | `Co-Authored-By: <Claude display name> <noreply@anthropic.com>` — the model's human-readable name, or just `Claude` when it is not known with confidence |
+| `gpt-` or `codex` | `Co-Authored-By: Codex <noreply@openai.com>` |
+| anything else | **no `Co-Authored-By` line at all** — `Generated-By` already records the model |
+
+GitHub resolves a co-author by the email address and shows that vendor's avatar on the commit, so a line naming a vendor that did not run this Skill misattributes it; writing none is the correct answer for a model not in the table. Decide by the model, not by the harness running it — one harness can run models from more than one vendor. If the harness appends its own co-author line after this message, leave it; an identical duplicate does no harm.
+<!-- commit-trailers:end -->
 
 Pass the title and body through a heredoc with a quoted delimiter (`"$(cat <<'EOF' ... EOF)"`), the way the other Skills do — the changelog text going into the body is free-form and may contain characters a shell would otherwise act on.
 
@@ -262,12 +288,12 @@ The body should carry: the version range, what was refreshed, what the user decl
 
 ### Step 9: Report
 
-**Read only the versions between the two from Step 1** (Issue #801). The changelog is one file per release, so this is a matter of opening the right files rather than filtering a large one:
+**Read only the versions between the two from Step 1**. The changelog is one file per release, so this is a matter of opening the right files rather than filtering a large one:
 
-- `.claude/skills/wikicommit-init/CHANGELOG.md` holds `[Unreleased]`, the latest released version, and an index of every earlier one
-- `.claude/skills/wikicommit-init/changelog/<version>.md` holds each earlier version, one per file
+- `../wikicommit-init/CHANGELOG.md` holds `[Unreleased]`, the latest released version, and an index of every earlier one
+- `../wikicommit-init/changelog/<version>.md` holds each earlier version, one per file
 
-Take the index, pick the versions above the synced one, and open those files and no others. A user one version behind should read one entry — do not read the whole set and then filter, which costs the same as before the split. Pasting everything you read is likewise the same as reporting nothing.
+Take the index, pick the versions above the synced one, and open those files and no others. A user one version behind should read one entry — do not read the whole set and then filter, which defeats the point of one file per release. Pasting everything you read is likewise the same as reporting nothing.
 
 When Step 1 found no stamp the range is unknown: say so, and summarize from the latest version and the index rather than opening every file.
 

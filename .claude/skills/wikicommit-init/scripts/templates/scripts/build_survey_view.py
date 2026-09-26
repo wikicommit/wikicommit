@@ -111,6 +111,10 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
         lang, type_name, slug = resolved
         props = fm.get("properties")
         tags = fm.get("tags")
+        sources = fm.get("sources")
+        # A view page's path resolves only through parse_view_path; it carries
+        # derived_from, not sources (Issue #675).
+        is_view = view_dir is not None and parse_wiki_path(path, entity_dir) is None
         pages.append({
             "path": path,
             "key": f"{type_name}/{slug}",
@@ -121,6 +125,14 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
             "description": str((props or {}).get("description") or "") if isinstance(props, dict) else "",
             "headings": page_headings(body),
             "links": {f"{t}/{s}" for t, s in WIKILINK_RE.findall(content)},
+            # Issue #990: how many sources the page stands on. None — never 0 —
+            # for a translation (inherits from its parent) and a view page
+            # (derived_from counts something else), so PAGE: drops the field.
+            "source_count": (
+                len(sources)
+                if isinstance(sources, list) and not is_view and not fm.get("translated_from")
+                else None
+            ),
         })
     return pages
 
@@ -183,7 +195,11 @@ def main() -> int:
         refs = len(backlinks.get(p["key"], ()))
         tags = ",".join(_one_line(t, 40) for t in p["tags"])
         links = ",".join(sorted(p["links"]))
-        print(f"PAGE: {p['key']} | {_one_line(p['title'], 80)} | backlinks={refs} | tags={tags} | links={links}")
+        sources_part = f" | sources={p['source_count']}" if p["source_count"] is not None else ""
+        print(
+            f"PAGE: {p['key']} | {_one_line(p['title'], 80)} | backlinks={refs}{sources_part}"
+            f" | tags={tags} | links={links}"
+        )
         if p["description"]:
             print(f"  DESC: {_one_line(p['description'], MAX_DESC_CHARS)}")
         if p["headings"]:

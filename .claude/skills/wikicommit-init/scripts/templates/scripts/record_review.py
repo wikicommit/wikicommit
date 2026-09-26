@@ -372,6 +372,44 @@ def record_sort_key(path: Path) -> tuple[str, int]:
     return (stem, 0)
 
 
+def _stamped_keys(directory: Path):
+    """`(stamp, seq)` for every name in `directory` that is a real record.
+
+    Two names are rejected, for two different reasons. One `record_sort_key()`
+    cannot parse at all gets `seq == 0` — that is how a hand-written file keeps its
+    own place in the order without deciding where machine records go. One that
+    parses but is not a timestamp (`1-2-ai.md`) is rejected on the fixed widths,
+    because `max()` over stamps is a *string* comparison and `"99-99"` would sort
+    above every real stamp and pin the directory.
+    """
+    for path in directory.glob("*.md"):
+        stamp, seq = record_sort_key(path)
+        date, _, clock = stamp.partition("-")
+        if seq and len(date) == 8 and len(clock) == 6:
+            yield stamp, seq
+
+
+def newest_stamp(directory: Path) -> str | None:
+    """The stamp of the newest well-formed record already in `directory`, or None."""
+    stamps = [stamp for stamp, _ in _stamped_keys(directory)]
+    return max(stamps) if stamps else None
+
+
+def next_seq(directory: Path, stamp: str) -> int:
+    """The lowest `record_sort_key()` seq that sorts after everything stamped `stamp`.
+
+    Allocation cannot key off "is this exact filename free", because `kind` is not
+    part of the sort key: clamping a `human` record onto the stamp of an existing
+    `ai` record leaves `<stamp>-human.md` free, and the two records then compare
+    *equal*. `load_records()` sorts stably, so which one `standing_review()` calls
+    current would fall back to `glob()` order — the same arbitrary answer the clamp
+    exists to remove. Ordering is a property of the stamp, so the next slot has to
+    be read from the stamp rather than from one filename.
+    """
+    seqs = [seq for existing, seq in _stamped_keys(directory) if existing == stamp]
+    return max(seqs) + 1 if seqs else 1
+
+
 def allocate_record_path(directory: Path, stamp: str, kind: str) -> Path:
     """Pick a filename inside `directory`, never overwriting an existing record.
 
@@ -382,11 +420,47 @@ def allocate_record_path(directory: Path, stamp: str, kind: str) -> Path:
 
     That suffix is why `record_sort_key()` exists: it does not sort lexically after
     the unsuffixed name.
+
+    **The stamp is clamped to the newest record already here (Issue #991.)** Which
+    record is current is decided by this order — `standing_review()`,
+    `standing_verdict()`, `latest_discarded()` and every count in
+    `check_review_coverage.py` read it — and the order came from `datetime.now()`,
+    which is not monotonic. A container whose clock is stepped backwards by its host
+    (measured on WSL2: four steps of 0.49-0.58s in 24 seconds) can hand two records
+    written in sequence timestamps in the opposite order, and then the *older* record
+    is read as the standing one. Nothing warns: records are immutable by contract
+    (Issue #750), so there is no later moment at which the inversion could be noticed.
+
+    Clamping reuses the mechanism that is already here for the same-second case, so
+    the documented filename shape is unchanged, `record_sort_key()` is unchanged, and
+    existing records stay readable. What it costs is that a clamped record's filename
+    is up to a step older than the instant it was written — bounded, and the record's
+    own `reviewed_at` still carries the date. The alternative is a silently wrong
+    answer to "which review is current", which is the question this tree exists to
+    answer.
+
+    The suffix is therefore allocated from `next_seq()` — the stamp, not the exact
+    filename. `kind` is not part of the sort key, so a clamped `human` record landing
+    beside an `ai` record of that stamp would otherwise take the free unsuffixed name
+    and compare *equal* to it, and equal keys put the answer back in `glob()` order.
     """
-    candidate = directory / f"{stamp}-{kind}.md"
-    if not candidate.exists():
-        return candidate
-    for n in range(2, 1000):
+    newest = newest_stamp(directory)
+    if newest is not None and stamp < newest:
+        print(
+            f"WARNING: {directory}: the clock reads {stamp}, older than the newest "
+            f"record already here ({newest}). Recording under {newest} so these "
+            "records keep the order they were written in; the filename is that much "
+            "older than the moment it was written.",
+            file=sys.stderr,
+        )
+        stamp = newest
+    seq = next_seq(directory, stamp)
+    if seq == 1:
+        candidate = directory / f"{stamp}-{kind}.md"
+        if not candidate.exists():
+            return candidate
+        seq = 2
+    for n in range(seq, 1000):
         candidate = directory / f"{stamp}-{kind}-{n}.md"
         if not candidate.exists():
             return candidate
@@ -457,7 +531,7 @@ def write_record(record: dict, body: str, directory: Path, stamp: str, kind: str
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Persist one review verdict as an immutable record (Issue #750)."
+        description="Persist one review verdict as an immutable record."
     )
     parser.add_argument("page", help="page under .wikicommit/entity/ or .wikicommit/view/")
     parser.add_argument("--kind", required=True, choices=KINDS)

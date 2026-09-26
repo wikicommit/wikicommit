@@ -2,7 +2,7 @@
 
 `wikicommit/wikicommit` is built by copying a whitelist of paths out of this
 repository (`dev/scripts/snapshot_push.sh`), so it is a strict subset: `dev/`,
-`Issues/`, `CLAUDE.md`, `CONTRIBUTING.md`, `CHANGELOG_ja.md`, `.gitignore` and
+`Issues/`, `CLAUDE.md`, `CONTRIBUTING.md`, `.gitignore` and
 `.wikicommit/config.yml` are not in it. A test that reads one of those has
 nothing to check there, and skipping is correct behaviour rather than a hole.
 

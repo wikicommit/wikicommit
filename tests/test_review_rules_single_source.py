@@ -291,7 +291,7 @@ def test_the_review_skill_states_what_its_start_of_run_gate_costs():
     """
     text = _flat(REVIEW_SKILLS["wikicommit-review"].read_text(encoding="utf-8"))
     assert _flat("This stops pages that would never have read the rules at all, and that is "
-                 "deliberate (Issue #917)") in text, (
+                 "deliberate") in text, (
         "the gate no longer says that it stops the no-ground-truth branch, so the "
         "cost it imposes reads as an oversight"
     )
@@ -323,3 +323,13 @@ def test_no_instruction_file_blames_an_uncommitted_file_for_a_hash_failure():
             f"{skill} explains a `git hash-object` failure as an uncommitted file, "
             f"which cannot happen — it fails only when the file cannot be read"
         )
+
+
+def test_return_format_names_the_values_of_page_at_fault():
+    """Issue #987: the section saying what to return listed `type`'s values but not
+    `page_at_fault`'s, and 67% of a pilot's recorded values were outside the two.
+    Keep the values next to the field, where `type`'s already are."""
+    text = " ".join(RULES.read_text(encoding="utf-8").split())
+    start = text.index("### 4. What to return")
+    section = text[start:text.index("###", start + 1)]
+    assert "`page_at_fault` (one of `under-review` / `other`" in section

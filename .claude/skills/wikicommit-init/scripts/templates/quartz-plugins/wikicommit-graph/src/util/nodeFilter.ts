@@ -7,6 +7,16 @@
 // have to be recovered from the node id (a Quartz slug). That makes this file
 // the one place in the fork that depends on WikiCommit's own path grammar; it
 // is kept separate from the inline script so it can be unit-tested.
+//
+// **A node id is lowercase.** Quartz's slugifier lowercases every segment, so
+// `content/ja/Person/yamada-taro.md` becomes the id `ja/person/yamada-taro` and
+// the type read off it is `person`, never `Person`. Anything a reader or a
+// config writes against these values in PascalCase — the spelling `type:` uses —
+// has to be folded before it is compared (`typeMatches()`), exactly as the
+// explorer's `sortTier` had to learn for `view` (Issue #981). Tests build their
+// ids in the published (lowercase) spelling for the same reason: fixtures that
+// shared the config's PascalCase spelling are how both bugs stayed green
+// (Issue #1005).
 
 export type NodeKind = "tag" | "source" | "overview" | "root" | "entity";
 
@@ -14,10 +24,12 @@ export interface NodeInfo {
   kind: NodeKind;
   /** Language directory, for entity nodes only (`ja`, `en`, …). */
   lang?: string;
-  /** Type name as it appears in the published path, e.g. `Person`. This is
+  /** Type segment as it appears in the node id (the **lowercased** Quartz
+   *  slug, not the `content/` path), e.g. `person` for `schema:Person`. This is
    *  `type:` minus the `schema:` prefix *and* minus a custom type's leading
-   *  `custom/`, which publishing drops (Issue #576) — so `schema:custom/Decision`
-   *  reads back as `Decision` here. Absent on a language-root node. */
+   *  `custom/`, which publishing drops (Issue #576), and then lowercased — so
+   *  `schema:custom/Decision` reads back as `decision` here. Absent on a
+   *  language-root node. */
   type?: string;
   /** True for a `<lang>/<Type>/index.md` type index or a `<lang>` language
    *  root — navigation, not an entity page. */
@@ -90,12 +102,57 @@ export function classifyNode(id: string): NodeInfo {
 export interface GraphFilterConfig {
   /** Language codes to keep. Empty/absent means "every language". */
   langs?: string[];
-  /** Type names to keep. Empty/absent means "every type". A custom type may be
-   *  named either as it is published (`Decision`) or as it appears in `type:`
-   *  (`custom/Decision`) — see `typeMatches()`. */
+  /** Type names to keep. Empty/absent means "every type". Compared without
+   *  regard to case, so `Person` (the `type:` spelling a hand-written config
+   *  uses) and `person` (the slug spelling the control bar writes) both select
+   *  the same pages. A custom type may be named either with or without its
+   *  `custom/` prefix (`Decision` / `custom/Decision`) — see `typeMatches()`. */
   types?: string[];
   /** Whether `sources/` nodes are shown at all. */
   showSources?: boolean;
+  /** Whether `tags/` nodes are shown at all. Absent means shown, matching
+   *  `showSources`.
+   *
+   *  This lives here — and not only where the inline script builds the page →
+   *  tag pseudo-links — because a tag node reaches the graph by **two** routes
+   *  (Issue #982). Quartz publishes each tag as a real page, so `tags/<name>`
+   *  is a key of `contentIndex.json` and enters the global graph's node set
+   *  unconditionally; the pseudo-link gate governs only the other route. With
+   *  the gate alone, turning tags off removed every edge and left the pages
+   *  behind as a field of unlinked dots (123 of 969 nodes on
+   *  `ai-driven-dev-wiki`, all of them `links: []`). */
+  showTags?: boolean;
+  /** Individual tag names to drop, as they are written in a page's `tags:`
+   *  frontmatter. Same two-route reason as `showTags`: without this, a tag
+   *  named here kept its page node and lost only its links. */
+  removeTags?: string[];
+  /** Whether build-generated **entity** index pages — a `<lang>/<Type>` type
+   *  index or a `<lang>` language root — are shown. Absent means **hidden**,
+   *  the opposite polarity from `showSources` / `showTags`, because these are
+   *  navigation rather than pages a reader linked to (Issue #983).
+   *
+   *  This is the first consumer `NodeInfo.isIndex` has ever had. The flag was
+   *  computed and documented as "navigation, not an entity page" from the
+   *  start, but nothing read it, so a type index entered the graph as an
+   *  ordinary page: on `ai-driven-dev-wiki`, `en/definedterm` alone drew 214
+   *  links — 44% of that language's pages through one node — which is the hub
+   *  Issue #584 set out to remove.
+   *
+   *  It also makes the graph agree with `check_orphans.py`, which excludes
+   *  `index.md` as a *link source* (Issue #678) because a machine-written
+   *  `- [[Type/slug]]` is not evidence that anyone referenced the page. Without
+   *  this, the graph drew a page that script reports as an orphan as one that
+   *  has a link.
+   *
+   *  The root index (`kind: "root"`) is deliberately **not** covered: its
+   *  outbound links are only `<lang>/`, `sources` and `overview/`, so it
+   *  neither becomes a hub nor tells a lie. Hence the condition below is
+   *  `kind === "entity" && isIndex`.
+   *
+   *  `sources/`'s own indexes are out of scope and stay reachable through
+   *  `showSources`: dropping them would change what Issue #839's prune reads,
+   *  and that behaviour was settled against measurements. */
+  showIndexes?: boolean;
   /** Drop nodes with fewer than this many links. 0 disables the bound. */
   minDegree?: number;
   /** Drop nodes with more than this many links. 0 disables the bound. */
@@ -159,17 +216,92 @@ export function computeEntityDegrees(ids: Set<string>, links: GraphLink[]): Map<
   return degrees;
 }
 
-/** True when `type` (a published type name, `custom/` already dropped) is one
- *  of the selected names.
+/** True when `type` (a type segment read off a node id, `custom/` already
+ *  dropped) is one of the selected names. `types` must already be folded with
+ *  `foldTypeName()`; `filterNodes()` does that once on the way in.
  *
- * A hand-written `quartz.config.yaml` names types the way `type:` does, so a
- * custom type is written `custom/Decision` there; the graph only ever sees the
- * published `Decision`. Accepting both spellings keeps that config from
- * silently filtering every custom-type page out of the graph. The control bar
- * always writes the published spelling, which `collectFacets()` produces.
+ * A hand-written `quartz.config.yaml` names types the way `type:` does — in
+ * PascalCase, and with a custom type's `custom/` prefix — while the node id is a
+ * lowercased slug with `custom/` dropped. Folding both sides to lowercase and
+ * accepting both prefixes keeps that config from silently filtering every page
+ * out of the graph (Issue #1005). The control bar always writes the slug
+ * spelling, which `collectFacets()` produces and which folding leaves as it is.
+ *
+ * Folding adds no third spelling to compare: `custom/Decision` folds to
+ * `custom/decision`, which is `custom/` + the folded `decision`, so this stays
+ * the same two lookups it has always been.
  */
 function typeMatches(types: Set<string>, type: string): boolean {
-  return types.has(type) || types.has(`custom/${type}`);
+  const folded = foldTypeName(type);
+  return types.has(folded) || types.has(`custom/${folded}`);
+}
+
+/** The facet values (type segments as `collectFacets()` reports them) that a
+ *  configured `types` list selects, in facet order.
+ *
+ * The control bar marks its options by exact value, but a hand-written config
+ * names types in the `type:` spelling (`Person`, `custom/Decision`). Without
+ * this mapping such a config filters the graph (`typeMatches()`) while the
+ * type select shows nothing chosen — which the bar presents as "unconstrained"
+ * (Issue #1005). Uses the same rule as `filterNodes()`, so what the select
+ * shows and what the graph keeps cannot disagree.
+ */
+export function selectedTypeFacets(types: string[], facetTypes: string[]): string[] {
+  if (types.length === 0) return [];
+  const folded = new Set(types.map(foldTypeName));
+  return facetTypes.filter((t) => typeMatches(folded, t));
+}
+
+/** Fold a type name to the case its slug segment has.
+ *
+ * Only case, unlike `foldTagName()`, which also turns whitespace into hyphens.
+ * The asymmetry is deliberate: a type name is PascalCase word characters only —
+ * no whitespace, no hyphens (the custom type naming rule, which `WIKILINK_RE`'s
+ * Type segment enforces by not accepting a hyphen) — so case is the only way a
+ * config spelling can differ from its published slug. A tag name is free text,
+ * which is why it needs more.
+ *
+ * `langs` is deliberately **not** folded. ISO 639-1 codes are lowercase by
+ * definition and pass through the slugifier unchanged; adding a fold there
+ * would change nothing today and would quietly change how a future two-letter
+ * type name that collided with a language directory is read.
+ */
+function foldTypeName(name: string): string {
+  return name.toLowerCase();
+}
+
+/** The tag name inside a tag node id, or `undefined` for the `tags` landing
+ *  page — which names no single tag and so is not what `removeTags` selects. */
+function tagNameOf(id: string): string | undefined {
+  if (!id.startsWith("tags/")) return undefined;
+  const name = id.slice("tags/".length);
+  return name.length > 0 ? name : undefined;
+}
+
+/** Fold a tag name to the form both sides of the `removeTags` comparison can
+ *  be written in.
+ *
+ * The two sides do not arrive spelled the same way. `removeTags` names the tag
+ * as a page's `tags:` frontmatter writes it, which is what the upstream
+ * link-building comparison saw; a published tag page's slug has been through
+ * Quartz's slugifier, which lowercases (the same lowercasing Issue #981 found
+ * in the explorer) and turns whitespace into hyphens. Without folding, a
+ * `removeTags` entry that differs from the slug would drop the pseudo-node and
+ * leave the page node behind — the very isolated dot Issue #982 is about.
+ *
+ * **Deliberately partial.** Quartz's slugifier also rewrites `%`, `?`, `#` and
+ * more; porting it here would put a second copy of it in a module kept free of
+ * Quartz imports so it can be unit-tested, and this repository has paid for
+ * that kind of copy before (Issue #677). Case and whitespace are the two the
+ * fold covers. A `removeTags` entry differing from the published slug in any
+ * other character still matches nothing — the tag simply is not removed, which
+ * is visible rather than silent.
+ *
+ * Over-matching is not a risk: two tags that fold together publish to one page,
+ * so this cannot merge nodes that were ever distinct.
+ */
+function foldTagName(name: string): string {
+  return name.toLowerCase().replace(/\s+/g, "-");
 }
 
 /** Apply the control bar's filters to a node set.
@@ -178,8 +310,14 @@ function typeMatches(types: Set<string>, type: string): boolean {
  * language by design (`tags` are language-neutral identifiers shared by a page
  * and its translations), and the root and source nodes have none either — so
  * narrowing to one language must not silently take them away. Tags are removed
- * through the existing `showTags` config key instead, and sources through
- * `showSources`.
+ * through `showTags` / `removeTags` instead, and sources through `showSources`.
+ * All three act here, on the node set, rather than where links are built: a tag
+ * page is a real page in `contentIndex.json`, so gating only the pseudo-links
+ * left its node behind with no edges (Issue #982).
+ *
+ * Build-generated entity index pages are dropped unless `showIndexes` asks for
+ * them (Issue #983) — the type indexes and language roots `isIndex` has always
+ * marked as navigation, and which until then nothing read.
  *
  * What *is* taken away is a tag or source node the filter just cut off from every
  * page it belonged to (Issue #839). Links are only
@@ -197,8 +335,19 @@ export function filterNodes(
   config: GraphFilterConfig,
 ): Set<string> {
   const langs = config.langs && config.langs.length > 0 ? new Set(config.langs) : undefined;
-  const types = config.types && config.types.length > 0 ? new Set(config.types) : undefined;
+  // Folded on the way in, like removeTags below — see typeMatches().
+  const types =
+    config.types && config.types.length > 0 ? new Set(config.types.map(foldTypeName)) : undefined;
   const showSources = config.showSources !== false;
+  const showTags = config.showTags !== false;
+  // `=== true`, not `!== false`: this one defaults to hidden (see the field).
+  const showIndexes = config.showIndexes === true;
+  // Folded on the way in, to be compared against a folded slug segment — see
+  // foldTagName().
+  const removeTags =
+    config.removeTags && config.removeTags.length > 0
+      ? new Set(config.removeTags.map(foldTagName))
+      : undefined;
 
   // Materialized up front because it is walked twice: once to apply the
   // selections, and once as the "before" degree baseline below. An Iterable may
@@ -227,9 +376,18 @@ export function filterNodes(
   // exactly what the reader should be able to see"), and the overview was
   // quietly undoing it. Readers still reach the page from the root index and
   // from the explorer's top row.
+  //
+  // Entity index pages (Issue #983) are dropped in the same place and for the
+  // same reason, and the "output is the same either way" note above holds for
+  // them too: a type index links only to entity pages, and no tag or source
+  // links to one, so removing them changes no tag's or source's **entity**
+  // degree and the prune below catches nothing new. Entity nodes are never
+  // pruned, so the entity pages that lose an index neighbour are unaffected.
   const all = new Set<string>();
   for (const id of ids) {
-    if (classifyNode(id).kind === "overview") continue;
+    const info = classifyNode(id);
+    if (info.kind === "overview") continue;
+    if (!showIndexes && info.kind === "entity" && info.isIndex) continue;
     all.add(id);
   }
 
@@ -237,6 +395,11 @@ export function filterNodes(
   for (const id of all) {
     const info = classifyNode(id);
     if (info.kind === "source" && !showSources) continue;
+    if (info.kind === "tag") {
+      if (!showTags) continue;
+      const name = tagNameOf(id);
+      if (removeTags && name !== undefined && removeTags.has(foldTagName(name))) continue;
+    }
     if (info.kind === "entity") {
       if (langs && (info.lang === undefined || !langs.has(info.lang))) continue;
       // A language-root node has no type; it belongs to whichever languages

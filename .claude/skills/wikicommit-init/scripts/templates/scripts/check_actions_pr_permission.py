@@ -73,7 +73,7 @@ def evaluate_permission_json(raw: str, repo: str) -> tuple[str, str, str]:
     )
     return "WARNING", (
         f"{repo}: {SETTING_NAME} is disabled, so review-issue-close-sync.yml "
-        f"cannot auto-merge after a review tracking Issue is closed (Issue #403). "
+        f"cannot auto-merge after a review tracking Issue is closed. "
         f"Enable it with: {enable_cmd}"
     ), "false"
 

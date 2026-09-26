@@ -1372,3 +1372,125 @@ def test_a_non_mapping_skill_overrides_is_left_alone(tmp_path):
 
     assert _settings(tmp_path)["skillOverrides"] == "off"
     assert "could not be read as a JSON object" in result.stderr
+
+
+# ── README.md for a repository that has none (Issue #1034) ────────────────────
+
+def test_readme_is_created_when_the_repository_has_none(tmp_path):
+    repo = tmp_path / "my-wiki"
+    repo.mkdir()
+    result = run([], cwd=repo)
+
+    assert result.returncode == 0
+    assert "CREATED: README.md" in result.stdout
+    text = (repo / "README.md").read_text(encoding="utf-8")
+    assert text.startswith("# my-wiki\n")
+    assert "## License" in text
+    # Without --quartz-pages no step 3 URL can exist, so no marker is left behind.
+    assert "wikicommit:published-site" not in text
+
+
+def test_readme_license_section_is_the_same_text_the_guidance_offers(tmp_path):
+    """One constant, two readers: the README init writes and the paste-in suggestion
+    print_next_steps.py prints when the README was already there."""
+    import importlib.util
+
+    root_outputs_path = SCRIPT.parent / "_root_outputs.py"
+    spec = importlib.util.spec_from_file_location("_root_outputs_for_test", root_outputs_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    run([], cwd=tmp_path)
+    assert module.README_LICENSE_TEXT in (tmp_path / "README.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "existing",
+    ["README.md", "readme.md", "README.rst", "README", ".github/README.md", "docs/README.md"],
+)
+def test_any_readme_github_would_show_means_none_is_written(tmp_path, existing):
+    path = tmp_path / existing
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("mine\n", encoding="utf-8")
+
+    result = run([], cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert "SKIPPED: README.md (a README already exists" in result.stdout
+    assert path.read_text(encoding="utf-8") == "mine\n"
+    if existing.lower() != "readme.md":
+        assert not (tmp_path / "README.md").exists()
+
+
+def test_quartz_pages_readme_carries_a_marker_that_finish_readme_resolves(tmp_path):
+    run(["--quartz", "--quartz-pages"], cwd=tmp_path)
+    readme = tmp_path / "README.md"
+    assert "<!-- wikicommit:published-site -->" in readme.read_text(encoding="utf-8")
+
+    result = run(["--finish-readme", "--site-url", "https://example.github.io/wiki/"], cwd=tmp_path)
+
+    assert result.returncode == 0
+    text = readme.read_text(encoding="utf-8")
+    assert "wikicommit:published-site" not in text
+    assert "## Published site" in text
+    assert "(https://example.github.io/wiki/)" in text
+
+
+def test_finish_readme_without_a_url_removes_the_marker(tmp_path):
+    run(["--quartz", "--quartz-pages"], cwd=tmp_path)
+
+    result = run(["--finish-readme"], cwd=tmp_path)
+
+    assert result.returncode == 0
+    text = (tmp_path / "README.md").read_text(encoding="utf-8")
+    assert "wikicommit:published-site" not in text
+    assert "## Published site" not in text
+    assert "\n\n\n" not in text
+
+
+def test_finish_readme_leaves_a_readme_without_the_marker_alone(tmp_path):
+    (tmp_path / "README.md").write_text("# mine\n", encoding="utf-8")
+
+    result = run(["--finish-readme", "--site-url", "https://example.github.io/wiki/"], cwd=tmp_path)
+
+    assert result.returncode == 0
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "# mine\n"
+
+
+def test_reinit_does_not_overwrite_a_readme_init_created(tmp_path):
+    run([], cwd=tmp_path)
+    (tmp_path / "README.md").write_text("# edited\n", encoding="utf-8")
+
+    result = run(["--no-overwrite"], cwd=tmp_path)
+
+    assert "SKIPPED: README.md" in result.stdout
+    assert (tmp_path / "README.md").read_text(encoding="utf-8") == "# edited\n"
+
+
+def _next_steps(*args: str) -> str:
+    script = SCRIPT.parent / "print_next_steps.py"
+    return subprocess.run(
+        [sys.executable, str(script), *args], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def test_guidance_drops_the_readme_suggestions_when_init_created_the_readme():
+    """Issue #1034: the created README already holds the licensing section and the link,
+    so suggesting them again says the same thing twice."""
+    created = _next_steps("--variant", "quartz_pages", "--pages-html-url", "https://x/", "--readme-created")
+    assert "View the wiki" not in created
+    assert "• README.md:" not in created
+    assert "Decide how this repository is licensed" in created
+
+
+def test_guidance_keeps_the_readme_suggestions_when_the_readme_was_already_there():
+    kept = _next_steps("--variant", "quartz_pages", "--pages-html-url", "https://x/")
+    assert "View the wiki" in kept
+    assert "• README.md:" in kept
+
+
+def test_guidance_keeps_the_manual_pages_reminder_when_init_created_the_readme_without_a_url():
+    """Without an html_url, --finish-readme removes the marker and the created README has no
+    link, so the reminder to add one after enabling Pages manually must still be printed."""
+    created = _next_steps("--variant", "quartz_pages", "--readme-created")
+    assert "Once you enable GitHub Pages manually" in created

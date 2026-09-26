@@ -149,7 +149,8 @@
       }
 
       // Starts the colour half on a new line, so the two axes read as two
-      // groups rather than one six-item scale. Without it the reader is invited
+      // groups rather than one scale (four items since Issue #985 moved the
+      // tag and source marks onto their toggles). Without it the reader is invited
       // to compare a shape swatch against a colour one, which is the comparison
       // the legend exists to say is meaningless.
       .global-graph-controls__legend-break {
@@ -199,7 +200,17 @@
 
       .global-graph-controls__range {
         display: flex;
-        gap: 0.25rem;
+        gap: 0.5rem;
+
+        // Each end carries its own caption now (Issue #984), so the two boxes
+        // are no longer interchangeable on screen. Laid out in a row rather
+        // than stacked: the bar grows by flow and a second stacked line would
+        // make this one field taller than every other (Issue #838).
+        .global-graph-controls__range-item {
+          display: flex;
+          align-items: center;
+          gap: 0.25rem;
+        }
 
         // Named by type for the same reason as the block below: the bar holds
         // more than one kind of control, and a bare `input` says nothing about
@@ -235,6 +246,11 @@
       // any handler of our own — the things a checkbox gave for free and an
       // element styled to look like a button would have to re-implement.
       .global-graph-controls__toggle {
+        // Laid out as a row so the kind swatch (Issue #985) sits beside the
+        // label rather than above it.
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
         cursor: pointer;
         font-size: 0.8rem;
         color: var(--dark);
@@ -267,6 +283,14 @@
           // 5.01:1), and it keeps the hue the pressed state already established.
           &:hover {
             filter: brightness(0.92);
+          }
+
+          // A --darkgray square on the --secondary fill is too close in
+          // lightness to read in light mode, so a pressed toggle rings its
+          // swatch in --light — the colour the label already uses there, so
+          // it flips with the theme the same way (Issue #985).
+          .global-graph-controls__legend-swatch--source {
+            box-shadow: 0 0 0 1px var(--light);
           }
         }
       }

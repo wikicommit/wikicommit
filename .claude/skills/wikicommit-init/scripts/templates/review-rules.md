@@ -1,10 +1,10 @@
 ---
-rules_version: 3
+rules_version: 4
 wikicommit:
   # Machine-readable header only. The rules themselves are the prose below.
   # `rules_version` is bumped whenever any rule in this file changes; a review
   # subagent must echo it back so the orchestrator can tell a review that read
-  # these rules from one that did not (Issue #752).
+  # these rules from one that did not.
   applies_to:
     - generate-pass4
     - review-skill
@@ -14,11 +14,7 @@ wikicommit:
 # WikiCommit review rules
 
 The one place the review discipline is written. Every review path reads this
-file; none of them restates it (Issue #752).
-
-Before this file existed the same rules lived in three Skills at once, and the
-three had already drifted apart — some checks existed in only one of them, and
-nobody had decided which version was right. Deciding that is what this file is.
+file; none of them restates it, so the paths cannot drift apart.
 
 **Do not copy these rules back into a SKILL.md.** What belongs there is the
 *choreography* — how a subagent is launched, what happens on FAIL, retries,
@@ -114,7 +110,9 @@ The agent-to-agent JSON: `result: "PASS" | "FAIL"`, an `issues` array, and
 
 Each `issues` entry carries `type` (one of `HALLUCINATION` / `CONTRADICTION` /
 `MISSING_SOURCE`), `claim`, `source_file`, `source_lines`, `source_quote`,
-`instruction`, and `page_at_fault` on cross-page entries only.
+`instruction`, and `page_at_fault` (one of `under-review` / `other` — spelled
+exactly so; check 8 says which applies, and on `synthesize-step5.5` that path's
+section does) on cross-page entries only.
 
 `source_file` is what tells a page conflict from a source one: a path under
 `.wikicommit/entity/` or `.wikicommit/view/` means the conflict is with a page,
@@ -186,8 +184,7 @@ document that the evidence only names *in passing* while writing about
 something else, and any document the page *cites* for a fact while the evidence
 does not contain it — that one stays check 4's however squarely the evidence is
 about the fact. The two halves are written as a pair on purpose, because a
-boundary written on one side only gets applied on one side only (Issue #550's
-lesson about `granularity`, in a different file). Neither check owns the whole
+boundary written on one side only gets applied on one side only. Neither check owns the whole
 space of "the page mentions another document"; which one applies turns on
 whether the evidence is *about* that fact or merely mentions it, and on whether
 the page states the fact or cites a document for it.
