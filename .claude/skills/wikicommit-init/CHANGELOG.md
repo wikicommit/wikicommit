@@ -239,6 +239,16 @@ deviation Django and Node.js make, for the same reason. Do not "restore" it to o
 
 ### Fixed
 
+- **The overview's "Checked against sources (AI)" ratio no longer drops every time a page
+  is translated** (Issue #1030). Its numerator and denominator counted translation pages,
+  which carry no record of a check against their original, so translating a wiki lowered
+  the ratio without anything having got worse — a fully translated two-language wiki read
+  as half checked. Both now count only pages generated from sources. When the wiki has
+  translation pages, a separate "Translation pages" row gives their number and says no
+  check against the original is recorded, with one line under the ratio saying they are
+  left out of it; a wiki with no translations shows the same rows as before. The note
+  under the ratio now says it covers pages generated from sources. Existing wikis get
+  this on their next build.
 - **Search no longer uses an index built before the pages it should find** (Issue #1061).
   `search_index.py query` built the index only when the file did not exist; once built it
   was used as is, so every page added, edited or removed afterwards was invisible to
