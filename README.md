@@ -25,6 +25,7 @@ WikiCommit is an implementation of the *LLM wiki* idea — an LLM that reads you
 - **Multi-person, asynchronous review**: Pages are auto-merged and published once they pass the quality checks, so review never blocks publishing; each reviewer finishes by closing their page's Issue.
 - **Automated from source discovery to page generation**: Automatically discovers un-ingested related sources from local folders and the web. Register a PDF, URL, or file in your repository, and it generates wiki pages.
 - **GitOps**: Every change is recorded as a commit and PR. Auditing, rollback, and backup are all handled by `git log` alone.
+- **Synthesized pages**: Writes comparisons and overviews from the wiki's existing pages.
 - **Q&A over the wiki (RAG)**: Answers questions using wiki pages as the starting point, and can trace back to the primary sources to cite them when needed.
 - **Multilingual support**: End-to-end support for translation generation, automatic detection of stale translations, and WikiLink language fallback.
 - **Automatic publishing to GitHub Pages**: A merge to `main` triggers a build and deploy as a static site. Local preview before publishing is also available.
@@ -38,6 +39,7 @@ Wikis that are actually running in production:
 
 - **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — A wiki on AI-driven software development: vibe coding, spec-driven development, and agentic coding workflows. Written in English, with a Japanese translation under way.
 - **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A wiki about Giovanni Boccaccio's *The Decameron*, written in Italian, with **every page translated into English and Japanese**.
+- **[world-of-work-wiki](https://wikicommit.github.io/world-of-work-wiki/)** — A wiki on the world of work: occupational safety and health, working time, forms of employment, and the quality of work. Written in English from public-agency sources in several languages.
 
 Each front page carries its own counts, recomputed on every build: how many pages there are, how many were checked against the sources they were written from, and how many a person has since read. That last number is a sample by design rather than a target — see [Step 3](#step-3-post-merge-review).
 
