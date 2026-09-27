@@ -9,6 +9,8 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 
 **LLM は 1 人が読める速さを超えてページを書くため、レビューは分割できなければなりません。** WikiCommit はレビューの単位をページ 1 枚に固定します — 1 ページが 1 つの追跡 Issue で、それだけを Close すれば完了です。レビューする人はそのページだけを読めばよく、知識ベース全体を読む必要も、他の人のレビューを待つ必要もありません。増えていく Wiki が 1 人の読み手の前で詰まらないのは、この単位によります。そして分割できることは、**全ページを読まなくてよい**ことでもあります — 機械は全ページをその元になった文書と照合し、人が読むのはそこからの抜取です（[Step 3](#step-3-マージ後レビュー)）。
 
+WikiCommit は *LLM wiki* — LLM が資料を読み、そこから Wiki を書いて育てていく考え方（[Andrej Karpathy の LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)）— の一実装です。加えているのはレビューの側です。どのページも PR を通って入り、元になった文書と照合され、人がそのページだけを読んで確認できます。各ページは [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)（Open Knowledge Format）v0.1 が唯一必須とする Schema.org の `type` を持つので、Wiki の知識は WikiCommit にしか読めない形式に閉じ込められません。
+
 > **Status**: パイロットリポジトリでの実運用検証を進めており、破壊的変更が入ることがあります。
 
 <picture>
@@ -43,6 +45,49 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
   <source media="(prefers-color-scheme: dark)" srcset="assets/front-dark.png">
   <img alt="公開された Wiki のフロントページ。ページ数・出典と照合済みのページ数・人が読んだページ数の 3 つの数字と、各々が何を意味し何を意味しないかを説明する段落。" src="assets/front-light.png">
 </picture>
+
+## Wiki の構成
+
+Wiki が持つものはすべて `.wikicommit/` の下に、3 つの層に分かれて置かれます。各層は 1 つ手前の層から書かれます。
+
+```mermaid
+flowchart LR
+  subgraph S["source/"]
+    s1["文書 (ja)"]
+    s2["文書 (en)"]
+    s3["文書 (de)"]
+    s4["…"]
+  end
+  subgraph E["entity/#lt;lang#gt;/"]
+    e1["Person/…"]
+    e2["Organization/…"]
+    e3["Event/…"]
+    e4["Place/…"]
+    e5["DefinedTerm/…"]
+    e6["CreativeWork/…"]
+    e7["…"]
+  end
+  subgraph V["view/#lt;lang#gt;/"]
+    v1["…"]
+  end
+  s1 --> e1 & e2 & e3
+  s2 --> e2 & e4
+  s3 --> e4 & e5 & e6
+  s4 --> e7
+  e1 & e4 & e6 --> v1
+```
+
+*ソースは書かれた言語のまま何語でも取り込まれ、ページはすべて Wiki の `primary_lang` で書かれます（図の `<lang>` はその 1 つの言語です）。`/wikicommit-generate` はソースに現れる事物を 1 つずつページにするので、1 つのソースから複数のページができます。2 つのソースが同じ事物を扱っていれば、そのページは両方から書かれます。`/wikicommit-synthesize` は entity のページから view のページを書きます。*
+
+- **`source/`** には、登録したソース（リポジトリ内のファイルまたは URL）1 つにつき 1 つの管理ファイルが置かれます。ソースのハッシュ・状態・そこから生まれたページを記録します。文書そのものはここにコピーされません。
+- **`entity/`** が Wiki の本体です。1 つの事物（人物・場所・用語など）につき 1 ページで、`<lang>/<Type>/<slug>.md` に置かれます。`<Type>` はそのページの Schema.org 型です。各ページは、書き起こしの元になった文書を `sources:` に持ちます。
+- **`view/`** には、1 つのソースからは書けないページ（比較・年表・全体像など）が置かれます。Wiki 自身の `entity/` のページから書かれ、`sources:` の代わりに `derived_from:` でそれらを挙げます。型を持たず `<lang>/<slug>.md` に置かれ、`[[View/<slug>]]` でリンクします。
+
+**言語の扱いは層ごとに違います:**
+
+- **ソースは何語でもよく、そこから書かれるページの言語はそれとは別に決まります。** `/wikicommit-generate` は常に `primary_lang`（`.wikicommit/config.yml` で設定）で書くため、英語の Wiki では日本語の記事から英語のページができます。ソースが何語で書かれていたかは管理ファイルに記録されます。
+- **それ以外の言語はすべて `/wikicommit-translate` から生まれます**（対象は `translation.targets` に挙げた言語）。翻訳ページは原文と同じ `<Type>/<slug>` を持ち、どのページのどのコミットから訳したかを記録するので、原文が更新されると `/wikicommit-status` が気づきます。
+- **リンクは言語を名指ししません。** `[[Type/slug]]` はリンクが書かれたページと同じ言語のページへ向かい、翻訳がまだ無ければ `primary_lang` のページへ落ちます。
 
 ## 基本フロー
 
@@ -240,7 +285,7 @@ flowchart TD
 | 1 | 初期化 | `/wikicommit-init` | リポジトリに Wiki を初期化 |
 | 2 | 生成・登録 | `/wikicommit-generate <path\|url>` | ソース登録 + Wiki ページ生成 |
 | 3 | 生成・登録 | `/wikicommit-collect` | 関連ソース候補を探索（人間承認前提） |
-| 4 | 生成・登録 | `/wikicommit-synthesize <topic>` | 既存Wikiページから新規ページを合成（`entity/`に書き込み） |
+| 4 | 生成・登録 | `/wikicommit-synthesize <topic>` | 既存Wikiページから新規ページを合成（`view/`に書き込み） |
 | 5 | 生成・登録 | `/wikicommit-translate <page> [--lang <target>]` \| `/wikicommit-translate`（一括） | ページを翻訳（ローカル書き出しのみ） |
 | 6 | レビュー・品質管理 | `/wikicommit-merge` | 品質チェック・PR 作成・マージ |
 | 7 | レビュー・品質管理 | `/wikicommit-review <page>` | ページを検証・レビュー |
@@ -277,6 +322,10 @@ WikiCommit 自身（Skills とそれが展開するテンプレート木）の�
 ## Contributing
 
 設計記録の読み方 — ここに何が公開されているか、`Issue #NNN` が何を指すか、本文が参照するパスのうちどれがこのリポジトリに含まれないか — は [docs/README.md](docs/README.md) にあります。テストの実行方法、本文の多くが日本語で書かれている理由、開発リポジトリの外で skip されるテストについては [tests/README.md](tests/README.md) を参照してください。
+
+## Author
+
+WikiCommit は Yuki Jo（[@joyk0117](https://github.com/joyk0117)）が開発・保守しています。
 
 ## License
 

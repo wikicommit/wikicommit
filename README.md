@@ -9,6 +9,8 @@ A Git-based knowledge management platform. An LLM generates wiki pages from your
 
 **An LLM writes faster than one person can read, so review has to be splittable.** WikiCommit makes a single page the unit of review: one page is one tracking Issue, closed on its own. A reviewer reads that page and nothing else — not the rest of the knowledge base — and never has to wait on anyone else's review. That is what keeps a growing wiki from piling up behind one reader. Being splittable is also what makes it unnecessary to read them all: the machine checks every page against the documents it was written from, and a person reads a sample of those ([Step 3](#step-3-post-merge-review)).
 
+WikiCommit is an implementation of the *LLM wiki* idea — an LLM that reads your sources and writes and maintains a wiki from them, as sketched in [Andrej Karpathy's LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). What it adds is the review side: every page arrives through a PR, is checked against the documents it was written from, and can be read and signed off by a person on its own. Each page carries a Schema.org `type`, the one field [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (Open Knowledge Format) v0.1 requires, so what the wiki knows is not locked into a format only WikiCommit reads.
+
 > **Status**: Actively being validated through real-world use in pilot repositories; breaking changes may occur.
 
 <picture>
@@ -43,6 +45,49 @@ Each front page carries its own counts, recomputed on every build: how many page
   <source media="(prefers-color-scheme: dark)" srcset="assets/front-dark.png">
   <img alt="The front page of a published wiki, showing three counts — pages, pages checked against their sources, and pages a person has read — followed by a paragraph explaining what each count does and does not mean." src="assets/front-light.png">
 </picture>
+
+## How a Wiki Is Laid Out
+
+Everything the wiki holds lives under `.wikicommit/`, in three layers. Each layer is written from the one before it.
+
+```mermaid
+flowchart LR
+  subgraph S["source/"]
+    s1["a document (ja)"]
+    s2["a document (en)"]
+    s3["a document (de)"]
+    s4["…"]
+  end
+  subgraph E["entity/#lt;lang#gt;/"]
+    e1["Person/…"]
+    e2["Organization/…"]
+    e3["Event/…"]
+    e4["Place/…"]
+    e5["DefinedTerm/…"]
+    e6["CreativeWork/…"]
+    e7["…"]
+  end
+  subgraph V["view/#lt;lang#gt;/"]
+    v1["…"]
+  end
+  s1 --> e1 & e2 & e3
+  s2 --> e2 & e4
+  s3 --> e4 & e5 & e6
+  s4 --> e7
+  e1 & e4 & e6 --> v1
+```
+
+*Sources come in whatever languages they were written in; every page is written in the wiki's `primary_lang`, so `<lang>` above is that one language. `/wikicommit-generate` draws every subject it finds out of a source, so each source yields several pages, and a page that two sources both cover is written from both. `/wikicommit-synthesize` writes a view page from the entity pages.*
+
+- **`source/`** holds one tracking file per registered source — a file in your repository or a URL. It records the source's hash, its status, and which pages it produced. The documents themselves are not copied here.
+- **`entity/`** holds the wiki itself: one page per subject (a person, a place, a term), filed as `<lang>/<Type>/<slug>.md`, where `<Type>` is the page's Schema.org type. Every page lists in `sources:` the documents it was written from.
+- **`view/`** holds pages that no single source could produce — a comparison, a timeline, an overview — written from the wiki's own `entity/` pages and listing them in `derived_from:` instead of `sources:`. Filed as `<lang>/<slug>.md` with no type, and linked as `[[View/<slug>]]`.
+
+**Languages work differently in each layer:**
+
+- **A source can be in any language; the pages written from it are not.** `/wikicommit-generate` always writes in `primary_lang` (set in `.wikicommit/config.yml`), so a Japanese article feeds an English page in an English wiki. The language the source was written in is recorded in its tracking file.
+- **Every other language comes from `/wikicommit-translate`**, into the languages listed under `translation.targets`. A translation keeps the same `<Type>/<slug>` as its original and records which page and which commit it was translated from, so `/wikicommit-status` can tell when the original has moved on.
+- **Links do not name a language.** `[[Type/slug]]` goes to the page in the same language as the page it is written on, and falls back to the `primary_lang` page while no translation exists yet.
 
 ## Basic Flow
 
@@ -252,7 +297,7 @@ The inside of `/wikicommit-generate` — the four passes from text extraction th
 | 1 | Initialization | `/wikicommit-init` | Initialize a wiki in a repository |
 | 2 | Generate/Register | `/wikicommit-generate <path\|url>` | Register a source + generate wiki pages |
 | 3 | Generate/Register | `/wikicommit-collect` | Discover candidate related sources (requires human approval) |
-| 4 | Generate/Register | `/wikicommit-synthesize <topic>` | Synthesize a new page from existing wiki pages (writes to `entity/`) |
+| 4 | Generate/Register | `/wikicommit-synthesize <topic>` | Synthesize a new page from existing wiki pages (writes to `view/`) |
 | 5 | Generate/Register | `/wikicommit-translate <page> [--lang <target>]` \| `/wikicommit-translate` (batch) | Translate a page (local write-out only) |
 | 6 | Review/Quality | `/wikicommit-merge` | Quality checks, PR creation, and merge |
 | 7 | Review/Quality | `/wikicommit-review <page>` | Validate and review a page |
@@ -289,6 +334,10 @@ The inside of `/wikicommit-generate` — the four passes from text extraction th
 ## Contributing
 
 [docs/README.md](docs/README.md) explains how to read the design record — what is published here, what the `Issue #NNN` references mean, and which referenced paths are not part of this repository. [tests/README.md](tests/README.md) covers the test suite: how to run it, why much of it is written in Japanese, and which tests are skipped outside the development repository.
+
+## Author
+
+WikiCommit is built and maintained by Yuki Jo ([@joyk0117](https://github.com/joyk0117)).
 
 ## License
 
