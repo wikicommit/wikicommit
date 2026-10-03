@@ -46,6 +46,7 @@ export default {
       // Over-claiming here would repeat, in the opposite direction, the error
       // Issue #740 is correcting for `reviewed`.
       aiReviewAt: "出典と照合:",
+      aiReviewOriginalAt: "原文と照合:",
       aiReviewBy: "照合モデル:",
       unknown: "不明",
       reviewStatusLink: "このページのレビュー状況を見る",

@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).parent.parent / ".claude" / "skills" / "wikicommit-remove" / "scripts" / "remove_page.py"
 
 _spec = importlib.util.spec_from_file_location("remove_page", SCRIPT)
@@ -332,3 +334,144 @@ def test_add_removed_fields_handles_backslash_in_value():
     updated = remove_page.add_removed_fields(content, fields)
 
     assert "merged_into: .wikicommit/entity/ja/Person/weird\\1target.md" in updated
+
+
+# ── view pages (Issue #1074) ─────────────────────────────────────────────────
+#
+# remove_page.py has handled .wikicommit/view/ since that tree existed, but no
+# test went through it, so nothing stopped the view branch from regressing.
+
+def write_view_page(root: Path, lang: str, slug: str, extra: dict | None = None) -> Path:
+    page_dir = root / ".wikicommit" / "view" / lang
+    page_dir.mkdir(parents=True, exist_ok=True)
+    page = page_dir / f"{slug}.md"
+    lines = ["---", f'title: "{slug}"', f"lang: {lang}", "derived_from: []"]
+    for key, value in (extra or {}).items():
+        lines.append(f"{key}: {value}")
+    lines += ["---", "", f"Body of {slug}.", ""]
+    page.write_text("\n".join(lines), encoding="utf-8")
+    return page
+
+
+def test_cli_marks_a_view_page_removed(tmp_path):
+    page = write_view_page(tmp_path, "ja", "agent-loops")
+    result = run([str(page.relative_to(tmp_path)), "--reason", "obsolete", "--today", "2026-07-08"], tmp_path)
+    assert result.returncode == 0, result.stderr
+    text = page.read_text(encoding="utf-8")
+    assert "status: removed" in text
+    assert 'removed_at: "2026-07-08"' in text
+    assert "removed_reason: obsolete" in text
+    assert "REMOVED: .wikicommit/view/ja/agent-loops.md" in result.stdout
+
+
+def test_cli_removes_a_view_pages_translations(tmp_path):
+    page = write_view_page(tmp_path, "ja", "agent-loops")
+    translation = write_view_page(
+        tmp_path, "en", "agent-loops", {"translated_from": ".wikicommit/view/ja/agent-loops.md"}
+    )
+    unrelated = write_view_page(tmp_path, "en", "other")
+    result = run([str(page.relative_to(tmp_path)), "--reason", "gdpr", "--today", "2026-07-08"], tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "status: removed" in translation.read_text(encoding="utf-8")
+    assert "removed_reason: gdpr" in translation.read_text(encoding="utf-8")
+    assert "status: removed" not in unrelated.read_text(encoding="utf-8")
+    assert "SUMMARY: removed=2" in result.stdout
+
+
+def test_cli_drops_the_view_page_from_its_language_index_only(tmp_path):
+    page = write_view_page(tmp_path, "ja", "agent-loops")
+    write_view_page(tmp_path, "ja", "other")
+    index = tmp_path / ".wikicommit" / "view" / "ja" / "index.md"
+    index.write_text(
+        '---\ntitle: "View"\n---\n\n- [[View/agent-loops]]\n- [[View/other]]\n', encoding="utf-8"
+    )
+    result = run([str(page.relative_to(tmp_path)), "--reason", "obsolete"], tmp_path)
+    assert result.returncode == 0, result.stderr
+    text = index.read_text(encoding="utf-8")
+    assert "[[View/agent-loops]]" not in text
+    assert "- [[View/other]]" in text
+
+
+def test_cli_merges_a_view_page_into_a_view_or_entity_page(tmp_path):
+    for i, target in enumerate((
+        write_view_page(tmp_path, "ja", "broader"),
+        write_page(tmp_path, "ja", "DefinedTerm", "loop"),
+    )):
+        page = write_view_page(tmp_path, "ja", f"narrow-{i}")
+        target_rel = str(target.relative_to(tmp_path))
+        result = run(
+            [str(page.relative_to(tmp_path)), "--reason", "merged", "--merged-into", target_rel], tmp_path
+        )
+        assert result.returncode == 0, result.stderr
+        text = page.read_text(encoding="utf-8")
+        assert "removed_reason: merged" in text
+        assert f"merged_into: {target_rel}" in text
+
+
+# ── grouped index (Issue #1136) ──────────────────────────────────────────────
+
+REBUILD_INDEX = Path(__file__).parent.parent / ".wikicommit" / "scripts" / "rebuild_index.py"
+
+GROUPS = """\
+groups:
+  practice:
+    label: {en: Practices}
+    pages: [vibe-coding, spec-driven]
+  phenomenon:
+    label: {en: Phenomena}
+    pages: [context-rot]
+"""
+
+
+def _grouped_wiki(root: Path) -> Path:
+    for slug in ("vibe-coding", "spec-driven", "context-rot", "loose-one"):
+        write_page(root, "en", "DefinedTerm", slug)
+    groups = root / ".wikicommit" / "groups" / "DefinedTerm.yml"
+    groups.parent.mkdir(parents=True, exist_ok=True)
+    groups.write_text(GROUPS, encoding="utf-8")
+    rebuilt = subprocess.run(
+        [sys.executable, str(REBUILD_INDEX)], capture_output=True, text=True, cwd=root, check=False
+    )
+    assert rebuilt.returncode == 0, rebuilt.stdout + rebuilt.stderr
+    return root / ".wikicommit" / "entity" / "en" / "DefinedTerm" / "index.md"
+
+
+@pytest.mark.parametrize(
+    "slug, heading",
+    [
+        ("context-rot", "## Phenomena"),  # the last page of a group in the middle
+        ("loose-one", "## Unclassified"),  # the last unclassified page, at the end
+    ],
+)
+def test_cli_drops_a_heading_left_empty_by_the_removal(tmp_path, slug, heading):
+    """Removing the last page of a section must not leave its `## ` heading
+    standing over nothing: the index ends up exactly as rebuild_index.py would
+    write it without that page (which leaves an empty section out)."""
+    index = _grouped_wiki(tmp_path)
+    assert heading in index.read_text(encoding="utf-8")
+    page = tmp_path / ".wikicommit" / "entity" / "en" / "DefinedTerm" / f"{slug}.md"
+
+    result = run([str(page.relative_to(tmp_path)), "--reason", "obsolete"], tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    after_remove = index.read_text(encoding="utf-8")
+    assert heading not in after_remove
+    assert f"[[DefinedTerm/{slug}]]" not in after_remove
+    subprocess.run([sys.executable, str(REBUILD_INDEX)], capture_output=True, cwd=tmp_path, check=True)
+    assert after_remove == index.read_text(encoding="utf-8")
+
+
+def test_cli_keeps_a_heading_that_still_has_pages(tmp_path):
+    index = _grouped_wiki(tmp_path)
+    page = tmp_path / ".wikicommit" / "entity" / "en" / "DefinedTerm" / "vibe-coding.md"
+
+    assert run([str(page.relative_to(tmp_path)), "--reason", "obsolete"], tmp_path).returncode == 0
+
+    text = index.read_text(encoding="utf-8")
+    assert "## Practices\n\n- [[DefinedTerm/spec-driven]]\n\n## Phenomena" in text
+    assert text.endswith("## Unclassified\n\n- [[DefinedTerm/loose-one]]\n")
+
+
+def test_drop_empty_sections_leaves_a_flat_index_alone():
+    content = '---\ntitle: "Person"\n---\n\n- [[Person/suzuki-jiro]]\n'
+    assert remove_page._drop_empty_sections(content) == content

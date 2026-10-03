@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # wikicommit-synthesize
 
-Synthesizes a new **view page** about a given concept or term from the content of `.wikicommit/entity/` itself — the counterpart to `/wikicommit-generate` (which creates pages from external sources): `generate` starts from a source document, `synthesize` starts from existing wiki pages. Gathering related pages uses the same cross-lingual search logic as `wikicommit-ask`. The result is written to `.wikicommit/view/<lang>/<slug>.md` — subject to the quality gate and mergeable via `/wikicommit-merge` like any other page. This Skill has no dedicated scripts of its own (it calls the shared `search_index.py`, `rebuild_index.py` and, in survey mode, `build_survey_view.py`).
+Synthesizes a new **view page** about a given concept or term from the content of `.wikicommit/entity/` itself — the counterpart to `/wikicommit-generate` (which creates pages from external sources): `generate` starts from a source document, `synthesize` starts from existing wiki pages. Gathering related pages uses the same search index as `wikicommit-ask`, but searches only `primary_lang` — the grounding has to be original pages, not translations of them (Step 1). The result is written to `.wikicommit/view/<lang>/<slug>.md` — subject to the quality gate and mergeable via `/wikicommit-merge` like any other page. This Skill has no dedicated scripts of its own (it calls the shared `search_index.py`, `rebuild_index.py` and, in survey mode, `build_survey_view.py`).
 
 **Why a separate tree**: a view page is grounded in this wiki's own pages (`derived_from`), not in an external document (`sources` + hash), and keeping it out of the type directories is what lets a reader see which is which. A view page carries **no `type:`** either: Schema.org models things, and what a view page holds is a *reading* of several pages, so picking a type would mean inventing one. It has an optional **`kind`** instead — what the page does with several pages at once, not what it is about.
 
@@ -17,6 +17,7 @@ Synthesizes a new **view page** about a given concept or term from the content o
 ```
 /wikicommit-synthesize <topic>     # write about a topic you already have in mind
 /wikicommit-synthesize             # survey the wiki first, and pick a topic out of it
+/wikicommit-synthesize [<topic>] --max-grounding <N>   # grounding pages to use at most (default 30)
 ```
 
 With no `<topic>`, Step 0 below surveys the whole wiki, proposes angles that only
@@ -87,7 +88,9 @@ in it should get few. For each, give:
 - a short topic phrase, in `primary_lang`, in the form Step 1 can take as `<topic>`
 - the **kind** it would be written as (Step 5's table), or none if no kind fits
 - one line on what makes it worth writing, naming the specific pages that
-  suggested it
+  suggested it — and how many there are, so an angle that would exceed the
+  grounding cap is visible before it is chosen. The pages named here are carried
+  to Step 3 as grounding candidates alongside whatever the search returns
 
 **Work through the kinds to find them.** "Propose angles" on its own has no
 structure, and the view's own output lines up with the kinds well enough to be
@@ -110,7 +113,10 @@ way to write it.
 #### 0.3 Let the person choose
 
 Present the numbered list and ask which to write about. They can also type a
-topic of their own, in which case use that verbatim.
+topic of their own, in which case use that verbatim. Add one line under the list
+saying that a synthesized page is grounded in at most 30 pages by default (or
+the `--max-grounding` value given), and that the person can name a different
+number with their choice or re-run with `--max-grounding <N>`.
 
 If the answer is not a choice — no answer arrives, or nothing appeals — stop
 here without writing anything, and say the wiki was left untouched. Do not pick
@@ -135,44 +141,38 @@ none). Continue at Step 1 — no other step changes. Because `<topic>` reaches
 Step 2 as ordinary free-form text, it goes through the same quote-delimited
 heredocs every search term already uses there.
 
-### Step 1: Determine Target Languages
+### Step 1: Determine the Search Language
 
-Read `.wikicommit/config.yml` and get `translation.primary_lang` and `translation.targets`. If `.wikicommit/config.yml` doesn't exist, display an error, guide the user to run `/wikicommit-init`, and stop.
+Read `.wikicommit/config.yml` and get `translation.primary_lang`. If `.wikicommit/config.yml` doesn't exist, display an error, guide the user to run `/wikicommit-init`, and stop.
 
-Have the LLM determine the language of `<topic>`.
+**Search `primary_lang` only.** Every original page is written in `primary_lang` — `/wikicommit-generate` writes in it whatever the source's language, and a page in any other language is a translation made by `/wikicommit-translate`, carrying `translated_from`. Searching the `targets` languages therefore finds only translations of pages the `primary_lang` search already reaches, and adds no evidence. Worse, a translation chosen as grounding makes this page a translation of a translation, can be older than its original, and hides a later change to the original from `check_derivation_freshness.py` (which watches the translation named in `derived_from`, not the original behind it). Differences in wording are bridged by the expansions in Step 2, not by searching other languages.
 
-Build the list of languages to search, in the following order, **deduplicating any repeated language** (to avoid searching the same language twice):
+Settle the grounding cap **`N`** now: the `--max-grounding` value if one was given, otherwise **30**. It is one number whatever the `kind` — how many pages a page needs depends on its subject, not on its kind (a `comparison` of seventeen tools needs more than one of three). There is no "unlimited" value; pass a large number instead.
 
-1. The language of `<topic>`
-2. `primary_lang`
-3. Each language in `targets`
+### Step 2: Search
 
-### Step 2: Cross-Lingual Search
-
-For each language determined in step 1, **run sequentially, one language at a time** (do not run in parallel — `search_index.py query` rebuilds the index whenever it is missing or stale, so parallel calls after a wiki change would each rebuild it; the swap is atomic, so nothing breaks, but the work is repeated per language):
-
-1. Split `<topic>` into the distinct keywords it names, and translate each into that language (the LLM translates on the fly each time — no dedicated translation API or library is used). If the target language matches `<topic>`'s language, skip translation and use them as-is.
-2. **Expand each keyword into a group of alternative wordings**. Translating still leaves the topic phrased one particular way, and FTS5 matches literal text: if the wiki writes `児童手当` where the keyword says `子ども手当`, the search returns nothing even though the wiki covers it. Expanding with the LLM's own vocabulary knowledge is the same move this Skill already makes across languages. Each keyword (in this language) plus its expansions becomes one `--expand` group. This is an internal step — do not report the expansions to the user.
+1. Split `<topic>` into the distinct keywords it names, and translate each into `primary_lang` if `<topic>` is written in another language (the LLM translates on the fly — no dedicated translation API or library is used).
+2. **Expand each keyword into a group of alternative wordings**. FTS5 matches literal text: if the wiki writes `児童手当` where the keyword says `子ども手当`, the search returns nothing even though the wiki covers it. Each keyword plus its expansions becomes one `--expand` group. This is an internal step — do not report the expansions to the user.
 
    **Expansion rules.** trigram search matches *substrings*, so inflected forms and longer compounds containing the term (`エンジニア` → `ソフトウェアエンジニア`) are already reached for free; spending expansion slots there only adds noise. Expand only where the vocabulary genuinely differs:
 
-   - **Expand**: synonyms (`児童手当` / `子ども手当`), hypernyms and general terms (`Claude Code` / `AIコーディングツール`), abbreviation–full-form pairs (`LLM` / `大規模言語モデル`), cross-language equivalents (`vibe coding` / `バイブコーディング`), orthographic variants (`サーバ` / `サーバー`).
+   - **Expand**: synonyms (`児童手当` / `子ども手当`), hypernyms and general terms (`Claude Code` / `AIコーディングツール`), abbreviation–full-form pairs (`LLM` / `大規模言語モデル`), terms borrowed from another language (`vibe coding` / `バイブコーディング`), orthographic variants (`サーバ` / `サーバー`).
    - **Do not expand**: inflected forms and word endings, compounds already reachable as a substring, or merely related terms whose meaning sits somewhere else (a term that "gets discussed alongside" the original is not a synonym).
    - **Limits**: at most 2–3 expansions per original term, and roughly 5 expanded terms across the whole search. Left unbounded this widens without end.
    - **Never produce an expansion shorter than 3 characters** — the trigram tokenizer cannot form a token from it, so it can never match.
 
-3. Run, passing one `--expand` per keyword group, each group's terms joined by `|`:
+3. Run, passing one `--expand` per keyword group, each group's terms joined by `|`, with `--limit` set to the larger of 40 and `N` — the search only gathers candidates, and a fixed limit would make a raised `N` ineffective:
 
 ```bash
 python .wikicommit/scripts/search_index.py query \
   --expand "$(cat <<'EOF'
-<keyword 1 in this language>|<expansion>|<expansion>
+<keyword 1>|<expansion>|<expansion>
 EOF
 )" \
   --expand "$(cat <<'EOF'
-<keyword 2 in this language>|<expansion>
+<keyword 2>|<expansion>
 EOF
-)" --lang <lang> --limit 5
+)" --lang <primary_lang> --limit <max(40, N)>
 ```
 
 Terms inside a group are OR-ed and the groups are AND-ed, which is why the expansions have to be grouped rather than appended to a single query string: FTS5 AND-s adjacent phrases, so appending a synonym would demand that a page contain every wording at once and would drop the very hit the expansion was meant to reach.
@@ -181,32 +181,35 @@ Pass every term through a quote-delimited heredoc, not a plain double-quote embe
 
 On exit code `1` (failure, with an `ERROR:` line printed), display that error message as-is to the user and stop.
 
-Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`) and the `SUMMARY:` line (`hits`) from each language's query results. A `WARNING: expand group "<a>|<b>" has no term of at least 3 character(s); ...` line means every wording of that keyword was too short for the trigram tokenizer to ever match and the keyword was dropped, widening the search. A `WARNING: no usable --expand term remains; ...` line means that happened to *every* keyword, so that language's search ran with no terms at all and its `hits=0` says nothing about the wiki's coverage — treat that language as "not searched" rather than "nothing there". The `WARNING: expand term ... its group still matches via: ...` form needs no action, since the keyword survived through a longer wording.
+Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`), in the bm25 order they came in, and the `SUMMARY:` line (`hits`). A `WARNING: expand group "<a>|<b>" has no term of at least 3 character(s); ...` line means every wording of that keyword was too short for the trigram tokenizer to ever match and the keyword was dropped, widening the search. A `WARNING: no usable --expand term remains; ...` line means that happened to *every* keyword, so the search ran with no terms at all and its `hits=0` says nothing about the wiki's coverage — say so rather than reporting that the wiki has nothing on the topic. The `WARNING: expand term ... its group still matches via: ...` form needs no action, since the keyword survived through a longer wording.
 
-### Step 3: Merge Results
+### Step 3: Choose the Grounding Set Before Reading Any Body
 
-1. Combine the hits from all languages into a single list.
-2. If multiple language versions of the same page (linked via `translated_from`) both show up as hits (i.e. two or more hits share the same `type` and `slug`), narrow it down to one. Priority order: "same language as `<topic>`" > "`primary_lang`" > "the order listed in `targets`".
-3. **Drop every hit that is itself a synthesized page** — one under `.wikicommit/view/`, or one in `.wikicommit/entity/` whose frontmatter carries `derived_from` (a synthesis written before the view tree existed stays where it is; old and new coexist rather than being migrated). The path test needs no file read; the frontmatter test below is for the entity tree. `search_index.py`'s `MATCH:` lines do not carry that field, so check the candidates directly. **Skip this item entirely when items 1–2 left no candidates** and go straight to item 5: `grep` with no file operands reads standard input and hangs, the same "do not invoke it with no paths" hazard `/wikicommit-merge` Step 3 spells out for its per-file checks.
+Every page chosen here is read in full twice — by you in Step 4 and by the review subagent in Step 5.5 — and becomes one `derived_from` line. So choose on the cheap part of each page first, and read bodies only for the pages chosen.
+
+1. **Candidates** are the search hits from Step 2, in their bm25 order, followed by any page Step 0.2 named as the source of the chosen angle that the search did not return (in survey mode only). A named page gets no free pass: it goes through items 2–3 like any other. Step 0.2 names pages by the `Type/slug` key the survey prints, not by path — turn each into `.wikicommit/entity/<primary_lang>/<Type/slug>.md` (the survey lists `primary_lang` only) before passing it on; a bare key is not a path and comes back as `MISSING:`. **If there are no candidates at all, skip item 2 and go straight to item 6.**
+2. **Reduce every candidate to its title, description and headings** with one call, passing the paths in candidate order:
 
    ```bash
-   grep -l "^derived_from:" "<candidate path>" "<candidate path>" ...
+   python .wikicommit/scripts/build_survey_view.py --pages "<candidate path>" "<candidate path>" ...
    ```
 
-   Quote every path. A page's slug is not a validated identifier, and an unquoted path holding a space or a glob metacharacter is split or expanded, so grep checks files that do not exist and reports nothing for the real page — leaving a synthesized page in the grounding set. Exit code `1` here means "no candidate is synthesized" and is the normal result; only exit code `2` is a failure.
+   Quote every path — a slug is not a validated identifier, and an unquoted path holding a space or a glob metacharacter is split or expanded. Each `PAGE:` line carries `path=`, and ends in `translation` and/or `synthesized` when the page is one; a `MISSING:` line names a candidate that is not a live page (removed, or gone since the index was built) — drop it. The flags come from the frontmatter, so a page that merely quotes a `derived_from:` line in its body is not mistaken for a synthesis.
 
-   **Then confirm each path grep prints by reading its frontmatter**, the same check Step 9 item 2 makes. grep sees the whole file, so a page that merely quotes a `derived_from:` line in its *body* — a YAML example on a page about the wiki's own schema — matches without being synthesized at all, and dropping it would discard ordinary primary content. Exclude only the paths where `derived_from` is a real frontmatter field.
+   **Drop every page marked `translation`.** It restates an original in another language (Step 1 says why an original is always the better grounding).
 
-   Every path left after that confirmation is excluded from the grounding set. This keeps **a synthesized page at most one step above ordinary pages**, and two things depend on that: `check_derivation_freshness.py` compares each `derived_from` entry's `source_commit` against that page's current commit, so a synthesis of a synthesis would only register staleness once the middle page is itself regenerated *and committed* — a change to the original would not propagate; and step 5.5's review always lands on pages that carry `sources`, so a claim can be traced to an external document in at most two hops.
+   **Drop every page marked `synthesized`** — a view page, or an entity page carrying `derived_from` (a synthesis written before the view tree existed stays where it is). This keeps **a synthesized page at most one step above ordinary pages**, and two things depend on that: `check_derivation_freshness.py` compares each `derived_from` entry's `source_commit` against that page's current commit, so a synthesis of a synthesis would only register staleness once the middle page is itself regenerated *and committed* — a change to the original would not propagate; and step 5.5's review always lands on pages that carry `sources`, so a claim can be traced to an external document in at most two hops. **This is a filter on the grounding set, not on the index.** Synthesized pages stay searchable — `/wikicommit-search` and `/wikicommit-ask` must still find them. Do not exclude them from `search_index.py`.
 
-   **This is a filter on the grounding set, not on the index.** Synthesized pages stay searchable — `/wikicommit-search` and `/wikicommit-ask` must still find them, and a reader looking for the topic should reach the page written about it. Do not exclude them from `search_index.py`.
-
-4. Sort the remaining hits roughly by the bm25 order returned by `search_index.py` (already ranked per-language) and select the top 5–10. A naive cross-language score comparison is acceptable as an approximation.
-5. If there are zero hits across all languages combined — or every hit was dropped by item 3 — display "No pages related to \"<topic>\" were found" and stop (do not run the remaining steps), closing the run record first with `python .wikicommit/scripts/record_run.py end <the path printed at the start>` — the search ran and answered, so this is a finished run rather than one that died partway.
+3. **Keep only the pages that treat `<topic>` as their subject.** Judge from the title, `DESC:` and `HEADINGS:` lines — not from the body, which is what this step exists to avoid reading. A page whose title or main subject is the topic, or one of its parts, stays; a page that only mentions the topic in passing while being about something else goes. This is the same subject test the review rules apply (a source that treats a fact as its own subject, against one that mentions it on the way to something else), so no new standard is introduced here. **When you cannot tell, drop the page**: an over-broad grounding set makes the review more likely to find a similar sentence somewhere and pass a claim, while a smaller one only makes the page more modest.
+4. **Cap at `N`**, keeping the kept pages in their Step 2 order (named pages from Step 0.2 that the search did not return come after the hits). Remember `M`, the number kept by item 3, and the paths of any pages the cap cut.
+5. **Say what was chosen before reading anything**: `Grounding: <N'> of the <M> pages that treat "<topic>" as their subject` (with `N'` = `min(M, N)`). When the cap cut pages, list them, and say that re-running with `--max-grounding <larger N>` would include them. Step 11 repeats this.
+6. If no page survives items 2–3, display "No pages related to \"<topic>\" were found" and stop (do not run the remaining steps), closing the run record first with `python .wikicommit/scripts/record_run.py end <the path printed at the start>` — the search ran and answered, so this is a finished run rather than one that died partway.
 
 ### Step 4: Fetch Page Content
 
-Read each selected page in full and add its body (excluding frontmatter) to the LLM's context. Keep the list of selected page paths — this is the grounding set used for `derived_from` in Step 10.
+Read each selected page in full and add its body (excluding frontmatter) to the LLM's context. Keep the list of selected page paths — this is the grounding set used for `derived_from` in Step 9.
+
+If `--max-grounding` was raised far enough that the selected set runs to around a hundred pages, say before reading that this many full bodies will crowd the context (and the review subagent's, which receives them all again). Do not stop — the number was chosen on purpose.
 
 **Say which grounding pages are unreviewed, before writing anything**. Take each page's `review_status` from the frontmatter you just read, **not** from step 2's `MATCH:` line: the page itself is the source of truth, and reading it rules out even a sub-second race between the index and a page rewritten after it was built. If any selected page is `pending`, list those paths now, in the same words `/wikicommit-ask` uses when its answer rests on pages nobody has read yet (`pending` states that the page has not reached a person, not that no check ran on it):
 
@@ -220,7 +223,7 @@ This is a warning, not a gate — do not stop, and do not ask for confirmation. 
 
 Generate a summary document about `<topic>`, grounded only in the body content injected in step 4. **Do not include claims in the document that aren't in a grounding page's body content** (hallucination prevention). Step 5.5 then checks that with a review subagent, the way `wikicommit-generate` Pass 4 checks a generated page against its source documents.
 
-Structure the document with sections (`##` and deeper), and include reference links to related pages (in `[[Type/slug]]` form) within the body. Do not append a "Referenced Pages" list to the body — the grounding set is instead recorded in the `derived_from` frontmatter field (Step 10), so listing it again in the body would be redundant.
+Structure the document with sections (`##` and deeper), and include reference links to related pages (in `[[Type/slug]]` form) within the body. Do not append a "Referenced Pages" list to the body — the grounding set is instead recorded in the `derived_from` frontmatter field (Step 9), so listing it again in the body would be redundant.
 
 #### Choose a `kind`
 
@@ -243,7 +246,7 @@ leaving it off is a real answer, not a failure.
 Write the body to fit the chosen kind, and keep inside its Boundary — Step 5.5
 checks the Boundary as well as the grounding.
 
-**Do not open the body with an H1 (`# <topic>`), or any other top-level title line**. The page's title lives in the `title` frontmatter field (Step 10) and Quartz renders that as the page heading, so a body H1 duplicates it on the published page. Every schema template's body starts with a paragraph or a `##` heading, which is why `/wikicommit-generate` and `/wikicommit-translate` never produce one — this Skill is the only one that builds a body without going through a template, so it is the only place the convention has to be stated outright.
+**Do not open the body with an H1 (`# <topic>`), or any other top-level title line**. The page's title lives in the `title` frontmatter field (Step 9) and Quartz renders that as the page heading, so a body H1 duplicates it on the published page. Every schema template's body starts with a paragraph or a `##` heading, which is why `/wikicommit-generate` and `/wikicommit-translate` never produce one — this Skill is the only one that builds a body without going through a template, so it is the only place the convention has to be stated outright.
 
 ### Step 5.5: Grounding Integrity Review (Review Subagent)
 
@@ -301,7 +304,7 @@ This path needs a check most: a synthesized page carries `derived_from` and no `
 
 ### Step 6: Determine the New Page's Language
 
-Set `lang` to `.wikicommit/config.yml`'s `primary_lang` (read in Step 1) — regardless of which language(s) were searched in Step 2. This mirrors `wikicommit-generate` Pass 2's rule: the topic may be looked up in multiple languages, but a newly created page's own language is always the wiki's source language.
+Set `lang` to `.wikicommit/config.yml`'s `primary_lang` (read in Step 1) — whatever language `<topic>` was given in. This mirrors `wikicommit-generate`'s rule that a newly created page's own language is always the wiki's source language, and it is the language every grounding page is written in (Step 1).
 
 There is no type-selection step: a view page has no `type:`, so its location is decided entirely by its language and its slug, and two runs on one topic land in the same place.
 
@@ -372,7 +375,7 @@ python .wikicommit/scripts/record_run.py end <the path printed at the start> \
     --page <the view page written> --outcome synthesized=1
 ```
 
-Then tell the user, including that path and its elapsed time — the record is not committed, so this run's own output is the only place a reader sees them:
+Then tell the user, including that path and its elapsed time, and Step 3's grounding line (`<N'> of <M>` pages) — and, when the cap cut pages, their paths and the `--max-grounding` re-run that would include them — the record is not committed, so this run's own output is the only place a reader sees them:
 
 ```
 Written to .wikicommit/view/<lang>/<slug>.md, and rebuilt .wikicommit/view/<lang>/index.md so the page appears in the view index.
@@ -397,6 +400,6 @@ If step 4 warned that some grounding pages are unreviewed, repeat that here as w
 - Do not write to `.wikicommit/schema/` (read-only)
 - Do not include claims in the document that aren't in a grounding page's body content (hallucination prevention; written in Step 5, verified in Step 5.5)
 - Do not write a `type:` on a view page, and do not invent a `kind` outside the six in Step 5's table. Both are ERRORs at the quality gate. No kind at all is a valid answer
-- The grounding set never includes a page that is itself synthesized (one carrying `derived_from`), so a view page always sits at most one step above ordinary pages (Step 3 item 3). With the view tree that rule also has a location: **no page under `.wikicommit/view/` is ever grounding material**. View pages stay in the search index — the exclusion is on the grounding set only
+- The grounding set never includes a page that is itself synthesized (one carrying `derived_from`), so a view page always sits at most one step above ordinary pages (Step 3 item 2). Nor does it include a translation — originals only, found by searching `primary_lang` (Step 1). With the view tree that rule also has a location: **no page under `.wikicommit/view/` is ever grounding material**. View pages stay in the search index — the exclusion is on the grounding set only
 - This Skill's side effects are confined to two local writes under `.wikicommit/view/`: the view page itself (Step 9) and its language's `index.md` (Step 10). It never writes to `.wikicommit/entity/`. `search_index.py` automatically rebuilds the index file (`.wikicommit/.cache/search_index.sqlite3`, not tracked by Git) when it doesn't exist or no longer matches the pages (a page added, edited or removed since it was built — it then prints a `NOTE:` line)
-- A grounding page's own `review_status: pending` **is** surfaced, in the same words `wikicommit-ask` uses (Step 4, repeated in Step 12). It warns and does not block: a wiki fresh out of a generation batch is entirely `pending`, and gating there would disable the Skill exactly when it is most useful
+- A grounding page's own `review_status: pending` **is** surfaced, in the same words `wikicommit-ask` uses (Step 4, repeated in Step 11). It warns and does not block: a wiki fresh out of a generation batch is entirely `pending`, and gating there would disable the Skill exactly when it is most useful

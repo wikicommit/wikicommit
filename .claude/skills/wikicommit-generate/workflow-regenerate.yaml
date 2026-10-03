@@ -1,0 +1,100 @@
+# The steps of /wikicommit-generate --regenerate, for .wikicommit/scripts/driver.py.
+#
+# Page-driven rather than source-driven: the items are pages, Pass 2 does not run,
+# and no management file is written. references/regenerate.md holds the mode's
+# procedure and is read alongside each shared pass file. With --merge (Issue #1119)
+# the one page rebuilt is the kept page, and merge-absorb takes the others down
+# once it has passed review; references/merge.md holds that procedure.
+
+skill: wikicommit-generate
+
+steps:
+  - id: preflight
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", preflight, --run, "{run}"]
+
+  - id: freshness
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", freshness]
+
+  - id: choose-pages
+    type: agent
+    instructions: references/regenerate.md
+    outcomes:
+      chosen: "the eligible pages were chosen and every dropped page reported; pass --add candidates=<page> for each eligible page"
+      none: "no page was eligible"
+    finishes_on: [none]
+    adds: [candidates]
+
+  - id: batch-cap
+    type: human
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", over-cap, --run, "{run}", --list, candidates]
+    ask: >-
+      More than 5 pages are eligible. Show the count and the pages from the run
+      record's `candidates` list and ask whether to rebuild all of them in this run
+      or only the first 5 by path.
+    choices:
+      all: "rebuild every eligible page in this run"
+      first-five: "rebuild the first 5 by path and leave the rest for a later run"
+    non_interactive: first-five
+
+  - id: select
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", select, --run, "{run}", --list, candidates, --answer-step, batch-cap]
+    produces: pages
+
+  - id: per-page
+    for_each: pages
+    steps:
+      - id: pass1-extract
+        type: agent
+        instructions: references/pass1-extract.md
+        also_read: references/regenerate.md
+        stamp: true
+        outcomes:
+          acquired: "every non-retracted source was re-acquired and matches the page's recorded hash"
+          skipped: "the page cannot be rebuilt (source changed, unavailable, or blocked); reported, nothing written (the rest of this page is skipped)"
+          halted: "the run must stop (missing package, network unavailable); pass --reason"
+        ends_item_on: [skipped]
+        halts_on: [halted]
+
+      - id: pass3-generate
+        type: agent
+        instructions: references/pass3-generate.md
+        also_read: references/regenerate.md
+        stamp: true
+        outcomes:
+          ok: "the page was rebuilt in memory for Pass 4"
+
+      - id: pass4-review
+        type: agent
+        instructions: references/pass4-review.md
+        also_read: references/regenerate.md
+        stamp: true
+        outcomes:
+          rebuilt: "the rebuilt page passed review and was written"
+          unchanged: "the rebuilt page matched the one on disk apart from bookkeeping"
+          failed: "the rebuilt page still failed review; the page on disk was left as it was"
+          halted: "the review could not be run as specified; pass --reason"
+        halts_on: [halted]
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-page-exists, --item, "{item}"]
+
+  - id: merge-absorb
+    type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", merge-ready, --run, "{run}"]
+    instructions: references/merge.md
+    outcomes:
+      absorbed: "the merge was recorded, the absorbed pages and their translations removed, and the links to them rewritten"
+      halted: "a step of the merge failed and the run must stop; pass --reason"
+    halts_on: [halted]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-merge, --run, "{run}"]
+
+  - id: rebuild-index
+    type: script
+    run: ["{python}", .wikicommit/scripts/rebuild_index.py]
+
+  - id: report
+    type: agent
+    instructions: references/regenerate.md
+    outcomes:
+      reported: "the per-page report was shown; pass --count regenerated=<N> --count unchanged=<N> --count failed=<N> and --page for each page rebuilt"

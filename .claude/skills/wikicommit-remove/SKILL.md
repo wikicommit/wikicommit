@@ -14,7 +14,10 @@ Skill for removing a wiki page. Does not physically delete the file — it only 
 
 ```
 /wikicommit-remove <page>   # e.g. /wikicommit-remove .wikicommit/entity/ja/Person/yamada-taro.md
+/wikicommit-remove <page>   # a view page too, e.g. /wikicommit-remove .wikicommit/view/ja/agent-loops.md
 ```
+
+`<page>` may be an entity page (`.wikicommit/entity/<lang>/<Type>/<slug>.md`) or a view page written by `/wikicommit-synthesize` (`.wikicommit/view/<lang>/<slug>.md`). Both are removed the same way; Step 2 says where the two differ. Do not delete a view page's file directly instead: without `status: removed` the quality gate cannot block new links to it, and its line stays in the view index.
 
 ## Processing Flow
 
@@ -44,8 +47,10 @@ python scripts/remove_page.py <page> --reason <reason> [--merged-into <path>]
 This script automatically does the following:
 
 1. Sets `status: removed` / `removed_at` / `removed_reason` (and `merged_into` for `merged`) on the target page's frontmatter
-2. Searches across all Type directories for translated pages that have the target page as their parent via `translated_from`, and applies the same `status: removed` etc. to them
-3. Removes the corresponding entry from the `index.md` of any affected Type directory
+2. Finds the translated pages that have the target page as their parent via `translated_from`, and applies the same `status: removed` etc. to them — for an entity page, across that Type's directory in every language; for a view page, across the view tree in every language
+3. Removes the page's line from the index it is listed in — for an entity page, the `index.md` of its Type directory; for a view page, the `index.md` directly under its language directory (`.wikicommit/view/<lang>/index.md`, since the view tree has no Type directories) — and the same for each translation
+
+`--merged-into` may name an entity page or a view page, whichever kind the page being removed is — a view page can be merged into an entity page and the other way round.
 
 ### Step 3: Report Results
 

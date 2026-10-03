@@ -220,8 +220,44 @@ def remove_index_entry(index_path: Path, type_name: str, slug: str) -> bool:
     pattern = re.compile(rf"^[ \t]*(?:[-*+][ \t]+)?{escaped}.*\r?\n?", re.MULTILINE)
     new_content, count = pattern.subn("", content)
     if count:
+        new_content = _drop_empty_sections(new_content)
         index_path.write_text(new_content, encoding="utf-8")
     return count > 0
+
+
+_SECTION_HEADING_RE = re.compile(r"^##[ \t]")
+
+
+def _drop_empty_sections(content: str) -> str:
+    """Drop `## ` headings left with nothing under them (Issue #1136).
+
+    A Type with a groups file has an index split into `## <label>` sections
+    (rebuild_index.py's `_grouped_body()`, Issue #1035), and rebuild_index.py
+    leaves out any section with no page — a group, or the unclassified section.
+    Removing a section's last row here would otherwise leave its heading
+    standing over nothing until rebuild_index.py next runs. A section counts as
+    empty when only blank lines follow its heading up to the next `## ` heading
+    or the end of the file; the heading goes with those blank lines, and the
+    file is left ending in a single newline as rebuild_index.py writes it.
+    """
+    lines = content.splitlines(keepends=True)
+    kept: list[str] = []
+    i = 0
+    while i < len(lines):
+        if _SECTION_HEADING_RE.match(lines[i]):
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j == len(lines) or _SECTION_HEADING_RE.match(lines[j]):
+                i = j
+                continue
+        kept.append(lines[i])
+        i += 1
+    result = "".join(kept)
+    if result != content:
+        stripped = result.rstrip("\r\n")
+        result = stripped + "\n" if stripped else ""
+    return result
 
 
 def main() -> int:

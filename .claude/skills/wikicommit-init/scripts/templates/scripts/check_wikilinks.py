@@ -3,12 +3,21 @@
 
 Usage:
     python .wikicommit/scripts/check_wikilinks.py [--changed <path>... [--deleted <path>...]]
+        [--skip-type-mismatch]
 
 With no arguments, every page under .wikicommit/entity/ is checked, matching
 validate_frontmatter.py, check_raw_html.py and check_orphans.py. It used to
 print "OK: 0 files checked" and exit 0 instead — output a reader cannot tell
 from a clean run of a real check (Issue #571). wikicommit-merge always passes
 --changed, so the diff-scoped behaviour it relies on is unaffected.
+
+--skip-type-mismatch drops the Type-segment ERROR (a link whose slug exists
+under another Type). wikicommit-status passes it, because
+check_wanted_pages.py already reports the same finding as TYPE_MISMATCH: and
+the status report would otherwise list it twice (Issue #976). The flag is a
+script option rather than a filter in the SKILL.md prose so that the dedup
+does not depend on the wording of the message. wikicommit-merge never passes
+it — there the ERROR still blocks.
 
 Exit code: 0 = no ERROR (WARNINGs OK), 1 = at least one ERROR.
 """
@@ -68,6 +77,9 @@ def main() -> int:
                              ".wikicommit/entity/)")
     parser.add_argument("--deleted", nargs="+", default=[], metavar="PATH",
                         help="Files being marked as status: removed (optional)")
+    parser.add_argument("--skip-type-mismatch", action="store_true",
+                        help="Do not report links whose slug exists under a different Type "
+                             "(check_wanted_pages.py reports these as TYPE_MISMATCH:)")
     args = parser.parse_args()
 
     repo_root = Path.cwd()
@@ -117,6 +129,13 @@ def main() -> int:
         if not path.exists():
             print(f"WARNING: {path}: file not found (skipped)")
             total_warnings += 1
+            continue
+
+        if whole_wiki and is_removed(path):
+            # A status: removed page is not published, so its own outgoing
+            # links break nothing. Reporting them would leave a finding on a
+            # page nobody will ever edit again — e.g. A removed first, then B
+            # (which A links to) removed later — that no action can clear.
             continue
 
         files_checked += 1
@@ -174,7 +193,23 @@ def main() -> int:
                     slug_index = build_slug_type_index(entity_dir, view_dir)
                 other_types = other_types_for_slug(type_name, slug, slug_index)
 
-                if other_types:
+                exists_elsewhere = other_types and args.skip_type_mismatch and any(
+                    link_target_path(type_name, slug, d.name, entity_dir, view_dir).exists()
+                    for root in (entity_dir, view_dir) if root.is_dir()
+                    for d in root.iterdir() if d.is_dir()
+                )
+                if other_types and args.skip_type_mismatch and not exists_elsewhere:
+                    # Reported by check_wanted_pages.py as TYPE_MISMATCH: — the
+                    # caller asked not to hear it twice (Issue #976). Not a
+                    # WARNING either: that would mislabel an existing page as
+                    # missing, which is exactly what this branch exists to avoid.
+                    # Only when <Type>/<slug> has no page in any language: that is
+                    # the condition check_wanted_pages.py reports under. If it
+                    # exists in some third language (or only as a removed page),
+                    # check_wanted_pages.py stays silent, so the ERROR below is the
+                    # only report left and must not be dropped.
+                    pass
+                elif other_types:
                     # The page exists; only the Type segment is wrong. Issue #340's
                     # reason for not blocking does not reach this case: the author
                     # cannot dodge the report by leaving the mention as plain text,

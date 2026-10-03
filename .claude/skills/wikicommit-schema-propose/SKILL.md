@@ -119,7 +119,7 @@ git checkout "<default branch>"
 sleep 2
 ```
 
-<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update and -init; tests/test_commit_trailer_vendor_table.py holds them together) -->
+<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update, -init and -organize; tests/test_commit_trailer_vendor_table.py holds them together) -->
 **Commit trailers.** Always write `Generated-By:   <current model ID>`: the ID of the model actually running this Skill, exactly as the runtime reports it — the same self-reported value `wikicommit-generate` writes into a page's `generated_by` (keep any suffix; do not shorten or normalize it; never hardcode one). Then choose `<Co-Authored-By line>` from the start of that same ID, so the two lines can never name different vendors:
 
 | `<current model ID>` starts with | `<Co-Authored-By line>` |

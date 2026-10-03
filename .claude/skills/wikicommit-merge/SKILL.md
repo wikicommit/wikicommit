@@ -1,6 +1,6 @@
 ---
 name: wikicommit-merge
-description: Run WikiCommit's quality gates over the uncommitted changes under .wikicommit/, then branch, open a PR, merge it into the repository's default branch, and file one review tracking Issue per page. Use this only to land WikiCommit's own output — the uncommitted changes another wikicommit Skill left under .wikicommit/ — including inside an unattended run that works through sources in batches. It squash-merges to the default branch and publishes, so do not use it as a general way to commit, push or open a PR for ordinary repository changes — use git and gh directly for those.
+description: Run WikiCommit's quality gates over the uncommitted changes under .wikicommit/, then branch, open a PR, merge it into the repository's default branch, and file one review tracking Issue per page. Use this only to land WikiCommit's own output — the uncommitted changes under .wikicommit/, including your own edits to its policy files — including inside an unattended run that works through sources in batches. It squash-merges to the default branch and publishes, so do not use it as a general way to commit, push or open a PR for ordinary repository changes — use git and gh directly for those.
 ---
 
 # wikicommit-merge
@@ -46,7 +46,7 @@ Record the result as `<default branch>` and use it everywhere below in place of 
 ### Step 1: Detect Changes
 
 ```bash
-git -c core.quotePath=false status --porcelain -- ".wikicommit/entity/**/*.md" ".wikicommit/view/**/*.md" ".wikicommit/source/**/*.md" ".wikicommit/review/**/*.md" ".wikicommit/entity/assets/**" ".wikicommit/source-policy.md" ".wikicommit/entity-policy.md"
+git -c core.quotePath=false status --porcelain -- ".wikicommit/entity/**/*.md" ".wikicommit/view/**/*.md" ".wikicommit/source/**/*.md" ".wikicommit/review/**/*.md" ".wikicommit/entity/assets/**" ".wikicommit/source-policy.md" ".wikicommit/entity-policy.md" ".wikicommit/relations.yml"
 ```
 
 > The `.wikicommit/entity/assets/**` pathspec covers assets — images and attachments under `.wikicommit/entity/assets/`. Without it, a run that only adds an image stops at "No changes to merge" and the asset is never committed, even though Step 5's `git add` (which takes directories, not `*.md`) would have staged it had some other `.md` change carried the run that far. Note this is detection only: assets must **not** enter `<changed .md files>` in Step 2 item 1, whose pathspec stays `*.md`-only — every quality check it feeds (`validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py`, `markdownlint-cli2`) parses frontmatter and would fail on a PNG. Because of that, an assets-only run reaches Step 3 with an **empty** `<changed .md files>`; see Step 3, which must skip the per-file checks in that case rather than invoking them with no paths.
@@ -56,6 +56,8 @@ git -c core.quotePath=false status --porcelain -- ".wikicommit/entity/**/*.md" "
 > The two policy-file pathspecs cover `.wikicommit/source-policy.md` and `.wikicommit/entity-policy.md`. `wikicommit-collect`'s Step 8 appends a declined candidate to that file's `rejected:` list, and neither `.wikicommit/entity/` nor `.wikicommit/source/` contains it (`.wikicommit/source/` is a directory pathspec and does not match the sibling file `source-policy.md`). Without this pathspec a collect run in which the user declines every candidate stops at "No changes to merge" and the record of that decision is never committed — which defeats the whole point of the list, since the next free exploration re-proposes the source it was meant to remember. Like assets, this is a `.md` file that must **not** enter `<changed .md files>` in Step 2 item 1: it is not a wiki page, and `validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py` would all fail on it. Step 2 item 6 stages them separately. The entity policy is there for the same reason one axis over — it is hand-edited prose deciding whether an entity may be written about at all, and `wikicommit-generate` acts on it, so a run in which the human edits only that file must not stop at "No changes to merge".
 >
 > The `.wikicommit/review/**/*.md` pathspec covers the review records — one immutable file per review, written by `record_review.py` under `.wikicommit/review/`. They are what makes "every page was reviewed" a checkable statement rather than an assertion, so a run whose records are never committed is indistinguishable from one where no review happened. Like assets and the policy files, these are `.md` files that must **not** enter `<changed .md files>` in Step 2 item 1: they are not wiki pages, and `validate_frontmatter.py` / `check_wikilinks.py` would fail on them. Step 5's `git add` takes the directory.
+>
+> The `.wikicommit/relations.yml` pathspec covers the decisions `/wikicommit-relate` records about how two or more pages relate. A run that only records "these two are distinct" changes nothing else, and without this pathspec it would stop at "No changes to merge" — the decision would never be committed and the same pair would be raised again. It is not a wiki page and never enters `<changed .md files>`; Step 2 item 7 stages it.
 >
 > Note also that `lychee` is invoked with an explicit path argument (Step 3), so it does not walk this tree — a record's `source_file` can hold a URL, and an unscoped run would re-fetch every one of them on every merge.
 >
@@ -111,7 +113,7 @@ If the output is empty → close the run record (`python .wikicommit/scripts/rec
 
    If no files match, `<new source files>` is empty.
 
-4. Determine **`<new schema files>`** (`wikicommit-generate` Pass 2b may write a new `.wikicommit/schema/<Type>.md` file locally, for a Schema.org type outside `installed schema/` that was approved for that run — by a human at the Enter prompt, or, in a non-interactive run, auto-approved after clearing a stricter bar; `wikicommit-collect`'s Step 7 is a second, equally valid source of the same kind of untracked file). Human-approved and auto-approved schema files are picked up and committed the same way; auto-approved ones carry no marker beyond the originating session's Completion Notice.
+4. Determine **`<new schema files>`** (`wikicommit-generate` Pass 2b may write a new `.wikicommit/schema/<Type>.md` file locally, for a Schema.org type outside `installed schema/` that a human approved at the Enter prompt in an interactive run — a non-interactive run defers the source instead of adding a type; `wikicommit-collect`'s Step 7 is a second, equally valid source of the same kind of untracked file). Both are picked up and committed the same way.
 
    ```bash
    git -c core.quotePath=false status --porcelain -- ".wikicommit/schema/*.md" ".wikicommit/schema/**/*.md"
@@ -146,9 +148,27 @@ If the output is empty → close the run record (`python .wikicommit/scripts/rec
 
    Unlike items 4 and 5, a **modified** tracked file is the normal case here rather than a red flag: the file exists from `/wikicommit-init` onward and every legitimate write to it is an in-place edit. Nothing else in WikiCommit ever commits it, so excluding modified copies would leave the append permanently uncommitted. It carries no wiki content and is not published, so no quality gate applies to it.
 
+7. Determine **`<relations file>`** — `.wikicommit/relations.yml`, where `/wikicommit-relate` appends each decision a person made about how pages relate:
+
+   ```bash
+   git -c core.quotePath=false status --porcelain -- ".wikicommit/relations.yml"
+   ```
+
+   If the path appears at all (`??` or ` M`), `<relations file>` is that path; otherwise it is empty. As with the policy files, a modified tracked file is the normal case — every decision after the first is an append — and no quality gate applies to it.
+
 ### Step 3: Quality Checks (Sequential)
 
-Run the following in order. Blocking status is determined not by each tool's exit code but by the criteria in the table below (whether the script printed `ERROR:` / `DUPLICATE:`; lychee and markdownlint-cli2 are always non-blocking). As soon as a blocking error occurs, stop running further checks, display the error to the user, and abort (leave the working tree changes as-is; do not create a branch).
+**First, refuse the work of a run that has not finished**:
+
+```bash
+python .wikicommit/scripts/driver.py check-merge
+```
+
+It reads `git status` itself and prints JSON. `"blocked": true` (exit 1) is **blocking**: a `/wikicommit-generate` run is still open, and some of the files it touched are in this change — a source half processed, pages written before their management file caught up. Show the user the runs, the step each stopped at and the files it names, and abort without creating a branch. The way on is to finish the run (`driver.py next <run>`) or, if its session is gone, to have a person decide about the files it left and close it (`driver.py abandon <run> --reason "<why>"`). Do not abandon a run on your own to get past this check.
+
+Changes that did not come through a run pass untouched — `/wikicommit-fix`, `/wikicommit-remove`, `/wikicommit-review` and hand edits use no driver — and so do runs that ended by deferring or halting, which are finished runs. Run records live only on the machine that ran them, so this check sees runs from this machine only. If `driver.py` does not exist (`.wikicommit/scripts/` older than this Skill), say so and carry on; that repository has no runs this check could name.
+
+Then run the following in order. Blocking status is determined not by each tool's exit code but by the criteria in the table below (whether the script printed `ERROR:` / `DUPLICATE:`; lychee and markdownlint-cli2 are always non-blocking). As soon as a blocking error occurs, stop running further checks, display the error to the user, and abort (leave the working tree changes as-is; do not create a branch).
 
 ```bash
 python .wikicommit/scripts/validate_frontmatter.py <changed .md files>
@@ -200,7 +220,7 @@ Branch naming rule (exception): use the form `wikicommit/merge-<YYYYMMDD>-<HHMMS
 ### Step 5: Commit
 
 ```bash
-git add -- .wikicommit/entity/ .wikicommit/view/ .wikicommit/source/ .wikicommit/review/ <new source files...> <new schema files...> <new vocab file> <policy files...>
+git add -- .wikicommit/entity/ .wikicommit/view/ .wikicommit/source/ .wikicommit/review/ <new source files...> <new schema files...> <new vocab file> <policy files...> <relations file>
 git commit -m "$(cat <<'EOF'
 wiki: bulk update <YYYY-MM-DD>
 
@@ -210,7 +230,7 @@ EOF
 )"
 ```
 
-<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update and -init; tests/test_commit_trailer_vendor_table.py holds them together) -->
+<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update, -init and -organize; tests/test_commit_trailer_vendor_table.py holds them together) -->
 **Commit trailers.** Always write `Generated-By:   <current model ID>`: the ID of the model actually running this Skill, exactly as the runtime reports it — the same self-reported value `wikicommit-generate` writes into a page's `generated_by` (keep any suffix; do not shorten or normalize it; never hardcode one). Then choose `<Co-Authored-By line>` from the start of that same ID, so the two lines can never name different vendors:
 
 | `<current model ID>` starts with | `<Co-Authored-By line>` |
@@ -222,7 +242,7 @@ EOF
 GitHub resolves a co-author by the email address and shows that vendor's avatar on the commit, so a line naming a vendor that did not run this Skill misattributes it; writing none is the correct answer for a model not in the table. Decide by the model, not by the harness running it — one harness can run models from more than one vendor. If the harness appends its own co-author line after this message, leave it; an identical duplicate does no harm.
 <!-- commit-trailers:end -->
 
-Replace `<YYYY-MM-DD>` with the output of `date +%Y-%m-%d` (use the same date in both the commit message title and body). Pass each path determined in Step 2 item 3 as a separate argument prefixed with `:(literal)` for `<new source files...>` (e.g. `:(literal)raw/report[2024].pdf`; omit if there are none). For the same reason as Step 2 item 3, passing a path containing metacharacters to `git add` without the prefix can accidentally stage an unrelated file. Pass each path determined in Step 2 item 4 for `<new schema files...>` the same way (omit if there are none) — these are always plain `.wikicommit/schema/<Type>.md` paths (Schema.org type names contain no glob metacharacters), but using `:(literal)` uniformly costs nothing and avoids re-deriving the rule if a custom type name ever did. Pass the path determined in Step 2 item 5 for `<new vocab file>` verbatim (omit if empty) — it is always the fixed literal path `.wikicommit/schemaorg-vocab.json`, so no `:(literal)` prefix is needed. Pass each path determined in Step 2 item 6 for `<policy files...>` verbatim as well, as its own argument (omit if none) — these too are fixed literal paths, `.wikicommit/source-policy.md` and `.wikicommit/entity-policy.md`.
+Replace `<YYYY-MM-DD>` with the output of `date +%Y-%m-%d` (use the same date in both the commit message title and body). Pass each path determined in Step 2 item 3 as a separate argument prefixed with `:(literal)` for `<new source files...>` (e.g. `:(literal)raw/report[2024].pdf`; omit if there are none). For the same reason as Step 2 item 3, passing a path containing metacharacters to `git add` without the prefix can accidentally stage an unrelated file. Pass each path determined in Step 2 item 4 for `<new schema files...>` the same way (omit if there are none) — these are always plain `.wikicommit/schema/<Type>.md` paths (Schema.org type names contain no glob metacharacters), but using `:(literal)` uniformly costs nothing and avoids re-deriving the rule if a custom type name ever did. Pass the path determined in Step 2 item 5 for `<new vocab file>` verbatim (omit if empty) — it is always the fixed literal path `.wikicommit/schemaorg-vocab.json`, so no `:(literal)` prefix is needed. Pass each path determined in Step 2 item 6 for `<policy files...>` verbatim as well, as its own argument (omit if none) — these too are fixed literal paths, `.wikicommit/source-policy.md` and `.wikicommit/entity-policy.md`. Pass `<relations file>` the same way (omit if empty).
 
 **Drop any of the four `.wikicommit/` directories that does not exist on disk.** `git add` treats a pathspec matching nothing as fatal and aborts the *whole* invocation — nothing is staged, and the commit that follows has no content — so listing them unconditionally would break every merge on a wiki that has one of them missing. That is not a hypothetical: `.wikicommit/review/` is created by `/wikicommit-init`, so a repository that updated its Skills (`npx skills add`) without re-running init does not have it, and a repository initialized by an older version may lack `.wikicommit/view/`. Check each with a plain directory test and pass only the ones present; the ones you drop are, by definition, directories with nothing to stage.
 
@@ -362,7 +382,7 @@ The only real constraint on generating many Issues back-to-back is GitHub's seco
 
 Obtain `<lang>` and `<slug>` from the target page's frontmatter `lang` field and its filename (without extension). `<Type>` is the value of the frontmatter `type` field with the `schema:` prefix stripped (e.g. `schema:Person` → `Person`, `schema:custom/Decision` → `custom/Decision`); always use this `<Type>` (including the `/`) in Issue titles. **A page under `.wikicommit/view/` has no `type:` field at all**, so for one of those `<Type>` is the reserved constant `View` — the same segment `[[View/<slug>]]` and the published `content/<lang>/View/` path use. Do not leave it empty; an Issue titled `Review: /<slug> (<lang>)` names nothing. While reading this frontmatter, also check for `translated_from` and `derived_from` — which one is present (if either) selects the Issue Body Template variant used below.
 
-**Also determine `<Pass-2b type?>` for a `sources`-based page**, once the duplicate check below has confirmed this page still needs an Issue — a page that already has an open tracking Issue is skipped without a body being built, so reading a schema file for it is wasted on every future run. Read `.wikicommit/schema/<Type>.md` (`<Type>` as derived just above, i.e. with the `schema:` prefix already stripped) and check whether its `wikicommit.provenance` is `generate-interactive` or `generate-auto` — the two values `wikicommit-generate` Pass 2b stamps when it adds a type on the fly. If it is, the `sources` variant's checklist below gains one extra item; otherwise that item is omitted. Treat a missing or unreadable schema file, a missing `provenance`, or any other value (`default`, `init-theme`, `collect`, `schema-propose`, `manual`) as "no" — every one of those means a human either installed the type deliberately or approved it through a path that already had its own confirmation. Skip this read entirely for translation and synthesized pages: neither variant carries the item.
+**Also determine `<Pass-2b type?>` for a `sources`-based page**, once the duplicate check below has confirmed this page still needs an Issue — a page that already has an open tracking Issue is skipped without a body being built, so reading a schema file for it is wasted on every future run. Read `.wikicommit/schema/<Type>.md` (`<Type>` as derived just above, i.e. with the `schema:` prefix already stripped) and check whether its `wikicommit.provenance` is `generate-interactive` or `generate-auto` — the two values `wikicommit-generate` Pass 2b has stamped when adding a type on the fly (it writes only `generate-interactive` now, since a non-interactive run defers a type candidate instead of approving it, but type files already stamped `generate-auto` remain and still get the item). If it is, the `sources` variant's checklist below gains one extra item; otherwise that item is omitted. Treat a missing or unreadable schema file, a missing `provenance`, or any other value (`default`, `init-theme`, `collect`, `schema-propose`, `manual`) as "no" — every one of those means a human either installed the type deliberately or approved it through a path that already had its own confirmation. Skip this read entirely for translation and synthesized pages: neither variant carries the item.
 
 > **Why `provenance` rather than this batch's diff.** This step scans the whole default branch so that a page whose Issue creation failed in an earlier run is still picked up; a batch-scoped condition would give that rescued page a different checklist purely as a function of when the API failed. `provenance` is a permanent stamp, so it answers identically on every run. The cost — every page of a Pass 2b-added type carries the item from then on — is accepted, since Pass 2b adding a type at all is uncommon.
 
@@ -764,7 +784,15 @@ If `gh issue create` fails for any other reason (API error, etc., after the labe
 
 ## How to Proceed
 
-This Issue is a visibility record, not an automation trigger — closing it does not change anything on its own (unlike a `wikicommit-review` tracking Issue, whose close is detected by `review-issue-close-sync.yml`). Read the failure reason above, then either fix the underlying issue (adjust the source content, or add guidance to the management file's `## User Notes`) and re-run `/wikicommit-generate` on this source to retry.
+This Issue is a visibility record, not an automation trigger — closing it does not change anything on its own (unlike a `wikicommit-review` tracking Issue, whose close is detected by `review-issue-close-sync.yml`).
+
+<Write exactly one of the two blocks below, chosen by `failed_pages`, and drop the other along with
+ this note. The two failures retire in different ways, and the steps of one cannot be carried out on
+ the other: the first block is about entities, and a source caught before any page was attempted has none.>
+
+<Block A — only where `failed_pages` is non-empty:>
+
+Read the failure reason above, then either fix the underlying issue (adjust the source content, or add guidance to the management file's `## User Notes`) and re-run `/wikicommit-generate` on this source to retry.
 
 **Closing it while `failed_pages` is still non-empty does not keep it closed** — the duplicate check above looks only at *open* Issues, so the next `/wikicommit-merge` creates this Issue again. To retire it for good, the underlying entry has to leave `failed_pages`.
 
@@ -776,6 +804,21 @@ This Issue is a visibility record, not an automation trigger — closing it does
 4. Run `/wikicommit-merge`, then close this Issue. With `failed_pages` empty, it is not created again.
 
 That one named run also rewrites this source's pages that did succeed; any of them whose content changes goes back to waiting for a read and gets a review tracking Issue of its own. That is expected, not a fault.
+
+<Block B — only where `failed_pages` is empty (the source failed before any page was attempted, so its `status` is `failed`):>
+
+No page was attempted in the run that failed, so there is no entity to accept or to retry — only the source itself. **Closing this Issue as it is does not keep it closed**: the duplicate check above looks only at *open* Issues, and the next `/wikicommit-merge` finds `status: failed` again and creates this Issue anew. Retire it one of these two ways, depending on what the failure reason says:
+
+1. **If the failure was temporary** — a network or server problem — wait, then change the management file's `status` to `pending` and run `/wikicommit-generate <this source's path or URL>` naming this source explicitly. A fetch that now succeeds moves the source off `status: failed`, and the next merge leaves this Issue alone. If it fails the same way again, it was not temporary: take the second route.
+   **Except** when the management file lists `generated_pages` (an earlier run built pages from it and only this re-check failed): leave `status` as `failed` and just run `/wikicommit-generate <this source's path or URL>` by name — that re-fetches the URL and compares it with the content the pages were built from. Setting `pending` instead would rebuild every one of those pages from the cached copy without fetching anything, sending any whose wording changes back to waiting for a read. If that run reports no changes, change `status` back to `generated` and delete the `## Failure Reason` section; if the content changed, the run regenerates the pages and sets `status` itself.
+2. **If this URL source cannot be fetched at all** — for example the site refuses automated requests (HTTP 403) — take the source out of the wiki:
+   - Delete the management file. `/wikicommit-merge` creates this Issue from the management file, so without one it never creates it again. **Except** when that file lists `generated_pages` (an earlier run built pages from it and only this re-check failed): then do not delete it — change `status` back to `generated` and delete its `## Failure Reason` section instead. Nothing was fetched, so `source.hash` still describes the content those pages were built from.
+   - Add the URL to `rejected:` in `.wikicommit/source-policy.md` with a `reason` that says it could not be fetched (the status code) and a `date`. The next attempt to register it then stops to ask, quoting that reason, and the record of what was tried survives the deleted file. If other documents on the same site are refused too, add the host to `exclude_domains:` instead — that is a decision about the whole site, and it also stops any URL on it from being fetched.
+   - Run `/wikicommit-merge`, then close this Issue.
+
+   For a repository file (`source.type: path`) that cannot be extracted, these steps do not apply — there is no URL to record, and its `source.hash` was already updated to the new file when it was registered. Repair or replace the file and take the first route, or remove the file from the repository together with its management file.
+
+   Do not mark this source `status: retracted` for this. That value says the source *was* fetched in full and its content is not trustworthy, and the published source page shows it as withdrawn — neither is true of a document the wiki never managed to read.
 
 Commands here are written the way Claude Code invokes them (`/wikicommit-generate`); in Codex, type `$wikicommit-generate` and so on instead.
 

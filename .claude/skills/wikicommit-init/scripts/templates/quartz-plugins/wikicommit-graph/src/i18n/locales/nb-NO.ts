@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Maks",
         degreeNoBound: "0 = ingen grense",
+        labelLimit: "Etiketter på skjermen",
+        labelLimitHint: "0 = etter zoomnivå",
         reset: "Tilbakestill",
         legend: "Tegnforklaring",
         legendPages: "Sider",

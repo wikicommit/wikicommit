@@ -20,10 +20,90 @@ var ja_JP_default = {
   }
 };
 
+// src/i18n/locales/de-DE.ts
+var de_DE_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "Lesen auf:"
+    }
+  }
+};
+
+// src/i18n/locales/es-ES.ts
+var es_ES_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "Leer en:"
+    }
+  }
+};
+
+// src/i18n/locales/fr-FR.ts
+var fr_FR_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "Lire en :"
+    }
+  }
+};
+
+// src/i18n/locales/it-IT.ts
+var it_IT_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "Leggi in:"
+    }
+  }
+};
+
+// src/i18n/locales/pl-PL.ts
+var pl_PL_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "Czytaj w j\u0119zyku:"
+    }
+  }
+};
+
+// src/i18n/locales/pt-BR.ts
+var pt_BR_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "Ler em:"
+    }
+  }
+};
+
+// src/i18n/locales/ru-RU.ts
+var ru_RU_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "\u0427\u0438\u0442\u0430\u0442\u044C \u043D\u0430:"
+    }
+  }
+};
+
+// src/i18n/locales/zh-CN.ts
+var zh_CN_default = {
+  components: {
+    wikicommitLanguageSwitcher: {
+      label: "\u9605\u8BFB\u8BED\u8A00\uFF1A"
+    }
+  }
+};
+
 // src/i18n/index.ts
 var locales = {
   "en-US": en_US_default,
-  "ja-JP": ja_JP_default
+  "ja-JP": ja_JP_default,
+  "de-DE": de_DE_default,
+  "es-ES": es_ES_default,
+  "fr-FR": fr_FR_default,
+  "it-IT": it_IT_default,
+  "pl-PL": pl_PL_default,
+  "pt-BR": pt_BR_default,
+  "ru-RU": ru_RU_default,
+  "zh-CN": zh_CN_default
 };
 function i18n(locale) {
   return locales[locale] || en_US_default;

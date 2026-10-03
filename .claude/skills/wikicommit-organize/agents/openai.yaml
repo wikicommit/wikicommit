@@ -1,0 +1,7 @@
+# Codex reads this file, not SKILL.md's frontmatter, to decide whether it may start this
+# Skill on its own judgment (Issue #1014). SKILL.md's `disable-model-invocation: true` is a
+# Claude Code key that Codex ignores. With this set to false Codex still runs the Skill
+# when a person names it explicitly ($skill), which is the intent of the Claude Code flag.
+# The key has to sit under `policy:` — at the top level it is not read.
+policy:
+  allow_implicit_invocation: false

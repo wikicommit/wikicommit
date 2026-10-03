@@ -6,9 +6,9 @@ wikicommit:
   # Every reader of this file is the agent itself, so an echo would be
   # self-reported and would verify nothing.
   # The `provenance` values the four reading paths stamp, so this list and a written
-  # file's own `wikicommit.provenance` are in one vocabulary. The type-necessity pass
-  # stamps two of them depending on how the candidate was approved, hence four paths
-  # and five values.
+  # file's own `wikicommit.provenance` are in one vocabulary. Four paths, five values:
+  # `generate-auto` is no longer written by any path (a non-interactive run defers a
+  # type candidate rather than approving it) but type files already on disk carry it.
   applies_to:
     - init-theme
     - collect

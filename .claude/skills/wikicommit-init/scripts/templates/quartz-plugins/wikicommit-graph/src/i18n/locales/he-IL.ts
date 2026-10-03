@@ -11,6 +11,8 @@ export default {
         degreeMin: "מינימום",
         degreeMax: "מקסימום",
         degreeNoBound: "0 = ללא הגבלה",
+        labelLimit: "תוויות על המסך",
+        labelLimitHint: "0 = לפי רמת הזום",
         reset: "איפוס",
         legend: "מקרא",
         legendPages: "דפים",

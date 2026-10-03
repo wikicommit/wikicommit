@@ -78,6 +78,10 @@ const REPORT_NOTE_ID = "wikicommit-banner-report-note"
 // silently — the line would just never appear.
 const AI_REVIEW_AT_FIELD = "ai_review_at"
 const AI_REVIEW_MODEL_FIELD = "ai_review_model"
+// Issue #1031: present only when the standing verdict is a translation checked
+// against its original page rather than a page checked against its sources.
+const AI_REVIEW_STAGE_FIELD = "ai_review_stage"
+const TRANSLATE_CHECK_STAGE = "translate-check"
 
 // A page's review tracking Issue (Issue #313) is created by wikicommit-merge
 // Step 8 *after* the PR merges, while the Quartz build runs off that same
@@ -258,7 +262,10 @@ const WikiCommitBanner: QuartzComponent = ({ fileData, allFiles, cfg }: QuartzCo
     typeof aiReviewBy === "string" &&
     aiReviewBy.trim() !== "" ? (
       <p class="wikicommit-banner__ai-review">
-        {t.aiReviewAt} {aiReviewAt}&nbsp;&nbsp;{t.aiReviewBy} {aiReviewBy}
+        {frontmatter?.[AI_REVIEW_STAGE_FIELD] === TRANSLATE_CHECK_STAGE
+          ? t.aiReviewOriginalAt
+          : t.aiReviewAt}{" "}
+        {aiReviewAt}&nbsp;&nbsp;{t.aiReviewBy} {aiReviewBy}
       </p>
     ) : null
 

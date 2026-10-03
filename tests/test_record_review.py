@@ -428,3 +428,68 @@ def test_a_stamp_shaped_but_bogus_name_does_not_pin_the_directory(tmp_path):
     path = allocate_record_path(directory, "20260921-153045", "ai")
 
     assert path.name == "20260921-153045-ai.md"
+
+
+# --- translate-check (Issue #1031) ---------------------------------------------
+
+TRANSLATION_REL = ".wikicommit/entity/en/Person/yamada-taro.md"
+TRANSLATION_RECORD_DIR_REL = ".wikicommit/review/entity/en/Person/yamada-taro"
+COMMIT = "a" * 40
+
+
+def write_translation(root: Path, *, translated_from: str = PAGE_REL, commit: str = COMMIT) -> Path:
+    page = root / TRANSLATION_REL
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\n"
+        'title: "Taro Yamada"\n'
+        "lang: en\n"
+        'type: "schema:Person"\n'
+        "review_status: pending\n"
+        f"translated_from: {translated_from}\n"
+        f'source_commit: "{commit}"\n'
+        "---\n\nBody.\n",
+        encoding="utf-8",
+    )
+    return page
+
+
+def test_translate_check_records_the_source_page_version(tmp_path):
+    """A translation has no sources; what it was checked against is the original."""
+    write_page(tmp_path)
+    write_translation(tmp_path)
+    result = run(
+        tmp_path, TRANSLATION_REL, "--kind", "ai", "--stage", "translate-check",
+        "--model", "m", "--attempts", "1", "--result", "pass",
+    )
+    assert result.returncode == 0, result.stderr
+    fm = only_record(tmp_path, TRANSLATION_RECORD_DIR_REL)
+    assert fm["stage"] == "translate-check"
+    assert fm["reviewed_sources"] == [{"path": PAGE_REL, "source_commit": COMMIT}]
+
+
+def test_translate_check_normalizes_a_legacy_translated_from(tmp_path):
+    write_page(tmp_path)
+    write_translation(tmp_path, translated_from=".wikicommit/wiki/ja/Person/yamada-taro.md")
+    run(
+        tmp_path, TRANSLATION_REL, "--kind", "ai", "--stage", "translate-check",
+        "--model", "m", "--attempts", "1", "--result", "pass",
+    )
+    fm = only_record(tmp_path, TRANSLATION_RECORD_DIR_REL)
+    assert fm["reviewed_sources"][0]["path"] == PAGE_REL
+
+
+def test_translate_check_discard_does_not_read_the_old_translation(tmp_path):
+    """The file on disk is the previous translation; its source_commit is not
+    the version this run checked, so reading it would make the record lie."""
+    write_page(tmp_path)
+    write_translation(tmp_path, commit="b" * 40)
+    result = run(
+        tmp_path, TRANSLATION_REL, "--kind", "ai", "--stage", "translate-check",
+        "--model", "m", "--attempts", "3", "--result", "discarded",
+    )
+    assert result.returncode == 0, result.stderr
+    fm = only_record(tmp_path, TRANSLATION_RECORD_DIR_REL)
+    assert fm["result"] == "discarded"
+    assert fm["reviewed_sources"] == []
+    assert fm["page_content_hash"] == ""

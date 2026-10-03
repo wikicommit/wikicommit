@@ -39,7 +39,43 @@ Usage:
 書く固定のリテラルなのでこの規則の対象外。
 
 一致する管理ファイルが見つかり、**かつ**キャッシュファイルがディスク上に実在する場合に
-そのパス（リポジトリルート相対）を stdout に印字する。それ以外は何も印字しない。
+そのパス（リポジトリルート相対）を stdout に印字する。
+
+## exit 1 の 2 つの意味を印字で分ける（Issue #1036）
+
+exit 1 は「一致する管理ファイルが無い」と「キャッシュが無い」の 2 つを畳んでいる。
+終了コードは変えず（`wikicommit-review` / `wikicommit-fix` / `wikicommit-relate` は
+exit 1 をどちらでも同じフォールバックで答える）、stdout の 1 行で区別する:
+
+    UNREGISTERED: <識別子>
+    NO_CACHE: <キャッシュが置かれるはずの位置> (<管理ファイル>)
+
+`wikicommit-ask --include-source` は後者で URL を取得し、前者ではキャッシュに置けない
+（置き場所が管理ファイルのパスから導かれる）ことをこの行から知る。
+
+## `--settle` — キャッシュが無かった URL を取得した後の判定（Issue #1036）
+
+呼び出し元は `wikicommit-ask --include-source` と、`wikicommit-review` / `wikicommit-fix`
+（`.wikicommit/.cache/refetch/` に取得した後。Issue #1137）。
+
+clean checkout ではキャッシュが常に空なので、`--include-source` は URL ソースを毎回
+諦めていた。ask は `add_source.py --fetch-url` で一時ファイルに取得し、本モードに渡す。
+取得した内容のハッシュを**2 つの値と別々に**照合する:
+
+| 照合の相手 | 答える問い |
+|---|---|
+| ページの `sources[].hash`（`--page-hash`） | ページが書かれたときの版か（＝抽出ガードを通った版か） |
+| 管理ファイルの `source.hash` | generate が今キャッシュとして期待している版か |
+
+**後者が一致したときだけ**キャッシュの位置へ移す。2 つは一致するとは限らない（保留した
+`LOW_DENSITY:` の取得、破棄された強制リチェックは管理ファイルの hash だけを進める）。
+管理ファイルには一切書き込まず、置かなかった一時ファイルも消さない（呼び出し側が読んで
+から消す）。出力は 1 行:
+
+    SETTLED: page=<match|mismatch>, cache=<placed <path>|not-placed (<理由>)>, read=<読むファイル>
+
+取り下げ済みなら `RETRACTED:` と exit 2（取得前の照会で既に分かるはずだが、
+置く前にもう一度見る）。
 
 ## 取り下げ済みソース（`status: retracted`）は exit 2 で伝える（Issue #918）
 
@@ -67,14 +103,17 @@ stdout に印字して exit 2 を返す。**これは人間が「このソース
 避けているのと同じ理由（stdout の契約は変えない）。
 
 Exit codes:
-    0 — キャッシュが見つかり印字した
-    1 — 一致する管理ファイルが無い、またはキャッシュファイルが実在しない
+    0 — キャッシュが見つかり印字した（`--settle` では判定を印字した）
+    1 — 一致する管理ファイルが無い（`UNREGISTERED:`）、またはキャッシュファイルが
+        実在しない（`NO_CACHE:`）。`--settle` では引数の誤り・取得ファイルが無い
     2 — 管理ファイルが `status: retracted` である
         （`RETRACTED: <識別子> (<管理ファイルのパス>)` を印字。後者は
         人間が書いた `## Retraction Reason` の在り処である）
 """
 
 import argparse
+import hashlib
+import os
 import sys
 from pathlib import Path
 
@@ -130,29 +169,88 @@ def _frontmatter_or_none(management_file: Path) -> dict | None:
     return fm or None
 
 
-def resolve_url(target_url: str, repo_root: Path = Path()) -> Path | Retracted | None:
-    """The cache path, a `Retracted`, or None. See the module docstring."""
-    mgmt_root = repo_root / ".wikicommit" / "source" / "url"
-    if not mgmt_root.is_dir():
-        return None
+class Located:
+    """What the scan of one tree found for an identifier.
 
+    `management_file` is None when nothing is registered for the identifier.
+    `cache_file` is where the cache *belongs* — it may not exist. Keeping the two
+    apart is what lets the CLI tell an unregistered source from a missing cache
+    (Issue #1036), which exit 1 alone folds together.
+    """
+
+    def __init__(
+        self,
+        management_file: Path | None = None,
+        cache_file: Path | None = None,
+        frontmatter: dict | None = None,
+        retracted: bool = False,
+    ) -> None:
+        self.management_file = management_file
+        self.cache_file = cache_file
+        self.frontmatter = frontmatter or {}
+        self.retracted = retracted
+
+
+def _locate(
+    target: str, key: str, mgmt_root: Path, cache_for
+) -> Located:
+    if not mgmt_root.is_dir():
+        return Located()
     for management_file in mgmt_root.rglob("*.md"):
         fm = _frontmatter_or_none(management_file)
         if fm is None:
             continue
         source = fm.get("source")
-        if not isinstance(source, dict) or source.get("url") != target_url:
+        if not isinstance(source, dict) or source.get(key) != target:
             continue
-        # Before the cache lookup, not after: a retracted source with no cache
-        # would otherwise return None and the caller would treat it as an
-        # ordinary miss.
-        if _is_retracted(fm):
-            return Retracted(management_file)
-        scratch_path = management_file.relative_to(mgmt_root).with_suffix("")
-        cache_file = (repo_root / ".wikicommit" / ".cache" / "ingest-fetch" / scratch_path).with_suffix(".md")
-        return cache_file if cache_file.is_file() else None
+        # Read before the cache lookup, not after: a retracted source with no
+        # cache would otherwise come back as an ordinary miss.
+        return Located(
+            management_file=management_file,
+            cache_file=cache_for(management_file),
+            frontmatter=fm,
+            retracted=_is_retracted(fm),
+        )
+    return Located()
 
-    return None
+
+def locate_url(target_url: str, repo_root: Path = Path()) -> Located:
+    mgmt_root = repo_root / ".wikicommit" / "source" / "url"
+
+    def cache_for(management_file: Path) -> Path:
+        scratch_path = management_file.relative_to(mgmt_root).with_suffix("")
+        return (repo_root / ".wikicommit" / ".cache" / "ingest-fetch" / scratch_path).with_suffix(".md")
+
+    return _locate(target_url, "url", mgmt_root, cache_for)
+
+
+def locate_path(target_path: str, repo_root: Path = Path()) -> Located:
+    """比較は `source.path` の文字列そのものに対して行う。`add_source.py` の
+    `find_mgmt_file_for_path()` と同じで、パスの正規化（`./` の除去・`resolve()`）は
+    しない — あちらが登録時に書いた値と、ページの `sources[].path` に転記された値は
+    同じ 1 つの文字列であり、その間に正規化を挟む主体がいない。
+    """
+    mgmt_root = repo_root / ".wikicommit" / "source" / "path"
+
+    def cache_for(management_file: Path) -> Path:
+        # 末尾の `.md` を落とさない（上の docstring 参照）。
+        rel = management_file.relative_to(mgmt_root)
+        return repo_root / ".wikicommit" / ".cache" / "extract-path" / rel
+
+    return _locate(target_path, "path", mgmt_root, cache_for)
+
+
+def _resolved(located: Located) -> Path | Retracted | None:
+    if located.management_file is None:
+        return None
+    if located.retracted:
+        return Retracted(located.management_file)
+    return located.cache_file if located.cache_file.is_file() else None
+
+
+def resolve_url(target_url: str, repo_root: Path = Path()) -> Path | Retracted | None:
+    """The cache path, a `Retracted`, or None. See the module docstring."""
+    return _resolved(locate_url(target_url, repo_root))
 
 
 def resolve_path(target_path: str, repo_root: Path = Path()) -> Path | Retracted | None:
@@ -161,31 +259,86 @@ def resolve_path(target_path: str, repo_root: Path = Path()) -> Path | Retracted
     取り下げ済みの場合は `Retracted` を返す（Issue #918）。ここで返さないと、
     キャッシュを持たない取り下げ済みソースが `None`（＝生ファイルを読むフォールバック）
     に落ちて素通りする。
-
-    比較は `source.path` の文字列そのものに対して行う。`add_source.py` の
-    `find_mgmt_file_for_path()` と同じで、パスの正規化（`./` の除去・`resolve()`）は
-    しない — あちらが登録時に書いた値と、ページの `sources[].path` に転記された値は
-    同じ 1 つの文字列であり、その間に正規化を挟む主体がいない。
     """
-    mgmt_root = repo_root / ".wikicommit" / "source" / "path"
-    if not mgmt_root.is_dir():
-        return None
+    return _resolved(locate_path(target_path, repo_root))
 
-    for management_file in mgmt_root.rglob("*.md"):
-        fm = _frontmatter_or_none(management_file)
-        if fm is None:
-            continue
-        source = fm.get("source")
-        if not isinstance(source, dict) or source.get("path") != target_path:
-            continue
-        if _is_retracted(fm):
-            return Retracted(management_file)
-        # 末尾の `.md` を落とさない（上の docstring 参照）。
-        rel = management_file.relative_to(mgmt_root)
-        cache_file = repo_root / ".wikicommit" / ".cache" / "extract-path" / rel
-        return cache_file if cache_file.is_file() else None
 
-    return None
+def sha256_file(path: Path) -> str:
+    """Same digest `add_source.py` writes into `source.hash` and `sources[].hash`."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return f"sha256:{h.hexdigest()}"
+
+
+def settle_fetch(
+    target_url: str, fetched: Path, page_hash: str, repo_root: Path = Path()
+) -> dict:
+    """Decide what a fresh `--include-source` fetch may be used for (Issue #1036).
+
+    Two comparisons, answering two different questions:
+
+    - against the grounding page's own `sources[].hash` — is this the version the
+      page was written from? Only then did the text pass the extraction guards
+      Pass 1 applied when the page was made, so only then is it used without a
+      note.
+    - against the management file's `source.hash` — is this the version
+      `wikicommit-generate` now expects in its cache? Only then is it moved into
+      the cache. Pass 1 always checks that hash before reading the cache, so a
+      file placed here can never mislead generate; the reason not to place
+      anything else is the *next* ask, which would read a different version as
+      "the cached source" with no note at all.
+
+    The two can disagree: a deferred `LOW_DENSITY:` fetch, or a forced recheck
+    whose update was discarded, moves `source.hash` without the page following.
+
+    Never writes to the management file. Never deletes: a file that is not
+    placed stays where it was fetched, for the caller to read and then remove.
+    """
+    located = locate_url(target_url, repo_root)
+    if located.retracted:
+        return {"result": "RETRACTED", "management_file": located.management_file}
+
+    if not fetched.is_file():
+        return {"result": "ERROR", "message": f"{fetched}: the fetched file does not exist"}
+
+    got = sha256_file(fetched)
+    page_match = bool(page_hash) and got == page_hash.strip()
+
+    if located.management_file is None:
+        cache = "not-placed (no management file is registered for this URL)"
+        read = fetched
+    else:
+        source = located.frontmatter.get("source") or {}
+        recorded = str(source.get("hash") or "").strip().strip('"')
+        if not recorded:
+            cache = "not-placed (the management file's source.hash is not set)"
+            read = fetched
+        elif got != recorded:
+            cache = "not-placed (differs from the management file's source.hash)"
+            read = fetched
+        else:
+            target = located.cache_file
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(fetched, target)
+            cache = f"placed {_rel(target, repo_root)}"
+            read = target
+
+    return {
+        "result": "SETTLED",
+        "page": "match" if page_match else "mismatch",
+        "cache": cache,
+        "read": read,
+        "hash": got,
+    }
+
+
+def _rel(path: Path, repo_root: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def main() -> int:
@@ -199,6 +352,19 @@ def main() -> int:
         default="url",
         help="Which kind of identifier is on stdin: a source.url (default) or a source.path.",
     )
+    parser.add_argument(
+        "--settle",
+        metavar="FETCHED_FILE",
+        help="For a URL fetched because no cache existed: compare FETCHED_FILE with the "
+        "page's hash (--page-hash) and the management file's source.hash, and move it into "
+        "the cache only when the latter matches. Never writes to a management file. "
+        "URL sources only.",
+    )
+    parser.add_argument(
+        "--page-hash",
+        default="",
+        help="With --settle: the grounding page's sources[].hash for this URL.",
+    )
     args = parser.parse_args()
 
     identifier = sys.stdin.read().strip()
@@ -209,17 +375,35 @@ def main() -> int:
         )
         return 1
 
-    if args.source_type == "path":
-        resolved = resolve_path(identifier)
-    else:
-        resolved = resolve_url(identifier)
+    if args.settle:
+        if args.source_type != "url":
+            print("ERROR: --settle applies to URL sources only", file=sys.stderr)
+            return 1
+        outcome = settle_fetch(identifier, Path(args.settle), args.page_hash)
+        if outcome["result"] == "RETRACTED":
+            print(f"RETRACTED: {identifier} ({outcome['management_file']})")
+            return 2
+        if outcome["result"] == "ERROR":
+            print(f"ERROR: {outcome['message']}", file=sys.stderr)
+            return 1
+        print(
+            f"SETTLED: page={outcome['page']}, cache={outcome['cache']}, "
+            f"read={outcome['read'].as_posix()}"
+        )
+        return 0
 
-    if isinstance(resolved, Retracted):
-        print(f"RETRACTED: {identifier} ({resolved.management_file})")
+    located = locate_path(identifier) if args.source_type == "path" else locate_url(identifier)
+
+    if located.retracted:
+        print(f"RETRACTED: {identifier} ({located.management_file})")
         return 2
-    if resolved is None:
+    if located.management_file is None:
+        print(f"UNREGISTERED: {identifier}")
         return 1
-    print(resolved)
+    if not located.cache_file.is_file():
+        print(f"NO_CACHE: {located.cache_file.as_posix()} ({located.management_file.as_posix()})")
+        return 1
+    print(located.cache_file)
     return 0
 
 

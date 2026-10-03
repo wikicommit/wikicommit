@@ -68,6 +68,8 @@ CAPS = {
     "wikicommit-schema-propose": 0,
     "wikicommit-update": 0,
     "wikicommit-reconcile": 0,
+    "wikicommit-relate": 0,
+    "wikicommit-organize": 0,
 }
 
 

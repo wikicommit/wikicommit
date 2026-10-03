@@ -3,6 +3,7 @@
 
 Usage:
     python .wikicommit/scripts/build_survey_view.py [--lang <lang>|all] [--max-pages N] [--limit N]
+    python .wikicommit/scripts/build_survey_view.py --pages <path> [<path> ...]
 
 `/wikicommit-synthesize` run with no `<topic>` has to find the topic itself, by
 looking at the wiki as a whole (Issue #586). The wiki's full text does not fit
@@ -24,6 +25,17 @@ This is deliberately a script rather than prose in a SKILL.md: surveying the
 wiki means walking every page, and partial coverage would silently undercut the
 one thing the survey is for. What the script does not do is judge — picking
 topics out of this digest is the LLM's job, and is non-deterministic by nature.
+
+`--pages` reduces only the named pages, in the order given, and omits the
+aggregate rankings (Issue #1075). `/wikicommit-synthesize` uses it to judge,
+before reading any body, which of its search candidates treat the topic as
+their subject: a candidate's title, description and headings are a few lines,
+while its body can be thousands of tokens, so reading bodies to decide which
+bodies to read would defeat the point of deciding first. Each record also says
+whether the page is a translation or is itself synthesized, from its
+frontmatter — both are excluded from grounding, and a whole-file `grep` for
+`derived_from:` would also match a page that merely quotes the field in its
+body.
 
 Exit code: always 0 (report-only; an unreadable page is a WARNING on stderr).
 """
@@ -115,6 +127,7 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
         # A view page's path resolves only through parse_view_path; it carries
         # derived_from, not sources (Issue #675).
         is_view = view_dir is not None and parse_wiki_path(path, entity_dir) is None
+        derived = fm.get("derived_from")
         pages.append({
             "path": path,
             "key": f"{type_name}/{slug}",
@@ -128,6 +141,9 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
             # Issue #990: how many sources the page stands on. None — never 0 —
             # for a translation (inherits from its parent) and a view page
             # (derived_from counts something else), so PAGE: drops the field.
+            "translation": bool(fm.get("translated_from")),
+            "synthesized": is_view or bool(derived),
+            "view": is_view,
             "source_count": (
                 len(sources)
                 if isinstance(sources, list) and not is_view and not fm.get("translated_from")
@@ -135,6 +151,57 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
             ),
         })
     return pages
+
+
+def print_page(p: dict, backlinks: dict[str, set[str]], *, with_path: bool = False) -> None:
+    refs = len(backlinks.get(p["key"], ()))
+    tags = ",".join(_one_line(t, 40) for t in p["tags"])
+    links = ",".join(sorted(p["links"]))
+    sources_part = f" | sources={p['source_count']}" if p["source_count"] is not None else ""
+    flags = ""
+    if with_path:
+        # Only the --pages mode names these: there the reader has to drop both
+        # before choosing grounding, and the path is what it hands on.
+        marks = [m for m, on in (("translation", p["translation"]),
+                                 ("synthesized", p["synthesized"])) if on]
+        flags = f" | path={p['path'].as_posix()}" + (f" | {','.join(marks)}" if marks else "")
+    print(
+        f"PAGE: {p['key']} | {_one_line(p['title'], 80)} | backlinks={refs}{sources_part}"
+        f" | tags={tags} | links={links}{flags}"
+    )
+    if p["description"]:
+        print(f"  DESC: {_one_line(p['description'], MAX_DESC_CHARS)}")
+    if p["headings"]:
+        heads = [_one_line(h, 60) for h in p["headings"][:MAX_HEADINGS]]
+        more = len(p["headings"]) - len(heads)
+        print("  HEADINGS: " + " / ".join(heads) + (f" (+{more})" if more > 0 else ""))
+
+
+def print_selected(pages: list[dict], wanted: list[str], backlinks: dict[str, set[str]]) -> int:
+    """The --pages mode: named pages only, in the caller's order.
+
+    A named path that does not resolve to a live page (missing, unreadable,
+    `status: removed`, or outside both trees) gets a `MISSING:` line rather
+    than silence — a candidate that disappears without a word is
+    indistinguishable from one the reader judged off-topic.
+    """
+    by_path = {p["path"].resolve(): p for p in pages}
+    seen = set()
+    shown = missing = 0
+    for raw in wanted:
+        target = Path(raw).resolve()
+        if target in seen:
+            continue
+        seen.add(target)
+        p = by_path.get(target)
+        if p is None:
+            print(f"MISSING: {raw} — not a live page under .wikicommit/entity/ or .wikicommit/view/")
+            missing += 1
+            continue
+        print_page(p, backlinks, with_path=True)
+        shown += 1
+    print(f"SUMMARY: pages={shown}, missing={missing}")
+    return 0
 
 
 def main() -> int:
@@ -148,20 +215,34 @@ def main() -> int:
     parser.add_argument("--include-view", action="store_true",
                         help="Also survey .wikicommit/view/ (excluded by default: a view "
                              "page is already an analysis of other pages)")
+    # nargs="*": a synthesize run whose search returned nothing may still call
+    # this with no paths, and that must answer pages=0 rather than fail on usage.
+    parser.add_argument("--pages", nargs="*", default=None, metavar="PATH",
+                        help="Reduce only these pages, in this order, with no rankings "
+                             "(view pages included; each record flags translations and "
+                             "synthesized pages)")
     args = parser.parse_args()
 
     repo_root = Path.cwd()
     entity_dir = ENTITY_DIR
-    pages = collect(entity_dir, VIEW_DIR if args.include_view else None)
+    pages = collect(entity_dir, VIEW_DIR if (args.include_view or args.pages) else None)
 
     # Backlinks are counted per Type/slug key rather than per page: a WikiLink
     # carries no language, so a page and its translations are one node. A page's
     # own link to itself is not a backlink to itself.
+    # --pages loads the view tree only to flag view candidates; their outbound
+    # links are left out of the counts unless --include-view asked for them, so
+    # a page's backlinks= means the same thing in both modes.
     backlinks: dict[str, set[str]] = {}
     for p in pages:
+        if p["view"] and not args.include_view:
+            continue
         for link in p["links"]:
             if link != p["key"]:
                 backlinks.setdefault(link, set()).add(p["key"])
+
+    if args.pages is not None:
+        return print_selected(pages, args.pages, backlinks)
 
     lang = args.lang or load_primary_lang(repo_root)
     listed = pages if lang == "all" else [p for p in pages if p["lang"] == lang]
@@ -192,20 +273,7 @@ def main() -> int:
         print(f"TYPE: {type_name} {n}")
 
     for p in listed:
-        refs = len(backlinks.get(p["key"], ()))
-        tags = ",".join(_one_line(t, 40) for t in p["tags"])
-        links = ",".join(sorted(p["links"]))
-        sources_part = f" | sources={p['source_count']}" if p["source_count"] is not None else ""
-        print(
-            f"PAGE: {p['key']} | {_one_line(p['title'], 80)} | backlinks={refs}{sources_part}"
-            f" | tags={tags} | links={links}"
-        )
-        if p["description"]:
-            print(f"  DESC: {_one_line(p['description'], MAX_DESC_CHARS)}")
-        if p["headings"]:
-            heads = [_one_line(h, 60) for h in p["headings"][:MAX_HEADINGS]]
-            more = len(p["headings"]) - len(heads)
-            print("  HEADINGS: " + " / ".join(heads) + (f" (+{more})" if more > 0 else ""))
+        print_page(p, backlinks)
 
     listed_keys = {p["key"] for p in listed}
     hubs = sorted(

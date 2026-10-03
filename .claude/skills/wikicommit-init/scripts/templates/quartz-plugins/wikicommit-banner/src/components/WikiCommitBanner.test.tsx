@@ -3,6 +3,7 @@ import type { VNode } from "preact"
 import render from "preact-render-to-string"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import WikiCommitBannerConstructor from "./WikiCommitBanner"
+import itIT from "../i18n/locales/it-IT"
 
 const WikiCommitBanner = WikiCommitBannerConstructor()
 
@@ -802,9 +803,19 @@ describe("WikiCommitBanner", () => {
     expect(html).toContain("LLM が自動生成したページです")
   })
 
+  // Issue #1017: the banner ships the ten Wikipedia-portal languages, so an
+  // Italian page on an English-configured site gets Italian captions.
+  it("renders an it page in Italian regardless of cfg.locale", () => {
+    const html = renderBanner(
+      { title: "Decameron", lang: "it", review_status: "pending" },
+      { cfg: { locale: "en-US" } },
+    )
+    expect(html).toContain(itIT.components.wikicommitBanner.title)
+  })
+
   it("falls back to cfg.locale when frontmatter.lang is not a locale this plugin ships", () => {
     const html = renderBanner(
-      { title: "OpenAI", lang: "fr", review_status: "pending" },
+      { title: "OpenAI", lang: "ko", review_status: "pending" },
       { cfg: { locale: "ja-JP" } },
     )
     expect(html).toContain("LLM が自動生成したページです")
@@ -967,6 +978,20 @@ describe("WikiCommitBanner", () => {
       const line = /<p class="wikicommit-banner__ai-review">([\s\S]*?)<\/p>/.exec(html)?.[1]
       expect(line).toBeDefined()
       expect(line).not.toMatch(/verified|accurate|correct|complete/i)
+    })
+
+    it("says the original page, not sources, for a translation's check", () => {
+      // Issue #1031: a translation is checked against the page it was
+      // translated from. Reusing "checked against sources" would claim a
+      // comparison with documents the check never saw.
+      const html = renderBanner({ ...withVerdict, ai_review_stage: "translate-check" }) as string
+      expect(html).toContain("Checked against the original page: 2026-09-05")
+      expect(html).not.toContain("Checked against sources:")
+      const ja = renderBanner(
+        { ...withVerdict, ai_review_stage: "translate-check", lang: "ja" },
+        { cfg: { locale: "en-US" } },
+      ) as string
+      expect(ja).toContain("原文と照合:")
     })
 
     it("carries no finding count", () => {

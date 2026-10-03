@@ -537,17 +537,11 @@ def cmd_checkpoint(args) -> int:
         else:
             token_state = TOKEN_OK
 
-    stamp = {
-        "pass": args.pass_name,
-        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "token": token_state,
-    }
-    if args.source:
-        # The unit the pass is iterating over: a source management file normally,
-        # the page being rebuilt under `--regenerate`. Without it a run that died
-        # on its third source is indistinguishable from one that died on its
-        # first, since the pass names repeat once per source.
-        stamp["source"] = args.source
+    # `--source` is the unit the pass is iterating over: a source management file
+    # normally, the page being rebuilt under `--regenerate`. Without it a run that
+    # died on its third source is indistinguishable from one that died on its
+    # first, since the pass names repeat once per source.
+    stamp = make_stamp(args.pass_name, token_state, args.source)
     passes = record.get("passes")
     record["passes"] = ([*passes] if isinstance(passes, list) else []) + [stamp]
     # The stamp is written even when the token check failed. A checkpoint that
@@ -563,19 +557,25 @@ def cmd_checkpoint(args) -> int:
     return 0
 
 
-def cmd_start(args) -> int:
+def open_record(skill: str, model: str, run_args: list[str], extra: dict | None = None) -> Path:
+    """Create a new run record and return its path.
+
+    Shared by `start` and by `driver.py start`, so a run opened through the driver
+    has exactly the shape `check_run_records.py` already reads. `extra` adds keys
+    (the driver's own state) after the standard ones.
+    """
     directory = RUN_DIR
     directory.mkdir(parents=True, exist_ok=True)
     now = datetime.now().astimezone()
     record = {
-        "skill": args.skill,
+        "skill": skill,
         "started_at": now.isoformat(timespec="seconds"),
         # Written empty rather than omitted so the record says, in the same
         # shape it will hold a real timestamp, that this run has not finished.
         "ended_at": "",
-        "model": args.model,
+        "model": model,
         "wikicommit_version": get_version(),
-        "args": list(args.args),
+        "args": list(run_args),
         "sources": [],
         "pages": [],
         # Empty rather than absent, in the same shape the stamps will take: a run
@@ -585,9 +585,29 @@ def cmd_start(args) -> int:
         "outcome": {},
         "halted_reason": "",
     }
-    path = allocate_run_path(directory, now.strftime("%Y%m%d-%H%M%S"), args.skill)
+    if extra:
+        record.update(extra)
+    path = allocate_run_path(directory, now.strftime("%Y%m%d-%H%M%S"), skill)
     write_record(path, record)
     rotate(directory)
+    return path
+
+
+def make_stamp(pass_name: str, token_state: str, source: str = "") -> dict:
+    """One entry of the `passes` list, in the shape `check_run_records.py` reads."""
+    stamp = {
+        "pass": pass_name,
+        "at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "token": token_state,
+    }
+    if source:
+        stamp["source"] = source
+    return stamp
+
+
+def cmd_start(args) -> int:
+    path = open_record(args.skill, args.model, args.args)
+    record = read_record(path)
     print(f"RUN_STARTED: {path} (skill={args.skill}, started_at={record['started_at']})")
     print("NOTE: pass this path back to `record_run.py end` when the run finishes.")
     return 0

@@ -352,8 +352,9 @@ def test_only_the_sources_variant_carries_the_type_selection_item(variants):
     the reviewer-knowledge item out of those two variants."""
     assert TYPE_ITEM_PHRASE in variants[VARIANT_HEADINGS[0]], (
         "The `sources` checklist no longer asks whether the type fits. This is "
-        "the only place a tracking Issue surfaces a type Pass 2b may have added "
-        "with no human confirmation at all (Issue #507)."
+        "the only place a tracking Issue surfaces a type Pass 2b added — "
+        "including files stamped `generate-auto` with no human confirmation "
+        "at all before Issue #1069 stopped that path (Issue #507)."
     )
     for heading in VARIANT_HEADINGS[1:]:
         assert TYPE_ITEM_PHRASE not in variants[heading], (
@@ -669,4 +670,28 @@ def test_generation_failure_acceptance_goes_through_user_notes():
     assert "does not keep it closed" in body, (
         "The Issue #969 sentence explaining why a plain close does not stick "
         "has been dropped."
+    )
+
+
+def test_generation_failure_without_failed_pages_has_its_own_exit():
+    """A source that failed before any page was attempted retires differently (Issue #1132).
+
+    `failed_pages` is empty, so the `## User Notes` route has no entity to act
+    on. The body must offer retry and taking the source out instead, warn off
+    `status: retracted`, and keep the two blocks mutually exclusive.
+    """
+    body = _step9_how_to_proceed()
+    assert "Block A — only where `failed_pages` is non-empty" in body
+    assert "Block B — only where `failed_pages` is empty" in body
+    block_b = body[body.index("<Block B"):]
+    assert "## User Notes" not in block_b, (
+        "The empty-failed_pages block again points at the entity-only "
+        "## User Notes route."
+    )
+    assert "Delete the management file" in block_b
+    assert "`rejected:`" in block_b and "`exclude_domains:`" in block_b
+    assert "`status: retracted`" in block_b
+    assert "`generated_pages`" in block_b, (
+        "The exception for a failed re-check of a source that already built "
+        "pages has been dropped; deleting that file would orphan its pages' record."
     )

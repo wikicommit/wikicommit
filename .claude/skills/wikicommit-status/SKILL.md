@@ -5,7 +5,7 @@ description: Check the wiki's health — orphan and wanted pages, pages not yet 
 
 # wikicommit-status
 
-A health-check skill for the wiki as a whole. Calls the six page-count scripts (`check_orphans.py` / `check_wanted_pages.py` / `check_expires.py` / `check_ingest_freshness.py` / `check_translation_status.py` / `check_derivation_freshness.py`) plus `check_actions_pr_permission.py` (a single repository-setting check, not a page count), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (two `.wikicommit/schema/` checks, not page counts either — the first for whether a template points at a WikiLink, the second for whether a type file is written in a working shape at all), `check_schema_coverage.py` (types in use with no dedicated schema file), `check_recurring_characters.py` (characters left as plain text in `properties.character`) and `check_unlinked_entity_mentions.py` (a `properties:` value naming a page that exists, written as plain text) and `check_installed_type_usage.py` (installed type files with no pages, and pages sitting on an ancestor of an installed type) and `check_self_referential_tags.py` (tags that only repeat a page's own title or type), aggregates their results, and displays them alongside the number of unprocessed `.wikicommit/source/` files and the number of `.wikicommit/entity/` pages no person has read yet. This skill has no dedicated scripts of its own (only the existing scripts plus directory scanning).
+A health-check skill for the wiki as a whole. Calls the six page-count scripts (`check_orphans.py` / `check_wanted_pages.py` / `check_expires.py` / `check_ingest_freshness.py` / `check_translation_status.py` / `check_derivation_freshness.py`), the three blocking checks `wikicommit-merge` runs only on changed files (`validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py`, run here over every page), plus `check_actions_pr_permission.py` (a single repository-setting check, not a page count), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (two `.wikicommit/schema/` checks, not page counts either — the first for whether a template points at a WikiLink, the second for whether a type file is written in a working shape at all), `check_schema_coverage.py` (types in use with no dedicated schema file), `check_recurring_characters.py` (characters left as plain text in `properties.character`) and `check_unlinked_entity_mentions.py` (a `properties:` value naming a page that exists, written as plain text) and `check_installed_type_usage.py` (installed type files with no pages, and pages sitting on an ancestor of an installed type) and `check_self_referential_tags.py` (tags that only repeat a page's own title or type), aggregates their results, and displays them alongside the number of unprocessed `.wikicommit/source/` files and the number of `.wikicommit/entity/` pages no person has read yet. This skill has no dedicated scripts of its own (only the existing scripts plus directory scanning).
 
 ## Usage
 
@@ -40,7 +40,7 @@ management file whose source changed to outdated (local change only; will show u
 Run /wikicommit-merge afterward to commit it.
 ```
 
-### Step 3: Run the Six Scripts
+### Step 3: Run the Nine Scripts
 
 Run the following in order, and for each, take the counts from its `SUMMARY:` line and the corresponding file paths from its `ORPHAN:` / `DUPLICATE:` / `WANTED:` / `TYPE_MISMATCH:` / `page:` lines.
 
@@ -51,6 +51,9 @@ python .wikicommit/scripts/check_expires.py
 python .wikicommit/scripts/check_ingest_freshness.py
 python .wikicommit/scripts/check_translation_status.py
 python .wikicommit/scripts/check_derivation_freshness.py
+python .wikicommit/scripts/validate_frontmatter.py
+python .wikicommit/scripts/check_wikilinks.py --skip-type-mismatch
+python .wikicommit/scripts/check_raw_html.py
 ```
 
 - `check_orphans.py` → `SUMMARY: orphans=N, duplicates=N`. Get file paths from the `ORPHAN: <path> (sources: ...)` / `DUPLICATE: <path> <-> <path> (title: "...")` lines (these two are the only categories without a `page:` line, so parse them directly). Keep the `sources:` part when listing orphans — the useful next question about an unreachable page is which source produced it, and a run of orphans sharing one source usually means that source covers something the rest of the wiki does not link to yet.
@@ -60,13 +63,15 @@ python .wikicommit/scripts/check_derivation_freshness.py
 - `check_translation_status.py` → `SUMMARY: stale=N, missing_source=N, untranslated=N`. Get file paths from the `page:` lines (each `STALE:` / `MISSING_SOURCE:` / `UNTRANSLATED:` line is immediately followed by its corresponding `page:` line). `untranslated` is 0 whenever `.wikicommit/config.yml`'s `translation.targets` is empty (no target languages configured).
 - `check_derivation_freshness.py` → `SUMMARY: stale=N, missing_source=N`. This is the `wikicommit-synthesize` counterpart of `check_translation_status.py`'s `STALE`/`MISSING_SOURCE` (same output shape, but walks `derived_from` entries instead of `translated_from`). Get file paths from the `page:` lines; a page with multiple stale/missing `derived_from` entries emits a `page:` line once per entry, so the same path may appear more than once here — dedupe when listing paths, but not when counting (the `SUMMARY:` counts entries, not pages). Keep this separate from `check_translation_status.py`'s own stale/missing counts (the line directly above) — different frontmatter field, different root cause: a translation going stale vs. a synthesized page's source going stale.
 
+- `validate_frontmatter.py`, `check_wikilinks.py --skip-type-mismatch` and `check_raw_html.py` → **take only their `ERROR:` lines**, and ignore their `WARNING:` and `OK:` lines. These are the three blocking checks `wikicommit-merge` runs on the files a batch changes, and only on those: a page is checked when it is written and never again, yet it can break afterwards — a refreshed `.wikicommit/schemaorg-vocab.json` or an imported type template can make a frontmatter that used to pass fail, a raw HTML tag left in a `pending` page is published as is, and a link to a page removed later is reported to nobody. Here they run on every page. Their WARNINGs are left out on purpose: `check_wikilinks.py`'s are unresolved links, the same thing `check_wanted_pages.py`'s `WANTED:` says above, and the other two's are informational. `--skip-type-mismatch` keeps a wrong Type segment out of these lines, because `check_wanted_pages.py` already reports it as `TYPE_MISMATCH:` — the flag is what removes the duplicate, so do not filter by message wording. **The three exit 1 whenever they print an `ERROR:` line. That is a finding here, not a failure of this step** — record the lines and carry on with the rest of the steps, as for every other script this skill runs. The one exception: an exit 1 with no `ERROR:` line on stdout means the script could not run at all (`validate_frontmatter.py` stops this way when `.wikicommit/schema/default.md` cannot be read, printing its reason to stderr) — report that script as not run, with its stderr, rather than counting 0, which would read as a clean wiki.
+
 ### Step 4: Check GitHub Actions PR Permission
 
 ```bash
 python .wikicommit/scripts/check_actions_pr_permission.py
 ```
 
-Unlike the six scripts in Step 3, this is a single repository-setting check, not a per-page count — it verifies "Allow GitHub Actions to create and approve pull requests" is enabled, which `review-issue-close-sync.yml`'s `Commit and open PR` step depends on. `wikicommit-init` tries to enable it, but that attempt can fail silently, and the failure otherwise shows only when a closed tracking Issue's workflow run fails deep in the Actions logs. This is the only script this skill calls that invokes `gh`; it never writes to the repository setting itself (read-only, matching every other check).
+Unlike the nine scripts in Step 3, this is a single repository-setting check, not a per-page count — it verifies "Allow GitHub Actions to create and approve pull requests" is enabled, which `review-issue-close-sync.yml`'s `Commit and open PR` step depends on. `wikicommit-init` tries to enable it, but that attempt can fail silently, and the failure otherwise shows only when a closed tracking Issue's workflow run fails deep in the Actions logs. This is the only script this skill calls that invokes `gh`; it never writes to the repository setting itself (read-only, matching every other check).
 
 Take the `OK:`/`WARNING:` line and `SUMMARY: enabled=<true|false|unknown|n/a>` — `n/a` means `review-issue-close-sync.yml` doesn't exist in this repository (not applicable) and `unknown` means the check itself couldn't run (unauthenticated `gh`, unresolvable repository, or a failed `gh api` call) — both are distinct from a confirmed `false`.
 
@@ -77,7 +82,7 @@ python .wikicommit/scripts/check_property_wikilink_reinforcement.py
 python .wikicommit/scripts/check_schema_files.py
 ```
 
-Also unlike the six scripts in Step 3, this checks `.wikicommit/schema/` type templates, not `.wikicommit/entity/` pages — for each `properties:` key whose Schema.org range includes a linkable entity type, whether the template gives any textual hint (a `granularity` bullet that names the property *and* points toward linking it — the rest of that bullet contains `[[` or the word `link` — or a `[[Type/slug]]` placeholder already in `properties:`) toward writing that property's value as a WikiLink. Purely a human-readability nudge, not a functional requirement — `wikicommit-generate` Pass 3 already applies the WikiLink decision uniformly to every such property regardless of whether the template reinforces it, so an `UNREINFORCED:` finding here is not itself evidence anything is broken. `description` is expected to appear for nearly every type (its Schema.org range is Mixed via `TextObject`, but this wiki's convention keeps it as prose) — treat that specific recurring finding as expected noise, not a defect to chase down. `HowTo`'s `tool` and `supply` are the same: that template names them only to say they are often empty and should be left out, which does not count as pointing at a WikiLink, so they are reported and are meant to stay that way.
+Also unlike the nine scripts in Step 3, this checks `.wikicommit/schema/` type templates, not `.wikicommit/entity/` pages — for each `properties:` key whose Schema.org range includes a linkable entity type, whether the template gives any textual hint (a `granularity` bullet that names the property *and* points toward linking it — the rest of that bullet contains `[[` or the word `link` — or a `[[Type/slug]]` placeholder already in `properties:`) toward writing that property's value as a WikiLink. Purely a human-readability nudge, not a functional requirement — `wikicommit-generate` Pass 3 already applies the WikiLink decision uniformly to every such property regardless of whether the template reinforces it, so an `UNREINFORCED:` finding here is not itself evidence anything is broken. `description` is expected to appear for nearly every type (its Schema.org range is Mixed via `TextObject`, but this wiki's convention keeps it as prose) — treat that specific recurring finding as expected noise, not a defect to chase down. `HowTo`'s `tool` and `supply` are the same: that template names them only to say they are often empty and should be left out, which does not count as pointing at a WikiLink, so they are reported and are meant to stay that way.
 
 Get the `SUMMARY: unreinforced=N` count and the individual `UNREINFORCED: <Type>.<property> (<path>) — ...` lines. Also surface any `WARNING: <path>: wikicommit.granularity...` line and keep it next to the findings for that same file: it means a `granularity` bullet parsed as something other than a string (usually a `": "` inside an unquoted list item, which YAML reads as a one-key mapping), so the reinforcement search never saw that bullet's prose. An `UNREINFORCED:` line for a file that carries such a warning may well be a parse artifact rather than genuinely missing reinforcement — the fix is to rewrite the bullet in the schema file (em dash instead of the colon, or wrap the bullet in double quotes), not to add reinforcement that is already there.
 
@@ -154,7 +159,7 @@ Take the `SUMMARY: unused=N, ancestor_fallback=N` counts and the individual line
 
 Neither is blocking and neither gates the health verdict in Step 17 — which type fits a subject is a judgment call this script cannot make, only point at. When something here does look wrong, note that re-typing an existing page is not something any Skill does today: it means a directory move plus rewriting the Type segment of every WikiLink that points at it. What this check is really for is catching the pattern early, so the next batch generates at the right grain.
 
-### Step 10: Check Self-Referential Tags
+### Step 10: Check Self-Referential Tags, Name Collisions and Page Groups
 
 ```bash
 python .wikicommit/scripts/check_self_referential_tags.py
@@ -167,6 +172,26 @@ Take `SUMMARY: title_echo=N, type_echo=N` and the `TITLE_ECHO:` / `TYPE_ECHO:` l
 Matching is exact after normalization and never partial: `見沼` on a page titled `見沼田んぼ` is the useful kind of tag and is not reported. One thing it cannot see is a type tag written in the wiki's own language (`博物館` on a `schema:Museum` page), which would need a translation of the Schema.org vocabulary — type names are language-neutral identifiers here and no such table exists. Non-English wikis get the title half only.
 
 Not blocking, and does not gate the health verdict in Step 17: a tag is a judgment call, and a wiki may have a reason for one this check flags.
+
+Then, in the same step, the pages that answer to the same name:
+
+```bash
+python .wikicommit/scripts/check_name_collisions.py
+```
+
+A concept two sources call by different names gets two pages, and what is left over shows as one page's title or alias being another page's title or alias. Take `SUMMARY: collisions=N, judged_pairs_skipped=N, relations=N` and the `COLLISION:` lines (no `page:` lines — each names the pages and whether the name is their title or an alias). Pairs a person has already decided about in `.wikicommit/relations.yml` are not listed. The route for each group is `/wikicommit-relate`, which asks whether the pages are the same concept, one inside the other, related or distinct, and records the answer. A title shared by two pages of the same Type is not repeated here — `check_orphans.py` reports it as `DUPLICATE:` in Step 3.
+
+Not blocking, and does not gate the health verdict in Step 17: whether two pages that share a name are one concept is a person's call, and two distinct things legitimately share names.
+
+Then, still in this step, the Types whose pages are sorted into groups (`.wikicommit/groups/<Type>.yml`, written by `/wikicommit-organize`):
+
+```bash
+python .wikicommit/scripts/check_groups.py
+```
+
+Take `SUMMARY: types=N, unclassified=N, stale=N, errors=N`, the `TYPE:` lines (one per Type that has a group file) and any `ERROR:` lines. A Type with no group file is not reported at all — grouping is optional, and a line for every ungrouped Type would always be on. An unclassified page is one generated after the last grouping; nothing places it automatically, so the count is the cue to run `/wikicommit-organize <Type>` again. A stale member is a slug the file still names though its page was removed or renamed; the next `/wikicommit-organize` run offers to drop it. An `ERROR:` means the file cannot be read as a grouping, and until it is fixed that Type's index and left pane are shown ungrouped. There is no threshold: how many unclassified pages are too many is the reader's call.
+
+Not blocking, and does not gate the health verdict in Step 17.
 
 ### Step 11: Check Distribution Freshness
 
@@ -278,6 +303,7 @@ Orphan pages:           <N> (zero inbound links)
 Duplicate pages:        <N>
 Wanted pages:           <N> (linked but no page exists in any language)
 Type-mismatched links:  <N> (slug exists under a different Type — fix the link, do not create the page)
+Blocking errors merge does not re-check: <N> (validate_frontmatter.py / check_wikilinks.py / check_raw_html.py ERROR lines on pages already merged)
 Expired pages:          <N> (past expires_at)
 Stale translations:     <N> (source_commit mismatch)
 Missing translation source: <N> (translated_from target doesn't exist)
@@ -299,6 +325,8 @@ Unlinked entity mentions: <N> (properties: value naming a page that exists — c
 Unused installed types:  <N> (schema file with zero pages — check_installed_type_usage.py)
 Possible ancestor-type fallback: <N> (pages on a type whose installed descendant may fit better — check_installed_type_usage.py)
 Self-referential tags:  <N> title echoes / <N> type echoes (check_self_referential_tags.py)
+Name collisions:        <N> (pages answering to the same title or alias, not yet decided about — check_name_collisions.py; /wikicommit-relate)
+Unclassified grouped pages: <N> in <T> grouped Type(s) (<S> stale, <E> unreadable group files — check_groups.py; /wikicommit-organize)
 Distribution freshness: <N> outdated / <N> missing / <N> orphan (check_distribution_freshness.py)
 Pages on a retracted source: <N> (sources[] names a source a human withdrew — check_retracted_sources.py)
 Review coverage:        <A>/<T> pages with a standing AI review, <H> with a standing human one, <N> of those left a note (check_review_coverage.py)
@@ -311,7 +339,9 @@ Runs that did not finish normally: <N> (never closed, or halted — check_run_re
 Runs that skipped a pass: <N> (finished, but a pass left no stamp — check_run_records.py)
 ```
 
-For any category with 1 or more hits, display the list of matching file paths directly below that category — with three exceptions, which have no per-page paths to list: for `Unreinforced property-value WikiLinks` display the `UNREINFORCED:` lines, for `Types with no schema file` display the `UNCOVERED:` lines (`check_schema_coverage.py` emits no `page:` lines at all — each `UNCOVERED:` line carries a page count and one example path for that type), and for `Recurring plain-text characters` display the matching `RECURRING:` lines (each already names the works the name was found in). `Unlinked entity mentions` does have `page:` lines, so it follows the normal rule — list the referring page paths, each with its `UNLINKED:` line. The two Step 9 categories have no `page:` lines either — display the matching `UNUSED:` / `ANCESTOR_FALLBACK:` lines. `Malformed schema files` is the same: display the finding lines themselves, each of which already names its file and that file's `provenance`.
+For `Blocking errors merge does not re-check`, `<N>` is the number of `ERROR:` lines from the three Step 3 checks together; when it is 1 or more, display those lines below the row as they came — each already names its page and what is wrong.
+
+For any category with 1 or more hits, display the list of matching file paths directly below that category — with three exceptions, which have no per-page paths to list: for `Unreinforced property-value WikiLinks` display the `UNREINFORCED:` lines, for `Types with no schema file` display the `UNCOVERED:` lines (`check_schema_coverage.py` emits no `page:` lines at all — each `UNCOVERED:` line carries a page count and one example path for that type), and for `Recurring plain-text characters` display the matching `RECURRING:` lines (each already names the works the name was found in). `Unlinked entity mentions` does have `page:` lines, so it follows the normal rule — list the referring page paths, each with its `UNLINKED:` line. The two Step 9 categories have no `page:` lines either — display the matching `UNUSED:` / `ANCESTOR_FALLBACK:` lines. `Malformed schema files` is the same: display the finding lines themselves, each of which already names its file and that file's `provenance`. So is `Name collisions`: display the `COLLISION:` lines. And `Unclassified grouped pages`: display the `TYPE:` and `ERROR:` lines. Omit the row entirely when Step 10 reported `types=0` and `errors=0` — the wiki groups no Type, and a row of zeros would be on for every wiki that never uses groups.
 
 The six Step 15 rows all come from that step's single scan of `.wikicommit/source/`. The two `<D> deferred` columns are subsets of the rows they sit on, not additions to them — print the column even when it is 0, since a reader cannot tell "none deferred" from "this build does not report deferrals" otherwise — and below each row that has one, list the deferred paths with the first line of each `## Deferred Reason`, so the reason a person is needed is visible without opening the file. For `Entities awaiting a type`, list the source path and, under it, each entity's title and candidate types, and name the route (`/wikicommit-reconcile --source <path|url>`, then the next `/wikicommit-generate`) — it is not the route the deferred columns take, and saying so is why it is a row of its own rather than a third column. For `Failed sources` and `Excluded sources`, list the paths, and for a failed one the first line of its `## Failure Reason`.
 
@@ -332,6 +362,7 @@ If every category above is 0 **and** `enabled` is `true` or `n/a`, display "Wiki
 - **Every row gates it** (must be 0) **unless it is listed under the next bullet.** Three that do gate are worth stating, because they sit beside rows that do not:
   - `Type-mismatched links` gates it even though it sits next to `Wanted pages`: the page already exists under another Type, the error is one word in one link, and it can and should be 0.
   - `Failed sources` gates it on the same footing as `Unprocessed sources`: a source that produced nothing is work the wiki still owes, with a concrete route out (re-run `/wikicommit-generate` naming it, or fix what `## Failure Reason` names).
+  - `Blocking errors merge does not re-check` gates it: each line is a page that would fail `wikicommit-merge` the next time it is changed, the fix is named in the line, and a wiki whose pages all still pass reaches 0.
   - `Types with no schema file` gates it: a non-zero count means a type definition is not being applied at all, it is 0 on a repository whose schema files match the types it uses, and the fix is concrete (add the file, or move it back out of a subdirectory).
 - **Rows that do not gate it**, each for the reason given:
   - `Pages not yet read by a person` — `reviewed` means a person read the page, and **the AI review is every page and the human one is a sample**, so requiring 0 would require 100% human review. It reports a state of reach, not a defect; machine-side coverage is the separate review-coverage rows.
@@ -339,6 +370,8 @@ If every category above is 0 **and** `enabled` is `true` or `n/a`, display "Wiki
   - `Unreinforced property-value WikiLinks` — purely informational (Step 5) and, per the `description` caveat, almost never 0 with the standard templates, so gating on it would make the verdict unreachable.
   - `Recurring plain-text characters` and `Unlinked entity mentions` — generation-time judgment calls (`Person.md`'s `granularity`; `validate_frontmatter.py` deliberately does not enforce `properties:` value shape); a standing count is a backlog to look at, not a defect.
   - The two Step 9 categories and `Self-referential tags` — judgment prompts, not defects; `ANCESTOR_FALLBACK` is expected to be non-zero on any wiki that installs a descendant type at all.
+  - `Name collisions` — whether pages sharing a name are one concept is a person's call; a decision recorded with `/wikicommit-relate`, whatever it is, takes the pair off the list.
+  - `Unclassified grouped pages` — grouping is how pages are listed, not whether they are sound; new pages wait unclassified by design until a person groups them.
   - `Pages on a retracted source` — a human chooses between removing, regenerating and fixing the page, and none of those is automatically right.
   - `Distribution freshness` — it describes how current the installation is, not whether the content is sound; a wiki can be healthy a version behind.
   - `Malformed schema files` — same reason, plus the count is usually dominated by `provenance: default` findings (an older template copy, not a mistake here), and the rest are a person's judgment about a file no Skill may touch. Read `in_distributed_templates` (Step 5) rather than the total.
@@ -362,4 +395,4 @@ Run /wikicommit-merge to commit it.
 
 - Do not commit or create a PR against `main` or any branch
 - Do not write to `.wikicommit/schema/`
-- No script other than `check_ingest_freshness.py`, and no part of the Step 3 / Step 15–16 scans, has side effects (read-only). `check_actions_pr_permission.py` (Step 4), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (Step 5), `check_schema_coverage.py` (Step 6), `check_recurring_characters.py` (Step 7) and `check_unlinked_entity_mentions.py` (Step 8) and `check_installed_type_usage.py` (Step 9) and `check_self_referential_tags.py` (Step 10) and `check_distribution_freshness.py` (Step 11) and `check_retracted_sources.py` (Step 12) and `check_review_coverage.py` (Step 13) and `check_run_records.py` (Step 14) are read-only too — unlike `wikicommit-init`'s Step 3, `check_actions_pr_permission.py` never attempts to enable the GitHub Actions PR permission setting itself, only reports its current state
+- No script other than `check_ingest_freshness.py`, and no part of the Step 3 / Step 15–16 scans, has side effects (read-only). The three blocking checks added to Step 3 (`validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py`) are read-only as well; their exit 1 is a finding, not an error of this skill. `check_actions_pr_permission.py` (Step 4), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (Step 5), `check_schema_coverage.py` (Step 6), `check_recurring_characters.py` (Step 7) and `check_unlinked_entity_mentions.py` (Step 8) and `check_installed_type_usage.py` (Step 9) and `check_self_referential_tags.py`, `check_name_collisions.py` and `check_groups.py` (Step 10) and `check_distribution_freshness.py` (Step 11) and `check_retracted_sources.py` (Step 12) and `check_review_coverage.py` (Step 13) and `check_run_records.py` (Step 14) are read-only too — unlike `wikicommit-init`'s Step 3, `check_actions_pr_permission.py` never attempts to enable the GitHub Actions PR permission setting itself, only reports its current state

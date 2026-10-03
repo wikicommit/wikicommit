@@ -41,6 +41,16 @@ rather than from a threshold: Pass 4 re-runs on every regeneration, so the
 only ways a verdict outlives its page are a `/wikicommit-fix` edit and a source
 that changed underneath it.
 
+A merge's link rewrite is not counted as a change. `rewrite_merged_links.py`
+turns `[[Type/old]]` into `[[Type/new]]` in every page that linked to an
+absorbed page, and those pages keep their `review_status` — the link now names
+the page a person decided is the same concept. So when the hash does not match,
+the page is hashed again with each recorded merge (`merged_into` in
+`.wikicommit/relations.yml`) undone, one full replacement per merge; a match
+means the verdict still stands. Partial replacements are not tried, so a page
+that linked to both the kept and the absorbed page before the merge still
+reports `STALE_REVIEW:`.
+
 ## Which records each line reads
 
 Every per-page line and every count reads the *standing* record: the newest one
@@ -120,24 +130,30 @@ Exit code: always 0 (informational, non-blocking).
 
 import argparse
 import sys
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 from _frontmatter import (
     parse_frontmatter,
     parse_frontmatter_and_body_text,
     parse_frontmatter_or_warn,
 )
-from _wikilink import ENTITY_DIR, VIEW_DIR, collect_entity_pages, collect_view_pages
+from _wikilink import ENTITY_DIR, VIEW_DIR, WIKILINK_RE, collect_entity_pages, collect_view_pages
 from record_review import (
     ACCEPTED_PREFIXES,
     REVIEW_DIR,
     RecordError,
+    compute_content_hash,
     compute_page_content_hash,
+    page_evidence_entries,
     record_dir_for,
     record_sort_key,
 )
 
 SOURCE_DIR = Path(".wikicommit/source")
+RELATIONS_FILE = Path(".wikicommit/relations.yml")
 
 
 def load_records(page_rel: str) -> list[dict]:
@@ -272,11 +288,10 @@ def source_versions(entries: list) -> dict[str, str]:
 
 
 def page_source_entries(fm: dict) -> list:
-    for key in ("sources", "derived_from"):
-        value = fm.get(key)
-        if isinstance(value, list):
-            return value
-    return []
+    # The same function record_review.py snapshots with, so a translation's
+    # `translated_from` / `source_commit` (Issue #1031) is compared like any
+    # other evidence entry instead of reading as "no longer on the page".
+    return page_evidence_entries(fm)
 
 
 def collect_retracted_identities(source_dir: Path = SOURCE_DIR) -> set[str]:
@@ -296,6 +311,88 @@ def collect_retracted_identities(source_dir: Path = SOURCE_DIR) -> set[str]:
     return retracted
 
 
+@lru_cache(maxsize=4)
+def _merge_pairs_cached(path: str, mtime_ns: int) -> tuple[tuple[str, str], ...]:
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return ()
+    if not isinstance(data, list):
+        return ()
+    direct: dict[str, set[str]] = {}
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        into = item.get("merged_into")
+        pages = item.get("pages")
+        if not isinstance(into, str) or not isinstance(pages, list):
+            continue
+        for old in pages:
+            if isinstance(old, str) and old != into:
+                direct.setdefault(old, set()).add(into)
+    # A chain (A merged into B, later B into C) leaves a page that linked to A
+    # linking to C, so A is paired with every page down its chain: a review
+    # written before either merge matches with C put back to A, one written
+    # between them with C put back to B (that pair comes from B's own chain).
+    pairs: set[tuple[str, str]] = set()
+    for old in direct:
+        seen = {old}
+        frontier = list(direct[old])
+        while frontier:
+            new = frontier.pop()
+            if new in seen:
+                continue
+            seen.add(new)
+            pairs.add((old, new))
+            frontier.extend(direct.get(new, ()))
+    return tuple(sorted(pairs))
+
+
+def merge_pairs(relations_file: Path = RELATIONS_FILE) -> tuple[tuple[str, str], ...]:
+    """(absorbed Type/slug, Type/slug its links now name) for every recorded merge.
+
+    Read from the `same` items `merge_pages.py record` writes to `relations.yml`
+    (`pages` plus `merged_into`). An unreadable or missing file gives no pairs,
+    which only means no rewrite is forgiven — the check falls back to plain
+    hash comparison.
+    """
+    try:
+        mtime_ns = relations_file.stat().st_mtime_ns
+    except OSError:
+        return ()
+    return _merge_pairs_cached(str(relations_file), mtime_ns)
+
+
+def _undo_rewrite(text: str, old: str, new: str) -> str:
+    return WIKILINK_RE.sub(
+        lambda m: f"[[{old}]]" if f"{m.group(1)}/{m.group(2)}" == new else m.group(0), text
+    )
+
+
+def matches_recorded_content(page: Path, recorded_hash: str) -> bool:
+    """Whether the page still holds the text a record with `recorded_hash` judged.
+
+    Besides the page as it stands, it accepts the page with one merge's link
+    rewrite undone: `rewrite_merged_links.py` turns `[[Type/old]]` into
+    `[[Type/new]]` after a person decided the two are the same concept, and the
+    claim around the link did not change. Each merge is tried as one full
+    replacement of `[[new]]` by `[[old]]` — partial replacements are not tried,
+    so a page that already linked to both before the merge still reads as
+    changed. Raises `RecordError` / `OSError` when the page cannot be hashed.
+    """
+    if compute_page_content_hash(page) == recorded_hash:
+        return True
+    pairs = merge_pairs()
+    if not pairs:
+        return False
+    text = page.read_text(encoding="utf-8-sig")
+    for old, new in pairs:
+        variant = _undo_rewrite(text, old, new)
+        if variant != text and compute_content_hash(variant, page) == recorded_hash:
+            return True
+    return False
+
+
 def stale_reasons(page: Path, fm: dict, record: dict) -> list[str]:
     """Why a record's verdict no longer applies to the page as it stands.
 
@@ -310,10 +407,10 @@ def stale_reasons(page: Path, fm: dict, record: dict) -> list[str]:
         # An empty hash is `result: discarded` — no page was ever written, so
         # there is nothing for it to have diverged from.
         try:
-            current_hash = compute_page_content_hash(page)
+            changed = not matches_recorded_content(page, recorded_hash)
         except (RecordError, OSError):
-            current_hash = ""
-        if current_hash and current_hash != recorded_hash:
+            changed = False
+        if changed:
             reasons.append(f"page content changed since {record.get('reviewed_at', 'the review')}")
 
     reviewed = source_versions(record.get("reviewed_sources") or [])

@@ -20,6 +20,7 @@ return the ordinary miss, and on the `type: path` route the caller answers a mis
 by reading the raw file.
 """
 
+import hashlib
 import importlib.util
 import subprocess
 import sys
@@ -332,10 +333,172 @@ def test_cli_defaults_to_url_so_the_existing_call_site_is_unchanged(tmp_path):
     assert got.stdout.strip() == ".wikicommit/.cache/ingest-fetch/example.com/article.md"
 
 
-def test_cli_exits_one_and_prints_nothing_when_unresolved(tmp_path):
+def test_cli_exits_one_and_says_unregistered_when_nothing_matches(tmp_path):
+    """Exit 1 still folds both misses; the printed line tells them apart (Issue #1036)."""
     got = _run(tmp_path, "raw/nope.pdf", "--type", "path")
     assert got.returncode == 1
-    assert got.stdout.strip() == ""
+    assert got.stdout.strip() == "UNREGISTERED: raw/nope.pdf"
+
+
+def test_cli_names_where_the_cache_belongs_when_it_is_missing(tmp_path):
+    """The other exit-1 meaning: a management file exists, the cache does not."""
+    _url_source(tmp_path, "example.com/article.md", "https://example.com/article")
+
+    got = _run(tmp_path, "https://example.com/article")
+    assert got.returncode == 1
+    assert got.stdout.strip() == (
+        "NO_CACHE: .wikicommit/.cache/ingest-fetch/example.com/article.md "
+        "(.wikicommit/source/url/example.com/article.md)"
+    )
+
+
+# ── --settle: a fetch made because no cache existed (Issue #1036) ─────────────
+
+_FETCHED = "fetched body\n"
+_FETCHED_HASH = "sha256:" + hashlib.sha256(_FETCHED.encode("utf-8")).hexdigest()
+
+
+def _url_source_with_hash(root: Path, mgmt_rel: str, url: str, source_hash: str) -> Path:
+    mgmt = root / ".wikicommit/source/url" / mgmt_rel
+    mgmt.parent.mkdir(parents=True, exist_ok=True)
+    hash_line = f"  hash: {source_hash}\n" if source_hash is not None else ""
+    mgmt.write_text(
+        f"---\nsource:\n  type: url\n  url: {url}\n{hash_line}status: generated\n---\n",
+        encoding="utf-8",
+    )
+    return mgmt
+
+
+def _fetched(root: Path) -> Path:
+    p = root / ".wikicommit/.cache/ask-fetch/1.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_FETCHED, encoding="utf-8")
+    return p
+
+
+_URL = "https://example.com/article"
+_CACHE = ".wikicommit/.cache/ingest-fetch/example.com/article.md"
+
+
+def _settle(root: Path, page_hash: str):
+    return _run(
+        root, _URL, "--settle", ".wikicommit/.cache/ask-fetch/1.md", "--page-hash", page_hash
+    )
+
+
+def test_settle_places_a_fetch_matching_both_hashes(tmp_path):
+    _url_source_with_hash(tmp_path, "example.com/article.md", _URL, _FETCHED_HASH)
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, _FETCHED_HASH)
+    assert got.returncode == 0
+    assert got.stdout.strip() == f"SETTLED: page=match, cache=placed {_CACHE}, read={_CACHE}"
+    assert (tmp_path / _CACHE).read_text(encoding="utf-8") == _FETCHED
+    assert not (tmp_path / ".wikicommit/.cache/ask-fetch/1.md").exists()
+    # The next lookup — ask's or generate's — now finds it.
+    assert _run(tmp_path, _URL).stdout.strip() == _CACHE
+
+
+def test_settle_places_a_management_file_match_even_when_the_page_differs(tmp_path):
+    """The management file's hash, not the page's, decides placement: that is the
+    hash Pass 1 checks before it reads the cache."""
+    _url_source_with_hash(tmp_path, "example.com/article.md", _URL, _FETCHED_HASH)
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, "sha256:" + "0" * 64)
+    assert got.returncode == 0
+    assert "page=mismatch" in got.stdout
+    assert f"cache=placed {_CACHE}" in got.stdout
+
+
+def test_settle_does_not_place_a_page_match_the_management_file_disagrees_with(tmp_path):
+    """The two hashes can differ (a deferred LOW_DENSITY fetch moves source.hash
+    alone). Placing a version generate does not expect would hand the next
+    --include-source a different text as "the cached source"."""
+    _url_source_with_hash(tmp_path, "example.com/article.md", _URL, "sha256:" + "1" * 64)
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, _FETCHED_HASH)
+    assert "page=match" in got.stdout
+    assert "cache=not-placed" in got.stdout
+    assert not (tmp_path / _CACHE).exists()
+    assert "read=.wikicommit/.cache/ask-fetch/1.md" in got.stdout
+    assert (tmp_path / ".wikicommit/.cache/ask-fetch/1.md").is_file()
+
+
+def test_settle_does_not_place_when_neither_hash_matches(tmp_path):
+    _url_source_with_hash(tmp_path, "example.com/article.md", _URL, "sha256:" + "1" * 64)
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, "sha256:" + "2" * 64)
+    assert "page=mismatch" in got.stdout
+    assert "cache=not-placed" in got.stdout
+    assert not (tmp_path / _CACHE).exists()
+
+
+def test_settle_treats_an_unset_source_hash_as_no_match(tmp_path):
+    _url_source_with_hash(tmp_path, "example.com/article.md", _URL, '""')
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, _FETCHED_HASH)
+    assert "page=match" in got.stdout
+    assert "source.hash is not set" in got.stdout
+    assert not (tmp_path / _CACHE).exists()
+
+
+def test_settle_cannot_place_an_unregistered_source(tmp_path):
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, _FETCHED_HASH)
+    assert got.returncode == 0
+    assert "page=match" in got.stdout
+    assert "no management file" in got.stdout
+
+
+def test_settle_never_writes_to_the_management_file(tmp_path):
+    for source_hash in (_FETCHED_HASH, "sha256:" + "1" * 64, '""'):
+        root = tmp_path / source_hash[-3:].strip('"') if source_hash != '""' else tmp_path / "unset"
+        mgmt = _url_source_with_hash(root, "example.com/article.md", _URL, source_hash)
+        before = mgmt.read_bytes()
+        _fetched(root)
+        _settle(root, "sha256:" + "2" * 64)
+        assert mgmt.read_bytes() == before
+
+
+def test_settle_refuses_a_retracted_source(tmp_path):
+    _url_source(tmp_path, "example.com/article.md", _URL, status="retracted")
+    _fetched(tmp_path)
+
+    got = _settle(tmp_path, "sha256:ab12")
+    assert got.returncode == 2
+    assert got.stdout.startswith(f"RETRACTED: {_URL} (")
+    assert not (tmp_path / _CACHE).exists()
+
+
+def test_settle_is_url_only(tmp_path):
+    got = _run(tmp_path, "raw/x.pdf", "--type", "path", "--settle", "f.md")
+    assert got.returncode == 1
+    assert "URL sources only" in got.stderr
+
+
+def test_the_ask_skill_fetches_a_missing_url_cache_only_off_the_exit_one_branch():
+    """Completion criteria 1 and 6: the fetch lives on the exit-1 branch, goes
+    through generate's fetcher and --settle, and never hands anything to
+    --write-hash."""
+    text = (REPO / ".claude/skills/wikicommit-ask/SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.replace("`", "").split())
+    url_branch = flat.partition("resolve_source_cache_path.py --type url")[2].partition(
+        "- type: manual → skip"
+    )[0]
+    exit_two = url_branch.index("exit code 2")
+    exit_one = url_branch.index("exit code 1")
+    fetch = url_branch.index("add_source.py --fetch-url")
+    assert exit_one < fetch, "the fetch must sit on the exit-1 branch"
+    assert url_branch[exit_two:exit_one].count("--fetch-url") == 0
+    assert "--settle" in url_branch
+    assert "check-fetch-capability" in url_branch
+    assert "NETWORK_UNAVAILABLE" in url_branch
+    assert "--write-hash" not in flat.replace("no --write-hash", "")
 
 
 def test_cli_exits_two_and_names_the_management_file_when_retracted(tmp_path):

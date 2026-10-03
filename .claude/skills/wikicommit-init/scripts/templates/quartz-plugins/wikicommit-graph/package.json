@@ -99,7 +99,8 @@
         "enableRadial": true,
         "showControls": true,
         "minDegree": 0,
-        "maxDegree": 0
+        "maxDegree": 0,
+        "labelLimit": 40
       }
     },
     "components": {

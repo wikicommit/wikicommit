@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Max",
         degreeNoBound: "0 = nincs korlát",
+        labelLimit: "Címkék a képernyőn",
+        labelLimitHint: "0 = nagyítás szerint",
         reset: "Visszaállítás",
         legend: "Jelmagyarázat",
         legendPages: "Oldalak",
@@ -18,7 +20,8 @@ export default {
         legendVisited: "Meglátogatott",
         legendUnvisited: "Nem meglátogatott",
         legendVisitedHint: "Oldalak, amelyeket megnyitott ebben a böngészőben",
-        legendTagsAlways: "A címkék mindig ezzel a színnel jelennek meg, függetlenül attól, hogy megnyitotta-e őket",
+        legendTagsAlways:
+          "A címkék mindig ezzel a színnel jelennek meg, függetlenül attól, hogy megnyitotta-e őket",
       },
     },
   },

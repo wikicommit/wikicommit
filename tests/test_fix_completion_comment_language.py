@@ -22,6 +22,7 @@ writes in the page's own `lang` — that last one is what makes the Skill give
 one answer instead of two.
 """
 
+import re
 from pathlib import Path
 
 SKILLS = Path(__file__).parent.parent / ".claude" / "skills"
@@ -140,19 +141,32 @@ def test_step7_prefers_the_report_links_own_language_line():
     )
 
 
-def test_step7_matches_the_report_labels_in_both_banner_locales():
+def test_step7_matches_the_report_labels_in_every_banner_locale():
     """The banner writes those labels in the page's own locale, not in English.
 
     A report filed from a `ja` page reads `言語: ja`, so matching only
     `Language:` would miss exactly the pages this rule is for — and mirror the
     original failure onto a `primary_lang: en` wiki with `targets: [ja]`. The
-    banner ships two locales and falls back to English for any third language
-    (Issue #823), so the four spellings below are the whole set.
+    banner ships ten locales and falls back to English for any other language
+    (Issue #823 / #1017), so its locale files are the whole set. They are read
+    here rather than restated, so a locale added or reworded there cannot leave
+    Step 7 matching a spelling the banner no longer writes.
     """
     step7 = _step7()
-    for label in ("`Language:` / `言語:`", "`Page:` / `ページ:`"):
-        assert label in step7, (
-            f"wikicommit-fix Step 7 no longer matches {label} in both of the "
-            "banner's locales, so a report filed from a page in the other one "
-            "falls through to the keyword search (Issue #824)."
-        )
+    locales_dir = (
+        SKILLS / "wikicommit-init" / "scripts" / "templates" / "quartz-plugins"
+        / "wikicommit-banner" / "src" / "i18n" / "locales"
+    )
+    locale_files = sorted(locales_dir.glob("*.ts"))
+    assert len(locale_files) == 10, [p.name for p in locale_files]
+    for path in locale_files:
+        source = path.read_text(encoding="utf-8")
+        for key in ("reportBodyPage", "reportBodyLanguage"):
+            match = re.search(rf'^\s*{key}: "([^"]+)"', source, re.MULTILINE)
+            assert match, f"{path.name} has no {key}"
+            label = f"`{match.group(1)}`"
+            assert label in step7, (
+                f"wikicommit-fix Step 7 does not match {label} ({path.name}'s "
+                f"{key}), so a report filed from a page in that locale falls "
+                "through to the keyword search (Issue #824 / #1017)."
+            )

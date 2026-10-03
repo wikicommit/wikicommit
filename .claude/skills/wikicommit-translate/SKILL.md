@@ -5,7 +5,7 @@ description: Translate wiki pages into the target languages configured in .wikic
 
 # wikicommit-translate
 
-Interactive translation Skill. Per-page processing is identical to the unattended Phase 4 pipeline — inject the source page's full text plus `DefinedTerm/` glossary terms and the source→target term table built from them, generate a translation, run a same-LLM quality check, and attach `translated_from` / `source_commit` / `translated_at` / `translated_by` / `translated_with`. The only difference is *who* calls it and *when*: this Skill is invoked by a human, writes locally, and performs no Git operations. Run `/wikicommit-merge` afterward to commit and open a PR.
+Interactive translation Skill. Per-page processing is identical to the unattended Phase 4 pipeline — inject the source page's full text plus `DefinedTerm/` glossary terms and the source→target term table built from them, generate a translation, check it against the source page with a review subagent (recorded under `.wikicommit/review/` as `translate-check`), and attach `translated_from` / `source_commit` / `translated_at` / `translated_by` / `translated_with`. The only difference is *who* calls it and *when*: this Skill is invoked by a human, writes locally, and performs no Git operations. Run `/wikicommit-merge` afterward to commit and open a PR.
 
 ## Usage
 
@@ -27,7 +27,9 @@ python .wikicommit/scripts/record_run.py start --skill wikicommit-translate \
 
 A record with a start and no end is what says a run did not finish, and nothing else in this repository is keyed on a run — so leaving it open is the signal rather than a failure state to avoid. Keep the path it prints.
 
-Then read `.wikicommit/config.yml` and obtain `translation.primary_lang` and `translation.targets`. If `.wikicommit/config.yml` does not exist, stop and tell the user to run `/wikicommit-init` first.
+Then read `.wikicommit/config.yml` and obtain `translation.primary_lang`, `translation.targets` and `generate.max_retries` (default: 2). If `.wikicommit/config.yml` does not exist, stop and tell the user to run `/wikicommit-init` first.
+
+**Check that `.wikicommit/review-rules.md` exists at the start of the run**, and if it does not, stop and tell the user to run `/wikicommit-init --no-overwrite`. Every page this run writes goes through the review in Step 4 item 5, and that review follows those rules; without them it degrades to a bare re-read while still writing a record that a review happened. Its absence is knowable now, before any translation is generated, so finding out at the first review would throw that work away. Close the run record with `record_run.py end <path> --halted-reason "review-rules.md missing"` on the way out.
 
 ### Step 1: Determine Mode
 
@@ -93,6 +95,8 @@ Given a `(source page, target language)` pair:
    - `lang`: the target language.
    - `type`: unchanged (Schema.org type is language-neutral).
    - `tags`: each tag translated into the target language.
+   - **The source's own wording, from the source page's `aliases`**: the source page is written in `primary_lang`, and when an original source wrote this entity's name or term in another language, generation keeps that exact wording as an alias of the source page. If one of those aliases is written **in the target language**, use it as this page's `title` and wherever the body names that entity or term, instead of translating the `primary_lang` wording back — a back-translation does not recover the source's spelling (`Testing Skyscraper` becomes `テスティング・スカイスクレイパー` where the source wrote `テストスカイスクレイパー`). Decide an alias's language from the string itself; **if you are not confident it is in the target language** (a string of kanji alone can be Japanese or Chinese), do not use it, and fall back to the glossary table and then to your own translation. Precedence for a term: a `translator_notes` entry (a person's decision about this page) > an alias in the target language > the step 2b glossary table > your own translation.
+   - `aliases`: **do not copy the source page's `aliases`** onto the translation. On the published wiki every alias becomes a redirect URL at the site root, so the same alias on both pages makes them claim the same URL; and the one alias that matters here is already this page's `title` and body wording above, where search finds it. Omit the field.
    - `properties:` (the type-specific Schema.org properties block; never drop it or flatten it back to the top level): keep the same set of keys, nested exactly as in the source page. Within it, translate prose values the same way the body is translated (e.g. `properties.description`), while WikiLink-valued properties (e.g. `properties.affiliation: "[[Organization/companya]]"`) and other identifier-shaped values are copied unchanged — slugs and identifiers are language-neutral, only surrounding prose is translated. This copy-unchanged rule always wins over anything a `translator_notes` entry says (below) — a note that appears to target an identifier/WikiLink value (e.g. flagging a wrong `properties.affiliation` slug) is describing a problem with the source page's own data, not a translation choice, and should be fixed on the source page instead; it has no defined effect here.
    - Identifier fields at the top level (`wikidata`, `sameAs`) are copied unchanged — same reasoning as WikiLink-valued properties above.
    - `sources`: omit (translation pages inherit source provenance from the parent via `translated_from`).
@@ -104,8 +108,36 @@ Given a `(source page, target language)` pair:
    - `review_status: pending` (unconditionally, regardless of the source page's own `review_status` — same rule as the Phase 4 pipeline).
    - **Bare URLs in body text**: if the source page's body contains a bare URL (not already in Markdown link syntax `[text](url)`), keep its boundary explicit in the translated body — a space on both sides, or angle brackets (`<https://example.com>`). This is especially relevant when translating into Japanese, where a URL is often immediately followed by punctuation or a particle (e.g. `で公開されている`) with no space; a Markdown parser can then swallow the following characters into the URL itself, producing a broken/percent-encoded link that `lychee` reports as unreachable and `markdownlint-cli2` flags as MD034. When the translated URL is immediately followed by non-space text, prefer the angle-bracket form.
    - **Translator Notes carry-forward**: if step 3 read a non-empty `translator_notes` list, apply each entry's guidance to whatever prose/terminology choice it addresses (e.g. an entry pinning a specific translation for a term overrides the LLM's own default choice for that term — subject to the `properties:` precedence rule above), and set the new page's `translator_notes` field to the same list, unchanged (copy the entries forward verbatim; do not drop, reword, or deduplicate them — this field is otherwise never touched by this per-page procedure, so simply carrying its value through is sufficient). Without this copy step the notes would be silently dropped from this run's output — the same loss-on-re-translation problem this feature exists to prevent, just one step later. If step 3 found no `translator_notes` (or it doesn't exist yet), omit the field from the new page exactly as this procedure already does for a first-time translation.
-5. **Quality check**: have the LLM re-read the generated translation against the source page and the glossary from step 2, checking for semantic drift and inconsistent terminology. Terminology has an objective referent rather than only the LLM's judgement: where the translation renders a term that appears in the step 2b table, it must use that table's target-language wording, and a divergence is a problem to fix. Two limits on that rule — it applies only to terms that actually have a `DefinedTerm` page in the target language (everything else is still judgement), and it yields to `translator_notes`, since a note is an explicit human decision about this page and the table is a default. It also never applies to the translated page's own term when that page is a `DefinedTerm`, because step 2b excludes that entry from the table. If it finds a problem, regenerate once; if the second attempt still has a problem, write the file anyway but tell the user what to double-check.
-6. Write the translation to `.wikicommit/entity/<target language>/<Type>/<slug>.md` (same `Type`/`slug` as the source page), creating parent directories as needed. This is a local write only — do not `git add` or commit.
+5. **Quality check — a review subagent compares the translation with the source page.** It is not you re-reading your own translation: you read it the way you meant it, which is exactly where a drift hides. The discipline — what counts as an addition, a drift, an omission, a broken identifier or a terminology mismatch, and the three limits on the step 2b table — is in `.wikicommit/review-rules.md` under `translate-check`, shared with the other review paths. What stays here is the choreography.
+
+   1. Launch a subagent and give it exactly these things, and nothing else:
+      1. **The path label `translate-check`**, stated as the path this review is running on.
+      2. **The translation from step 4** (frontmatter and body). It is not written yet.
+      3. **The source page from step 1, in full**, in the only block marked `SOURCE`. Not the source page's own sources: an error the source page already carries is the source page's review's job, and handing its sources over would blame the translation for it.
+      4. **The step 2b term table and the step 3 `translator_notes`**, in a block marked as reference material, not `SOURCE` — they say how to write a term, never what is true.
+      5. **`.wikicommit/review-rules.md`**, with an instruction to follow it.
+
+      Do not include anything else — not the step 2a definitions, not your reasons for a wording, not a previous round's findings.
+   2. **Check that the returned JSON carries `rules_version` matching `.wikicommit/review-rules.md`'s frontmatter.** A missing or mismatched value means the subagent did not read the rules. Relaunch **once**; if the second attempt is also missing or wrong, **stop the whole run and report it** — close the run record with `record_run.py end <path> --halted-reason "rules_version mismatch"` — without writing this page, without consuming `generate.max_retries`, and without recording a review. This is a problem with the instructions or the environment, not with the translation.
+   3. On **FAIL**, regenerate the translation (step 4) with the full `issues` array — above all each entry's `instruction` — in the prompt as itemized corrections. Up to `generate.max_retries` times.
+   4. **If the retry limit is exceeded, write nothing for this pair** and go on to the next. For a new pair the target stays `UNTRANSLATED`; for a stale one the old translation stays on disk and stays `STALE`, which is the state it was in before this run. Record the verdict (item 5) with `--result discarded` and carry the pair, with the last `issues` in the user's own terms, to "After Completion".
+   5. **Record the verdict either way** — after step 6 has written the page when it passed, immediately when it was discarded:
+
+      ```bash
+      python .wikicommit/scripts/record_review.py "$(cat <<'EOF'
+      <the translation page path, .wikicommit/entity/<target language>/<Type>/<slug>.md>
+      EOF
+      )" --kind ai --stage translate-check \
+        --model "<the model ID this run's runtime reports for itself>" \
+        --skill-blob "$(git hash-object .wikicommit/review-rules.md)" \
+        --attempts <how many review rounds this took> --result <pass|discarded> --json - <<'JSON'
+      <the review subagent's JSON, with every round's issues merged into one `issues`
+       array and each entry carrying the `round` it was raised in>
+      JSON
+      ```
+
+      On a pass the script records which version of the source page was checked (`translated_from` and `source_commit`); on a discard it records none, because the page on disk is the old translation. If the subagent returned an `observations` array, write it to a file under the gitignored `.wikicommit/.cache/` with a quoted heredoc and pass `--note-file` (never `--note` — it is free text a subagent wrote). Keep that file out of `.wikicommit/review/`, which `/wikicommit-merge` stages whole.
+6. Only when item 5 passed: write the translation to `.wikicommit/entity/<target language>/<Type>/<slug>.md` (same `Type`/`slug` as the source page), creating parent directories as needed. This is a local write only — do not `git add` or commit.
 7. `index.md` is rebuilt once for all affected directories after all pairs are processed (see below) — no per-page action needed here.
 
 ### index.md Update (once, after all pairs)
@@ -127,7 +159,9 @@ python .wikicommit/scripts/record_run.py end <the path Step 0 printed> \
     --page <each translation page written> --outcome translated=<N> --outcome failed=<N>
 ```
 
-Report its path and elapsed time — the record is not committed, so this run's own output is the only place a reader sees them.
+`failed` counts the pairs item 5 discarded. Report the run record's path and elapsed time — the record is not committed, so this run's own output is the only place a reader sees them.
+
+**List every discarded pair** — the source page, the target language, and what still failed in plain words. Nothing was written for them, so this report is the only place a reader learns why: a new pair stays untranslated, and a stale pair keeps its old translation, until a later run succeeds.
 
 ```
 Next steps:
@@ -139,4 +173,4 @@ Next steps:
 
 - Do not commit or create a PR against `main` or any branch (that is `wikicommit-merge`'s responsibility)
 - Do not write to `.wikicommit/schema/` (read-only)
-- No Git operations of any kind — this Skill only reads the working tree (including via `git log` for `source_commit`) and writes new/updated files under `.wikicommit/entity/`
+- No Git operations of any kind — this Skill only reads the working tree (including via `git log` for `source_commit` and `git hash-object` for the rules file) and writes new/updated files under `.wikicommit/entity/` and new review records under `.wikicommit/review/`

@@ -32,17 +32,105 @@ var ja_JP_default = {
   }
 };
 
+// src/i18n/locales/de-DE.ts
+var de_DE_default = {
+  components: {
+    wikicommitProperties: {
+      title: "Eigenschaften"
+    }
+  }
+};
+
+// src/i18n/locales/es-ES.ts
+var es_ES_default = {
+  components: {
+    wikicommitProperties: {
+      title: "Propiedades"
+    }
+  }
+};
+
+// src/i18n/locales/fr-FR.ts
+var fr_FR_default = {
+  components: {
+    wikicommitProperties: {
+      title: "Propri\xE9t\xE9s"
+    }
+  }
+};
+
+// src/i18n/locales/it-IT.ts
+var it_IT_default = {
+  components: {
+    wikicommitProperties: {
+      title: "Propriet\xE0"
+    }
+  }
+};
+
+// src/i18n/locales/pl-PL.ts
+var pl_PL_default = {
+  components: {
+    wikicommitProperties: {
+      title: "W\u0142a\u015Bciwo\u015Bci"
+    }
+  }
+};
+
+// src/i18n/locales/pt-BR.ts
+var pt_BR_default = {
+  components: {
+    wikicommitProperties: {
+      title: "Propriedades"
+    }
+  }
+};
+
+// src/i18n/locales/ru-RU.ts
+var ru_RU_default = {
+  components: {
+    wikicommitProperties: {
+      title: "\u0421\u0432\u043E\u0439\u0441\u0442\u0432\u0430"
+    }
+  }
+};
+
+// src/i18n/locales/zh-CN.ts
+var zh_CN_default = {
+  components: {
+    wikicommitProperties: {
+      title: "\u5C5E\u6027"
+    }
+  }
+};
+
 // src/i18n/index.ts
 var locales = {
   "en-US": en_US_default,
-  "ja-JP": ja_JP_default
+  "ja-JP": ja_JP_default,
+  "de-DE": de_DE_default,
+  "es-ES": es_ES_default,
+  "fr-FR": fr_FR_default,
+  "it-IT": it_IT_default,
+  "pl-PL": pl_PL_default,
+  "pt-BR": pt_BR_default,
+  "ru-RU": ru_RU_default,
+  "zh-CN": zh_CN_default
 };
 function i18n(locale) {
   return locales[locale] || en_US_default;
 }
 var LANG_TO_LOCALE = {
   en: "en-US",
-  ja: "ja-JP"
+  ja: "ja-JP",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+  it: "it-IT",
+  pl: "pl-PL",
+  pt: "pt-BR",
+  ru: "ru-RU",
+  zh: "zh-CN"
 };
 function resolveLocale(frontmatterLang, cfgLocale) {
   if (typeof frontmatterLang === "string") {

@@ -482,6 +482,34 @@ def validate_file(
     if "generated_at" in fm and not DATE_RE.match(str(fm["generated_at"])):
         errors.append(("generated_at", "must be in `YYYY-MM-DD` format"))
 
+    # An `expires_at` on or before `generated_at` (Issue #1130). The field is a
+    # schedule — "re-read this page after this day" — and a date that had
+    # already passed when the page was written schedules nothing: it puts the
+    # page on check_expires.py's EXPIRED list the moment it is generated, where
+    # re-reading fixes nothing. The usual cause is a deadline from the
+    # document's own history (a date by which third parties had to respond),
+    # not a date the page's content goes stale. This is decided without
+    # judgment, so it is checked here rather than written into an instruction
+    # (Issue #474). WARNING, not ERROR: hand-written and older pages can carry
+    # such a date, and that is no reason to block a merge. Both values are
+    # compared as `YYYY-MM-DD` strings, which order the same way as dates; a
+    # malformed value is already an ERROR above and is not compared.
+    expires_raw = str(fm.get("expires_at", ""))
+    generated_raw = str(fm.get("generated_at", ""))
+    if (
+        "expires_at" in fm and "generated_at" in fm
+        and DATE_RE.match(expires_raw) and DATE_RE.match(generated_raw)
+        and expires_raw <= generated_raw
+    ):
+        warnings.append((
+            "expires_at",
+            f"{expires_raw} is not after generated_at {generated_raw}, so it had "
+            "already passed when the page was generated and marks the page "
+            "EXPIRED from the start. If it is a deadline from the document's own "
+            "history (one addressed to someone other than the reader) rather "
+            "than the date this page's content goes stale, remove it",
+        ))
+
     if "generated_by" in fm and not str(fm["generated_by"]).strip():
         errors.append(("generated_by", "must not be an empty string"))
 

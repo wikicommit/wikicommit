@@ -20,24 +20,17 @@ from pathlib import Path
 import pytest
 import yaml
 
-from _publication import skip_unless_development_repository
-
 REPO_ROOT = Path(__file__).parent.parent
 TEMPLATE = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts" / "templates" / "config.yml"
-OWN_CONFIG = REPO_ROOT / ".wikicommit" / "config.yml"
 
 DEAD_KEYS = ("auto_merge", "chain_of_thought")
 
 
-@pytest.mark.parametrize("path", [TEMPLATE, OWN_CONFIG], ids=["template", "own"])
-def test_config_has_no_review_block(path):
-    if path == OWN_CONFIG:
-        # This repository dogfoods WikiCommit, so it has a config of its own — but
-        # that config is its wiki data, not a distributed artifact, and is
-        # permanently excluded from the published snapshot (Issue #788). The
-        # template half of this parametrisation is the one that guards the
-        # shipped default, and it runs everywhere.
-        skip_unless_development_repository("this repository's own .wikicommit/config.yml")
+def test_config_has_no_review_block():
+    """The shipped default. This repository used to carry a config of its own as
+    well, as dogfooding wiki data; Issue #1086 deleted it, leaving the template as
+    the only `config.yml` there is to guard."""
+    path = TEMPLATE
     parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert "review" not in parsed, (
         f"{path} grew a `review:` block again. Both of its former keys had no "
@@ -65,10 +58,7 @@ def test_removed_keys_are_not_reintroduced_without_a_consumer(key):
     assertion would report a consumer that does not exist and pass for exactly
     the key it most needs to guard.
     """
-    # OWN_CONFIG is absent from the published snapshot (see above); dropping it
-    # there narrows what is scanned but cannot make this assertion pass wrongly —
-    # a key declared only in the template is still caught by the template half.
-    configs = [path for path in (TEMPLATE, OWN_CONFIG) if path.is_file()]
+    configs = [path for path in (TEMPLATE,) if path.is_file()]
     declared_in = [
         path for path in configs
         if re.search(rf"^\s*{re.escape(key)}\s*:", path.read_text(encoding="utf-8"), re.MULTILINE)

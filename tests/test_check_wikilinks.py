@@ -184,6 +184,66 @@ def test_wrong_type_segment_is_error_naming_the_real_type(tmp_path):
     assert "1 errors, 0 warnings" in result.stdout
 
 
+def test_skip_type_mismatch_drops_only_the_type_segment_error(tmp_path):
+    """wikicommit-status passes --skip-type-mismatch because check_wanted_pages.py
+    already reports this as TYPE_MISMATCH: (Issue #976). The removed-page ERROR
+    must still come through, and the dropped finding must not turn into a
+    "page does not exist" WARNING — the page does exist."""
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "AdministrativeArea", "saitama-city")
+    write_page(
+        tmp_path, "ja", "Place", "tokyo",
+        {"status": "removed", "removed_at": "2026-01-01"},
+    )
+    page = _link_page(tmp_path, "[[Organization/saitama-city]] and [[Place/tokyo]]")
+
+    result = run(["--skip-type-mismatch", "--changed", str(page)], cwd=tmp_path)
+    assert result.returncode == 1
+    assert "the Type segment may be wrong" not in result.stdout
+    assert "page does not exist" not in result.stdout
+    assert "[[Place/tokyo]] → links to a page with status: removed" in result.stdout
+    assert "1 errors, 0 warnings" in result.stdout
+
+
+def test_skip_type_mismatch_in_whole_wiki_mode(tmp_path):
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "AdministrativeArea", "saitama-city")
+    _link_page(tmp_path, "[[Organization/saitama-city]]")
+
+    result = run(["--skip-type-mismatch"], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "0 errors" in result.stdout
+
+
+def test_skip_type_mismatch_keeps_error_when_target_exists_in_a_third_language(tmp_path):
+    """check_wanted_pages.py counts <Type>/<slug> as existing in any language, so
+    it says nothing here. Dropping the ERROR would leave no report at all."""
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "AdministrativeArea", "saitama-city")
+    write_page(tmp_path, "fr", "Organization", "saitama-city")
+    _link_page(tmp_path, "[[Organization/saitama-city]]", lang="en")
+
+    result = run(["--skip-type-mismatch"], cwd=tmp_path)
+    assert result.returncode == 1
+    assert "the Type segment may be wrong" in result.stdout
+
+
+def test_whole_wiki_mode_skips_links_on_removed_pages(tmp_path):
+    """A removed page is not published; its outgoing links to a later-removed
+    page would otherwise be a finding nothing can clear."""
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Place", "tokyo", {"status": "removed", "removed_at": "2026-01-01"})
+    page = _link_page(tmp_path, "[[Place/tokyo]]")
+    text = page.read_text(encoding="utf-8").replace(
+        "review_status: pending", "review_status: pending\nstatus: removed\nremoved_at: '2026-01-02'"
+    )
+    page.write_text(text, encoding="utf-8")
+
+    result = run([], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "links to a page with status: removed" not in result.stdout
+
+
 def test_wrong_type_segment_lists_every_candidate_type(tmp_path):
     write_config(tmp_path)
     write_page(tmp_path, "ja", "AdministrativeArea", "saitama-city")

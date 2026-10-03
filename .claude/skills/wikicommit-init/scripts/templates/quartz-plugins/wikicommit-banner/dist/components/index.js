@@ -47,6 +47,10 @@ var en_US_default = {
       // Over-claiming here would repeat, in the opposite direction, the error
       // Issue #740 is correcting for `reviewed`.
       aiReviewAt: "Checked against sources:",
+      // Issue #1031: a translation page is checked against the page it was
+      // translated from, not against sources, so it says so. Stamped by
+      // convert_wikilinks.py as `ai_review_stage: translate-check`.
+      aiReviewOriginalAt: "Checked against the original page:",
       aiReviewBy: "Checking model:",
       unknown: "unknown",
       reviewStatusLink: "Check this page's review status",
@@ -144,6 +148,7 @@ var ja_JP_default = {
       // Over-claiming here would repeat, in the opposite direction, the error
       // Issue #740 is correcting for `reviewed`.
       aiReviewAt: "\u51FA\u5178\u3068\u7167\u5408:",
+      aiReviewOriginalAt: "\u539F\u6587\u3068\u7167\u5408:",
       aiReviewBy: "\u7167\u5408\u30E2\u30C7\u30EB:",
       unknown: "\u4E0D\u660E",
       reviewStatusLink: "\u3053\u306E\u30DA\u30FC\u30B8\u306E\u30EC\u30D3\u30E5\u30FC\u72B6\u6CC1\u3092\u898B\u308B",
@@ -192,17 +197,337 @@ var ja_JP_default = {
   }
 };
 
+// src/i18n/locales/de-DE.ts
+var de_DE_default = {
+  components: {
+    wikicommitBanner: {
+      title: "Diese Seite wurde von einem LLM generiert",
+      body: "Sie kann Ungenauigkeiten enthalten.",
+      generatedAt: "Generiert:",
+      generatedBy: "Modell:",
+      translatedAt: "\xDCbersetzt:",
+      translatedBy: "Modell:",
+      readBy: "Gelesen von {name} \u2014 nichts offensichtlich Falsches ist aufgefallen",
+      readByAPerson: "Eine Person hat diese Seite gelesen \u2014 nichts offensichtlich Falsches ist aufgefallen",
+      aiReviewAt: "Mit Quellen abgeglichen:",
+      aiReviewOriginalAt: "Mit der Originalseite abgeglichen:",
+      aiReviewBy: "Abgleichendes Modell:",
+      unknown: "unbekannt",
+      reviewStatusLink: "Pr\xFCfstatus dieser Seite ansehen",
+      reportLink: "Etwas melden, das Ihnen aufgefallen ist",
+      reportLinkAccountNote: "(GitHub-Konto erforderlich)",
+      reportTitlePrefix: "[Meldung]",
+      reportBodyPage: "Seite:",
+      reportBodyLanguage: "Sprache:",
+      reportBodyOriginal: "Originalseite:",
+      reportBodyGuidanceHeading: "Das sind Arten von Problemen, die keine automatische Pr\xFCfung finden kann. Notieren Sie alles, was zutrifft (Sie sollen nicht danach suchen \u2014 nur das, was Ihnen beim Lesen aufgefallen ist).",
+      reportBodyGuidanceHarm: "- Aussagen \xFCber eine reale Person oder Organisation, die \xFCbertrieben oder zu bestimmt wirkten",
+      reportBodyGuidanceKnowledge: "- Aussagen, die dem widersprechen, was Sie wissen (f\xFCgen Sie eine URL hinzu, falls vorhanden)",
+      reportBodyGuidanceContradiction: "- Aussagen, die eine andere Seite in diesem Wiki anders darstellt",
+      reportBodyGuidanceFooter: "Alles andere ist ebenfalls willkommen \u2014 Tippfehler, veraltete Fakten, defekte Links.",
+      reportBodyProblemHeading: "## Problem",
+      siteSummaryPages: "Seiten:",
+      siteSummaryReviewed: "Von einer Person gelesen und durchgesehen:",
+      siteSummaryReviewNote: "Jede Seite wird ver\xF6ffentlicht, sobald ein LLM sie generiert. Der Abgleich mit den Quellen erfolgt maschinell; \u201Evon einer Person gelesen und durchgesehen\u201C gibt an, wie viele Seiten seitdem jemand vollst\xE4ndig gelesen hat, ohne dass etwas offensichtlich Falsches aufgefallen ist. Nur ein Teil der Seiten wird von einer Person gelesen, und das ist so gewollt \u2014 diese Zahl soll die Gesamtzahl nicht erreichen, und sie ist keine vollst\xE4ndige Qualit\xE4tsgarantie.",
+      siteSummaryAiReviewed: "Mit Quellen abgeglichen:",
+      siteSummaryAiReviewNote: "\u201EMit Quellen abgeglichen\u201C gibt an, wie viele Seiten bei ihrer Generierung mit ihren eigenen Quellen verglichen wurden. Dieser Abgleich pr\xFCft nur die \xDCbereinstimmung mit diesen Quellen und nichts anderes \u2014 nicht die Vollst\xE4ndigkeit, nicht die Auswirkungen auf reale Personen und Organisationen, nicht Widerspr\xFCche zu dem, was Sie wissen."
+    }
+  }
+};
+
+// src/i18n/locales/es-ES.ts
+var es_ES_default = {
+  components: {
+    wikicommitBanner: {
+      title: "Esta p\xE1gina la ha generado un LLM",
+      body: "Puede contener inexactitudes.",
+      generatedAt: "Generada:",
+      generatedBy: "Modelo:",
+      translatedAt: "Traducida:",
+      translatedBy: "Modelo:",
+      readBy: "Le\xEDda por {name}: nada salt\xF3 a la vista como claramente err\xF3neo",
+      readByAPerson: "Una persona ley\xF3 esta p\xE1gina: nada salt\xF3 a la vista como claramente err\xF3neo",
+      aiReviewAt: "Cotejada con las fuentes:",
+      aiReviewOriginalAt: "Cotejada con la p\xE1gina original:",
+      aiReviewBy: "Modelo de cotejo:",
+      unknown: "desconocido",
+      reviewStatusLink: "Ver el estado de revisi\xF3n de esta p\xE1gina",
+      reportLink: "Informar de algo que hayas notado",
+      reportLinkAccountNote: "(se necesita una cuenta de GitHub)",
+      reportTitlePrefix: "[Informe]",
+      reportBodyPage: "P\xE1gina:",
+      reportBodyLanguage: "Idioma:",
+      reportBodyOriginal: "P\xE1gina original:",
+      reportBodyGuidanceHeading: "Estos son los tipos de problema que ninguna comprobaci\xF3n autom\xE1tica puede detectar. Anota los que correspondan (no se te pide que los busques: solo lo que hayas notado al leer).",
+      reportBodyGuidanceHarm: "- Cualquier cosa sobre una persona u organizaci\xF3n real que te pareciera exagerada o demasiado categ\xF3rica",
+      reportBodyGuidanceKnowledge: "- Cualquier cosa que contradiga lo que sabes (a\xF1ade una URL si la tienes)",
+      reportBodyGuidanceContradiction: "- Cualquier cosa que otra p\xE1gina de esta wiki diga de otra manera",
+      reportBodyGuidanceFooter: "Cualquier otra cosa tambi\xE9n es bienvenida: erratas, datos desactualizados, enlaces rotos.",
+      reportBodyProblemHeading: "## Problema",
+      siteSummaryPages: "P\xE1ginas:",
+      siteSummaryReviewed: "Le\xEDdas y revisadas por una persona:",
+      siteSummaryReviewNote: "Cada p\xE1gina se publica en cuanto un LLM la genera. El cotejo con las fuentes lo hace una m\xE1quina; \xABle\xEDdas y revisadas por una persona\xBB es cu\xE1ntas p\xE1ginas ha le\xEDdo despu\xE9s alguien de principio a fin sin que nada saltara a la vista como claramente err\xF3neo. Por dise\xF1o, solo algunas p\xE1ginas las lee una persona: esta cifra no pretende llegar al total y no es una garant\xEDa completa de calidad.",
+      siteSummaryAiReviewed: "Cotejadas con las fuentes:",
+      siteSummaryAiReviewNote: "\xABCotejadas con las fuentes\xBB es cu\xE1ntas p\xE1ginas se compararon con sus propias fuentes al generarse. Ese cotejo abarca la concordancia con esas fuentes y nada m\xE1s: ni la exhaustividad, ni el efecto sobre personas y organizaciones reales, ni los conflictos con lo que t\xFA sabes."
+    }
+  }
+};
+
+// src/i18n/locales/fr-FR.ts
+var fr_FR_default = {
+  components: {
+    wikicommitBanner: {
+      title: "Cette page a \xE9t\xE9 g\xE9n\xE9r\xE9e par un LLM",
+      body: "Elle peut contenir des inexactitudes.",
+      generatedAt: "G\xE9n\xE9r\xE9e :",
+      generatedBy: "Mod\xE8le :",
+      translatedAt: "Traduite :",
+      translatedBy: "Mod\xE8le :",
+      readBy: "Lue par {name} \u2014 rien de manifestement faux n'a \xE9t\xE9 relev\xE9",
+      readByAPerson: "Une personne a lu cette page \u2014 rien de manifestement faux n'a \xE9t\xE9 relev\xE9",
+      aiReviewAt: "Compar\xE9e aux sources :",
+      aiReviewOriginalAt: "Compar\xE9e \xE0 la page originale :",
+      aiReviewBy: "Mod\xE8le de comparaison :",
+      unknown: "inconnu",
+      reviewStatusLink: "Voir l'\xE9tat de relecture de cette page",
+      reportLink: "Signaler quelque chose que vous avez remarqu\xE9",
+      reportLinkAccountNote: "(compte GitHub requis)",
+      reportTitlePrefix: "[Signalement]",
+      reportBodyPage: "Page :",
+      reportBodyLanguage: "Langue :",
+      reportBodyOriginal: "Page originale :",
+      reportBodyGuidanceHeading: "Voici les types de probl\xE8mes qu'aucune v\xE9rification automatique ne peut d\xE9tecter. Notez ceux qui s'appliquent (on ne vous demande pas de les chercher \u2014 seulement ce que vous avez remarqu\xE9 en lisant).",
+      reportBodyGuidanceHarm: "- Tout ce qui, \xE0 propos d'une personne ou d'une organisation r\xE9elle, vous a sembl\xE9 exag\xE9r\xE9 ou trop affirmatif",
+      reportBodyGuidanceKnowledge: "- Tout ce qui contredit ce que vous savez (ajoutez une URL si vous en avez une)",
+      reportBodyGuidanceContradiction: "- Tout ce qu'une autre page de ce wiki dit diff\xE9remment",
+      reportBodyGuidanceFooter: "Tout le reste est aussi bienvenu \u2014 coquilles, informations d\xE9pass\xE9es, liens cass\xE9s.",
+      reportBodyProblemHeading: "## Probl\xE8me",
+      siteSummaryPages: "Pages :",
+      siteSummaryReviewed: "Lues et examin\xE9es par une personne :",
+      siteSummaryReviewNote: "Chaque page est publi\xE9e d\xE8s qu'un LLM la g\xE9n\xE8re. La comparaison avec les sources est effectu\xE9e par une machine ; \xAB lues et examin\xE9es par une personne \xBB indique combien de pages quelqu'un a depuis lues en entier sans que rien de manifestement faux n'ait \xE9t\xE9 relev\xE9. Seules certaines pages sont lues par une personne, par choix \u2014 ce nombre n'a pas vocation \xE0 atteindre le total, et ce n'est pas une garantie de qualit\xE9 compl\xE8te.",
+      siteSummaryAiReviewed: "Compar\xE9es aux sources :",
+      siteSummaryAiReviewNote: "\xAB Compar\xE9es aux sources \xBB indique combien de pages ont \xE9t\xE9 compar\xE9es \xE0 leurs propres sources lors de leur g\xE9n\xE9ration. Cette comparaison porte sur la concordance avec ces sources et rien d'autre \u2014 ni l'exhaustivit\xE9, ni l'effet sur des personnes et organisations r\xE9elles, ni les contradictions avec ce que vous savez."
+    }
+  }
+};
+
+// src/i18n/locales/it-IT.ts
+var it_IT_default = {
+  components: {
+    wikicommitBanner: {
+      title: "Questa pagina \xE8 stata generata da un LLM",
+      body: "Potrebbe contenere inesattezze.",
+      generatedAt: "Generata il:",
+      generatedBy: "Modello:",
+      translatedAt: "Tradotta il:",
+      translatedBy: "Modello:",
+      readBy: "Letta da {name}: non \xE8 emerso nulla di palesemente sbagliato",
+      readByAPerson: "Una persona ha letto questa pagina: non \xE8 emerso nulla di palesemente sbagliato",
+      aiReviewAt: "Confrontata con le fonti:",
+      aiReviewOriginalAt: "Confrontata con la pagina originale:",
+      aiReviewBy: "Modello del confronto:",
+      unknown: "sconosciuto",
+      reviewStatusLink: "Verifica lo stato di revisione di questa pagina",
+      reportLink: "Segnala qualcosa che hai notato",
+      reportLinkAccountNote: "(serve un account GitHub)",
+      reportTitlePrefix: "[Segnalazione]",
+      reportBodyPage: "Pagina:",
+      reportBodyLanguage: "Lingua:",
+      reportBodyOriginal: "Pagina originale:",
+      reportBodyGuidanceHeading: "Questi sono i tipi di problema che nessun controllo automatico pu\xF2 trovare. Annota quelli che ti riguardano (non ti chiediamo di andarli a cercare: solo ci\xF2 che hai notato leggendo).",
+      reportBodyGuidanceHarm: "- Qualcosa su una persona o un'organizzazione reale che ti \xE8 sembrato esagerato o troppo sicuro",
+      reportBodyGuidanceKnowledge: "- Qualcosa in contrasto con ci\xF2 che sai (aggiungi un URL, se ne hai uno)",
+      reportBodyGuidanceContradiction: "- Qualcosa che un'altra pagina di questo wiki dice in modo diverso",
+      reportBodyGuidanceFooter: "\xC8 benvenuto anche tutto il resto: refusi, informazioni superate, link non funzionanti.",
+      reportBodyProblemHeading: "## Problema",
+      siteSummaryPages: "Pagine:",
+      siteSummaryReviewed: "Lette e controllate da una persona:",
+      siteSummaryReviewNote: 'Ogni pagina viene pubblicata non appena un LLM la genera. Il confronto con le fonti \xE8 eseguito da una macchina; "lette e controllate da una persona" indica quante pagine qualcuno ha poi letto per intero senza notare nulla di palesemente sbagliato. Per scelta, solo alcune pagine vengono lette da una persona: questo numero non \xE8 pensato per raggiungere il totale e non \xE8 una garanzia di qualit\xE0 completa.',
+      siteSummaryAiReviewed: "Confrontate con le fonti:",
+      siteSummaryAiReviewNote: `"Confrontate con le fonti" indica quante pagine sono state confrontate con le proprie fonti al momento della generazione. Il confronto riguarda solo la concordanza con quelle fonti e nient'altro: non la completezza, non gli effetti su persone e organizzazioni reali, non i contrasti con ci\xF2 che sai.`
+    }
+  }
+};
+
+// src/i18n/locales/pl-PL.ts
+var pl_PL_default = {
+  components: {
+    wikicommitBanner: {
+      title: "Ta strona zosta\u0142a wygenerowana przez LLM",
+      body: "Mo\u017Ce zawiera\u0107 nie\u015Bcis\u0142o\u015Bci.",
+      generatedAt: "Wygenerowano:",
+      generatedBy: "Model:",
+      translatedAt: "Przet\u0142umaczono:",
+      translatedBy: "Model:",
+      readBy: "Przeczytane przez {name} \u2014 nic nie wyda\u0142o si\u0119 wyra\u017Anie b\u0142\u0119dne",
+      readByAPerson: "Cz\u0142owiek przeczyta\u0142 t\u0119 stron\u0119 \u2014 nic nie wyda\u0142o si\u0119 wyra\u017Anie b\u0142\u0119dne",
+      aiReviewAt: "Por\xF3wnane ze \u017Ar\xF3d\u0142ami:",
+      aiReviewOriginalAt: "Por\xF3wnane ze stron\u0105 oryginaln\u0105:",
+      aiReviewBy: "Model por\xF3wnuj\u0105cy:",
+      unknown: "nieznany",
+      reviewStatusLink: "Sprawd\u017A status przegl\u0105du tej strony",
+      reportLink: "Zg\u0142o\u015B co\u015B, co zauwa\u017Cy\u0142e\u015B(-a\u015B)",
+      reportLinkAccountNote: "(wymagane konto GitHub)",
+      reportTitlePrefix: "[Zg\u0142oszenie]",
+      reportBodyPage: "Strona:",
+      reportBodyLanguage: "J\u0119zyk:",
+      reportBodyOriginal: "Strona oryginalna:",
+      reportBodyGuidanceHeading: "To rodzaje problem\xF3w, kt\xF3rych \u017Cadna automatyczna kontrola nie wykryje. Zapisz te, kt\xF3re pasuj\u0105 (nie prosimy o szukanie \u2014 tylko o to, co zauwa\u017Cy\u0142e\u015B(-a\u015B) podczas czytania).",
+      reportBodyGuidanceHarm: "- Cokolwiek o rzeczywistej osobie lub organizacji, co wyda\u0142o si\u0119 przesadzone lub zbyt pewne",
+      reportBodyGuidanceKnowledge: "- Cokolwiek sprzecznego z tym, co wiesz (dodaj URL, je\u015Bli go masz)",
+      reportBodyGuidanceContradiction: "- Cokolwiek, co inna strona tej wiki podaje inaczej",
+      reportBodyGuidanceFooter: "Wszystko inne te\u017C jest mile widziane \u2014 liter\xF3wki, nieaktualne fakty, niedzia\u0142aj\u0105ce linki.",
+      reportBodyProblemHeading: "## Problem",
+      siteSummaryPages: "Strony:",
+      siteSummaryReviewed: "Przeczytane i sprawdzone przez cz\u0142owieka:",
+      siteSummaryReviewNote: "Ka\u017Cda strona jest publikowana od razu po wygenerowaniu przez LLM. Por\xF3wnanie ze \u017Ar\xF3d\u0142ami wykonuje maszyna; \u201Eprzeczytane i sprawdzone przez cz\u0142owieka\u201D oznacza, ile stron kto\u015B od tego czasu przeczyta\u0142 w ca\u0142o\u015Bci, nie zauwa\u017Caj\u0105c niczego wyra\u017Anie b\u0142\u0119dnego. Z za\u0142o\u017Cenia cz\u0142owiek czyta tylko cz\u0119\u015B\u0107 stron \u2014 ta liczba nie ma osi\u0105gn\u0105\u0107 \u0142\u0105cznej liczby stron i nie stanowi pe\u0142nej gwarancji jako\u015Bci.",
+      siteSummaryAiReviewed: "Por\xF3wnane ze \u017Ar\xF3d\u0142ami:",
+      siteSummaryAiReviewNote: "\u201EPor\xF3wnane ze \u017Ar\xF3d\u0142ami\u201D oznacza, ile stron w chwili generowania por\xF3wnano z ich w\u0142asnymi \u017Ar\xF3d\u0142ami. To por\xF3wnanie obejmuje wy\u0142\u0105cznie zgodno\u015B\u0107 z tymi \u017Ar\xF3d\u0142ami \u2014 nie kompletno\u015B\u0107, nie wp\u0142yw na rzeczywiste osoby i organizacje, nie sprzeczno\u015Bci z tym, co wiesz."
+    }
+  }
+};
+
+// src/i18n/locales/pt-BR.ts
+var pt_BR_default = {
+  components: {
+    wikicommitBanner: {
+      title: "Esta p\xE1gina foi gerada por um LLM",
+      body: "Ela pode conter imprecis\xF5es.",
+      generatedAt: "Gerada em:",
+      generatedBy: "Modelo:",
+      translatedAt: "Traduzida em:",
+      translatedBy: "Modelo:",
+      readBy: "Lida por {name} \u2014 nada obviamente errado chamou a aten\xE7\xE3o",
+      readByAPerson: "Uma pessoa leu esta p\xE1gina \u2014 nada obviamente errado chamou a aten\xE7\xE3o",
+      aiReviewAt: "Conferida com as fontes:",
+      aiReviewOriginalAt: "Conferida com a p\xE1gina original:",
+      aiReviewBy: "Modelo que conferiu:",
+      unknown: "desconhecido",
+      reviewStatusLink: "Ver o status de revis\xE3o desta p\xE1gina",
+      reportLink: "Relatar algo que voc\xEA notou",
+      reportLinkAccountNote: "(requer conta no GitHub)",
+      reportTitlePrefix: "[Relato]",
+      reportBodyPage: "P\xE1gina:",
+      reportBodyLanguage: "Idioma:",
+      reportBodyOriginal: "P\xE1gina original:",
+      reportBodyGuidanceHeading: "Estes s\xE3o tipos de problema que nenhuma verifica\xE7\xE3o autom\xE1tica consegue encontrar. Anote os que se aplicarem (n\xE3o pedimos que voc\xEA v\xE1 procurar \u2014 apenas o que notou durante a leitura).",
+      reportBodyGuidanceHarm: "- Algo sobre uma pessoa ou organiza\xE7\xE3o real que pareceu exagerado ou afirmado com certeza demais",
+      reportBodyGuidanceKnowledge: "- Algo que conflita com o que voc\xEA sabe (inclua uma URL, se tiver)",
+      reportBodyGuidanceContradiction: "- Algo que outra p\xE1gina deste wiki diz de forma diferente",
+      reportBodyGuidanceFooter: "Qualquer outra coisa tamb\xE9m \xE9 bem-vinda \u2014 erros de digita\xE7\xE3o, informa\xE7\xF5es desatualizadas, links quebrados.",
+      reportBodyProblemHeading: "## Problema",
+      siteSummaryPages: "P\xE1ginas:",
+      siteSummaryReviewed: "Lidas e conferidas por uma pessoa:",
+      siteSummaryReviewNote: 'Cada p\xE1gina \xE9 publicada assim que um LLM a gera. A confer\xEAncia com as fontes \xE9 feita por m\xE1quina; "lidas e conferidas por uma pessoa" \xE9 quantas p\xE1ginas algu\xE9m leu depois at\xE9 o fim sem que nada obviamente errado chamasse a aten\xE7\xE3o. Por design, apenas algumas p\xE1ginas s\xE3o lidas por uma pessoa \u2014 este n\xFAmero n\xE3o pretende chegar ao total e n\xE3o \xE9 uma garantia completa de qualidade.',
+      siteSummaryAiReviewed: "Conferidas com as fontes:",
+      siteSummaryAiReviewNote: '"Conferidas com as fontes" \xE9 quantas p\xE1ginas foram comparadas com suas pr\xF3prias fontes quando foram geradas. Essa confer\xEAncia cobre a concord\xE2ncia com essas fontes e nada mais \u2014 n\xE3o a completude, n\xE3o o efeito sobre pessoas e organiza\xE7\xF5es reais, n\xE3o conflitos com o que voc\xEA sabe.'
+    }
+  }
+};
+
+// src/i18n/locales/ru-RU.ts
+var ru_RU_default = {
+  components: {
+    wikicommitBanner: {
+      title: "\u042D\u0442\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0441\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u043D\u0430 LLM",
+      body: "\u041E\u043D\u0430 \u043C\u043E\u0436\u0435\u0442 \u0441\u043E\u0434\u0435\u0440\u0436\u0430\u0442\u044C \u043D\u0435\u0442\u043E\u0447\u043D\u043E\u0441\u0442\u0438.",
+      generatedAt: "\u0421\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u043D\u043E:",
+      generatedBy: "\u041C\u043E\u0434\u0435\u043B\u044C:",
+      translatedAt: "\u041F\u0435\u0440\u0435\u0432\u0435\u0434\u0435\u043D\u043E:",
+      translatedBy: "\u041C\u043E\u0434\u0435\u043B\u044C:",
+      readBy: "\u041F\u0440\u043E\u0447\u0438\u0442\u0430\u043B(\u0430) {name} \u2014 \u043D\u0438\u0447\u0435\u0433\u043E \u044F\u0432\u043D\u043E \u043D\u0435\u0432\u0435\u0440\u043D\u043E\u0433\u043E \u043D\u0435 \u0431\u0440\u043E\u0441\u0438\u043B\u043E\u0441\u044C \u0432 \u0433\u043B\u0430\u0437\u0430",
+      readByAPerson: "\u0427\u0435\u043B\u043E\u0432\u0435\u043A \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043B \u044D\u0442\u0443 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0443 \u2014 \u043D\u0438\u0447\u0435\u0433\u043E \u044F\u0432\u043D\u043E \u043D\u0435\u0432\u0435\u0440\u043D\u043E\u0433\u043E \u043D\u0435 \u0431\u0440\u043E\u0441\u0438\u043B\u043E\u0441\u044C \u0432 \u0433\u043B\u0430\u0437\u0430",
+      aiReviewAt: "\u0421\u0432\u0435\u0440\u0435\u043D\u043E \u0441 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u043C\u0438:",
+      aiReviewOriginalAt: "\u0421\u0432\u0435\u0440\u0435\u043D\u043E \u0441 \u0438\u0441\u0445\u043E\u0434\u043D\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435\u0439:",
+      aiReviewBy: "\u041C\u043E\u0434\u0435\u043B\u044C \u0441\u0432\u0435\u0440\u043A\u0438:",
+      unknown: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E",
+      reviewStatusLink: "\u041F\u043E\u0441\u043C\u043E\u0442\u0440\u0435\u0442\u044C \u0441\u0442\u0430\u0442\u0443\u0441 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0438 \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B",
+      reportLink: "\u0421\u043E\u043E\u0431\u0449\u0438\u0442\u044C \u043E \u0437\u0430\u043C\u0435\u0447\u0435\u043D\u043D\u043E\u043C",
+      reportLinkAccountNote: "(\u043D\u0443\u0436\u043D\u0430 \u0443\u0447\u0451\u0442\u043D\u0430\u044F \u0437\u0430\u043F\u0438\u0441\u044C GitHub)",
+      reportTitlePrefix: "[\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435]",
+      reportBodyPage: "\u0421\u0442\u0440\u0430\u043D\u0438\u0446\u0430:",
+      reportBodyLanguage: "\u042F\u0437\u044B\u043A:",
+      reportBodyOriginal: "\u0418\u0441\u0445\u043E\u0434\u043D\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430:",
+      reportBodyGuidanceHeading: "\u041D\u0438\u0436\u0435 \u2014 \u0432\u0438\u0434\u044B \u043F\u0440\u043E\u0431\u043B\u0435\u043C, \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043D\u0435 \u043C\u043E\u0436\u0435\u0442 \u043D\u0430\u0439\u0442\u0438 \u043D\u0438 \u043E\u0434\u043D\u0430 \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0430\u044F \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430. \u0417\u0430\u043F\u0438\u0448\u0438\u0442\u0435 \u0442\u0435, \u0447\u0442\u043E \u043E\u0442\u043D\u043E\u0441\u044F\u0442\u0441\u044F \u043A \u0434\u0435\u043B\u0443 (\u0438\u0441\u043A\u0430\u0442\u044C \u0441\u043F\u0435\u0446\u0438\u0430\u043B\u044C\u043D\u043E \u043D\u0435 \u043D\u0443\u0436\u043D\u043E \u2014 \u0442\u043E\u043B\u044C\u043A\u043E \u0442\u043E, \u0447\u0442\u043E \u0432\u044B \u0437\u0430\u043C\u0435\u0442\u0438\u043B\u0438 \u043F\u0440\u0438 \u0447\u0442\u0435\u043D\u0438\u0438).",
+      reportBodyGuidanceHarm: "- \u0427\u0442\u043E-\u043B\u0438\u0431\u043E \u043E \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u043C \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u0435 \u0438\u043B\u0438 \u043E\u0440\u0433\u0430\u043D\u0438\u0437\u0430\u0446\u0438\u0438, \u0447\u0442\u043E \u043F\u043E\u043A\u0430\u0437\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u0435\u0443\u0432\u0435\u043B\u0438\u0447\u0435\u043D\u043D\u044B\u043C \u0438\u043B\u0438 \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u0447\u043D\u044B\u043C",
+      reportBodyGuidanceKnowledge: "- \u0427\u0442\u043E-\u043B\u0438\u0431\u043E, \u0447\u0442\u043E \u0440\u0430\u0441\u0445\u043E\u0434\u0438\u0442\u0441\u044F \u0441 \u0442\u0435\u043C, \u0447\u0442\u043E \u0432\u044B \u0437\u043D\u0430\u0435\u0442\u0435 (\u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 URL, \u0435\u0441\u043B\u0438 \u043E\u043D \u0435\u0441\u0442\u044C)",
+      reportBodyGuidanceContradiction: "- \u0427\u0442\u043E-\u043B\u0438\u0431\u043E, \u0447\u0442\u043E \u0434\u0440\u0443\u0433\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u044D\u0442\u043E\u0439 \u0432\u0438\u043A\u0438 \u0438\u0437\u043B\u0430\u0433\u0430\u0435\u0442 \u0438\u043D\u0430\u0447\u0435",
+      reportBodyGuidanceFooter: "\u0412\u0441\u0451 \u043E\u0441\u0442\u0430\u043B\u044C\u043D\u043E\u0435 \u0442\u043E\u0436\u0435 \u043F\u0440\u0438\u0432\u0435\u0442\u0441\u0442\u0432\u0443\u0435\u0442\u0441\u044F \u2014 \u043E\u043F\u0435\u0447\u0430\u0442\u043A\u0438, \u0443\u0441\u0442\u0430\u0440\u0435\u0432\u0448\u0438\u0435 \u0444\u0430\u043A\u0442\u044B, \u043D\u0435\u0440\u0430\u0431\u043E\u0442\u0430\u044E\u0449\u0438\u0435 \u0441\u0441\u044B\u043B\u043A\u0438.",
+      reportBodyProblemHeading: "## \u041F\u0440\u043E\u0431\u043B\u0435\u043C\u0430",
+      siteSummaryPages: "\u0421\u0442\u0440\u0430\u043D\u0438\u0446:",
+      siteSummaryReviewed: "\u041F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E \u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u043E \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u043E\u043C:",
+      siteSummaryReviewNote: "\u041A\u0430\u0436\u0434\u0430\u044F \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u043F\u0443\u0431\u043B\u0438\u043A\u0443\u0435\u0442\u0441\u044F \u0441\u0440\u0430\u0437\u0443 \u043F\u043E\u0441\u043B\u0435 \u0442\u043E\u0433\u043E, \u043A\u0430\u043A \u0435\u0451 \u0441\u0433\u0435\u043D\u0435\u0440\u0438\u0440\u043E\u0432\u0430\u043B\u0430 LLM. \u0421\u0432\u0435\u0440\u043A\u0443 \u0441 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u043C\u0438 \u0432\u044B\u043F\u043E\u043B\u043D\u044F\u0435\u0442 \u043C\u0430\u0448\u0438\u043D\u0430; \xAB\u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043D\u043E \u0438 \u043F\u0440\u043E\u0432\u0435\u0440\u0435\u043D\u043E \u0447\u0435\u043B\u043E\u0432\u0435\u043A\u043E\u043C\xBB \u2014 \u044D\u0442\u043E \u0447\u0438\u0441\u043B\u043E \u0441\u0442\u0440\u0430\u043D\u0438\u0446, \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043A\u0442\u043E-\u0442\u043E \u0437\u0430\u0442\u0435\u043C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u043B \u0446\u0435\u043B\u0438\u043A\u043E\u043C \u0438 \u043D\u0435 \u0437\u0430\u043C\u0435\u0442\u0438\u043B \u043D\u0438\u0447\u0435\u0433\u043E \u044F\u0432\u043D\u043E \u043D\u0435\u0432\u0435\u0440\u043D\u043E\u0433\u043E. \u0427\u0435\u043B\u043E\u0432\u0435\u043A \u0447\u0438\u0442\u0430\u0435\u0442 \u043B\u0438\u0448\u044C \u0447\u0430\u0441\u0442\u044C \u0441\u0442\u0440\u0430\u043D\u0438\u0446, \u0438 \u0442\u0430\u043A \u0437\u0430\u0434\u0443\u043C\u0430\u043D\u043E: \u044D\u0442\u043E \u0447\u0438\u0441\u043B\u043E \u043D\u0435 \u0434\u043E\u043B\u0436\u043D\u043E \u0434\u043E\u0441\u0442\u0438\u0433\u0430\u0442\u044C \u043E\u0431\u0449\u0435\u0433\u043E \u043A\u043E\u043B\u0438\u0447\u0435\u0441\u0442\u0432\u0430 \u0438 \u043D\u0435 \u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043F\u043E\u043B\u043D\u043E\u0439 \u0433\u0430\u0440\u0430\u043D\u0442\u0438\u0435\u0439 \u043A\u0430\u0447\u0435\u0441\u0442\u0432\u0430.",
+      siteSummaryAiReviewed: "\u0421\u0432\u0435\u0440\u0435\u043D\u043E \u0441 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u043C\u0438:",
+      siteSummaryAiReviewNote: "\xAB\u0421\u0432\u0435\u0440\u0435\u043D\u043E \u0441 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u043C\u0438\xBB \u2014 \u044D\u0442\u043E \u0447\u0438\u0441\u043B\u043E \u0441\u0442\u0440\u0430\u043D\u0438\u0446, \u043A\u043E\u0442\u043E\u0440\u044B\u0435 \u043F\u0440\u0438 \u0433\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u0438 \u0441\u0440\u0430\u0432\u043D\u0438\u0432\u0430\u043B\u0438\u0441\u044C \u0441\u043E \u0441\u0432\u043E\u0438\u043C\u0438 \u0441\u043E\u0431\u0441\u0442\u0432\u0435\u043D\u043D\u044B\u043C\u0438 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u043C\u0438. \u042D\u0442\u0430 \u043F\u0440\u043E\u0432\u0435\u0440\u043A\u0430 \u043E\u0445\u0432\u0430\u0442\u044B\u0432\u0430\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0441\u043E\u0433\u043B\u0430\u0441\u043E\u0432\u0430\u043D\u043D\u043E\u0441\u0442\u044C \u0441 \u044D\u0442\u0438\u043C\u0438 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430\u043C\u0438 \u0438 \u043D\u0438\u0447\u0435\u0433\u043E \u0431\u043E\u043B\u044C\u0448\u0435 \u2014 \u043D\u0435 \u043F\u043E\u043B\u043D\u043E\u0442\u0443, \u043D\u0435 \u0432\u043B\u0438\u044F\u043D\u0438\u0435 \u043D\u0430 \u0440\u0435\u0430\u043B\u044C\u043D\u044B\u0445 \u043B\u044E\u0434\u0435\u0439 \u0438 \u043E\u0440\u0433\u0430\u043D\u0438\u0437\u0430\u0446\u0438\u0438, \u043D\u0435 \u043F\u0440\u043E\u0442\u0438\u0432\u043E\u0440\u0435\u0447\u0438\u044F \u0441 \u0442\u0435\u043C, \u0447\u0442\u043E \u0437\u043D\u0430\u0435\u0442\u0435 \u0432\u044B."
+    }
+  }
+};
+
+// src/i18n/locales/zh-CN.ts
+var zh_CN_default = {
+  components: {
+    wikicommitBanner: {
+      title: "\u672C\u9875\u9762\u7531 LLM \u751F\u6210",
+      body: "\u5185\u5BB9\u53EF\u80FD\u5B58\u5728\u4E0D\u51C6\u786E\u4E4B\u5904\u3002",
+      generatedAt: "\u751F\u6210\u65E5\u671F\uFF1A",
+      generatedBy: "\u6A21\u578B\uFF1A",
+      translatedAt: "\u7FFB\u8BD1\u65E5\u671F\uFF1A",
+      translatedBy: "\u6A21\u578B\uFF1A",
+      readBy: "{name} \u5DF2\u8BFB\u8FC7\u672C\u9875\u9762\u2014\u2014\u672A\u53D1\u73B0\u660E\u663E\u95EE\u9898",
+      readByAPerson: "\u5DF2\u6709\u4EBA\u8BFB\u8FC7\u672C\u9875\u9762\u2014\u2014\u672A\u53D1\u73B0\u660E\u663E\u95EE\u9898",
+      aiReviewAt: "\u5DF2\u4E0E\u6765\u6E90\u6BD4\u5BF9\uFF1A",
+      aiReviewOriginalAt: "\u5DF2\u4E0E\u539F\u6587\u9875\u9762\u6BD4\u5BF9\uFF1A",
+      aiReviewBy: "\u6BD4\u5BF9\u6A21\u578B\uFF1A",
+      unknown: "\u672A\u77E5",
+      reviewStatusLink: "\u67E5\u770B\u672C\u9875\u9762\u7684\u5BA1\u9605\u72B6\u6001",
+      reportLink: "\u62A5\u544A\u4F60\u6CE8\u610F\u5230\u7684\u95EE\u9898",
+      reportLinkAccountNote: "\uFF08\u9700\u8981 GitHub \u8D26\u53F7\uFF09",
+      reportTitlePrefix: "[\u62A5\u544A]",
+      reportBodyPage: "\u9875\u9762\uFF1A",
+      reportBodyLanguage: "\u8BED\u8A00\uFF1A",
+      reportBodyOriginal: "\u539F\u6587\u9875\u9762\uFF1A",
+      reportBodyGuidanceHeading: "\u4EE5\u4E0B\u662F\u4EFB\u4F55\u81EA\u52A8\u68C0\u67E5\u90FD\u65E0\u6CD5\u53D1\u73B0\u7684\u95EE\u9898\u7C7B\u578B\u3002\u5982\u6709\u7B26\u5408\u7684\u8BF7\u5199\u4E0B\u6765\uFF08\u4E0D\u9700\u8981\u4E13\u95E8\u53BB\u627E\uFF0C\u53EA\u5199\u9605\u8BFB\u65F6\u6CE8\u610F\u5230\u7684\u5373\u53EF\uFF09\u3002",
+      reportBodyGuidanceHarm: "- \u5173\u4E8E\u771F\u5B9E\u4EBA\u7269\u6216\u7EC4\u7EC7\uFF0C\u611F\u89C9\u5199\u5F97\u8FC7\u5934\u6216\u8FC7\u4E8E\u786E\u5B9A\u7684\u5185\u5BB9",
+      reportBodyGuidanceKnowledge: "- \u4E0E\u4F60\u6240\u4E86\u89E3\u7684\u60C5\u51B5\u4E0D\u7B26\u7684\u5185\u5BB9\uFF08\u5982\u6709 URL \u8BF7\u9644\u4E0A\uFF09",
+      reportBodyGuidanceContradiction: "- \u4E0E\u672C Wiki \u5176\u4ED6\u9875\u9762\u8BF4\u6CD5\u4E0D\u540C\u7684\u5185\u5BB9",
+      reportBodyGuidanceFooter: "\u5176\u4ED6\u95EE\u9898\u4E5F\u6B22\u8FCE\u62A5\u544A\u2014\u2014\u9519\u522B\u5B57\u3001\u8FC7\u65F6\u7684\u4FE1\u606F\u3001\u5931\u6548\u7684\u94FE\u63A5\u7B49\u3002",
+      reportBodyProblemHeading: "## \u95EE\u9898",
+      siteSummaryPages: "\u9875\u9762\u6570\uFF1A",
+      siteSummaryReviewed: "\u7ECF\u4EBA\u9605\u8BFB\u5E76\u68C0\u67E5\uFF1A",
+      siteSummaryReviewNote: "\u6BCF\u4E2A\u9875\u9762\u5728 LLM \u751F\u6210\u540E\u5373\u4F1A\u53D1\u5E03\u3002\u4E0E\u6765\u6E90\u7684\u6BD4\u5BF9\u7531\u673A\u5668\u5B8C\u6210\uFF1B\u201C\u7ECF\u4EBA\u9605\u8BFB\u5E76\u68C0\u67E5\u201D\u662F\u6307\u6B64\u540E\u6709\u4EBA\u4ECE\u5934\u8BFB\u5B8C\u3001\u4E14\u672A\u53D1\u73B0\u660E\u663E\u95EE\u9898\u7684\u9875\u9762\u6570\u3002\u6309\u7167\u8BBE\u8BA1\uFF0C\u53EA\u6709\u90E8\u5206\u9875\u9762\u4F1A\u7531\u4EBA\u9605\u8BFB\u2014\u2014\u8FD9\u4E2A\u6570\u5B57\u5E76\u4E0D\u4EE5\u8FBE\u5230\u603B\u6570\u4E3A\u76EE\u6807\uFF0C\u4E5F\u4E0D\u662F\u5B8C\u6574\u7684\u8D28\u91CF\u4FDD\u8BC1\u3002",
+      siteSummaryAiReviewed: "\u5DF2\u4E0E\u6765\u6E90\u6BD4\u5BF9\uFF1A",
+      siteSummaryAiReviewNote: "\u201C\u5DF2\u4E0E\u6765\u6E90\u6BD4\u5BF9\u201D\u662F\u6307\u5728\u751F\u6210\u65F6\u4E0E\u5176\u81EA\u8EAB\u6765\u6E90\u8FDB\u884C\u8FC7\u6BD4\u5BF9\u7684\u9875\u9762\u6570\u3002\u8BE5\u6BD4\u5BF9\u53EA\u6DB5\u76D6\u4E0E\u8FD9\u4E9B\u6765\u6E90\u662F\u5426\u4E00\u81F4\uFF0C\u4E0D\u6D89\u53CA\u5176\u4ED6\u65B9\u9762\u2014\u2014\u4E0D\u6D89\u53CA\u5185\u5BB9\u662F\u5426\u5B8C\u6574\uFF0C\u4E0D\u6D89\u53CA\u5BF9\u771F\u5B9E\u4EBA\u7269\u548C\u7EC4\u7EC7\u7684\u5F71\u54CD\uFF0C\u4E5F\u4E0D\u6D89\u53CA\u4E0E\u4F60\u6240\u4E86\u89E3\u60C5\u51B5\u7684\u51B2\u7A81\u3002"
+    }
+  }
+};
+
 // src/i18n/index.ts
 var locales = {
   "en-US": en_US_default,
-  "ja-JP": ja_JP_default
+  "ja-JP": ja_JP_default,
+  "de-DE": de_DE_default,
+  "es-ES": es_ES_default,
+  "fr-FR": fr_FR_default,
+  "it-IT": it_IT_default,
+  "pl-PL": pl_PL_default,
+  "pt-BR": pt_BR_default,
+  "ru-RU": ru_RU_default,
+  "zh-CN": zh_CN_default
 };
 function i18n(locale) {
   return locales[locale] || en_US_default;
 }
 var LANG_TO_LOCALE = {
   en: "en-US",
-  ja: "ja-JP"
+  ja: "ja-JP",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+  it: "it-IT",
+  pl: "pl-PL",
+  pt: "pt-BR",
+  ru: "ru-RU",
+  zh: "zh-CN"
 };
 function resolveLocale(frontmatterLang, cfgLocale) {
   if (typeof frontmatterLang === "string") {
@@ -256,6 +581,8 @@ function resolveOriginalPageInfo(frontmatter, allFiles, cfg) {
 var REPORT_NOTE_ID = "wikicommit-banner-report-note";
 var AI_REVIEW_AT_FIELD = "ai_review_at";
 var AI_REVIEW_MODEL_FIELD = "ai_review_model";
+var AI_REVIEW_STAGE_FIELD = "ai_review_stage";
+var TRANSLATE_CHECK_STAGE = "translate-check";
 function buildReviewSearchUrl(repo, type, lang, relativePath) {
   if (!repo || !type || !lang || !relativePath) return void 0;
   const slug = relativePath.split("/").pop()?.replace(/\.md$/, "");
@@ -308,7 +635,7 @@ var WikiCommitBanner = ({ fileData, allFiles, cfg }) => {
   const aiReviewAt = frontmatter?.[AI_REVIEW_AT_FIELD];
   const aiReviewBy = frontmatter?.[AI_REVIEW_MODEL_FIELD];
   const aiReviewLine = typeof aiReviewAt === "string" && aiReviewAt.trim() !== "" && typeof aiReviewBy === "string" && aiReviewBy.trim() !== "" ? /* @__PURE__ */ u2("p", { class: "wikicommit-banner__ai-review", children: [
-    t2.aiReviewAt,
+    frontmatter?.[AI_REVIEW_STAGE_FIELD] === TRANSLATE_CHECK_STAGE ? t2.aiReviewOriginalAt : t2.aiReviewAt,
     " ",
     aiReviewAt,
     "\xA0\xA0",

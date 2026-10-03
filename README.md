@@ -7,9 +7,11 @@
 
 A Git-based knowledge management platform. An LLM generates wiki pages from your source documents, and after automated and human review, they're published as a static wiki. It's implemented as a set of SKILL.md files and runs as-is on whatever LLM environment you already subscribe to, such as Claude Code.
 
-**An LLM writes faster than one person can read, so review has to be splittable.** WikiCommit makes a single page the unit of review: one page is one tracking Issue, closed on its own. A reviewer reads that page and nothing else — not the rest of the knowledge base — and never has to wait on anyone else's review. That is what keeps a growing wiki from piling up behind one reader. Being splittable is also what makes it unnecessary to read them all: the machine checks every page against the documents it was written from, and a person reads a sample of those ([Step 3](#step-3-post-merge-review)).
+**The goal is a knowledge base an AI can use, with every page traceable to where it came from — published so that people can read whatever interests them.** Each page is built from sources you register, records exactly which version of which document it came from, and is checked by the machine against those documents; the result of that check is recorded and shown on the published page. People then read the pages they care about. Publishing is why the traceability matters: the person reading a page is not the person who made it, and the record attached to the page is what they have to judge it by.
 
-WikiCommit is an implementation of the *LLM wiki* idea — an LLM that reads your sources and writes and maintains a wiki from them, as sketched in [Andrej Karpathy's LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). What it adds is the review side: every page arrives through a PR, is checked against the documents it was written from, and can be read and signed off by a person on its own. Each page carries a Schema.org `type`, the one field [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (Open Knowledge Format) v0.1 requires, so what the wiki knows is not locked into a format only WikiCommit reads.
+**A wiki is the shape that serves both.** A machine reads its types, links, and sources as structure; a person reads it by following links. Each page is one subject with a Schema.org `type` — the one field [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (Open Knowledge Format) v0.1 requires — so what the wiki knows is not locked into a format only WikiCommit reads, and each page can be checked on its own. An LLM writes the pages so that turning scattered sources into typed pages, and keeping them up to date, is not left to a person's hands.
+
+WikiCommit started as an implementation of the *LLM wiki* idea — an LLM that reads your sources and writes and maintains a wiki from them, as sketched in [Andrej Karpathy's LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). What it adds is checking every page against the documents it was written from, recording a verdict for each page on its own, and sending every change through a PR.
 
 > **Status**: Actively being validated through real-world use in pilot repositories; breaking changes may occur.
 
@@ -130,7 +132,9 @@ That last one matters when an encyclopedia covers your subject. A page written f
 
 ### Step 3: Post-merge review
 
-**The machine checks every page; a person reads some of them.** Each page is compared against the documents it was written from when it is generated, and the WikiLinks are validated before the merge — so the reading is not a re-run of either. What it adds is what no automated check reaches: whether a sentence is unfair to a real person or organization, whether the page conflicts with what you already know, and whether it contradicts another page written in a different batch. Reading every page is not the goal; `/wikicommit-status` lists the ones most worth a second look.
+**An LLM writes faster than one person can read, so review has to be splittable.** WikiCommit makes a single page the unit of review: one page is one tracking Issue, closed on its own. A reviewer reads that page and nothing else — not the rest of the knowledge base — and never has to wait on anyone else's review. That is what keeps a growing wiki from piling up behind one reader.
+
+**The machine checks every page; a person reads some of them.** Being splittable is also what makes it unnecessary to read them all. Each page is compared against the documents it was written from when it is generated, and the WikiLinks are validated before the merge — so the reading is not a re-run of either. What it adds is what no automated check reaches: whether a sentence is unfair to a real person or organization, whether the page conflicts with what you already know, and whether it contradicts another page written in a different batch. Reading every page is not the goal; `/wikicommit-status` lists the ones most worth a second look.
 
 Check the review-tracking Issue (`wikicommit-review` label, automatically created for each page with `review_status: pending`). Closing it states two things: that this page's knowledge reached a person, and that nothing struck them as obviously wrong while reading. It is not a guarantee that the content is correct.
 
@@ -150,7 +154,7 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 
 > Because the Skills are a set of SKILL.md files compliant with the [agentskills.io](https://agentskills.io) standard, they should in principle work with other compatible coding agents such as Codex, but Claude Code is currently the only environment we've verified.
 >
-> **Under Codex, keeping a writing Skill from starting on its own rests on different mechanisms.** Nine Skills (`collect`, `fix`, `init`, `reconcile`, `remove`, `review`, `schema-propose`, `synthesize`, `update`) carry `disable-model-invocation: true`, a Claude Code setting that Codex ignores, and `.claude/settings.json`'s `skillOverrides` is likewise read only by Claude Code. For Codex each of those nine also ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`, and its description says to use it only when explicitly asked. Whether Codex actually honors that setting has not been verified on Codex itself yet; until it has, invoke those Skills by name (`$wikicommit-…`) and review what they leave before running `wikicommit-merge`.
+> **Under Codex, keeping a writing Skill from starting on its own rests on different mechanisms.** Eleven Skills (`collect`, `fix`, `init`, `organize`, `reconcile`, `relate`, `remove`, `review`, `schema-propose`, `synthesize`, `update`) carry `disable-model-invocation: true`, a Claude Code setting that Codex ignores, and `.claude/settings.json`'s `skillOverrides` is likewise read only by Claude Code. For Codex each of those eleven also ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`, and its description says to use it only when explicitly asked. Whether Codex actually honors that setting has not been verified on Codex itself yet; until it has, invoke those Skills by name (`$wikicommit-…`) and review what they leave before running `wikicommit-merge`.
 >
 > **WikiCommit needs network access and write access to `.git`.** The network is used to fetch URL sources (`/wikicommit-generate <url>`), by `gh` (the PR, the merge and the tracking Issues in `/wikicommit-merge`) and by lychee; `.git` is written by `/wikicommit-merge` (branch, commit) and by `/wikicommit-init` (its foundation commit). **Codex's default sandbox blocks both.** According to Codex's documentation ([Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security), checked 2026-09-24), an interactive session in a version-controlled folder defaults to `workspace-write`, where network access is off and `.git` (together with `.agents` and `.codex`) is kept read-only:
 >
@@ -178,16 +182,24 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 
 WikiCommit does not provide LLM inference — you bring your own Claude Code, GitHub Copilot or API contract, and that contract has a context requirement. `/wikicommit-generate` is the command that sets it: a fixed overhead of about 49K, plus a per-source cost for every source processed in the same run.
 
-**That per-source cost varies a lot with the source** — a short blog post is far lighter, a PDF report far heavier. The two columns below are two measured points (about 15K from a single Japanese Wikipedia article, about 22K back-calculated from a mixed 30-source run), not a specification.
+**That per-source cost varies a lot with the source** — a short blog post is far lighter, a PDF report far heavier. The two columns below are two measured points (about 15K from a single Japanese Wikipedia article, about 22K back-calculated from a mixed 30-source run), not a specification. Each cell is (window − 49K) ÷ per-source cost, rounded down, so it is the largest number of sources that still fits. **All of these figures were measured in Claude Code**; another agent may load the Skill differently and count tokens differently (especially for Japanese), so treat them as an estimate there until they are measured.
 
 | Context window | at 15K/source | at 22K/source |
 |---|---|---|
-| 200K | about 10 | about 7 |
+| 128K | about 5 | about 3 |
+| 200K | about 10 | about 6 |
+| 272K | about 14 | about 10 |
 | 1M | about 63 | about 43 |
 
-**Those are the points where a run stops fitting, not a setting you can raise.** Past them the session compacts mid-run, the Skill's own instructions are partly lost, and **the output still looks normal**. `/wikicommit-generate` asks before processing more than 5 sources in one run, but that is a prompt rather than a limit — answering "process all" is supported, and the table is what it costs. Splitting the work across separate runs is the reliable way past them: the sources you leave keep their state, and the next run picks them up.
+**Those are the points where a run stops fitting, not a setting you can raise.** Past them the agent has to shrink the conversation mid-run, and what it keeps of the Skill's own instructions depends on the agent — in Claude Code it re-attaches only the first 5,000 tokens of each Skill, so most of the steps are lost, and **the output still looks normal**. `/wikicommit-generate` asks before processing more than 5 sources in one run, but that is a prompt rather than a limit — answering "process all" is supported, and the table is what it costs. Splitting the work across separate runs is the reliable way past them: the sources you leave keep their state, and the next run picks them up.
 
-In Claude Code, Opus 5 / 4.8 / 4.6 and Sonnet 4.6 default to a 200K window; Sonnet 5 and Fable 5 / 5.1 are natively 1M, and Opus reaches 1M with the `[1m]` suffix depending on your plan (figures as of 2026-09; see [Claude Code's model configuration docs](https://code.claude.com/docs/en/model-config) for the current ones).
+**At 128K, even the 5-source default does not fit** at the heavier per-source cost (about 159K), so answering "first 5 only" is not enough there. Name one source at a time instead — `/wikicommit-generate <path|url>` processes only the source you pass — or switch to a model with a larger window.
+
+Window sizes depend on the agent and the model you pick (figures as of 2026-10):
+
+- **Claude Code**: Opus 5 / 4.8 / 4.6 and Sonnet 4.6 default to 200K; Sonnet 5 and Fable 5 / 5.1 are natively 1M, and Opus reaches 1M with the `[1m]` suffix depending on your plan ([model configuration docs](https://code.claude.com/docs/en/model-config)).
+- **Codex**: the models in Codex's own catalog default to a 272K window ([`models.json` in openai/codex](https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json)).
+- **GitHub Copilot**: GitHub does not publish a default size per model; the latest models offer an extended 1M window in VS Code and Copilot CLI ([supported models](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities)). In Copilot CLI, `/context` shows the window of the model in use.
 
 You can measure your own sources after a single run: `grep extracted_tokens .wikicommit/source/**/*.md` — that field counts the extraction alone, so expect it to read lower than the per-source figures above. The breakdown of the fixed overhead, and exactly what a compaction drops, are in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6.
 
@@ -277,7 +289,7 @@ for deletion by `/wikicommit-update`. Keep your own notes somewhere else in the 
 
 ## Skills List
 
-The main path — all 17 Skills are in the table below. **The write side stops at a local write; every Git operation happens in `/wikicommit-merge`.**
+The main path — all 19 Skills are in the table below. **The write side stops at a local write; every Git operation happens in `/wikicommit-merge`.**
 
 ```mermaid
 flowchart TD
@@ -313,6 +325,8 @@ The inside of `/wikicommit-generate` — the four passes from text extraction th
 | 15 | Operations/Preview | `/wikicommit-serve [--build]` | Build and preview the wiki locally |
 | 16 | Operations/Preview | `/wikicommit-update` | Bring the repository in step with the installed distribution (PR, not auto-merged) |
 | 17 | Operations/Preview | `/wikicommit-reconcile <--source <path\|url>\|--type <Type>\|--all>` | Put sources back in the queue after a policy, type template or generation rule changed |
+| 18 | Review/Quality | `/wikicommit-relate [<Type/slug> ...]` | Decide how pages relate (same, broader, related, distinct, series) and record it |
+| 19 | Operations/Preview | `/wikicommit-organize <Type>` | Sort a Type's pages into groups shown in its index and the site's left pane, without rewriting any page (PR, not auto-merged) |
 
 ## Tech Stack
 

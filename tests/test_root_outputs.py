@@ -217,6 +217,7 @@ EXPECTED_UPDATE_POLICIES = {
     ".wikicommit/view": ("skip", "the user's pages"),
     ".wikicommit/source": ("skip", "the user's source management files"),
     ".wikicommit/review": ("skip", "the wiki's own accumulated review history"),
+    ".wikicommit/groups": ("skip", "the user's grouping of a Type's pages, written by /wikicommit-organize"),
     ".gitmodules": ("skip", "the user's own git submodule add"),
     "quartz": ("skip", "the user's own git submodule add"),
     ".claude/settings.json": ("review", "the user's own settings file; init merges 3 keys in"),

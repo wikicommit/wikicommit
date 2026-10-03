@@ -76,11 +76,11 @@ def test_guard_b_and_empty_extraction_still_fail():
     )
 
 
-def test_pass_2b_below_the_bar_defers_rather_than_declining():
+def test_a_non_interactive_pass_2b_candidate_defers_rather_than_declining():
     text = _flat((SKILLS / "wikicommit-generate" / "references"
                   / "pass2b-type.md").read_text(encoding="utf-8"))
     assert _flat("**defer this source**") in text, (
-        "a Pass 2b candidate below the strict bar is being declined again, so the "
+        "a non-interactive Pass 2b candidate is being declined again, so the "
         "entity is written under an ancestor type and nothing can reclassify it"
     )
     assert _flat("**Deferring is not persisting the candidate**") in text, (
@@ -89,12 +89,23 @@ def test_pass_2b_below_the_bar_defers_rather_than_declining():
     )
 
 
-def test_the_strict_auto_approval_path_is_untouched():
-    """Issue #507's bar is what makes an unattended approval defensible; deferral was
-    added underneath it, not in place of it."""
+def test_a_non_interactive_run_never_approves_a_type():
+    """Issue #1069 withdrew Issue #507's strict auto-approval bar.
+
+    The after-the-fact check it relied on (the merge PR) auto-merges seconds later
+    and nobody reads it, and a wrong approval cannot be undone: no Skill edits a
+    type file or reclassifies the pages written under it. So every candidate in a
+    non-interactive run defers the source, and the only `provenance` this path
+    stamps is the one a human answer produces.
+    """
     text = _flat((SKILLS / "wikicommit-generate" / "references"
                   / "pass2b-type.md").read_text(encoding="utf-8"))
-    assert _flat("treat as **approved without ever showing the prompt** (default **Y**)") in text
+    assert "approved without ever showing the prompt" not in text, (
+        "the non-interactive auto-approval path is back; a type is being added with "
+        "no human and no Skill can take it back"
+    )
+    assert _flat("**defer this source**, whatever the candidate") in text
+    assert _flat("**`provenance` is `generate-interactive`**") in text
 
 
 def test_an_ambiguous_entity_is_recorded_on_the_management_file():

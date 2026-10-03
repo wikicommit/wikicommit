@@ -137,7 +137,7 @@ import yaml
 
 from _frontmatter import parse_frontmatter, parse_frontmatter_and_body_text
 from _version import get_version
-from _wikilink import ENTITY_DIR, LEGACY_ENTITY_PREFIX, VIEW_DIR
+from _wikilink import ENTITY_DIR, LEGACY_ENTITY_PREFIX, VIEW_DIR, normalize_entity_prefix
 from reset_review_on_content_change import BOOKKEEPING_FIELDS
 
 REVIEW_DIR = Path(".wikicommit/review")
@@ -147,7 +147,7 @@ KINDS = ("ai", "human")
 # Which caller produced the record. Every value here is a real call site; a new one
 # has to be added deliberately rather than passed as free text, because
 # check_review_coverage.py groups by it.
-STAGES = ("generate-pass4", "review-skill", "synthesize-step5.5", "issue-close")
+STAGES = ("generate-pass4", "review-skill", "synthesize-step5.5", "issue-close", "translate-check")
 
 # `pass` / `fail` are the subagent's own verdict. `discarded` is the outcome Pass 4
 # step 5 reaches when the retry budget runs out: the page was never written, which is
@@ -231,10 +231,21 @@ def compute_page_content_hash(page_path: Path) -> str:
     normalized the same way that script normalizes it, so the digest depends on the
     values rather than on key order or line endings.
     """
-    text = page_path.read_text(encoding="utf-8-sig")
+    return compute_content_hash(page_path.read_text(encoding="utf-8-sig"), page_path)
+
+
+def compute_content_hash(text: str, label: object = "page") -> str:
+    """`compute_page_content_hash()` for page text already in memory.
+
+    Split out so `check_review_coverage.py` can hash a variant of a page's text
+    (the page with a merge's link rewrite undone) by exactly the same rule as
+    the page on disk. `label` only names the page in an error.
+    """
+    if text.startswith("\ufeff"):
+        text = text[1:]
     fm, err, body = parse_frontmatter_and_body_text(text)
     if err:
-        raise RecordError(f"{page_path}: {err}")
+        raise RecordError(f"{label}: {err}")
     content_fields = {k: v for k, v in (fm or {}).items() if k not in BOOKKEEPING_FIELDS}
     canonical = yaml.safe_dump(
         content_fields, sort_keys=True, allow_unicode=True, default_flow_style=False
@@ -243,12 +254,44 @@ def compute_page_content_hash(page_path: Path) -> str:
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def page_evidence_entries(fm: dict) -> list[dict]:
+    """The entries that pin what a review of this page was checked against.
+
+    `sources[]` for a page generated from documents, `derived_from` for a view
+    page, and — for a translation — one entry built from `translated_from` and
+    `source_commit` (Issue #1031): the evidence of a translation check is the
+    original page at the commit it was translated from. `translated_from` is a
+    single string and `source_commit` its sibling field, so the entry is
+    assembled rather than read. An empty `source_commit` (the original was not
+    committed yet) is kept as-is: the record then cannot say which version it
+    was checked against, but the verdict itself still stands.
+
+    Shared with check_review_coverage.py's staleness check, which compares a
+    record's snapshot against this same function applied to the page as it is
+    now — two readers of one shape, so they cannot disagree about what counts
+    as the page's evidence.
+    """
+    for key in ("sources", "derived_from"):
+        value = fm.get(key)
+        if isinstance(value, list):
+            return [entry for entry in value if isinstance(entry, dict)]
+    original = fm.get("translated_from")
+    if isinstance(original, str) and original.strip():
+        commit = fm.get("source_commit")
+        return [{
+            "path": normalize_entity_prefix(original.strip()),
+            "source_commit": str(commit) if commit is not None else "",
+        }]
+    return []
+
+
 def reviewed_sources_for(page_path: Path) -> list[dict]:
     """Snapshot the sources a review of this page had in front of it.
 
     An entity page contributes its `sources[]` verbatim; a view page contributes its
     `derived_from` entries, which occupy the same slot for a page whose evidence is
-    other pages rather than external documents.
+    other pages rather than external documents; a translation contributes its
+    original page and `source_commit` (`page_evidence_entries()`).
 
     This duplicates the page's own frontmatter at the moment of writing, and that is
     the point: the page's copy is the current value, this one is the value at review
@@ -258,11 +301,7 @@ def reviewed_sources_for(page_path: Path) -> list[dict]:
     fm, err = parse_frontmatter(page_path)
     if err or not fm:
         return []
-    for key in ("sources", "derived_from"):
-        value = fm.get(key)
-        if isinstance(value, list):
-            return [entry for entry in value if isinstance(entry, dict)]
-    return []
+    return page_evidence_entries(fm)
 
 
 def sources_from_management_files(paths: list[str]) -> list[dict]:
@@ -486,6 +525,13 @@ def build_record(args, payload: dict, page_path: Path, page_rel: str) -> tuple[d
 
     if args.sources_from:
         reviewed_sources = sources_from_management_files(args.sources_from)
+    elif args.stage == "translate-check" and args.result == "discarded":
+        # Issue #1031: re-translating a STALE pair that ran out of retries leaves
+        # the *previous* translation on disk, and its source_commit names the
+        # original this run did not check against. Reading it would make the
+        # record claim a version it never saw, so a discarded translation check
+        # records no evidence version at all.
+        reviewed_sources = []
     elif page_exists:
         reviewed_sources = reviewed_sources_for(page_path)
     else:

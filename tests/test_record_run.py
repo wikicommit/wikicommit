@@ -254,6 +254,13 @@ def test_each_writing_skill_invokes_the_recorder(skill):
     held while the normal close could have been dropped without a word.
     """
     text = _instructions(skill)
+    if skill == "wikicommit-generate":
+        # Since Issue #1085 the driver opens and closes this Skill's record: it
+        # calls record_run.open_record() at `start`, and the last step's `done`
+        # closes it. The closing report must still be a step the run has to reach.
+        assert "driver.py start --workflow" in text, skill
+        assert "driver.py done" in text and "--step completion" in text, skill
+        return
     assert f"record_run.py start --skill {skill}" in text, skill
     assert "record_run.py end" in text, skill
 
@@ -270,10 +277,17 @@ def test_the_generate_notice_and_its_closing_call_stay_in_the_same_file():
     notice = SKILLS / "wikicommit-generate" / "references" / "completion-notice.md"
     assert notice.is_file(), "completion-notice.md is gone; see Issue #894"
     body = notice.read_text(encoding="utf-8")
-    assert "record_run.py end" in body, (
+    # Since Issue #1085 the record is closed by reporting the last step to the
+    # driver, and that report is still made from this file.
+    assert "--step completion" in body, (
         "the call that closes a run normally is no longer in completion-notice.md, "
         "so skipping that file no longer shows up as an unclosed record"
     )
+    workflow = yaml.safe_load((SKILLS / "wikicommit-generate" / "workflow.yaml").read_text(encoding="utf-8"))
+    assert workflow["steps"][-1]["id"] == "completion", (
+        "completion is no longer the last step, so the record can close before the notice"
+    )
+    assert workflow["steps"][-1]["instructions"] == "references/completion-notice.md"
 
     skill = (SKILLS / "wikicommit-generate" / "SKILL.md").read_text(encoding="utf-8")
     assert "references/completion-notice.md" in skill, (
@@ -437,10 +451,22 @@ def test_generate_stamps_every_pass_it_declares():
     missing on every single run, which trains a reader to ignore the line."""
     sys.path.insert(0, str(SCRIPT.parent))
     from record_run import EXPECTED_PASSES
-    text = _instructions("wikicommit-generate")
-    assert "record_run.py checkpoint" in text
-    for name in EXPECTED_PASSES["wikicommit-generate"]:
-        assert name in text, name
+    from record_run import REGENERATE_PASSES
+    generate = SKILLS / "wikicommit-generate"
+
+    def stamped(workflow_file: str) -> list[str]:
+        # Since Issue #1085 the driver writes the stamps, from the steps marked
+        # `stamp: true` in the Skill's workflow definition.
+        data = yaml.safe_load((generate / workflow_file).read_text(encoding="utf-8"))
+        names = []
+        for step in data["steps"]:
+            for sub in step.get("steps", [step]):
+                if sub.get("stamp"):
+                    names.append(sub["id"])
+        return names
+
+    assert stamped("workflow.yaml") == list(EXPECTED_PASSES["wikicommit-generate"])
+    assert stamped("workflow-regenerate.yaml") == list(REGENERATE_PASSES["wikicommit-generate"])
 
 
 def test_no_instruction_file_points_at_a_moved_section_as_if_it_were_inline():

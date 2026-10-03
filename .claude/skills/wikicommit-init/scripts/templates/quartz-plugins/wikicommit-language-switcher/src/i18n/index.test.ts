@@ -13,7 +13,7 @@ describe("i18n", () => {
   })
 
   it("falls back to en-US for an unsupported locale", () => {
-    expect(i18n("fr-FR")).toBe(enUS)
+    expect(i18n("ko-KR")).toBe(enUS)
   })
 
   it("falls back to en-US when no locale is given", () => {

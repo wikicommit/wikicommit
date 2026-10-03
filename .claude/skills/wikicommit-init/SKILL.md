@@ -14,7 +14,7 @@ Generates WikiCommit's `.wikicommit/` directory structure, schema, and configura
 
 Confirm the following with the user (use the default value if there is no answer):
 
-1. **Primary language** (primary_lang): `en` (default). This is the source language of the wiki the user is creating (not the language of the WikiCommit tool itself). Users who want a Japanese-language wiki should explicitly answer `ja`. **Any other answer is supported and produces a wiki in that language, but WikiCommit's own labels — the review banner, the sources box, page properties, and the generated index/overview pages — have translations only for `en` and `ja` and render in English on every other wiki** (page bodies and Quartz's own chrome still follow the chosen language). `init.py` prints this as a `NOTE:` line when it applies, so there is no need to pre-empt it here; the published pages deliberately say nothing about it, which makes that line the only place it is stated.
+1. **Primary language** (primary_lang): `en` (default). This is the source language of the wiki the user is creating (not the language of the WikiCommit tool itself). Users who want a Japanese-language wiki should explicitly answer `ja`. **Any other answer is supported and produces a wiki in that language, but WikiCommit's own labels — the review banner, the sources box, page properties, and the generated index/overview pages — have translations for ten languages (`en`, `ja`, `de`, `es`, `fr`, `it`, `pl`, `pt`, `ru`, `zh`) and render in English on a wiki in any other language** (page bodies and Quartz's own chrome still follow the chosen language). `init.py` prints this as a `NOTE:` line when it applies, so there is no need to pre-empt it here; the published pages deliberately say nothing about it, which makes that line the only place it is stated.
 2. **Wiki theme** (theme): free text, empty (default, skip with a blank Enter). Used by `wikicommit-generate`'s exclude judgment to automatically skip entities unrelated to the wiki's topic; leaving it empty disables that judgment (all entities are generated as before). **It answers "what is this wiki about" — and only that.** Two neighbouring questions have their own files, both of which `init.py` writes a template for in Processing Flow step 2: "which sources do we take in" is `.wikicommit/source-policy.md`, and "granted a subject is relevant, may we write about it at all" is `.wikicommit/entity-policy.md`. Neither exists yet at this point, so name them as the place to write those policies *after* init finishes rather than telling the user to open one now. Say so when prompting, without spelling out all three axes — the prompt only has to keep the answer to this one: a source-selection rule written here is read only when deciding whether an already-ingested entity gets a page, where it is pure noise, and is never read at the point it would matter; a "do not write about X" rule written here is read at the right moment but gets weighed as relevance, which is a different question and gives a different answer for a subject that is squarely on-topic and still off-limits. Example prompt:
 
    ```
@@ -221,8 +221,8 @@ Confirm the following with the user (use the default value if there is no answer
    `NOTE: quartz.config.yaml: no --repo-url resolved ...` line — when you see it, tell the user, and
    that they can add the link by hand in `quartz.config.yaml` once the repository has a remote.
 
-   `init.py` prints a second `NOTE:` line — `NOTE: WikiCommit ships its own labels in en/ja only ...` —
-   when `primary_lang` is neither `en` nor `ja`. **Relay it to the user too.** Prerequisite 1
+   `init.py` prints a second `NOTE:` line — `NOTE: WikiCommit ships its own labels in en/ja/de/... only ...` —
+   when `primary_lang` is not one of the ten languages listed in Prerequisite 1. **Relay it to the user too.** Prerequisite 1
    deliberately does not pre-empt it, and the published pages deliberately say nothing about the
    fallback, so this line is the only place anyone is told; left sitting in `init.py`'s output it
    reaches nobody. Say what falls back to English and
@@ -708,7 +708,7 @@ Confirm the following with the user (use the default value if there is no answer
    `git add` after the commit could only leave something staged and uncommitted. Give the commit the
    same trailers `wikicommit-merge` writes, passed through a quoted heredoc:
 
-   <!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update and -init; tests/test_commit_trailer_vendor_table.py holds them together) -->
+   <!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update, -init and -organize; tests/test_commit_trailer_vendor_table.py holds them together) -->
    **Commit trailers.** Always write `Generated-By:   <current model ID>`: the ID of the model actually running this Skill, exactly as the runtime reports it — the same self-reported value `wikicommit-generate` writes into a page's `generated_by` (keep any suffix; do not shorten or normalize it; never hardcode one). Then choose `<Co-Authored-By line>` from the start of that same ID, so the two lines can never name different vendors:
 
    | `<current model ID>` starts with | `<Co-Authored-By line>` |

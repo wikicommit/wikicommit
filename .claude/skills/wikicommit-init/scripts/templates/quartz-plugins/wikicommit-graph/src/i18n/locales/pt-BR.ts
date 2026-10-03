@@ -11,6 +11,8 @@ export default {
         degreeMin: "Mín",
         degreeMax: "Máx",
         degreeNoBound: "0 = sem limite",
+        labelLimit: "Rótulos na tela",
+        labelLimitHint: "0 = conforme o zoom",
         reset: "Redefinir",
         legend: "Legenda",
         legendPages: "Páginas",

@@ -11,6 +11,8 @@ export default {
         degreeMin: "Мин",
         degreeMax: "Макс",
         degreeNoBound: "0 = шектеусіз",
+        labelLimit: "Экрандағы белгілер",
+        labelLimitHint: "0 = масштабқа қарай",
         reset: "Қалпына келтіру",
         legend: "Шартты белгілер",
         legendPages: "Беттер",

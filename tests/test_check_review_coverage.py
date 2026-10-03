@@ -559,3 +559,161 @@ def test_the_key_is_present_even_with_no_review_tree(tmp_path):
     "this build does not have it" would look the same."""
     write_page(tmp_path)
     assert "human_notes=0" in run(tmp_path).stdout
+
+
+# --- translate-check (Issue #1031) ---------------------------------------------
+
+TRANSLATION_REL = ".wikicommit/entity/en/Person/yamada-taro.md"
+
+
+def write_translation(root: Path, *, body: str = "Body.") -> Path:
+    page = root / TRANSLATION_REL
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\n"
+        'title: "Taro Yamada"\n'
+        "lang: en\n"
+        'type: "schema:Person"\n'
+        "review_status: pending\n"
+        f"translated_from: {PAGE_REL}\n"
+        f'source_commit: "{"a" * 40}"\n'
+        "---\n\n"
+        f"{body}\n",
+        encoding="utf-8",
+    )
+    return page
+
+
+def translate_check(cwd: Path) -> None:
+    record(cwd, TRANSLATION_REL, "--kind", "ai", "--stage", "translate-check",
+           "--model", "m", "--attempts", "1", "--result", "pass")
+
+
+def test_a_checked_translation_is_not_unreviewed(tmp_path):
+    """No code change was needed for this; the test pins that it stays so."""
+    write_page(tmp_path)
+    ai(tmp_path)
+    write_translation(tmp_path)
+    translate_check(tmp_path)
+    out = run(tmp_path).stdout
+    assert "UNREVIEWED:" not in out
+    assert "STALE_REVIEW:" not in out
+
+
+def test_an_updated_original_does_not_make_the_translation_check_stale(tmp_path):
+    """check_translation_status.py's STALE already reports it; a second line
+    for the same fact, with the same fix, would only be noise."""
+    write_page(tmp_path)
+    ai(tmp_path)
+    write_translation(tmp_path)
+    translate_check(tmp_path)
+    write_page(tmp_path, body="原文を書き換えた。")
+    ai(tmp_path)
+    out = run(tmp_path).stdout
+    assert "STALE_REVIEW: " + TRANSLATION_REL not in out
+
+
+def test_an_edited_translation_goes_stale(tmp_path):
+    write_page(tmp_path)
+    ai(tmp_path)
+    write_translation(tmp_path)
+    translate_check(tmp_path)
+    write_translation(tmp_path, body="Edited by hand.")
+    out = run(tmp_path).stdout
+    assert f"STALE_REVIEW: {TRANSLATION_REL} (page content changed" in out
+
+
+# A merge's link rewrite does not make a reviewed page stale. `rewrite_merged_links.py`
+# turns `[[Type/old]]` into `[[Type/new]]` after a person decided the two are the same
+# concept, and the pages it rewrites keep their `review_status`; the check undoes each
+# merge recorded in `relations.yml` before calling the text changed.
+
+REWRITE = SCRIPTS / "rewrite_merged_links.py"
+
+
+def merge(root: Path, old: str, new: str) -> None:
+    """Record `old` merged into `new` the way the merge steps leave it, then rewrite links."""
+    for ident in (old, new):
+        if not (root / f".wikicommit/entity/ja/{ident}.md").exists():
+            write_page(root, f".wikicommit/entity/ja/{ident}.md")
+    removed = root / f".wikicommit/entity/ja/{old}.md"
+    removed.write_text(
+        removed.read_text(encoding="utf-8").replace(
+            "review_status: pending\n",
+            "review_status: pending\nstatus: removed\nremoved_at: \"2026-10-01\"\n"
+            f"removed_reason: merged\nmerged_into: .wikicommit/entity/ja/{new}.md\n",
+        ),
+        encoding="utf-8",
+    )
+    relations = root / ".wikicommit/relations.yml"
+    existing = relations.read_text(encoding="utf-8") if relations.exists() else ""
+    relations.write_text(
+        existing
+        + f"- relation: same\n  pages: [{new}, {old}]\n  merged_into: {new}\n"
+        "  merged_aliases: []\n  merged_at: \"2026-10-01\"\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(REWRITE)], capture_output=True, text=True, cwd=root, check=False
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_merge_link_rewrite_does_not_make_the_page_stale(tmp_path):
+    write_page(tmp_path, body="[[Person/old-name]] と働いた。")
+    ai(tmp_path)
+    merge(tmp_path, "Person/old-name", "Person/new-name")
+    assert "[[Person/new-name]]" in (tmp_path / PAGE_REL).read_text(encoding="utf-8")
+    assert "STALE_REVIEW: " + PAGE_REL not in run(tmp_path).stdout
+
+
+def test_the_same_link_change_without_a_recorded_merge_is_stale(tmp_path):
+    """The tolerance comes from the merge record, not from links being ignored."""
+    write_page(tmp_path, body="[[Person/old-name]] と働いた。")
+    ai(tmp_path)
+    write_page(tmp_path, body="[[Person/new-name]] と働いた。")
+    assert "STALE_REVIEW: " + PAGE_REL in run(tmp_path).stdout
+
+
+def test_a_merge_rewrite_plus_a_prose_edit_is_stale(tmp_path):
+    write_page(tmp_path, body="[[Person/old-name]] と働いた。")
+    ai(tmp_path)
+    merge(tmp_path, "Person/old-name", "Person/new-name")
+    write_page(tmp_path, body="[[Person/new-name]] と長く働いた。")
+    assert "STALE_REVIEW: " + PAGE_REL in run(tmp_path).stdout
+
+
+def test_a_page_that_linked_to_both_before_the_merge_is_stale(tmp_path):
+    """Known limit: only the full replacement is tried, never a partial one."""
+    write_page(tmp_path, body="[[Person/new-name]] と [[Person/old-name]]。")
+    ai(tmp_path)
+    merge(tmp_path, "Person/old-name", "Person/new-name")
+    assert "STALE_REVIEW: " + PAGE_REL in run(tmp_path).stdout
+
+
+def test_a_chain_of_merges_is_followed(tmp_path):
+    """Reviewed before either merge: A, merged into B, later B into C, now reads C."""
+    write_page(tmp_path, body="[[Person/a-name]] と働いた。")
+    ai(tmp_path)
+    merge(tmp_path, "Person/a-name", "Person/b-name")
+    merge(tmp_path, "Person/b-name", "Person/c-name")
+    assert "[[Person/c-name]]" in (tmp_path / PAGE_REL).read_text(encoding="utf-8")
+    assert "STALE_REVIEW: " + PAGE_REL not in run(tmp_path).stdout
+
+
+def test_a_review_between_two_merges_still_matches(tmp_path):
+    write_page(tmp_path, body="[[Person/a-name]] と働いた。")
+    merge(tmp_path, "Person/a-name", "Person/b-name")
+    ai(tmp_path)
+    merge(tmp_path, "Person/b-name", "Person/c-name")
+    assert "STALE_REVIEW: " + PAGE_REL not in run(tmp_path).stdout
+
+
+def test_an_unreadable_relations_file_falls_back_to_plain_comparison(tmp_path):
+    write_page(tmp_path, body="[[Person/old-name]] と働いた。")
+    ai(tmp_path)
+    merge(tmp_path, "Person/old-name", "Person/new-name")
+    (tmp_path / ".wikicommit/relations.yml").write_text("[unclosed\n", encoding="utf-8")
+    result = run(tmp_path)
+    assert result.returncode == 0
+    assert "STALE_REVIEW: " + PAGE_REL in result.stdout

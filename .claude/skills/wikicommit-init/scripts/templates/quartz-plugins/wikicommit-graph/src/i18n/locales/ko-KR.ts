@@ -11,6 +11,8 @@ export default {
         degreeMin: "최소",
         degreeMax: "최대",
         degreeNoBound: "0 = 제한 없음",
+        labelLimit: "화면의 라벨 수",
+        labelLimitHint: "0 = 확대 수준에 따름",
         reset: "초기화",
         legend: "범례",
         legendPages: "페이지",

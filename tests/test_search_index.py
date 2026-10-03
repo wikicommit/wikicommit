@@ -760,3 +760,44 @@ def test_a_rebuild_that_cannot_replace_the_index_still_searches_the_old_one(
 
 def test_template_copy_matches_canonical_script():
     assert TEMPLATE_SCRIPT.read_text(encoding="utf-8") == SCRIPT.read_text(encoding="utf-8")
+
+
+# ── aliases (Issue #1078) ────────────────────────────────────────────────────
+
+def test_query_finds_a_page_by_its_alias_alone(tmp_path):
+    """The source's own wording may survive only as an alias — the title and
+    body are in primary_lang, and the wiki may have no translation into the
+    source's language — so the alias has to be searchable."""
+    write_page(
+        tmp_path, "en", "DefinedTerm", "testing-skyscraper",
+        textwrap.dedent("""\
+            title: "Testing Skyscraper"
+            lang: en
+            type: "schema:DefinedTerm"
+            aliases: ["テストスカイスクレイパー"]
+            """),
+        body="A way of layering tests.\n",
+    )
+    result = run(["query", "テストスカイスクレイパー"], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "testing-skyscraper.md" in result.stdout
+    assert "hits=1" in result.stdout
+
+
+def test_an_index_from_the_previous_format_is_rebuilt(tmp_path):
+    """INDEX_FORMAT is mixed into the fingerprint, so an index written before
+    the aliases column existed is rebuilt rather than trusted."""
+    import sqlite3
+
+    write_page(
+        tmp_path, "en", "DefinedTerm", "x",
+        'title: "X term"\nlang: en\ntype: "schema:DefinedTerm"\naliases: ["別名テスト"]\n',
+    )
+    assert run(["build"], cwd=tmp_path).returncode == 0
+    con = sqlite3.connect(tmp_path / DB_RELATIVE_PATH)
+    con.execute("UPDATE meta SET value = 'stale' WHERE key = 'fingerprint'")
+    con.commit()
+    con.close()
+    result = run(["query", "別名テスト"], cwd=tmp_path)
+    assert "NOTE: search index was stale" in result.stdout
+    assert "hits=1" in result.stdout

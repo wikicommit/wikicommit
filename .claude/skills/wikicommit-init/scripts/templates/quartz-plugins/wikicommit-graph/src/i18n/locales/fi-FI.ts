@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Maks",
         degreeNoBound: "0 = ei rajaa",
+        labelLimit: "Nimiöitä näkymässä",
+        labelLimitHint: "0 = zoomauksen mukaan",
         reset: "Palauta",
         legend: "Selite",
         legendPages: "Sivut",
@@ -18,7 +20,8 @@ export default {
         legendVisited: "Vierailtu",
         legendUnvisited: "Ei vierailtu",
         legendVisitedHint: "Sivut, jotka olet avannut tässä selaimessa",
-        legendTagsAlways: "Tunnisteet piirretään aina tällä värillä riippumatta siitä, oletko avannut ne",
+        legendTagsAlways:
+          "Tunnisteet piirretään aina tällä värillä riippumatta siitä, oletko avannut ne",
       },
     },
   },

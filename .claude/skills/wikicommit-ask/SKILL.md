@@ -7,7 +7,7 @@ description: Answer a question from the wiki's own pages, citing them, with cros
 
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to this Skill's directory — the one holding this `SKILL.md`, which the runtime names when it loads the Skill — not to the repository root, because the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there (`python <this Skill's directory>/scripts/…`). Paths starting with `.wikicommit/` are repository-root paths as before.
 
-A RAG-style skill that answers questions grounded in the content of `.wikicommit/entity/`. Search is delegated to the shared script `.wikicommit/scripts/search_index.py`, and this skill implements `CLAUDE.md`'s cross-lingual search policy (agent-driven query translation: search multiple times, once in the original language and once per language configured in `config.yml`). Besides calling `search_index.py` multiple times, this skill has one dedicated script of its own, `scripts/resolve_source_cache_path.py`, used only by the opt-in `--include-source` path in Step 4.3.
+A RAG-style skill that answers questions grounded in the content of `.wikicommit/entity/`. Search is delegated to the shared script `.wikicommit/scripts/search_index.py`, and this skill implements `CLAUDE.md`'s cross-lingual search policy (agent-driven query translation: search multiple times, once in the original language and once per language configured in `config.yml`). Besides calling `search_index.py` multiple times, the opt-in `--include-source` path in Step 4.3 uses three more: this skill's own `scripts/resolve_source_cache_path.py` (find a source's cache, and settle a fresh fetch), and, when a URL source has no cache, `../wikicommit-generate/scripts/add_source.py --fetch-url` and `.wikicommit/scripts/check_extraction_quality.py check-fetch-capability` — the same fetcher and the same pre-fetch check `wikicommit-generate` uses, so ask never fetches a source differently from the way the page was made.
 
 ## Usage
 
@@ -122,7 +122,45 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
         EOF
         ```
 
-        Pass the URL via a quote-delimited heredoc, not a plain argument — `sources[].url` is only format-validated (`validate_frontmatter.py` checks the `https://` prefix, nothing more), which doesn't meet the bar for exempting a value from this rule (only values a script or command has already validated deterministically are exempt). This script locates the *actual* source management file for the URL (by scanning `.wikicommit/source/url/` for a matching `source.url`, rather than recomputing a filename from the URL) and prints the matching `.wikicommit/.cache/ingest-fetch/` path — deliberately not `add_source.py`'s `url_to_filename()` recomputed from the URL, which would silently miss a management file written under an older naming scheme (those are never auto-migrated). On exit code `0`, Read the printed path and add its content to the LLM's context the same way as the `path` case above. **On exit code `2` the source is retracted — do not include it** (see the paragraph after the `manual` case below). On exit code `1` (no matching management file registered for this URL, or the cache file is missing — cache never populated, a different machine, or the cache was cleared), do **not** attempt a live re-fetch — `wikicommit-ask` has no side effects (see Notes) and adding a network call here would break that guarantee. Instead, record `sources[].url` as unavailable for the Step 6 fallback note. Note this script doesn't verify the cached content is still current with the source's live `source.hash` — a stale-but-present cache is used with the same confidence as a fresh one; that's a known limitation, not something this step checks.
+        Pass the URL via a quote-delimited heredoc, not a plain argument — `sources[].url` is only format-validated (`validate_frontmatter.py` checks the `https://` prefix, nothing more), which doesn't meet the bar for exempting a value from this rule (only values a script or command has already validated deterministically are exempt). This script locates the *actual* source management file for the URL (by scanning `.wikicommit/source/url/` for a matching `source.url`, rather than recomputing a filename from the URL) and prints the matching `.wikicommit/.cache/ingest-fetch/` path — deliberately not `add_source.py`'s `url_to_filename()` recomputed from the URL, which would silently miss a management file written under an older naming scheme (those are never auto-migrated). On exit code `0`, Read the printed path and add its content to the LLM's context the same way as the `path` case above. **On exit code `2` the source is retracted — do not include it, and do not fetch it** (see the paragraph after the `manual` case below). On exit code `1` the cache is missing, which on a clean checkout, another machine or a cleared cache is the ordinary state rather than an exception. The line it printed says which kind of miss: `NO_CACHE: <where the cache belongs> (<management file>)`, or `UNREGISTERED: <url>` when no management file names this URL. Either way, fetch it:
+
+        1. **Once per host per run, check the fetch can be complete.** If any `MISSING_PACKAGE:` line has already been printed for this host this turn, skip straight to recording it as unavailable (below). Otherwise:
+
+           ```bash
+           python .wikicommit/scripts/check_extraction_quality.py check-fetch-capability "$(cat <<'EOF'
+           <sources[].url>
+           EOF
+           )"
+           ```
+
+           `MISSING_PACKAGE:` (exit 1) → do not fetch; record the URL as unavailable **because of the environment** (name the missing package) for Step 6 note 3. Without the package the fetch returns a partial text — a YouTube page without its transcript — whose hash cannot match the page's, and the note would then read as "the source changed" when it did not.
+        2. **Fetch into a scratch file** with the same fetcher `wikicommit-generate` uses — never the agent's own web-fetch tool, which can return a model-written summary:
+
+           ```bash
+           python ../wikicommit-generate/scripts/add_source.py --fetch-url "$(cat <<'EOF'
+           <sources[].url>
+           EOF
+           )" --output ".wikicommit/.cache/ask-fetch/<n>.md"
+           ```
+
+           `<n>` counts the fetches this turn (1, 2, …), so two URLs never share a file. Go on only after `FETCHED:`. **`NETWORK_UNAVAILABLE:` (exit 3)** → the request never reached any server; record the URL as unavailable **because of the environment** (no network — a sandbox with network off is the usual cause) and **do not fetch any remaining URL this turn** — they would all fail the same way. **`ERROR:` (exit 1)** — including `markitdown` not being installed, which this skill does not set up — → record the URL as unavailable.
+        3. **Settle the fetch** — compare it against the page and the management file, and move it into the cache only where that is safe:
+
+           ```bash
+           python scripts/resolve_source_cache_path.py --settle ".wikicommit/.cache/ask-fetch/<n>.md" --page-hash "<sources[].hash>" <<'EOF'
+           <sources[].url>
+           EOF
+           ```
+
+           `<sources[].hash>` is the hash recorded in the grounding page's own `sources` entry (for a translation page, the parent's entry you resolved in step 4.3.1) — a `sha256:` value the script only compares. It prints one line, `SETTLED: page=<match|mismatch>, cache=<placed <path>|not-placed (<reason>)>, read=<file>`. Read the `read=` file in full and add it to the context like any other raw source. Then:
+           - `page=match` → use it with no extra note: it is the very text the page was written from, which passed the extraction guards when the page was made.
+           - `page=mismatch` → use it, and record it for Step 6 note 4 — it did not pass those guards as far as anyone knows. If `cache=placed`, say it is the version `wikicommit-generate` last recorded rather than the one the page was written from; otherwise, that the source may have changed since the page was written, or the fetch may not have got the same text, and that `/wikicommit-generate <url>` re-checks it.
+           - `cache=not-placed` → after reading, delete the scratch file. It is not a cache, nothing reads it, and keeping it would only leave a second version of the source lying beside the real cache.
+           - `RETRACTED:` (exit `2`) → treat exactly like exit `2` above: do not use the file, delete it.
+
+        **Two hashes, because they answer different questions.** The page's `sources[].hash` says whether this is the version the page was written from; the management file's `source.hash` says whether it is the version `wikicommit-generate` now expects in its cache. They can differ — a deferred `LOW_DENSITY:` fetch and a forced recheck whose update was discarded both move `source.hash` without the page following — so a match against the management file alone would not mean "the page's version". Only a management-file match is moved into the cache: Pass 1 checks that hash before it reads the cache, so such a file can never mislead generate, and anything else would be read by the next `--include-source` as "the cached source" with no note. **Nothing here writes to a management file** — no `--write-hash`, no `status` change; only `/wikicommit-generate` moves `source.hash`.
+
+        As before, a cache that *is* found is not checked against the source's live content — a stale-but-present cache is used with the same confidence as a fresh one; that's a known limitation, not something this step checks.
       - `type: manual` → skip (no underlying file or URL to read; `sources[].author`/`created_at` is already visible wherever this page's `sources` list was resolved from in step 1 above — the page's own frontmatter, or the parent page's if resolved via `translated_from`).
 
    **Exit code `2` means a person withdrew that source, and its content must not ground an answer.** `status: retracted` is written by hand, never by a Skill: someone read the document and judged its content unreliable. Nothing else stops it from reaching an answer — a page built on it is faithful to it and so passes every check — so this branch is the only place the decision is honoured on the reference side.
@@ -131,7 +169,7 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
 
    **Only `retracted` is read.** `failed`, `excluded`, `partial` and `outdated` all describe how ingestion went, not what anyone thinks of the document, and acting on them here would put a second interpreter of the whole `status` vocabulary on the reference side.
 
-   **Known limitations**: (1) a large raw source (e.g. a novel-length `.txt`/`.md` file) is read in full, with no chunking or excerpt selection — this can substantially inflate the LLM's context for a single grounding page; (2) non-plain-text `type: path` sources **when no extraction cache is present** (a clean checkout, another machine) arrive as whatever a direct read makes of them, which for those formats is unusable; (3) **the text injected here is not necessarily the text the source holds now**, and which way it is off depends on the route rather than on the source type. Where a cache is read, it holds the version the management file last recorded — which is the version the grounding page was generated from, so for explaining what that page says it is arguably the more faithful of the two, but it is not what the file says today. Where the raw file is read instead (`.md`/`.txt`, which are deliberately never cached, or any source whose cache is absent), the opposite holds: the answer is grounded in the current text, which may have moved on from the page. This is a property of both source types, not a gap in one of them — a source whose file has since changed is `check_ingest_freshness.py`'s and `/wikicommit-generate`'s concern. `wikicommit-ask` does not attempt to mitigate any of these — treat them as known limitations of `--include-source`, not bugs.
+   **Known limitations**: (1) a large raw source (e.g. a novel-length `.txt`/`.md` file) is read in full, with no chunking or excerpt selection — this can substantially inflate the LLM's context for a single grounding page; (2) non-plain-text `type: path` sources **when no extraction cache is present** (a clean checkout, another machine) arrive as whatever a direct read makes of them, which for those formats is unusable — unlike a URL source, ask does not rebuild that cache, because doing so would mean taking on generate's whole extraction routing; (3) **the text injected here is not necessarily the text the source holds now**, and which way it is off depends on the route rather than on the source type. Where a cache is read, it holds the version the management file last recorded — which is the version the grounding page was generated from, so for explaining what that page says it is arguably the more faithful of the two, but it is not what the file says today. Where the raw file is read instead (`.md`/`.txt`, which are deliberately never cached, or any source whose cache is absent), the opposite holds: the answer is grounded in the current text, which may have moved on from the page. This is a property of both source types, not a gap in one of them — a source whose file has since changed is `check_ingest_freshness.py`'s and `/wikicommit-generate`'s concern; (4) URL sources with no cache are fetched one by one with no cap, so a clean checkout with many grounding pages pays one fetch per source and carries every fetched text into the context. `wikicommit-ask` does not attempt to mitigate any of these — treat them as known limitations of `--include-source`, not bugs.
 
 ### Step 5: Generate the Answer
 
@@ -155,13 +193,22 @@ Before the answer body, insert zero or more of the following notes, each on its 
    ⚠️ This answer includes content read directly from the original source document(s) of the following page(s), which have not gone through the wiki page generation/review process: .wikicommit/entity/ja/Person/character-a.md
    ```
 
-3. If `--include-source` was given but step 4.3 recorded at least one `type: url`/`wikicommit` source as unavailable (no cached fetch found), prepend a best-effort note naming the skipped source(s):
+3. If `--include-source` was given but step 4.3 recorded at least one `type: url`/`wikicommit` source as unavailable, prepend a note naming the skipped source(s) and **why**. Keep the two reasons apart, because they call for different actions: a failed fetch is about that source, while no network or a missing package is about this environment and every source would have failed the same way:
 
    ```
-   ⚠️ Could not include the original source for the following URL(s) because no cached fetch was found: https://example.com/article
+   ⚠️ Could not include the original source for the following URL(s) because fetching it failed: https://example.com/article
+   ⚠️ Could not include the original source for the following URL(s) because this environment cannot fetch it (no network access): https://example.com/article
    ```
 
-4. If `--include-source` was given but step 4.3 excluded at least one source as retracted (exit code `2`), prepend a note naming it. **Keep this separate from note 3** — that one says a document could not be retrieved, this one says it could be and was deliberately not used, and folding them together would leave a reader guessing which happened:
+   Name the missing package instead of "no network access" when the pre-fetch check stopped it.
+
+4. If `--include-source` was given and step 4.3 fetched at least one source whose text does not match the page's recorded hash (`page=mismatch`), prepend a note naming it, saying which of the two cases from step 4.3 applies:
+
+   ```
+   ⚠️ The original source for the following was fetched now and differs from the version its page was written from — the source may have changed since, or the fetch may not have got the same text (`/wikicommit-generate <url>` re-checks it): https://example.com/article
+   ```
+
+5. If `--include-source` was given but step 4.3 excluded at least one source as retracted (exit code `2`), prepend a note naming it. **Keep this separate from note 3** — that one says a document could not be retrieved, this one says it could be and was deliberately not used, and folding them together would leave a reader guessing which happened:
 
    ```
    ⚠️ Left out the original source for the following, which someone withdrew as unreliable: https://example.com/article (see .wikicommit/source/url/example.com/article.md)
@@ -174,6 +221,7 @@ Before the answer body, insert zero or more of the following notes, each on its 
 <note 2, if any>
 <note 3, if any>
 <note 4, if any>
+<note 5, if any>
 
 <answer body>
 ```
@@ -183,4 +231,5 @@ Before the answer body, insert zero or more of the following notes, each on its 
 - Do not commit or create a PR against `main` or any branch
 - Do not write to `.wikicommit/schema/`
 - Do not include claims in the answer that aren't in a grounding page's body content (hallucination)
-- This skill itself has no side effects. However, `search_index.py` automatically rebuilds the index file (`.wikicommit/.cache/search_index.sqlite3`, not tracked by Git) when it doesn't exist or no longer matches the pages (a page added, edited or removed since it was built — it then prints a `NOTE:` line)
+- This skill writes to no tracked file — no page, no source management file. It writes under `.wikicommit/.cache/` (not tracked by Git) in exactly two cases: `search_index.py` rebuilds `.wikicommit/.cache/search_index.sqlite3` when it doesn't exist or no longer matches the pages (a page added, edited or removed since it was built — it then prints a `NOTE:` line), and `--include-source` fetches a URL source that has no cache into `.wikicommit/.cache/ask-fetch/`, moving it into `.wikicommit/.cache/ingest-fetch/` only when it matches the management file's `source.hash` (Step 4.3). That cache tree is otherwise written only by `/wikicommit-generate`, and both derive the location from the management file's path the same way.
+- It reaches the network only with `--include-source`, and only for a `type: url`/`wikicommit` source with no cache.

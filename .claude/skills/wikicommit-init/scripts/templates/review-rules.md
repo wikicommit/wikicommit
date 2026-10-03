@@ -1,5 +1,5 @@
 ---
-rules_version: 4
+rules_version: 6
 wikicommit:
   # Machine-readable header only. The rules themselves are the prose below.
   # `rules_version` is bumped whenever any rule in this file changes; a review
@@ -9,6 +9,7 @@ wikicommit:
     - generate-pass4
     - review-skill
     - synthesize-step5.5
+    - translate-check
 ---
 
 # WikiCommit review rules
@@ -148,7 +149,7 @@ once and was fixed looking like one that never failed, one scale smaller.
   array. There is no quota, and a remark attached to every page is a remark
   nobody reads.
 
-On the two paths that run a subagent these are recorded as the review record's
+On the paths that run a subagent these are recorded as the review record's
 prose body, not as findings, so they do not count toward the sampling list a
 person works from. **On `review-skill` there is no subagent and no separate body
 to write** — that record's body is the line the reviewer writes back — so report
@@ -161,8 +162,8 @@ else this path produces goes.
 
 Each check names the paths it applies to. A check that does not name your path
 is not yours to run. **Your path is stated in your prompt** — one of
-`generate-pass4`, `review-skill` or `synthesize-step5.5`, the same three names
-this file's `applies_to` lists. If your prompt does not state one, say so and
+`generate-pass4`, `review-skill`, `synthesize-step5.5` or `translate-check`,
+the same four names this file's `applies_to` lists. If your prompt does not state one, say so and
 stop rather than guessing: guessing wrong silently drops the checks that path
 depends on, and the output still looks normal.
 
@@ -176,6 +177,15 @@ any other: the evidence must state that exact date (or, where several deadlines
 are stated, the earliest of them) for an entity this page covers. An
 `expires_at` invented or misread fails review the same way a fabricated
 body-text claim would.
+
+**Added aliases — `generate-pass4` only.** When your prompt lists `aliases`
+values this generation added, each one is a claim that the evidence writes this
+entity's name or term in exactly that form. The evidence must contain the
+string verbatim (as a name for this entity, not an unrelated word); an alias
+that is a translation, transliteration or guessed spelling fails as
+`HALLUCINATION`. Aliases the prompt does not list were already on the page and
+are not yours to check — they may rest on another source you have not been
+given.
 
 **A fact the evidence states as its own subject is supported here, even when
 that fact concerns another document** — a coinage, a publication, a release.
@@ -201,7 +211,7 @@ claim does not excuse an inexact specific detail: if the general fact that a
 named person wrote about a topic is true, but the date given for that
 publication is not the date the evidence states, that is a FAIL.
 
-### 3. Naming vs. inventing — all paths
+### 3. Naming vs. inventing — `generate-pass4`, `review-skill`, `synthesize-step5.5`
 
 When the evidence describes one party giving a name or label to an existing or
 emerging practice ("X calls this Y", "X coined the term Y"), a page that
@@ -283,7 +293,7 @@ evidence there is grounding pages, so a claim they do not carry means no page
 states it, not that the wiki is missing a document — there would be no URL to
 recommend registering.
 
-### 5. Attribution correctness — all paths
+### 5. Attribution correctness — `generate-pass4`, `review-skill`, `synthesize-step5.5`
 
 Truth-checking alone cannot catch an attribution swap, because a misattributed
 claim can still be true according to *some* source — just not the one the page
@@ -297,7 +307,7 @@ one the page names, that is a **FAIL** (`type: CONTRADICTION`) even though the
 claim's content is accurate: the attribution itself is the defect. Say in
 `instruction` which party the wording actually belongs to.
 
-### 6. Unattributed single-source formulations — all paths
+### 6. Unattributed single-source formulations — `generate-pass4`, `review-skill`, `synthesize-step5.5`
 
 Check whether the page states a definition, framework, or formulation as
 unqualified general fact when the evidence shows it is actually one specific
@@ -465,3 +475,58 @@ Put one grounding page in `source_file` with its wording in `source_quote`, and
 name the counterpart page — its path and its version of the same fact — in
 `claim`. Otherwise only half the pair can be reported, and half a pair is not
 actionable.
+
+### `translate-check` — a translation against the page it was translated from
+
+Evidence is the **original page in full — its frontmatter and its body**, and
+only that. A translation has no sources of its own and inherits its correctness
+from the original; what this review asks is whether the translation *says the
+same thing*, not whether the thing is true. Checks 1 and 2 apply, read as "does
+the original page state this"; checks 3–9 do not — they are either the original
+page's review's job or cannot happen in a translation. The translation's
+frontmatter (`title`, `properties.*`, `expires_at`) is checked against the
+original's frontmatter: a value the original states only there is supported,
+even when its body never repeats it.
+
+**Do not read the original page's own sources.** An error the original page
+already carries is not the translation's defect, and failing it here would
+blame the translation for it. That belongs to the original page's review.
+
+**Completeness is a criterion on this path, and only on this path.** Rule 2 of
+Part 1 still holds everywhere else; here the page's job is to carry the whole
+original, so a sentence, bullet or section of the original missing from the
+translation is a **FAIL**. Name what is missing in `instruction`.
+
+**What to report, and as what:**
+
+| Defect | `type` |
+|---|---|
+| Something the original does not say was added (including a helpful explanation from your own knowledge) | `HALLUCINATION` |
+| Meaning drift — a negation, condition, quantity or tense that differs from the original | `CONTRADICTION` |
+| Omission (above) | `CONTRADICTION` |
+| Structural breakage — a WikiLink slug, an identifier, or a `properties:` key that differs from the original | `CONTRADICTION` |
+| A term rendered differently from the term table (below) | `CONTRADICTION`, with the table's rendering in `instruction` |
+
+`source_file` is the original page's path on every entry.
+
+**The term table and `translator_notes` are reference material, not
+`SOURCE`.** Your prompt marks them separately. They say *how to write* a term,
+never *what is true*: a word that appears in neither the original nor the table
+is not a `HALLUCINATION` for that reason alone, and a sibling term's page is not
+evidence for any fact. Three limits govern the table:
+
+- **It covers only terms that have a `DefinedTerm` page in the target
+  language.** A term with no such page has no fixed rendering, and any faithful
+  rendering is acceptable.
+- **`translator_notes`, and an alias on the original page written in the target
+  language, outrank it, in that order.** A human decision recorded for this page
+  comes first, the source's own spelling next, and the table's default last.
+- **It never applies to the translated `DefinedTerm` page's own term.** When the
+  page under review is itself a `DefinedTerm` translation, its own entry in the
+  table is its previous translation, and holding the new one to it would pull
+  every correction back to the old wording.
+
+**This review is not independent of the model — it is independent of the
+context.** It runs as a subagent of the session that translated the page, which
+is why the three things it is handed are fixed and nothing else is: the
+translator's intentions stay out of the judgment.

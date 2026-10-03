@@ -6,7 +6,7 @@ pass_token: "5e9b2d84"
 
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to the Skill's directory (the parent of this `references/` directory), not to the repository root — the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there. Paths starting with `.wikicommit/` are repository-root paths as before.
 
-**Stamp `--pass pass2b-type` on entry**, with `--source` naming this source's management file. **Pass `--token 5e9b2d84` with it** — the value of this file's `pass_token`. `record_run.py` opens this file itself to compare, so the stamp records that this file was read rather than that the pass was improvised; without `--token` the stamp reads `token: unchecked`.
+**When this pass is done, report it to the driver** — run the `then` line the driver gave you for `pass2b-type`, with `--token 5e9b2d84` (this file's `pass_token`; the driver opens this file itself to compare, so a pass carried out without reading it is refused rather than recorded) and the outcome `ok` or `deferred`; name a schema file this pass wrote with `--touched`. The driver checks the result on disk before it moves on, and records the pass on the run record — a pass that never reaches `done` shows up as not run.
 
 Before extracting entities, decide whether the source content calls for a Schema.org type that isn't already in `installed schema/`. This runs **once per source** (not once per entity) and is grounded in the Pass 2a summary. The evidence is the actual source content rather than a single free-text `theme` sentence, so this judgment is comparatively high-confidence.
 
@@ -55,48 +55,37 @@ Before extracting entities, decide whether the source content calls for a Schema
 
      If declined (the user typed N or left it blank), record it as **explicitly declined**.
 
-   - **Non-interactive/subagent-driven**: no human will ever see the prompt above, so defaulting it to N
-     unconditionally would silently drop every candidate regardless of merit. Do not show the prompt at
-     all. Instead, apply a second, stricter filter to the candidate: is the type **obviously** implied by
-     this source's content, not merely a clearer semantic fit than any installed type (step 2's bar) — the
-     same "obviously implied, not merely plausible" bar `wikicommit-init`'s theme-driven judgment and
-     `wikicommit-collect`'s Type Proposal step apply, except grounded here in the actual source content,
-     the strongest evidence of the three, which is why clearing it is high-confidence enough to skip human
-     confirmation entirely. This is genuinely stricter than step 2, not the same judgment restated: step 2 only asks
-     whether the type fits *better* than any installed type, while this bar asks whether the fit is
-     *unmistakable* — a source that merely makes `schema:GovernmentService` the better choice over
-     `schema:HowTo` clears step 2 but may not clear this bar; a source unambiguously about a single named
-     software product clears both.
-       - Clears the stricter bar → treat as **approved without ever showing the prompt** (default **Y**)
-         and proceed directly to step 4 for it.
-       - Does not clear the stricter bar → **defer this source**. Do not record the
-         candidate as declined and do not carry on to Pass 2c: declining it means Pass 2c runs with
-         only the installed types available, the entity is written under an ancestor type, and there
-         is no Skill that can reclassify a page afterwards. The judgment "is this type right for this
-         subject" is one a human seeing the source would answer. **Deferring is not persisting the candidate**: nothing
-         about it is written down. The source simply does not advance, so the next interactive run
-         reads the same source, reaches the same candidate, and shows the prompt.
+   - **Non-interactive/subagent-driven**: no human will ever see the prompt above. Do not show it, do
+     not answer it yourself, and do not record the candidate as declined — **defer this source**, whatever
+     the candidate. There is no second, stricter bar that lets a candidate through without a human: an
+     approved type file cannot be edited by any Skill afterwards (step 4 only ever *adds* a file), no Skill
+     can reclassify the pages written under it, and `provenance` is a permanent stamp — so a wrong approval
+     is the one outcome here that cannot be taken back, while a deferral only makes this source wait for
+     the next interactive run. Declining is no better: Pass 2c would then run with only the installed types
+     available, the entity would be written under an ancestor type, and again there is no Skill that can
+     reclassify a page afterwards. The judgment "is this type right for this subject" is one a human seeing
+     the source would answer. **Deferring is not persisting the candidate**: nothing about it is written
+     down beyond the reason below. The source simply does not advance, so the next interactive run reads
+     the same source, reaches the same candidate, and shows the prompt.
 
-         Concretely, exactly as guard A defers in Pass 1 (`references/pass1-extract.md`): leave `status`
-         as it is when it is one the collection step picks up, and on a forced recheck — where it is still
-         `generated`/`failed`/`excluded` and nothing would collect it — set it to `pending` instead, for the
-         reason given there. Write the candidate type name and the motivating entities into a
-         **`## Deferred Reason`** section of this source's management file (English, deleted as soon as the
-         source reaches any other outcome), roll the source up in the Completion Notice, and skip to the next
-         source. `source.hash` and `extracted_tokens` are already written by the time Pass 2b runs; leave them.
+     Concretely, exactly as guard A defers in Pass 1 (`references/pass1-extract.md`): leave `status`
+     as it is when it is one the collection step picks up, and on a forced recheck — where it is still
+     `generated`/`failed`/`excluded` and nothing would collect it — set it to `pending` instead, for the
+     reason given there. Write the candidate type name and the motivating entities into a
+     **`## Deferred Reason`** section of this source's management file (English, deleted as soon as the
+     source reaches any other outcome), roll the source up in the Completion Notice, and skip to the next
+     source. `source.hash` and `extracted_tokens` are already written by the time Pass 2b runs; leave them.
 
-   Whichever of the three outcomes applies (explicitly declined, deferred for want of a human, or
-   non-interactively auto-approved), append the candidate — its type name, the motivating
-   entities/reasoning, this source's source management file path, and which outcome it was — to a running
-   list so it can be rolled up in the Completion Notice (`references/completion-notice.md`). Record
-   the actual outcome rather than assuming one: the Completion Notice must describe accurately what
-   happened in *this* run, and an interactive session where the user typed N themselves is not a
-   deferral — a human answered, and that answer stands. This is conversation-only bookkeeping, not a file write — it does not conflict with
-   step 5's "no persistence" rule below, and it applies equally to the auto-approved case: the type file
-   itself is written in step 4 like any other approval, but *why* it was approved without a human still
-   needs to reach the Completion Notice.
+   Whichever of the two outcomes applies (explicitly declined, or deferred for want of a human), append
+   the candidate — its type name, the motivating entities/reasoning, this source's source management file
+   path, and which outcome it was — to a running list so it can be rolled up in the Completion Notice
+   (`references/completion-notice.md`). Record the actual outcome rather than assuming one: the Completion
+   Notice must describe accurately what happened in *this* run, and an interactive session where the user
+   typed N themselves is not a deferral — a human answered, and that answer stands. This is
+   conversation-only bookkeeping, not a file write — it does not conflict with step 5's "no persistence"
+   rule below.
 
-4. **For each approved candidate, read `.wikicommit/schema-authoring.md` and follow it** to verify the type, pick and verify its properties, and write `.wikicommit/schema/<Type>.md`. That file holds the whole procedure — property selection and verification, the file format, how to write `granularity`, and the add-only restriction — because four paths write type files and only the judgment differs between them. Pass the value it asks for: **`provenance` is `generate-interactive` if a human answered the Enter prompt in step 3, `generate-auto` if it was auto-approved with no prompt shown**.
+4. **For each approved candidate, read `.wikicommit/schema-authoring.md` and follow it** to verify the type, pick and verify its properties, and write `.wikicommit/schema/<Type>.md`. That file holds the whole procedure — property selection and verification, the file format, how to write `granularity`, and the add-only restriction — because four paths write type files and only the judgment differs between them. Pass the value it asks for: **`provenance` is `generate-interactive`** — only a human answering the Enter prompt in step 3 approves a candidate, so this is the only value this path writes. (`generate-auto` is still a valid value in repositories whose type files were written before non-interactive runs stopped approving types; never write it now.)
 
    Three things this step is accountable for even if that Read is skipped, so that the fallback is thin guidance rather than none: **every property goes through `check_schema_org_type.py` before it enters `properties:`**, **one `granularity` rule starts with `Boundary —`** (em dash, not a colon), and **`provenance` carries this path's own value** rather than the `default` that `Person.md` shows.
 

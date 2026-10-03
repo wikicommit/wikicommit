@@ -11,6 +11,8 @@ export default {
         degreeMin: "ต่ำสุด",
         degreeMax: "สูงสุด",
         degreeNoBound: "0 = ไม่จำกัด",
+        labelLimit: "ป้ายกำกับบนหน้าจอ",
+        labelLimitHint: "0 = ตามระดับการซูม",
         reset: "รีเซ็ต",
         legend: "คำอธิบายสัญลักษณ์",
         legendPages: "หน้า",

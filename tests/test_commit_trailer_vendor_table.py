@@ -1,11 +1,11 @@
-"""The commit-trailer rule is one rule, written four times (Issue #1019).
+"""The commit-trailer rule is one rule, written five times (Issue #1019).
 
-`wikicommit-merge`, `-schema-propose`, `-update` and `-init` (its foundation
-commit) each carry the trailer paragraph, because each commits on its own and
+`wikicommit-merge`, `-schema-propose`, `-update`, `-init` (its foundation
+commit) and `-organize` (Issue #1035) each carry the trailer paragraph, because each commits on its own and
 the paragraph is short enough to keep beside the command it governs (the
 Issue #875 threshold for moving shared prose into a data file is not met).
-Four copies drift, and the drift is silent — one Skill would go on naming a
-vendor that did not run it while the others have stopped. So the four blocks
+The copies drift, and the drift is silent — one Skill would go on naming a
+vendor that did not run it while the others have stopped. So the blocks
 are held equal here, whitespace-indentation aside (the `init` copy sits inside
 a numbered list item).
 """
@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 SKILLS = Path(__file__).parent.parent / ".claude" / "skills"
-COPIES = ("wikicommit-merge", "wikicommit-schema-propose", "wikicommit-update", "wikicommit-init")
+COPIES = ("wikicommit-merge", "wikicommit-schema-propose", "wikicommit-update", "wikicommit-init", "wikicommit-organize")
 
 BLOCK_RE = re.compile(
     r"<!-- commit-trailers:start.*?-->\n(.*?)\n\s*<!-- commit-trailers:end -->", re.DOTALL

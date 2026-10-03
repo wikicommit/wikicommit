@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Maks",
         degreeNoBound: "0 = tanpa batas",
+        labelLimit: "Label di layar",
+        labelLimitHint: "0 = menurut tingkat zoom",
         reset: "Atur ulang",
         legend: "Legenda",
         legendPages: "Halaman",

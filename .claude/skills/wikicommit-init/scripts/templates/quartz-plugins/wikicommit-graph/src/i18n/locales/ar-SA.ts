@@ -11,6 +11,8 @@ export default {
         degreeMin: "الأدنى",
         degreeMax: "الأقصى",
         degreeNoBound: "0 = بلا حد",
+        labelLimit: "التسميات على الشاشة",
+        labelLimitHint: "0 = حسب مستوى التكبير",
         reset: "إعادة تعيين",
         legend: "مفتاح الرموز",
         legendPages: "الصفحات",

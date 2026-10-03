@@ -25,6 +25,7 @@ is responsible for blocking on broken links during the quality gate).
 """
 
 import argparse
+import json
 import os
 import posixpath
 import re
@@ -51,8 +52,15 @@ from _wikilink import (
 # answers "is this verdict still valid?" for the operator and this script asks
 # the same question for the reader, and two copies of that judgement would
 # drift into a banner that contradicts `/wikicommit-status`.
-from check_review_coverage import latest_by_kind, load_records, stale_reasons, standing_verdict
-from record_review import ACCEPTED_PREFIXES, REVIEW_DIR, RecordError, compute_page_content_hash
+from _groups import load_group_file
+from check_review_coverage import (
+    latest_by_kind,
+    load_records,
+    matches_recorded_content,
+    stale_reasons,
+    standing_verdict,
+)
+from record_review import ACCEPTED_PREFIXES, REVIEW_DIR, RecordError
 
 # The finding types `.wikicommit/review-rules.md` defines, in the order the
 # overview lists them. Anything else a record carries — a missing `type`, or a
@@ -87,6 +95,10 @@ RESERVED_PUBLISH_TREES = (SOURCES_DIR_NAME, OVERVIEW_DIR_NAME)
 # not read one as the other.
 AI_REVIEW_MODEL_FIELD = "ai_review_model"
 AI_REVIEW_AT_FIELD = "ai_review_at"
+# Written only for a translation checked against its original page (Issue
+# #1031), so every other page publishes byte-for-byte as before.
+AI_REVIEW_STAGE_FIELD = "ai_review_stage"
+TRANSLATE_CHECK_STAGE = "translate-check"
 
 
 def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None) -> dict | None:
@@ -144,12 +156,14 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     if record is None or str(record.get("result") or "") != "pass":
         return None
 
+    # The same comparison `/wikicommit-status` makes, including its tolerance
+    # for a merge's link rewrite, so the banner and `STALE_REVIEW:` agree.
     try:
-        current_hash = compute_page_content_hash(src_path)
+        unchanged = matches_recorded_content(src_path, str(record.get("page_content_hash") or ""))
     except (RecordError, OSError, ValueError) as e:
         print(f"WARNING: {src_path}: the page content hash could not be computed: {e}")
         return None
-    if str(record.get("page_content_hash") or "") != current_hash:
+    if not unchanged:
         return None
     # The other half of staleness, borrowed rather than restated: a source that
     # changed or left the page moved the evidence out from under the verdict
@@ -180,6 +194,11 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     return {
         "model": model,
         "reviewed_at": reviewed_at,
+        # Issue #1031: what the page was checked against. `translate-check`
+        # compared a translation with its original page, not with sources, and
+        # every reader-facing surface has to say so rather than fold it into
+        # "checked against sources".
+        "stage": str(record.get("stage") or ""),
         "findings_by_type": count_findings_by_type(record.get("findings")),
     }
 
@@ -375,43 +394,38 @@ def existing_lang_targets(
 
 
 # The four *_LABELS dicts below (root index, source type, source page,
-# overview) ship two languages: Japanese here, English in the DEFAULT_*
-# fallback beside each one. **That is not a claim that two is the right
-# number** — no record exists of anyone deciding on these two. What has been
-# decided is the other half: when to add a third.
+# overview) ship ten languages: en (the DEFAULT_* fallback beside each one) and
+# ja, de, es, fr, it, ru, zh, pt, pl as entries (Issue #1017). **The set is
+# fixed by an external standard, not by which wikis happen to exist**: it is the
+# ten languages the Wikipedia portal (wikipedia.org) lists. Before #1017 these
+# dicts held ja only, and "add a language when a wiki in it appears" answered
+# every new language with "because a pilot happened to use it". Do not widen the
+# set past these ten on the same reasoning.
 #
-# **Adding one is blocked on verification, not on translation.** A translation
-# can be produced for any of these strings at any time. What this project has
-# no way to do is check that the result says what the English says, and the
-# cost of getting that wrong is not uniform across the keys:
+# **The non-English entries were produced by an LLM from the English.** Most
+# keys are plain labels ("Sources", "Type", "Total pages"). A minority carry
+# claims — counts_note, ai_counts_note, licensing, reviewed_note,
+# retracted_notice — and each was translated to say no more than the English
+# says ("checked against sources" as compared, not verified). If a translation
+# reads stronger than the English, fix the translation; the English is
+# canonical.
 #
-#   - Most keys are plain labels ("Sources", "Type", "Total pages"). A clumsy
-#     translation is clumsy and nothing more.
-#   - A minority carry claims — counts_note, ai_counts_note, licensing,
-#     reviewed_note, retracted_notice. Those sentences say what this wiki does
-#     and does not vouch for, what its sources permit, and why a source was
-#     dropped. Several of them exist specifically to keep this wiki from
-#     overstating what it knows.
-#
-# **The second kind fails invisibly.** Left in English it fails visibly: a
-# reader who cannot read it knows they cannot. Mistranslated slightly stronger,
-# it reads fine and the reader believes something this wiki deliberately does
-# not say — and nobody here can see that it happened.
-#
-# **A partial language is not an option today.** These dicts are read with
-# bracket access, so one missing key raises KeyError and fails the build. That
-# is a guarantee, not a defect — a language is complete or absent, never
+# **A partial language is not an option.** These dicts are read with bracket
+# access, so one missing key raises KeyError and fails the build. That is a
+# guarantee, not a defect — a language is complete or absent, never
 # half-rendered. The one exception is SOURCE_TYPE_LABELS, whose values are
 # looked up with .get(source_type, source_type) and degrade to the bare type
-# string instead.
+# string instead. `tests/test_ui_translation_completeness.py` checks every
+# entry against the DEFAULT_* keys and placeholders, so a gap is caught before
+# a build hits it.
 #
-# **To add a language**, add it to all four dicts in the same change as the
-# translations themselves. There is no registry to keep in step (they are keyed
-# by primary_lang directly, unlike the Quartz plugins' LANG_TO_LOCALE), but
-# they are four independent dicts, so adding to one and not the rest is silent:
-# that wiki gets a translated root index and English source pages.
+# **The language set is kept in step elsewhere**: all four dicts here, the four
+# WikiCommit Quartz plugins' locales and init.py's WIKICOMMIT_UI_LANGS.
+# `tests/test_ui_language_fallback_disclosure.py` fails if they disagree —
+# adding to one dict and not the rest would otherwise be silent (that wiki
+# would get a translated root index and English source pages).
 #
-# **A language with no entry renders in English**, per surface, via the
+# **A language outside the ten renders in English**, per surface, via the
 # DEFAULT_* dict.
 #
 # **The published pages do not say that the fallback happened** (Issue #825).
@@ -422,12 +436,12 @@ def existing_lang_targets(
 #   - **A notice would not restore what was lost.** The English string *is* the
 #     canonical wording — the other language's entry would be a translation of
 #     it — so a reader who can read English has already received the claim, and
-#     learning that Italian was intended changes nothing about what this wiki
+#     learning that Korean was intended changes nothing about what this wiki
 #     vouches for. A reader who cannot read English cannot read the notice
 #     either.
 #   - **A language-independent marker only restates what is already visible.**
 #     A flag or an `(en)` tag says "this is English", which is exactly what
-#     English text in an Italian page already says. That was the point of
+#     English text in a Korean page already says. That was the point of
 #     leaving it in English: the failure is visible without help.
 #   - **It would be a standing notice on every surface of every page**, one
 #     nobody can act on — a reader cannot supply the missing labels. That is the
@@ -494,6 +508,110 @@ ROOT_INDEX_LABELS = {
                           "読者自身の知識との食い違いは見ていません。",
         "licensing": "各ページの利用条件は、そのページが生成された出典ごとに異なります。"
                      "サイト全体に単一のライセンスはありません。",
+    },
+    "de": {
+        "top": "Wiki-Startseite",
+        "select": "Sprache wählen",
+        "sources": "Quellen",
+        "overview": "Übersicht",
+        "counts": " ({pages} Seiten / {reviewed} von einer Person gelesen und durchgesehen)",
+        "counts_one": " ({pages} Seite / {reviewed} von einer Person gelesen und durchgesehen)",
+        "counts_note": "Seiten werden veröffentlicht, sobald ein LLM sie generiert. Der Abgleich mit den Quellen erfolgt maschinell; „von einer Person gelesen und durchgesehen“ gibt an, wie viele Seiten seitdem jemand vollständig gelesen hat, ohne dass etwas offensichtlich Falsches aufgefallen ist. Nur ein Teil der Seiten wird von einer Person gelesen, und das ist so gewollt — diese Zahl soll die Gesamtzahl nicht erreichen, und sie ist keine vollständige Qualitätsgarantie.",
+        "counts_ai": " ({pages} Seiten / {ai_reviewed} mit Quellen abgeglichen / {reviewed} von einer Person gelesen und durchgesehen)",
+        "counts_ai_one": " ({pages} Seite / {ai_reviewed} mit Quellen abgeglichen / {reviewed} von einer Person gelesen und durchgesehen)",
+        "ai_counts_note": "„Mit Quellen abgeglichen“ gibt an, wie viele Seiten bei ihrer Generierung mit ihren eigenen Quellen verglichen wurden. Dieser Abgleich prüft nur die Übereinstimmung mit diesen Quellen und nichts anderes — nicht die Vollständigkeit, nicht die Auswirkungen auf reale Personen und Organisationen, nicht Widersprüche zu dem, was Sie wissen.",
+        "licensing": "Die Nutzungsbedingungen unterscheiden sich von Seite zu Seite, je nach den Quellen, aus denen die Seite generiert wurde. Es gibt keine einheitliche Lizenz für die gesamte Website.",
+    },
+    "es": {
+        "top": "Inicio de la wiki",
+        "select": "Seleccionar idioma",
+        "sources": "Fuentes",
+        "overview": "Panorama general",
+        "counts": " ({pages} páginas / {reviewed} leídas y revisadas por una persona)",
+        "counts_one": " ({pages} página / {reviewed} leídas y revisadas por una persona)",
+        "counts_note": "Las páginas se publican en cuanto un LLM las genera. El cotejo con las fuentes lo hace una máquina; «leídas y revisadas por una persona» es cuántas páginas ha leído después alguien de principio a fin sin que nada saltara a la vista como claramente erróneo. Por diseño, solo algunas páginas las lee una persona: esta cifra no pretende llegar al total y no es una garantía completa de calidad.",
+        "counts_ai": " ({pages} páginas / {ai_reviewed} cotejadas con las fuentes / {reviewed} leídas y revisadas por una persona)",
+        "counts_ai_one": " ({pages} página / {ai_reviewed} cotejadas con las fuentes / {reviewed} leídas y revisadas por una persona)",
+        "ai_counts_note": "«Cotejadas con las fuentes» es cuántas páginas se compararon con sus propias fuentes al generarse. Ese cotejo abarca la concordancia con esas fuentes y nada más: ni la exhaustividad, ni el efecto sobre personas y organizaciones reales, ni los conflictos con lo que tú sabes.",
+        "licensing": "Las condiciones de uso varían según la página, en función de las fuentes a partir de las que se generó cada una. No hay una licencia única que cubra todo el sitio.",
+    },
+    "fr": {
+        "top": "Accueil du wiki",
+        "select": "Choisir la langue",
+        "sources": "Sources",
+        "overview": "Vue d'ensemble",
+        "counts": " ({pages} pages / {reviewed} lues et examinées par une personne)",
+        "counts_one": " ({pages} page / {reviewed} lue(s) et examinée(s) par une personne)",
+        "counts_note": "Les pages sont publiées dès qu'un LLM les génère. La comparaison avec les sources est effectuée par une machine ; « lues et examinées par une personne » indique combien de pages quelqu'un a depuis lues en entier sans que rien de manifestement faux n'ait été relevé. Seules certaines pages sont lues par une personne, par choix — ce nombre n'a pas vocation à atteindre le total, et ce n'est pas une garantie de qualité complète.",
+        "counts_ai": " ({pages} pages / {ai_reviewed} comparées aux sources / {reviewed} lues et examinées par une personne)",
+        "counts_ai_one": " ({pages} page / {ai_reviewed} comparée(s) aux sources / {reviewed} lue(s) et examinée(s) par une personne)",
+        "ai_counts_note": "« Comparées aux sources » indique combien de pages ont été comparées à leurs propres sources lors de leur génération. Cette comparaison porte sur la concordance avec ces sources et rien d'autre — ni l'exhaustivité, ni l'effet sur des personnes et organisations réelles, ni les contradictions avec ce que vous savez.",
+        "licensing": "Les conditions d'utilisation varient d'une page à l'autre, selon les sources à partir desquelles chaque page a été générée. Aucune licence unique ne couvre l'ensemble du site.",
+    },
+    "it": {
+        "top": "Home del wiki",
+        "select": "Seleziona la lingua",
+        "sources": "Fonti",
+        "overview": "Panoramica",
+        "counts": " ({pages} pagine / lette e controllate da una persona: {reviewed})",
+        "counts_one": " ({pages} pagina / lette e controllate da una persona: {reviewed})",
+        "counts_note": "Le pagine vengono pubblicate non appena un LLM le genera. Il confronto con le fonti è eseguito da una macchina; \"lette e controllate da una persona\" indica quante pagine qualcuno ha poi letto per intero senza notare nulla di palesemente sbagliato. Per scelta, solo alcune pagine vengono lette da una persona: questo numero non è pensato per raggiungere il totale e non è una garanzia di qualità completa.",
+        "counts_ai": " ({pages} pagine / confrontate con le fonti: {ai_reviewed} / lette e controllate da una persona: {reviewed})",
+        "counts_ai_one": " ({pages} pagina / confrontate con le fonti: {ai_reviewed} / lette e controllate da una persona: {reviewed})",
+        "ai_counts_note": "\"Confrontate con le fonti\" indica quante pagine sono state confrontate con le proprie fonti al momento della generazione. Il confronto riguarda solo la concordanza con quelle fonti e nient'altro: non la completezza, non gli effetti su persone e organizzazioni reali, non i contrasti con ciò che sai.",
+        "licensing": "Le condizioni d'uso variano da pagina a pagina, in base alle fonti da cui ciascuna pagina è stata generata. Non esiste un'unica licenza per l'intero sito.",
+    },
+    "pl": {
+        "top": "Strona główna wiki",
+        "select": "Wybierz język",
+        "sources": "Źródła",
+        "overview": "Przegląd",
+        "counts": " (stron: {pages} / przeczytane i sprawdzone przez człowieka: {reviewed})",
+        "counts_one": " (strona: {pages} / przeczytane i sprawdzone przez człowieka: {reviewed})",
+        "counts_note": "Strony są publikowane od razu po wygenerowaniu przez LLM. Porównanie ze źródłami wykonuje maszyna; „przeczytane i sprawdzone przez człowieka” oznacza, ile stron ktoś od tego czasu przeczytał w całości, nie zauważając niczego wyraźnie błędnego. Z założenia człowiek czyta tylko część stron — ta liczba nie ma osiągnąć łącznej liczby stron i nie stanowi pełnej gwarancji jakości.",
+        "counts_ai": " (stron: {pages} / porównane ze źródłami: {ai_reviewed} / przeczytane i sprawdzone przez człowieka: {reviewed})",
+        "counts_ai_one": " (strona: {pages} / porównane ze źródłami: {ai_reviewed} / przeczytane i sprawdzone przez człowieka: {reviewed})",
+        "ai_counts_note": "„Porównane ze źródłami” oznacza, ile stron w chwili generowania porównano z ich własnymi źródłami. To porównanie obejmuje wyłącznie zgodność z tymi źródłami — nie kompletność, nie wpływ na rzeczywiste osoby i organizacje, nie sprzeczności z tym, co wiesz.",
+        "licensing": "Warunki korzystania różnią się między stronami i zależą od źródeł, z których dana strona została wygenerowana. Nie ma jednej licencji obejmującej całą witrynę.",
+    },
+    "pt": {
+        "top": "Início do Wiki",
+        "select": "Selecionar idioma",
+        "sources": "Fontes",
+        "overview": "Visão geral",
+        "counts": " ({pages} páginas / {reviewed} lidas e conferidas por uma pessoa)",
+        "counts_one": " ({pages} página / {reviewed} lidas e conferidas por uma pessoa)",
+        "counts_note": "As páginas são publicadas assim que um LLM as gera. A conferência com as fontes é feita por máquina; \"lidas e conferidas por uma pessoa\" é quantas páginas alguém leu depois até o fim sem que nada obviamente errado chamasse a atenção. Por design, apenas algumas páginas são lidas por uma pessoa — este número não pretende chegar ao total e não é uma garantia completa de qualidade.",
+        "counts_ai": " ({pages} páginas / {ai_reviewed} conferidas com as fontes / {reviewed} lidas e conferidas por uma pessoa)",
+        "counts_ai_one": " ({pages} página / {ai_reviewed} conferidas com as fontes / {reviewed} lidas e conferidas por uma pessoa)",
+        "ai_counts_note": "\"Conferidas com as fontes\" é quantas páginas foram comparadas com suas próprias fontes quando foram geradas. Essa conferência cobre a concordância com essas fontes e nada mais — não a completude, não o efeito sobre pessoas e organizações reais, não conflitos com o que você sabe.",
+        "licensing": "Os termos de uso variam por página, conforme as fontes a partir das quais cada página foi gerada. Não há uma licença única que cubra o site inteiro.",
+    },
+    "ru": {
+        "top": "Главная вики",
+        "select": "Выберите язык",
+        "sources": "Источники",
+        "overview": "Обзор",
+        "counts": " (страниц: {pages} / прочитано и проверено человеком: {reviewed})",
+        "counts_one": " ({pages} страница / прочитано и проверено человеком: {reviewed})",
+        "counts_note": "Страницы публикуются сразу после того, как их сгенерировала LLM. Сверку с источниками выполняет машина; «прочитано и проверено человеком» — это число страниц, которые кто-то затем прочитал целиком и не заметил ничего явно неверного. Человек читает лишь часть страниц, и так задумано: это число не должно достигать общего количества и не является полной гарантией качества.",
+        "counts_ai": " (страниц: {pages} / сверено с источниками: {ai_reviewed} / прочитано и проверено человеком: {reviewed})",
+        "counts_ai_one": " ({pages} страница / сверено с источниками: {ai_reviewed} / прочитано и проверено человеком: {reviewed})",
+        "ai_counts_note": "«Сверено с источниками» — это число страниц, которые при генерации сравнивались со своими собственными источниками. Эта проверка охватывает только согласованность с этими источниками и ничего больше — не полноту, не влияние на реальных людей и организации, не противоречия с тем, что знаете вы.",
+        "licensing": "Условия использования различаются от страницы к странице — в зависимости от источников, из которых сгенерирована каждая страница. Единой лицензии на весь сайт нет.",
+    },
+    "zh": {
+        "top": "Wiki 首页",
+        "select": "选择语言",
+        "sources": "来源",
+        "overview": "概览",
+        "counts": "（{pages} 个页面 / 经人阅读并检查 {reviewed}）",
+        "counts_one": "（{pages} 个页面 / 经人阅读并检查 {reviewed}）",
+        "counts_note": "页面在 LLM 生成后即会发布。与来源的比对由机器完成；“经人阅读并检查”是指此后有人从头读完、且未发现明显问题的页面数。按照设计，只有部分页面会由人阅读——这个数字并不以达到总数为目标，也不是完整的质量保证。",
+        "counts_ai": "（{pages} 个页面 / 已与来源比对 {ai_reviewed} / 经人阅读并检查 {reviewed}）",
+        "counts_ai_one": "（{pages} 个页面 / 已与来源比对 {ai_reviewed} / 经人阅读并检查 {reviewed}）",
+        "ai_counts_note": "“已与来源比对”是指在生成时与其自身来源进行过比对的页面数。该比对只涵盖与这些来源是否一致，不涉及其他方面——不涉及内容是否完整，不涉及对真实人物和组织的影响，也不涉及与你所了解情况的冲突。",
+        "licensing": "各页面的使用条款因其生成所依据的来源而异。本站没有适用于整个网站的单一许可证。",
     },
 }
 DEFAULT_ROOT_INDEX_LABELS = {
@@ -883,11 +1001,18 @@ def relative_link(current_lang: str, current_type: str, target_lang: str, target
 # (a human assertion with no backing management file to mirror here).
 SOURCE_TYPE_ORDER = ["path", "url", "wikicommit"]
 
-# Two languages, and the note above ROOT_INDEX_LABELS says why adding a
-# third is gated on verification rather than translation. All four
-# *_LABELS dicts have to gain the language in the same change.
+# Ten languages; the note above ROOT_INDEX_LABELS says which and why. All
+# four *_LABELS dicts have to hold the same set.
 SOURCE_TYPE_LABELS = {
     "ja": {"path": "ファイル", "url": "URL", "wikicommit": "WikiCommit連携"},
+    "de": {"path": "Dateien", "url": "URL", "wikicommit": "WikiCommit-Föderation"},
+    "es": {"path": "Archivos", "url": "URL", "wikicommit": "Federación WikiCommit"},
+    "fr": {"path": "Fichiers", "url": "URL", "wikicommit": "Fédération WikiCommit"},
+    "it": {"path": "File", "url": "URL", "wikicommit": "Federazione WikiCommit"},
+    "pl": {"path": "Pliki", "url": "URL", "wikicommit": "Federacja WikiCommit"},
+    "pt": {"path": "Arquivos", "url": "URL", "wikicommit": "Federação WikiCommit"},
+    "ru": {"path": "Файлы", "url": "URL", "wikicommit": "Федерация WikiCommit"},
+    "zh": {"path": "文件", "url": "URL", "wikicommit": "WikiCommit 联合"},
 }
 DEFAULT_SOURCE_TYPE_LABELS = {"path": "Files", "url": "URL", "wikicommit": "WikiCommit federation"}
 
@@ -918,6 +1043,142 @@ SOURCE_PAGE_LABELS = {
             "参照してください。ライセンスが記録されていない情報源については、"
             "この Wiki は条件を把握していません（「制約が無い」という意味ではありません）。"
         ),
+    },
+    "de": {
+        "index_title": "Quellen",
+        "type": "Typ",
+        "original": "Original",
+        "status": "Status",
+        "summary": "Zusammenfassung",
+        "no_summary": "(noch nicht generiert)",
+        "license": "Lizenz",
+        "retracted_notice": "**Diese Quelle wurde zurückgezogen.** Dieses Wiki hat ihren Inhalt als unzuverlässig eingestuft und übernimmt nichts mehr aus ihr. Die unten unter „Generierte Seiten“ aufgeführten Seiten wurden verfasst, als sie noch verwendet wurde.",
+        "retraction_reason": "Grund für die Zurückziehung",
+        "no_retraction_reason": "(kein Grund angegeben)",
+        "generated_pages": "Generierte Seiten",
+        "no_generated_pages": "Noch keine Seiten generiert.",
+        "empty": "Es wurden noch keine Quellen registriert.",
+        "licensing_heading": "Zu den Nutzungsbedingungen",
+        "licensing_body": "Jede Seite dieses Wikis ist eine von einem LLM erstellte Zusammenfassung und Neugliederung der hier aufgeführten Quellen. Die Nutzungsbedingungen unterscheiden sich von Quelle zu Quelle, und es gibt keine einheitliche Lizenz für die gesamte Website. Die Bedingungen einer Seite finden Sie in den Lizenzen, die unten auf dieser Seite neben ihren Quellen angezeigt werden. Ist für eine Quelle keine Lizenz erfasst, kennt dieses Wiki ihre Bedingungen nicht — was nicht bedeutet, dass es keine gibt.",
+    },
+    "es": {
+        "index_title": "Fuentes",
+        "type": "Tipo",
+        "original": "Original",
+        "status": "Estado",
+        "summary": "Resumen",
+        "no_summary": "(aún no generado)",
+        "license": "Licencia",
+        "retracted_notice": "**Esta fuente ha sido retirada.** Esta wiki consideró que su contenido no era fiable y ya no incorpora nada de ella. Las páginas que figuran abajo en «Páginas generadas» se escribieron mientras aún se usaba.",
+        "retraction_reason": "Motivo de la retirada",
+        "no_retraction_reason": "(no se registró ningún motivo)",
+        "generated_pages": "Páginas generadas",
+        "no_generated_pages": "Aún no se ha generado ninguna página.",
+        "empty": "Aún no se ha registrado ninguna fuente.",
+        "licensing_heading": "Sobre las condiciones de uso",
+        "licensing_body": "Cada página de esta wiki es un resumen y una reorganización, hechos por un LLM, de las fuentes aquí enumeradas. Las condiciones de uso varían de una fuente a otra, y ninguna licencia única se aplica al sitio en su conjunto. Para conocer las condiciones de una página concreta, consulta las licencias que aparecen junto a sus fuentes al pie de esa página. Cuando una fuente no tiene licencia registrada, esta wiki desconoce sus condiciones, lo cual no equivale a que no las tenga.",
+    },
+    "fr": {
+        "index_title": "Sources",
+        "type": "Type",
+        "original": "Original",
+        "status": "Statut",
+        "summary": "Résumé",
+        "no_summary": "(pas encore généré)",
+        "license": "Licence",
+        "retracted_notice": "**Cette source a été retirée.** Ce wiki a jugé son contenu peu fiable et n'en importe plus rien. Les pages éventuellement listées sous « Pages générées » ci-dessous ont été rédigées alors qu'elle était encore utilisée.",
+        "retraction_reason": "Motif du retrait",
+        "no_retraction_reason": "(aucun motif enregistré)",
+        "generated_pages": "Pages générées",
+        "no_generated_pages": "Aucune page générée pour l'instant.",
+        "empty": "Aucune source n'a encore été enregistrée.",
+        "licensing_heading": "À propos des conditions d'utilisation",
+        "licensing_body": "Chaque page de ce wiki est un résumé et une réorganisation, par un LLM, des sources listées ici. Les conditions d'utilisation varient d'une source à l'autre, et aucune licence unique ne s'applique au site dans son ensemble. Pour connaître les conditions d'une page donnée, lisez les licences indiquées à côté de ses sources en bas de cette page. Lorsqu'aucune licence n'est enregistrée pour une source, ce wiki ne connaît pas ses conditions — ce qui ne signifie pas qu'il n'y en a aucune.",
+    },
+    "it": {
+        "index_title": "Fonti",
+        "type": "Tipo",
+        "original": "Originale",
+        "status": "Stato",
+        "summary": "Riepilogo",
+        "no_summary": "(non ancora generato)",
+        "license": "Licenza",
+        "retracted_notice": "**Questa fonte è stata ritirata.** Questo wiki ne ha giudicato il contenuto inaffidabile e non la acquisisce più. Le pagine elencate più sotto in “Pagine generate” sono state scritte quando era ancora in uso.",
+        "retraction_reason": "Motivo del ritiro",
+        "no_retraction_reason": "(nessun motivo registrato)",
+        "generated_pages": "Pagine generate",
+        "no_generated_pages": "Nessuna pagina ancora generata.",
+        "empty": "Non è ancora stata registrata alcuna fonte.",
+        "licensing_heading": "Sulle condizioni d'uso",
+        "licensing_body": "Ogni pagina di questo wiki è un riassunto e una riorganizzazione, fatti da un LLM, delle fonti elencate qui. Le condizioni d'uso variano da fonte a fonte e nessuna licenza unica si applica al sito nel suo insieme. Per conoscere le condizioni di una pagina, leggi le licenze indicate accanto alle sue fonti in fondo a quella pagina. Se per una fonte non è registrata alcuna licenza, questo wiki non ne conosce le condizioni, il che non equivale all'assenza di condizioni.",
+    },
+    "pl": {
+        "index_title": "Źródła",
+        "type": "Typ",
+        "original": "Oryginał",
+        "status": "Status",
+        "summary": "Podsumowanie",
+        "no_summary": "(jeszcze nie wygenerowano)",
+        "license": "Licencja",
+        "retracted_notice": "**To źródło zostało wycofane.** Ta wiki uznała jego treść za niewiarygodną i nie pobiera już z niego treści. Strony wymienione poniżej w sekcji „Wygenerowane strony” zostały napisane, gdy było jeszcze używane.",
+        "retraction_reason": "Powód wycofania",
+        "no_retraction_reason": "(nie zapisano powodu)",
+        "generated_pages": "Wygenerowane strony",
+        "no_generated_pages": "Nie wygenerowano jeszcze żadnych stron.",
+        "empty": "Nie zarejestrowano jeszcze żadnych źródeł.",
+        "licensing_heading": "O warunkach korzystania",
+        "licensing_body": "Każda strona tej wiki jest streszczeniem i przeredagowaniem przez LLM wymienionych tu źródeł. Warunki korzystania różnią się między źródłami i żadna pojedyncza licencja nie obejmuje całej witryny. Aby poznać warunki dla danej strony, sprawdź licencje podane przy jej źródłach na dole tej strony. Jeśli dla źródła nie zapisano licencji, ta wiki nie zna jego warunków — co nie oznacza, że ich nie ma.",
+    },
+    "pt": {
+        "index_title": "Fontes",
+        "type": "Tipo",
+        "original": "Original",
+        "status": "Status",
+        "summary": "Resumo",
+        "no_summary": "(ainda não gerado)",
+        "license": "Licença",
+        "retracted_notice": "**Esta fonte foi retirada.** Este wiki julgou seu conteúdo não confiável e deixou de incorporar conteúdo dela. As páginas listadas em “Páginas geradas” abaixo foram escritas enquanto ela ainda estava em uso.",
+        "retraction_reason": "Motivo da retirada",
+        "no_retraction_reason": "(nenhum motivo registrado)",
+        "generated_pages": "Páginas geradas",
+        "no_generated_pages": "Nenhuma página gerada ainda.",
+        "empty": "Nenhuma fonte foi registrada ainda.",
+        "licensing_heading": "Sobre os termos de uso",
+        "licensing_body": "Cada página deste wiki é um resumo e uma reorganização, feitos por um LLM, das fontes listadas aqui. Os termos de uso variam de fonte para fonte, e nenhuma licença única se aplica ao site como um todo. Para saber os termos de uma página, leia as licenças exibidas ao lado das fontes no fim dessa página. Quando uma fonte não tem licença registrada, este wiki não conhece seus termos — o que não é o mesmo que não haver termos.",
+    },
+    "ru": {
+        "index_title": "Источники",
+        "type": "Тип",
+        "original": "Оригинал",
+        "status": "Статус",
+        "summary": "Краткое содержание",
+        "no_summary": "(ещё не сгенерировано)",
+        "license": "Лицензия",
+        "retracted_notice": "**Этот источник отозван.** Эта вики сочла его содержание ненадёжным и больше не берёт из него материал. Страницы, перечисленные ниже в разделе «Сгенерированные страницы», были написаны, пока он ещё использовался.",
+        "retraction_reason": "Причина отзыва",
+        "no_retraction_reason": "(причина не записана)",
+        "generated_pages": "Сгенерированные страницы",
+        "no_generated_pages": "Сгенерированных страниц пока нет.",
+        "empty": "Источники пока не зарегистрированы.",
+        "licensing_heading": "Об условиях использования",
+        "licensing_body": "Каждая страница этой вики — выполненные LLM пересказ и переработка перечисленных здесь источников. Условия использования у разных источников разные, и единой лицензии на весь сайт нет. Чтобы узнать условия для конкретной страницы, посмотрите лицензии, указанные рядом с её источниками внизу этой страницы. Если у источника лицензия не записана, эта вики не знает его условий — а это не то же самое, что их отсутствие.",
+    },
+    "zh": {
+        "index_title": "来源",
+        "type": "类型",
+        "original": "原始链接",
+        "status": "状态",
+        "summary": "摘要",
+        "no_summary": "（尚未生成）",
+        "license": "许可证",
+        "retracted_notice": "**此来源已被撤回。** 本 Wiki 判断其内容不可靠，不再从中获取内容。下方“生成的页面”中列出的页面，是在其仍被使用时撰写的。",
+        "retraction_reason": "撤回原因",
+        "no_retraction_reason": "（未记录原因）",
+        "generated_pages": "生成的页面",
+        "no_generated_pages": "尚未生成任何页面。",
+        "empty": "尚未登记任何来源。",
+        "licensing_heading": "关于使用条款",
+        "licensing_body": "本 Wiki 的每个页面都是 LLM 对此处所列来源的概括和重新组织。使用条款因来源而异，没有适用于整个网站的单一许可证。要了解某个页面的使用条款，请查看该页面底部来源旁显示的许可证。对于未记录许可证的来源，本 Wiki 并不知道其条款——这并不等于没有任何条款。",
     },
 }
 DEFAULT_SOURCE_PAGE_LABELS = {
@@ -1367,8 +1628,11 @@ def generate_source_pages(
         "status_counts": {},      # registration status -> management file count
         "host_counts": {},        # URL host -> management file count
         # source.lang (ISO 639-1) -> management file count; None for a file
-        # that carries no language yet (Issue #989)
+        # that carries no language yet (Issue #989) but has finished a run
         "lang_counts": {},
+        # management files with no language that have never finished a run
+        # (empty `last_generated_at`) — the queue, not old intake (Issue #1135)
+        "lang_unprocessed": 0,
         "type_x_page_type": {},   # source.type -> {published page type -> page count}
         # source.url / source.path -> this source's page under content/sources/
         # (Issue #1006). Keyed by the identity string the management file
@@ -1424,7 +1688,25 @@ def generate_source_pages(
             if raw_lang is False:
                 raw_lang = "no"
             lang_key = (str(raw_lang).strip().lower() or None) if raw_lang is not None else None
-            stats["lang_counts"][lang_key] = stats["lang_counts"].get(lang_key, 0) + 1
+            # Issue #1135: an empty lang means one of two things. A source that has
+            # never finished a run (`add_source.py` writes `last_generated_at:`
+            # empty and only a completed run fills it — the same test
+            # reconcile_ingest_status.py uses) is still in the queue; calling it
+            # "taken in before this was recorded" would tell a new wiki's readers
+            # it has old intake. Only a source that has run without a language
+            # is "not recorded". `excluded` is the exception to the date test:
+            # Pass 4 writes it at the end of a completed run but, unlike
+            # `generated`/`partial`, never writes `last_generated_at`, so a
+            # language-less `excluded` source was processed before the field
+            # existed — not queued.
+            if (
+                lang_key is None
+                and not fm.get("last_generated_at")
+                and status_key != "excluded"
+            ):
+                stats["lang_unprocessed"] += 1
+            else:
+                stats["lang_counts"][lang_key] = stats["lang_counts"].get(lang_key, 0) + 1
             per_page_type = stats["type_x_page_type"].setdefault(source_type, {})
             for wiki_rel in linked_wiki_rels:
                 resolved = parse_wiki_path(entity_dir / wiki_rel, entity_dir)
@@ -1463,9 +1745,8 @@ def generate_source_pages(
 # /wikicommit-status, since "today" would freeze at build time and quietly go
 # stale until the next deploy.
 
-# Two languages, and the note above ROOT_INDEX_LABELS says why adding a
-# third is gated on verification rather than translation. All four
-# *_LABELS dicts have to gain the language in the same change.
+# Ten languages; the note above ROOT_INDEX_LABELS says which and why. All
+# four *_LABELS dicts have to hold the same set.
 OVERVIEW_LABELS = {
     "ja": {
         "title": "Wiki 全体の俯瞰",
@@ -1510,6 +1791,8 @@ OVERVIEW_LABELS = {
         "translation_pages": "翻訳ページ",
         "translation_pages_value": "{n}（原文との照合は記録されていません）",
         "translation_pages_note": "翻訳ページはこの照合の対象外であり、上の割合にも含めていません。",
+        "translation_checked": "原文と照合済み（AI）",
+        "translation_checked_note": "翻訳ページは、翻訳したときに訳文を原文ページと照合しています。照合しているのは原文との一致（意味・用語・加筆や訳漏れが無いこと）だけで、原文ページ自体が正しいかは見ていません。この照合が入る前に翻訳されたページには記録がありません。",
         "ai_findings": "うち指摘を受けて書き直された箇所",
         # Issue #1063: reader-facing names for review-rules.md's finding types,
         # never the enum names themselves.
@@ -1570,12 +1853,14 @@ OVERVIEW_LABELS = {
         "by_source_lang": "言語別",
         "col_source_lang": "言語",
         "source_lang_unknown": "未記録",
+        "source_lang_unprocessed": "未処理",
         "source_lang_note": (
             "ソースの抽出テキストが主として書かれている言語（生成時に LLM が判断）。"
             "ページは常にこの Wiki の主言語で書かれるため、"
             "主言語以外の行があるのは正常であり、"
             "そのソースから書かれたページは要約・翻訳を経ていることを意味します。"
             "「未記録」はこの記録が始まる前に取り込まれ、まだ読み直されていないソースです。"
+            "「未処理」は登録されたがまだ一度も処理を終えていないソース（取り込み待ちの列）です。"
         ),
         "cross_tab": "情報源の種別 × 生成されたページの型",
         "col_source_type": "情報源の種別",
@@ -1587,6 +1872,518 @@ OVERVIEW_LABELS = {
         "none": "該当なし。",
         "more": "ほか {n} 件",
         "empty": "まだページがありません。",
+    },
+    "de": {
+        "title": "Übersicht",
+        "totals": "Auf einen Blick",
+        "total_pages": "Seiten insgesamt",
+        "reviewed": "Von einer Person gelesen und durchgesehen",
+        "reviewed_note": "Seiten werden veröffentlicht, sobald ein LLM sie generiert. Der Abgleich mit den Quellen erfolgt maschinell; „von einer Person gelesen und durchgesehen“ gibt an, wie viele Seiten seitdem jemand vollständig gelesen hat, ohne dass etwas offensichtlich Falsches aufgefallen ist. Nur ein Teil der Seiten wird von einer Person gelesen, und das ist so gewollt — diese Zahl soll die Gesamtzahl nicht erreichen, und sie ist keine vollständige Qualitätsgarantie.",
+        "ai_reviewed": "Mit Quellen abgeglichen (AI)",
+        "ai_reviewed_note": "Jede aus Quellen generierte Seite wird bei ihrer Generierung mit diesen Quellen abgeglichen. Dieser Abgleich prüft nur die Übereinstimmung mit diesen Quellen und nichts anderes — nicht die Vollständigkeit, nicht die Auswirkungen auf reale Personen und Organisationen, nicht Widersprüche zu dem, was Sie wissen.",
+        "translation_pages": "Übersetzungsseiten",
+        "translation_pages_value": "{n} (kein Abgleich mit dem Original erfasst)",
+        "translation_pages_note": "Übersetzungsseiten fallen nicht unter diesen Abgleich und sind im obigen Anteil nicht enthalten.",
+        "translation_checked": "Mit dem Original abgeglichen (AI)",
+        "translation_checked_note": "Jede Übersetzungsseite wird bei der Übersetzung mit der Seite abgeglichen, aus der sie übersetzt wurde. Dieser Abgleich prüft nur die Übereinstimmung mit dem Original — Bedeutung, Begriffe, nichts hinzugefügt oder ausgelassen — und nicht, ob das Original selbst stimmt. Seiten, die vor Einführung dieses Abgleichs übersetzt wurden, haben keinen Eintrag.",
+        "ai_findings": "Vor der Veröffentlichung beanstandete und behobene Stellen",
+        "finding_type_HALLUCINATION": "Aussagen, die in den Quellen nicht stehen",
+        "finding_type_CONTRADICTION": "Aussagen, die den Quellen widersprechen",
+        "finding_type_MISSING_SOURCE": "Aussagen, die sich auf ein Dokument stützen, das nicht unter den Quellen ist",
+        "finding_type_OTHER": "Sonstiges",
+        "unpublished": "Zurückgehaltene Seiten, die den Abgleich nicht bestanden haben",
+        "unpublished_note": "Eine Seite, die während ihrer Generierung nicht mit ihren Quellen in Einklang gebracht werden konnte, wird nicht veröffentlicht. Diese Zahl zeigt, dass der Abgleich greift, und ist kein Mangel des Wikis.",
+        "type_count": "Verwendete Typen",
+        "by_lang": "Seiten pro Sprache",
+        "translation_coverage": "Übersetzungsabdeckung",
+        "hubs": "Wissensknoten",
+        "hubs_desc": "Die Seiten, auf die andere Seiten am häufigsten verlinken.",
+        "backlinks": "Backlinks",
+        "sources_count": "Erfasste Quellen",
+        "sources_count_note": "„Erfasste Quellen“ ist die Zahl der auf der Seite erfassten Quellen, nicht die Zahl unabhängiger Bestätigungen. Eine Seite über ein bestimmtes Dokument hat naturgemäß genau eine — weniger ist nicht schlechter.",
+        "hub_concentration": "Von den Top {n} stützen sich diese allein auf eine Quelle:",
+        "hub_concentration_count": "{n} Knoten",
+        "hub_concentration_note": "Aufgeführt sind die obigen Knoten mit nur einer erfassten Quelle, die sich diese Quelle teilen. Das ist keine Bewertung: Eine Seite über ein bestimmtes Dokument oder ein Wiki, dessen Thema ein einzelnes Dokument ist, ist konzentriert, weil es so sein soll.",
+        "col_status": "Status",
+        "col_host": "Host",
+        "by_type": "Nach Typ",
+        "col_type": "Typ",
+        "col_pages": "Seiten",
+        "col_reviewed": "Gelesen + durchgesehen",
+        "col_avg_backlinks": "Ø Backlinks",
+        "col_orphans": "Verwaist",
+        "gaps": "Lücken",
+        "wanted": "Verlinkt, aber nicht geschrieben",
+        "wanted_desc": "Seiten, auf die andere Seiten verlinken, die aber noch nicht existieren.",
+        "referenced_by": "Verlinkt von",
+        "orphans": "Seiten, auf die nichts verlinkt",
+        "sources": "Quellen",
+        "by_source_type": "Nach Typ",
+        "by_status": "Nach Status",
+        "by_host": "Nach Host (URL-Quellen)",
+        "by_source_lang": "Nach Sprache",
+        "col_source_lang": "Sprache",
+        "source_lang_unknown": "Nicht erfasst",
+        "source_lang_unprocessed": "Noch nicht verarbeitet",
+        "source_lang_note": "Die Sprache, in der der extrahierte Text einer Quelle überwiegend geschrieben ist, wie vom LLM bei der Generierung eingeschätzt. Seiten werden immer in der Hauptsprache dieses Wikis geschrieben, daher ist eine Zeile für eine andere Sprache zu erwarten: Die aus diesen Quellen geschriebenen Seiten haben eine zusammenfassende Übersetzung durchlaufen. „Nicht erfasst“ zählt Quellen, die übernommen wurden, bevor dies erfasst wurde, und seitdem nicht erneut gelesen wurden. „Noch nicht verarbeitet“ zählt registrierte Quellen, deren Verarbeitung noch nie abgeschlossen wurde (die Warteschlange).",
+        "cross_tab": "Quellentyp x Typ der generierten Seite",
+        "col_source_type": "Quellentyp",
+        "col_total": "Gesamt",
+        "tags": "Tags",
+        "col_tag": "Tag",
+        "col_count": "Anzahl",
+        "manual_note": "manual (nur sources[] der Seite; keine Verwaltungsdatei)",
+        "none": "Keine.",
+        "more": "und {n} weitere",
+        "empty": "Noch keine Seiten.",
+    },
+    "es": {
+        "title": "Panorama general",
+        "totals": "De un vistazo",
+        "total_pages": "Total de páginas",
+        "reviewed": "Leídas y revisadas por una persona",
+        "reviewed_note": "Las páginas se publican en cuanto un LLM las genera. El cotejo con las fuentes lo hace una máquina; «leídas y revisadas por una persona» es cuántas páginas ha leído después alguien de principio a fin sin que nada saltara a la vista como claramente erróneo. Por diseño, solo algunas páginas las lee una persona: esta cifra no pretende llegar al total y no es una garantía completa de calidad.",
+        "ai_reviewed": "Cotejadas con las fuentes (AI)",
+        "ai_reviewed_note": "Cada página generada a partir de fuentes se coteja con esas fuentes al generarse. Ese cotejo abarca la concordancia con esas fuentes y nada más: ni la exhaustividad, ni el efecto sobre personas y organizaciones reales, ni los conflictos con lo que tú sabes.",
+        "translation_pages": "Páginas traducidas",
+        "translation_pages_value": "{n} (no consta ningún cotejo con el original)",
+        "translation_pages_note": "Las páginas traducidas quedan fuera de este cotejo y no se incluyen en la proporción anterior.",
+        "translation_checked": "Cotejadas con el original (AI)",
+        "translation_checked_note": "Cada página traducida se coteja, al traducirse, con la página de la que se tradujo. Ese cotejo abarca solo la concordancia con el original —significado, términos, nada añadido ni omitido— y no si el original es correcto. Las páginas traducidas antes de que existiera este cotejo no tienen registro.",
+        "ai_findings": "Observaciones planteadas y corregidas antes de publicar",
+        "finding_type_HALLUCINATION": "Afirmaciones que las fuentes no hacen",
+        "finding_type_CONTRADICTION": "Afirmaciones que contradicen las fuentes",
+        "finding_type_MISSING_SOURCE": "Afirmaciones basadas en un documento que no está entre las fuentes",
+        "finding_type_OTHER": "Otras",
+        "unpublished": "Páginas retenidas por no superar el cotejo",
+        "unpublished_note": "Una página que no pudo ajustarse a sus fuentes durante su generación no se publica. Esto cuenta el cotejo en funcionamiento, no un defecto de la wiki.",
+        "type_count": "Tipos en uso",
+        "by_lang": "Páginas por idioma",
+        "translation_coverage": "Cobertura de traducción",
+        "hubs": "Núcleos de conocimiento",
+        "hubs_desc": "Las páginas a las que más enlazan otras páginas.",
+        "backlinks": "Enlaces entrantes",
+        "sources_count": "Fuentes registradas",
+        "sources_count_note": "«Fuentes registradas» es el número de fuentes registradas en la página, no el número de confirmaciones independientes. Una página sobre un documento concreto tiene exactamente una por construcción: tener menos no es peor.",
+        "hub_concentration": "De los {n} primeros, estos se apoyan en una sola fuente:",
+        "hub_concentration_count": "{n} núcleos",
+        "hub_concentration_note": "Aquí figuran los núcleos anteriores con una sola fuente registrada que comparten esa fuente. No es un veredicto: una página sobre un documento concreto, o una wiki cuyo tema es un único documento, está concentrada porque así debe ser.",
+        "col_status": "Estado",
+        "col_host": "Host",
+        "by_type": "Por tipo",
+        "col_type": "Tipo",
+        "col_pages": "Páginas",
+        "col_reviewed": "Leídas + revisadas",
+        "col_avg_backlinks": "Media de enlaces entrantes",
+        "col_orphans": "Huérfanas",
+        "gaps": "Lagunas",
+        "wanted": "Referenciadas pero no escritas",
+        "wanted_desc": "Páginas a las que enlazan otras páginas y que aún no existen.",
+        "referenced_by": "Referenciada por",
+        "orphans": "Páginas a las que nada enlaza",
+        "sources": "Fuentes",
+        "by_source_type": "Por tipo",
+        "by_status": "Por estado",
+        "by_host": "Por host (fuentes URL)",
+        "by_source_lang": "Por idioma",
+        "col_source_lang": "Idioma",
+        "source_lang_unknown": "No registrado",
+        "source_lang_unprocessed": "Aún sin procesar",
+        "source_lang_note": "El idioma en el que está escrito principalmente el texto extraído de una fuente, según lo juzgó el LLM al generar. Las páginas se escriben siempre en el idioma principal de esta wiki, así que es normal que haya una fila para otro idioma: las páginas escritas a partir de esas fuentes pasaron por una traducción resumida. «No registrado» cuenta las fuentes incorporadas antes de que esto se registrara y que no se han vuelto a leer desde entonces. «Aún sin procesar» cuenta las fuentes registradas cuyo procesamiento todavía no ha terminado nunca (la cola).",
+        "cross_tab": "Tipo de fuente x tipo de página generada",
+        "col_source_type": "Tipo de fuente",
+        "col_total": "Total",
+        "tags": "Etiquetas",
+        "col_tag": "Etiqueta",
+        "col_count": "Recuento",
+        "manual_note": "manual (solo sources[] de la página; sin archivo de gestión)",
+        "none": "Ninguna.",
+        "more": "y {n} más",
+        "empty": "Aún no hay páginas.",
+    },
+    "fr": {
+        "title": "Vue d'ensemble",
+        "totals": "En bref",
+        "total_pages": "Nombre total de pages",
+        "reviewed": "Lues et examinées par une personne",
+        "reviewed_note": "Les pages sont publiées dès qu'un LLM les génère. La comparaison avec les sources est effectuée par une machine ; « lues et examinées par une personne » indique combien de pages quelqu'un a depuis lues en entier sans que rien de manifestement faux n'ait été relevé. Seules certaines pages sont lues par une personne, par choix — ce nombre n'a pas vocation à atteindre le total, et ce n'est pas une garantie de qualité complète.",
+        "ai_reviewed": "Comparées aux sources (AI)",
+        "ai_reviewed_note": "Chaque page générée à partir de sources est comparée à ces sources lors de sa génération. Cette comparaison porte sur la concordance avec ces sources et rien d'autre — ni l'exhaustivité, ni l'effet sur des personnes et organisations réelles, ni les contradictions avec ce que vous savez.",
+        "translation_pages": "Pages traduites",
+        "translation_pages_value": "{n} (aucune comparaison avec l'original n'est enregistrée)",
+        "translation_pages_note": "Les pages traduites ne sont pas concernées par cette comparaison et sont exclues du ratio ci-dessus.",
+        "translation_checked": "Comparées à l'original (AI)",
+        "translation_checked_note": "Chaque page traduite est comparée, lors de sa traduction, à la page dont elle est traduite. Cette comparaison porte uniquement sur la concordance avec l'original — sens, termes, rien d'ajouté ni d'omis — et non sur l'exactitude de l'original lui-même. Les pages traduites avant l'existence de cette comparaison n'ont pas d'enregistrement.",
+        "ai_findings": "Problèmes relevés et corrigés avant publication",
+        "finding_type_HALLUCINATION": "Affirmations absentes des sources",
+        "finding_type_CONTRADICTION": "Affirmations qui contredisent les sources",
+        "finding_type_MISSING_SOURCE": "Affirmations reposant sur un document absent des sources",
+        "finding_type_OTHER": "Autre",
+        "unpublished": "Pages retenues faute d'avoir passé la comparaison",
+        "unpublished_note": "Une page qui n'a pas pu être mise en accord avec ses sources lors de sa génération n'est pas publiée. Ce chiffre montre la comparaison à l'œuvre, pas un défaut du wiki.",
+        "type_count": "Types utilisés",
+        "by_lang": "Pages par langue",
+        "translation_coverage": "Couverture des traductions",
+        "hubs": "Pôles de connaissance",
+        "hubs_desc": "Les pages vers lesquelles les autres pages pointent le plus.",
+        "backlinks": "Rétroliens",
+        "sources_count": "Sources enregistrées",
+        "sources_count_note": "« Sources enregistrées » est le nombre de sources enregistrées sur la page, et non le nombre de confirmations indépendantes. Une page consacrée à un document particulier en a exactement une par construction — moins n'est pas pire.",
+        "hub_concentration": "Parmi les {n} premiers, ceux-ci reposent sur une seule source :",
+        "hub_concentration_count": "{n} pôles",
+        "hub_concentration_note": "Figurent ici les pôles ci-dessus qui n'ont qu'une seule source enregistrée et qui partagent cette source. Ce n'est pas un verdict : une page consacrée à un document particulier, ou un wiki dont le sujet est un seul document, est concentré parce qu'il doit l'être.",
+        "col_status": "Statut",
+        "col_host": "Hôte",
+        "by_type": "Par type",
+        "col_type": "Type",
+        "col_pages": "Pages",
+        "col_reviewed": "Lues + examinées",
+        "col_avg_backlinks": "Rétroliens moy.",
+        "col_orphans": "Orphelines",
+        "gaps": "Lacunes",
+        "wanted": "Référencées mais non rédigées",
+        "wanted_desc": "Pages vers lesquelles d'autres pages pointent mais qui n'existent pas encore.",
+        "referenced_by": "Référencée par",
+        "orphans": "Pages vers lesquelles rien ne pointe",
+        "sources": "Sources",
+        "by_source_type": "Par type",
+        "by_status": "Par statut",
+        "by_host": "Par hôte (sources URL)",
+        "by_source_lang": "Par langue",
+        "col_source_lang": "Langue",
+        "source_lang_unknown": "Non enregistrée",
+        "source_lang_unprocessed": "Pas encore traitée",
+        "source_lang_note": "La langue dans laquelle le texte extrait d'une source est principalement rédigé, telle qu'évaluée par le LLM lors de la génération. Les pages sont toujours rédigées dans la langue principale de ce wiki ; une ligne pour une autre langue est donc normale : les pages rédigées à partir de ces sources sont passées par une traduction résumée. « Non enregistrée » compte les sources importées avant que cette information ne soit enregistrée et qui n'ont pas été relues depuis. « Pas encore traitée » compte les sources enregistrées dont le traitement n'a encore jamais abouti (la file d'attente).",
+        "cross_tab": "Type de source x type de page générée",
+        "col_source_type": "Type de source",
+        "col_total": "Total",
+        "tags": "Étiquettes",
+        "col_tag": "Étiquette",
+        "col_count": "Nombre",
+        "manual_note": "manual (sources[] de la page uniquement ; pas de fichier de gestion)",
+        "none": "Aucun.",
+        "more": "et {n} de plus",
+        "empty": "Aucune page pour l'instant.",
+    },
+    "it": {
+        "title": "Panoramica",
+        "totals": "In sintesi",
+        "total_pages": "Pagine totali",
+        "reviewed": "Lette e controllate da una persona",
+        "reviewed_note": "Le pagine vengono pubblicate non appena un LLM le genera. Il confronto con le fonti è eseguito da una macchina; \"lette e controllate da una persona\" indica quante pagine qualcuno ha poi letto per intero senza notare nulla di palesemente sbagliato. Per scelta, solo alcune pagine vengono lette da una persona: questo numero non è pensato per raggiungere il totale e non è una garanzia di qualità completa.",
+        "ai_reviewed": "Confrontate con le fonti (AI)",
+        "ai_reviewed_note": "Ogni pagina generata da fonti viene confrontata con quelle fonti al momento della generazione. Il confronto riguarda solo la concordanza con quelle fonti e nient'altro: non la completezza, non gli effetti su persone e organizzazioni reali, non i contrasti con ciò che sai.",
+        "translation_pages": "Pagine tradotte",
+        "translation_pages_value": "{n} (non è registrato alcun confronto con l'originale)",
+        "translation_pages_note": "Le pagine tradotte sono escluse da questo confronto e non rientrano nella proporzione qui sopra.",
+        "translation_checked": "Confrontate con l'originale (AI)",
+        "translation_checked_note": "Ogni pagina tradotta viene confrontata, al momento della traduzione, con la pagina da cui è tradotta. Il confronto riguarda solo la concordanza con l'originale — significato, termini, nulla aggiunto od omesso — e non se l'originale sia corretto. Le pagine tradotte prima che esistesse questo confronto non hanno alcuna registrazione.",
+        "ai_findings": "Rilievi segnalati e corretti prima della pubblicazione",
+        "finding_type_HALLUCINATION": "Affermazioni che le fonti non fanno",
+        "finding_type_CONTRADICTION": "Affermazioni in contrasto con le fonti",
+        "finding_type_MISSING_SOURCE": "Affermazioni basate su un documento che non è tra le fonti",
+        "finding_type_OTHER": "Altro",
+        "unpublished": "Pagine non pubblicate perché non hanno superato il confronto",
+        "unpublished_note": "Una pagina che durante la generazione non è stato possibile rendere coerente con le proprie fonti non viene pubblicata. Questo numero registra il confronto al lavoro, non un difetto del wiki.",
+        "type_count": "Tipi in uso",
+        "by_lang": "Pagine per lingua",
+        "translation_coverage": "Copertura delle traduzioni",
+        "hubs": "Pagine centrali",
+        "hubs_desc": "Le pagine più collegate dalle altre pagine.",
+        "backlinks": "Collegamenti in entrata",
+        "sources_count": "Fonti registrate",
+        "sources_count_note": "\"Fonti registrate\" è il numero di fonti registrate sulla pagina, non il numero di conferme indipendenti. Una pagina su un documento specifico ne ha per costruzione esattamente una: averne meno non è peggio.",
+        "hub_concentration": "Delle prime {n}, queste poggiano su un'unica fonte:",
+        "hub_concentration_count": "{n} pagine centrali",
+        "hub_concentration_note": "Qui sono elencate le pagine centrali qui sopra con una sola fonte registrata che condividono quella fonte. Non è un giudizio: una pagina su un documento specifico, o un wiki il cui argomento è un solo documento, è concentrata perché è giusto che lo sia.",
+        "col_status": "Stato",
+        "col_host": "Host",
+        "by_type": "Per tipo",
+        "col_type": "Tipo",
+        "col_pages": "Pagine",
+        "col_reviewed": "Lette + controllate",
+        "col_avg_backlinks": "Media collegamenti in entrata",
+        "col_orphans": "Orfane",
+        "gaps": "Lacune",
+        "wanted": "Citate ma non scritte",
+        "wanted_desc": "Pagine collegate da altre pagine che non esistono ancora.",
+        "referenced_by": "Citata da",
+        "orphans": "Pagine che nessuna pagina collega",
+        "sources": "Fonti",
+        "by_source_type": "Per tipo",
+        "by_status": "Per stato",
+        "by_host": "Per host (fonti URL)",
+        "by_source_lang": "Per lingua",
+        "col_source_lang": "Lingua",
+        "source_lang_unknown": "Non registrata",
+        "source_lang_unprocessed": "Non ancora elaborata",
+        "source_lang_note": "La lingua in cui è scritto principalmente il testo estratto da una fonte, secondo il giudizio dell'LLM al momento della generazione. Le pagine sono sempre scritte nella lingua principale di questo wiki, quindi una riga per un'altra lingua è normale: le pagine scritte da quelle fonti sono passate per una traduzione riassuntiva. \"Non registrata\" conta le fonti acquisite prima che questo dato venisse registrato e non più rilette da allora. \"Non ancora elaborata\" conta le fonti registrate la cui elaborazione non si è mai ancora conclusa (la coda).",
+        "cross_tab": "Tipo di fonte x tipo di pagina generata",
+        "col_source_type": "Tipo di fonte",
+        "col_total": "Totale",
+        "tags": "Tag",
+        "col_tag": "Tag",
+        "col_count": "Conteggio",
+        "manual_note": "manual (solo sources[] della pagina; nessun file di gestione)",
+        "none": "Nessuna.",
+        "more": "e altre {n}",
+        "empty": "Ancora nessuna pagina.",
+    },
+    "pl": {
+        "title": "Przegląd",
+        "totals": "W skrócie",
+        "total_pages": "Łączna liczba stron",
+        "reviewed": "Przeczytane i sprawdzone przez człowieka",
+        "reviewed_note": "Strony są publikowane od razu po wygenerowaniu przez LLM. Porównanie ze źródłami wykonuje maszyna; „przeczytane i sprawdzone przez człowieka” oznacza, ile stron ktoś od tego czasu przeczytał w całości, nie zauważając niczego wyraźnie błędnego. Z założenia człowiek czyta tylko część stron — ta liczba nie ma osiągnąć łącznej liczby stron i nie stanowi pełnej gwarancji jakości.",
+        "ai_reviewed": "Porównane ze źródłami (AI)",
+        "ai_reviewed_note": "Każda strona wygenerowana ze źródeł jest w chwili generowania porównywana z tymi źródłami. To porównanie obejmuje wyłącznie zgodność z tymi źródłami — nie kompletność, nie wpływ na rzeczywiste osoby i organizacje, nie sprzeczności z tym, co wiesz.",
+        "translation_pages": "Strony tłumaczeń",
+        "translation_pages_value": "{n} (nie zapisano porównania z oryginałem)",
+        "translation_pages_note": "Strony tłumaczeń nie podlegają temu porównaniu i nie są wliczane do powyższego odsetka.",
+        "translation_checked": "Porównane z oryginałem (AI)",
+        "translation_checked_note": "Każda strona tłumaczenia jest w chwili tłumaczenia porównywana ze stroną, z której ją przetłumaczono. To porównanie obejmuje wyłącznie zgodność z oryginałem — znaczenie, terminy, nic dodanego ani pominiętego — a nie to, czy sam oryginał jest poprawny. Strony przetłumaczone przed wprowadzeniem tego porównania nie mają zapisu.",
+        "ai_findings": "Uwagi zgłoszone i poprawione przed publikacją",
+        "finding_type_HALLUCINATION": "Stwierdzenia, których źródła nie zawierają",
+        "finding_type_CONTRADICTION": "Stwierdzenia sprzeczne ze źródłami",
+        "finding_type_MISSING_SOURCE": "Stwierdzenia oparte na dokumencie spoza źródeł",
+        "finding_type_OTHER": "Inne",
+        "unpublished": "Strony wstrzymane, bo nie przeszły porównania",
+        "unpublished_note": "Strona, której podczas generowania nie udało się uzgodnić z jej źródłami, nie jest publikowana. Ta liczba pokazuje działanie porównania, a nie wadę wiki.",
+        "type_count": "Używane typy",
+        "by_lang": "Strony według języka",
+        "translation_coverage": "Pokrycie tłumaczeniami",
+        "hubs": "Węzły wiedzy",
+        "hubs_desc": "Strony, do których inne strony linkują najczęściej.",
+        "backlinks": "Linki zwrotne",
+        "sources_count": "Zapisane źródła",
+        "sources_count_note": "„Zapisane źródła” to liczba źródeł zapisanych na stronie, a nie liczba niezależnych potwierdzeń. Strona o jednym konkretnym dokumencie z założenia ma dokładnie jedno — mniej nie znaczy gorzej.",
+        "hub_concentration": "Spośród pierwszych pozycji (liczba: {n}) te opierają się tylko na jednym źródle:",
+        "hub_concentration_count": "węzły: {n}",
+        "hub_concentration_note": "Wymieniono tu te z powyższych węzłów, które mają jedno zapisane źródło, wspólne z innymi. To nie jest ocena: strona o jednym konkretnym dokumencie albo wiki, której tematem jest jeden dokument, jest skoncentrowana, bo tak powinna.",
+        "col_status": "Status",
+        "col_host": "Host",
+        "by_type": "Według typu",
+        "col_type": "Typ",
+        "col_pages": "Strony",
+        "col_reviewed": "Przeczytane + sprawdzone",
+        "col_avg_backlinks": "Śr. linków zwrotnych",
+        "col_orphans": "Osierocone",
+        "gaps": "Luki",
+        "wanted": "Przywoływane, ale nienapisane",
+        "wanted_desc": "Strony, do których linkują inne strony, a które jeszcze nie istnieją.",
+        "referenced_by": "Przywoływane przez",
+        "orphans": "Strony, do których nic nie linkuje",
+        "sources": "Źródła",
+        "by_source_type": "Według typu",
+        "by_status": "Według statusu",
+        "by_host": "Według hosta (źródła URL)",
+        "by_source_lang": "Według języka",
+        "col_source_lang": "Język",
+        "source_lang_unknown": "Nie zapisano",
+        "source_lang_unprocessed": "Jeszcze nieprzetworzone",
+        "source_lang_note": "Język, w którym głównie napisany jest tekst wyodrębniony ze źródła, według oceny LLM w chwili generowania. Strony są zawsze pisane w podstawowym języku tej wiki, więc wiersz dla innego języka jest normalny: strony napisane z tych źródeł przeszły tłumaczenie połączone ze streszczeniem. „Nie zapisano” obejmuje źródła pobrane, zanim zaczęto to zapisywać, i od tego czasu nieprzeczytane ponownie. „Jeszcze nieprzetworzone” obejmuje zarejestrowane źródła, których przetwarzanie nigdy jeszcze się nie zakończyło (kolejka).",
+        "cross_tab": "Typ źródła x typ wygenerowanej strony",
+        "col_source_type": "Typ źródła",
+        "col_total": "Razem",
+        "tags": "Tagi",
+        "col_tag": "Tag",
+        "col_count": "Liczba",
+        "manual_note": "manual (tylko sources[] strony; brak pliku zarządzającego)",
+        "none": "Brak.",
+        "more": "i inne (liczba: {n})",
+        "empty": "Brak stron.",
+    },
+    "pt": {
+        "title": "Visão geral",
+        "totals": "Em resumo",
+        "total_pages": "Total de páginas",
+        "reviewed": "Lidas e conferidas por uma pessoa",
+        "reviewed_note": "As páginas são publicadas assim que um LLM as gera. A conferência com as fontes é feita por máquina; \"lidas e conferidas por uma pessoa\" é quantas páginas alguém leu depois até o fim sem que nada obviamente errado chamasse a atenção. Por design, apenas algumas páginas são lidas por uma pessoa — este número não pretende chegar ao total e não é uma garantia completa de qualidade.",
+        "ai_reviewed": "Conferidas com as fontes (AI)",
+        "ai_reviewed_note": "Cada página gerada a partir de fontes é conferida com essas fontes quando é gerada. Essa conferência cobre a concordância com essas fontes e nada mais — não a completude, não o efeito sobre pessoas e organizações reais, não conflitos com o que você sabe.",
+        "translation_pages": "Páginas de tradução",
+        "translation_pages_value": "{n} (nenhuma conferência com o original está registrada)",
+        "translation_pages_note": "As páginas de tradução ficam fora desta conferência e não entram na proporção acima.",
+        "translation_checked": "Conferidas com o original (AI)",
+        "translation_checked_note": "Cada página de tradução é conferida, ao ser traduzida, com a página da qual foi traduzida. Essa conferência cobre apenas a concordância com o original — sentido, termos, nada acrescentado nem omitido — e não se o original está correto. Páginas traduzidas antes desta conferência existir não têm registro.",
+        "ai_findings": "Apontamentos feitos e corrigidos antes da publicação",
+        "finding_type_HALLUCINATION": "Afirmações que as fontes não fazem",
+        "finding_type_CONTRADICTION": "Afirmações que contradizem as fontes",
+        "finding_type_MISSING_SOURCE": "Afirmações apoiadas em um documento que não está entre as fontes",
+        "finding_type_OTHER": "Outros",
+        "unpublished": "Páginas retidas por não passarem na conferência",
+        "unpublished_note": "Uma página que não pôde ser alinhada às suas fontes durante a geração não é publicada. Este número registra a conferência em funcionamento, não um defeito do wiki.",
+        "type_count": "Tipos em uso",
+        "by_lang": "Páginas por idioma",
+        "translation_coverage": "Cobertura de tradução",
+        "hubs": "Centros de conhecimento",
+        "hubs_desc": "As páginas mais linkadas por outras páginas.",
+        "backlinks": "Backlinks",
+        "sources_count": "Fontes registradas",
+        "sources_count_note": "\"Fontes registradas\" é o número de fontes registradas na página, não o número de confirmações independentes. Uma página sobre um documento específico tem exatamente uma, por construção — ter menos não é pior.",
+        "hub_concentration": "Dos {n} primeiros, estes se apoiam em uma única fonte:",
+        "hub_concentration_count": "{n} centros",
+        "hub_concentration_note": "Aqui aparecem os centros acima com uma única fonte registrada que compartilham essa fonte. Isto não é um veredito: uma página sobre um documento específico, ou um wiki cujo assunto é um único documento, é concentrado porque deve ser.",
+        "col_status": "Status",
+        "col_host": "Host",
+        "by_type": "Por tipo",
+        "col_type": "Tipo",
+        "col_pages": "Páginas",
+        "col_reviewed": "Lidas + conferidas",
+        "col_avg_backlinks": "Média de backlinks",
+        "col_orphans": "Órfãs",
+        "gaps": "Lacunas",
+        "wanted": "Referenciadas mas não escritas",
+        "wanted_desc": "Páginas linkadas por outras páginas que ainda não existem.",
+        "referenced_by": "Referenciada por",
+        "orphans": "Páginas sem nenhum link apontando para elas",
+        "sources": "Fontes",
+        "by_source_type": "Por tipo",
+        "by_status": "Por status",
+        "by_host": "Por host (fontes de URL)",
+        "by_source_lang": "Por idioma",
+        "col_source_lang": "Idioma",
+        "source_lang_unknown": "Não registrado",
+        "source_lang_unprocessed": "Ainda não processado",
+        "source_lang_note": "O idioma em que o texto extraído de uma fonte está escrito predominantemente, conforme julgado pelo LLM no momento da geração. As páginas são sempre escritas no idioma principal deste wiki, então uma linha para outro idioma é esperada: as páginas escritas a partir dessas fontes passaram por uma tradução com resumo. \"Não registrado\" conta as fontes incorporadas antes de este registro existir e que não foram relidas desde então. \"Ainda não processado\" conta as fontes registradas cujo processamento ainda nunca foi concluído (a fila).",
+        "cross_tab": "Tipo de fonte x tipo de página gerada",
+        "col_source_type": "Tipo de fonte",
+        "col_total": "Total",
+        "tags": "Tags",
+        "col_tag": "Tag",
+        "col_count": "Quantidade",
+        "manual_note": "manual (apenas sources[] da página; sem arquivo de gerenciamento)",
+        "none": "Nenhum.",
+        "more": "e mais {n}",
+        "empty": "Nenhuma página ainda.",
+    },
+    "ru": {
+        "title": "Обзор",
+        "totals": "Коротко",
+        "total_pages": "Всего страниц",
+        "reviewed": "Прочитано и проверено человеком",
+        "reviewed_note": "Страницы публикуются сразу после того, как их сгенерировала LLM. Сверку с источниками выполняет машина; «прочитано и проверено человеком» — это число страниц, которые кто-то затем прочитал целиком и не заметил ничего явно неверного. Человек читает лишь часть страниц, и так задумано: это число не должно достигать общего количества и не является полной гарантией качества.",
+        "ai_reviewed": "Сверено с источниками (AI)",
+        "ai_reviewed_note": "Каждая страница, сгенерированная из источников, при генерации сверяется с этими источниками. Эта проверка охватывает только согласованность с этими источниками и ничего больше — не полноту, не влияние на реальных людей и организации, не противоречия с тем, что знаете вы.",
+        "translation_pages": "Страницы-переводы",
+        "translation_pages_value": "{n} (сверка с оригиналом не записана)",
+        "translation_pages_note": "Страницы-переводы не входят в эту проверку и не учитываются в доле выше.",
+        "translation_checked": "Сверено с оригиналом (AI)",
+        "translation_checked_note": "Каждая страница-перевод при переводе сверяется со страницей, с которой она переведена. Эта сверка охватывает только согласованность с оригиналом — смысл, термины, ничего не добавлено и не пропущено — и не то, верен ли сам оригинал. У страниц, переведённых до появления этой сверки, записи нет.",
+        "ai_findings": "Замечания, выявленные и исправленные до публикации",
+        "finding_type_HALLUCINATION": "Утверждения, которых нет в источниках",
+        "finding_type_CONTRADICTION": "Утверждения, противоречащие источникам",
+        "finding_type_MISSING_SOURCE": "Утверждения, опирающиеся на документ, которого нет среди источников",
+        "finding_type_OTHER": "Прочее",
+        "unpublished": "Страницы, не опубликованные, потому что не прошли проверку",
+        "unpublished_note": "Страница, которую при генерации не удалось привести в согласие с её источниками, не публикуется. Это число показывает работу проверки, а не дефект вики.",
+        "type_count": "Используемых типов",
+        "by_lang": "Страниц по языкам",
+        "translation_coverage": "Охват переводами",
+        "hubs": "Узлы знаний",
+        "hubs_desc": "Страницы, на которые чаще всего ссылаются другие страницы.",
+        "backlinks": "Обратные ссылки",
+        "sources_count": "Записано источников",
+        "sources_count_note": "«Записано источников» — это число источников, записанных на странице, а не число независимых подтверждений. У страницы об одном конкретном документе по определению ровно один источник — меньше не значит хуже.",
+        "hub_concentration": "Из первых {n} только на одном источнике держатся:",
+        "hub_concentration_count": "узлов: {n}",
+        "hub_concentration_note": "Здесь перечислены узлы из списка выше с единственным записанным источником, у которых этот источник общий. Это не приговор: страница об одном конкретном документе или вики, предмет которой — один документ, сосредоточены на одном источнике, потому что так и должно быть.",
+        "col_status": "Статус",
+        "col_host": "Хост",
+        "by_type": "По типам",
+        "col_type": "Тип",
+        "col_pages": "Страниц",
+        "col_reviewed": "Прочитано + проверено",
+        "col_avg_backlinks": "Ср. обратных ссылок",
+        "col_orphans": "Страницы-сироты",
+        "gaps": "Пробелы",
+        "wanted": "Упоминаются, но не написаны",
+        "wanted_desc": "Страницы, на которые ссылаются другие страницы, но которых ещё нет.",
+        "referenced_by": "Ссылаются",
+        "orphans": "Страницы, на которые никто не ссылается",
+        "sources": "Источники",
+        "by_source_type": "По типам",
+        "by_status": "По статусу",
+        "by_host": "По хостам (URL-источники)",
+        "by_source_lang": "По языкам",
+        "col_source_lang": "Язык",
+        "source_lang_unknown": "Не записано",
+        "source_lang_unprocessed": "Ещё не обработано",
+        "source_lang_note": "Язык, на котором в основном написан извлечённый текст источника, по оценке LLM при генерации. Страницы всегда пишутся на основном языке этой вики, поэтому строка для другого языка ожидаема: страницы, написанные по таким источникам, прошли через перевод с пересказом. «Не записано» — источники, взятые до того, как это начали записывать, и с тех пор не перечитанные. «Ещё не обработано» — зарегистрированные источники, обработка которых ещё ни разу не была завершена (очередь).",
+        "cross_tab": "Тип источника × тип сгенерированной страницы",
+        "col_source_type": "Тип источника",
+        "col_total": "Итого",
+        "tags": "Теги",
+        "col_tag": "Тег",
+        "col_count": "Количество",
+        "manual_note": "manual (только sources[] страницы; файла управления нет)",
+        "none": "Нет.",
+        "more": "и ещё {n}",
+        "empty": "Страниц пока нет.",
+    },
+    "zh": {
+        "title": "概览",
+        "totals": "总体数字",
+        "total_pages": "页面总数",
+        "reviewed": "经人阅读并检查",
+        "reviewed_note": "页面在 LLM 生成后即会发布。与来源的比对由机器完成；“经人阅读并检查”是指此后有人从头读完、且未发现明显问题的页面数。按照设计，只有部分页面会由人阅读——这个数字并不以达到总数为目标，也不是完整的质量保证。",
+        "ai_reviewed": "已与来源比对（AI）",
+        "ai_reviewed_note": "每个根据来源生成的页面，在生成时都会与这些来源进行比对。该比对只涵盖与这些来源是否一致，不涉及其他方面——不涉及内容是否完整，不涉及对真实人物和组织的影响，也不涉及与你所了解情况的冲突。",
+        "translation_pages": "翻译页面",
+        "translation_pages_value": "{n}（未记录与原文的比对）",
+        "translation_pages_note": "翻译页面不在此比对范围内，也未计入上面的比例。",
+        "translation_checked": "已与原文比对（AI）",
+        "translation_checked_note": "每个翻译页面在翻译时都会与其原文页面进行比对。该比对只涵盖与原文是否一致（含义、术语、无增添无遗漏），不涉及原文本身是否正确。在此比对出现之前翻译的页面没有记录。",
+        "ai_findings": "发布前被指出并修正的问题",
+        "finding_type_HALLUCINATION": "来源中没有的陈述",
+        "finding_type_CONTRADICTION": "与来源相矛盾的陈述",
+        "finding_type_MISSING_SOURCE": "依据不在来源之列的文档的陈述",
+        "finding_type_OTHER": "其他",
+        "unpublished": "因未通过检查而未发布的页面",
+        "unpublished_note": "在生成过程中无法与其来源保持一致的页面不会发布。这个数字记录的是检查在发挥作用，而不是 Wiki 的缺陷。",
+        "type_count": "使用中的类型数",
+        "by_lang": "各语言页面数",
+        "translation_coverage": "翻译覆盖率",
+        "hubs": "知识中心",
+        "hubs_desc": "被其他页面链接最多的页面。",
+        "backlinks": "反向链接",
+        "sources_count": "记录的来源数",
+        "sources_count_note": "“记录的来源数”是页面上记录的来源数量，而不是独立佐证的数量。关于某一特定文档的页面，按结构只会有一个——数量少并不代表更差。",
+        "hub_concentration": "在前 {n} 个中，以下仅依赖于单一来源：",
+        "hub_concentration_count": "{n} 个知识中心",
+        "hub_concentration_note": "此处列出的是上面列表中只记录了一个来源、且共用同一来源的知识中心。这并不是判定：关于某一特定文档的页面，或以单一文档为主题的 Wiki，本来就应当集中于该来源。",
+        "col_status": "状态",
+        "col_host": "主机",
+        "by_type": "按类型",
+        "col_type": "类型",
+        "col_pages": "页面数",
+        "col_reviewed": "经人阅读并检查",
+        "col_avg_backlinks": "平均反向链接数",
+        "col_orphans": "孤立页面",
+        "gaps": "缺口",
+        "wanted": "被引用但尚未撰写",
+        "wanted_desc": "被其他页面链接但尚不存在的页面。",
+        "referenced_by": "被引用于",
+        "orphans": "没有任何页面链接的页面",
+        "sources": "来源",
+        "by_source_type": "按类型",
+        "by_status": "按状态",
+        "by_host": "按主机（URL 来源）",
+        "by_source_lang": "按语言",
+        "col_source_lang": "语言",
+        "source_lang_unknown": "未记录",
+        "source_lang_unprocessed": "尚未处理",
+        "source_lang_note": "来源的提取文本主要使用的语言，由 LLM 在生成时判断。页面始终以本 Wiki 的主要语言撰写，因此出现其他语言的行属于正常情况：根据这些来源撰写的页面经过了概括性的翻译。“未记录”统计的是在开始记录此项之前导入、此后尚未重新读取的来源。“尚未处理”统计的是已登记但尚未完成过一次处理的来源（待处理队列）。",
+        "cross_tab": "来源类型 × 生成页面类型",
+        "col_source_type": "来源类型",
+        "col_total": "合计",
+        "tags": "标签",
+        "col_tag": "标签",
+        "col_count": "数量",
+        "manual_note": "manual（仅页面的 sources[]；无管理文件）",
+        "none": "无。",
+        "more": "另有 {n} 个",
+        "empty": "尚无页面。",
     },
 }
 DEFAULT_OVERVIEW_LABELS = {
@@ -1613,6 +2410,16 @@ DEFAULT_OVERVIEW_LABELS = {
     "translation_pages_value": "{n} (no check against the original is recorded)",
     "translation_pages_note": (
         "Translation pages are outside this check and are left out of the ratio above."
+    ),
+    # Issue #1031: a translation is checked against its original page, never
+    # against sources, so it gets its own line and its own caption — adding it
+    # to "checked against sources" would claim a comparison it never made.
+    "translation_checked": "Checked against the original (AI)",
+    "translation_checked_note": (
+        "Each translation page is checked against the page it was translated from when "
+        "it is translated. That check covers agreement with the original — meaning, "
+        "terms, nothing added or dropped — and not whether the original itself is right. "
+        "Pages translated before this check existed carry no record."
     ),
     "ai_findings": "Findings raised and fixed before publishing",
     "finding_type_HALLUCINATION": "Statements the sources do not make",
@@ -1665,12 +2472,15 @@ DEFAULT_OVERVIEW_LABELS = {
     "by_source_lang": "By language",
     "col_source_lang": "Language",
     "source_lang_unknown": "Not recorded",
+    "source_lang_unprocessed": "Not processed yet",
     "source_lang_note": (
         "The language a source's extracted text is mainly written in, as judged by the "
         "LLM at generation time. Pages are always written in this wiki's primary "
         "language, so a row for another language is expected: the pages written from "
         "those sources went through a summarizing translation. \"Not recorded\" counts "
-        "sources taken in before this was recorded that have not been re-read since."
+        "sources taken in before this was recorded that have not been re-read since. "
+        "\"Not processed yet\" counts registered sources that have never finished a "
+        "run (the queue)."
     ),
     "cross_tab": "Source type x generated page type",
     "col_source_type": "Source type",
@@ -1879,6 +2689,12 @@ def generate_overview_page(
     # originals and translations.
     checkable_pages = [p for p in content_pages if not p["is_translation"]]
     translation_count = total_pages - len(checkable_pages)
+    # Issue #1031: a translation's own check is against its original page, so
+    # it is counted on its own line, never added to the one above.
+    translation_checked = [
+        p for p in content_pages
+        if p["is_translation"] and (p.get("ai_review") or {}).get("stage") == TRANSLATE_CHECK_STAGE
+    ]
     ai_reviewed = [p for p in checkable_pages if p.get("ai_review")]
     ai_models = sorted({p["ai_review"]["model"] for p in ai_reviewed})
     # The total, not the number of pages carrying one: what this number is for
@@ -1906,11 +2722,6 @@ def generate_overview_page(
             f"- **{labels['ai_reviewed']}**: {len(ai_reviewed)} / {len(checkable_pages)} "
             f"({_pct(len(ai_reviewed), len(checkable_pages))}){model_note}"
         )
-        if translation_count:
-            lines.append(
-                f"- **{labels['translation_pages']}**: "
-                + labels["translation_pages_value"].format(n=translation_count)
-            )
         if ai_findings_total:
             lines.append(f"- **{labels['ai_findings']}**: {ai_findings_total}")
             # The breakdown sums to the total by construction (same records, same
@@ -1919,6 +2730,20 @@ def generate_overview_page(
             for kind in (*FINDING_TYPES, OTHER_FINDING_TYPE):
                 if findings_by_type.get(kind):
                     lines.append(f"  - {labels['finding_type_' + kind]}: {findings_by_type[kind]}")
+    # Issue #1031 replaces Issue #1030's "no check is recorded" line once any
+    # translation carries a check; until then that line stays, and it is still
+    # emitted only beside the sources line (a wiki with no records at all keeps
+    # its output unchanged).
+    if translation_count and translation_checked:
+        lines.append(
+            f"- **{labels['translation_checked']}**: {len(translation_checked)} / {translation_count} "
+            f"({_pct(len(translation_checked), translation_count)})"
+        )
+    elif translation_count and ai_reviewed:
+        lines.append(
+            f"- **{labels['translation_pages']}**: "
+            + labels["translation_pages_value"].format(n=translation_count)
+        )
     if unpublished_pages:
         lines.append(f"- **{labels['unpublished']}**: {unpublished_pages}")
     lines += [
@@ -1950,6 +2775,8 @@ def generate_overview_page(
         lines += [labels["ai_reviewed_note"], ""]
         if translation_count:
             lines += [labels["translation_pages_note"], ""]
+    if translation_checked:
+        lines += [labels["translation_checked_note"], ""]
     if unpublished_pages:
         lines += [labels["unpublished_note"], ""]
 
@@ -2130,13 +2957,18 @@ def generate_overview_page(
     # sit — while the number of languages is small, so this table is never cut.
     # The unrecorded row always comes last, whatever its size.
     lang_counts = source_stats.get("lang_counts", {})
+    lang_unprocessed = source_stats.get("lang_unprocessed", 0)
     lines += [f"### {labels['by_source_lang']}", ""]
-    if lang_counts:
+    if lang_counts or lang_unprocessed:
         lines += [labels["source_lang_note"], ""]
         known = sorted(
             ((k, n) for k, n in lang_counts.items() if k is not None), key=lambda e: (-e[1], e[0])
         )
         lang_rows = [[f"`{k}`", str(n)] for k, n in known]
+        # Issue #1135: sources never processed yet are the queue, kept apart from
+        # "not recorded" (processed before the field existed).
+        if lang_unprocessed:
+            lang_rows.append([labels["source_lang_unprocessed"], str(lang_unprocessed)])
         if lang_counts.get(None):
             lang_rows.append([labels["source_lang_unknown"], str(lang_counts[None])])
         lines += _md_table([labels["col_source_lang"], labels["col_count"]], lang_rows)
@@ -2300,10 +3132,13 @@ def convert_file(
     # place the verdict lives, so it cannot go stale here, and no new
     # validate_frontmatter.py rule is needed for a field wiki pages never hold.
     if ai_review is not None:
-        new_content = inject_frontmatter_lines(new_content, [
+        stamp = [
             f"{AI_REVIEW_MODEL_FIELD}: {_yaml_quote(ai_review['model'])}",
             f"{AI_REVIEW_AT_FIELD}: {_yaml_quote(ai_review['reviewed_at'])}",
-        ])
+        ]
+        if ai_review.get("stage") == TRANSLATE_CHECK_STAGE:
+            stamp.append(f"{AI_REVIEW_STAGE_FIELD}: {_yaml_quote(TRANSLATE_CHECK_STAGE)}")
+        new_content = inject_frontmatter_lines(new_content, stamp)
 
     out_path = output_dir / out_rel_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2461,6 +3296,246 @@ def sync_assets(source_dir: Path, output_dir: Path) -> tuple[int, int]:
     return copied, removed_stale
 
 
+# The Explorer's group manifest (Issue #1035). Written at the content/ root so
+# Quartz's Assets emitter publishes it next to contentIndex.json; the explorer's
+# inline script fetches it and files each grouped page under a virtual folder.
+GROUP_MANIFEST_NAME = "wikicommit-groups.json"
+
+
+def write_group_manifest(output_dir: Path, page_stats: list[dict]) -> bool:
+    """Publish `.wikicommit/groups/` for the Explorer, without touching any page.
+
+    Why a separate file rather than a frontmatter field on each published page:
+    the Explorer builds its tree in the browser from contentIndex.json, and
+    Quartz's content index carries a fixed set of fields (slug, title, links,
+    tags, ...) — an injected frontmatter key would never reach it. A field
+    nobody can read is a receiver without a consumer (Issue #553), so the
+    membership goes here instead, keyed the way contentIndex.json keys pages.
+
+    Keys are published slugs: `<lang>/<Type>` lowercased the way Quartz
+    slugifies (a custom type already flattened, Issue #576) and the page slug
+    likewise, so the client compares strings without re-deriving anything.
+    Labels are resolved per language here, so the client never sees the file's
+    shape. The page's URL does not change — the folder is virtual.
+
+    Returns True when the manifest was written. With no usable group file the
+    manifest is removed rather than left behind from an earlier local build, so
+    a wiki without groups publishes exactly what it did before.
+    """
+    folders: dict[str, dict] = {}
+    loaded: dict[str, object] = {}
+    for stat in page_stats:
+        if stat["is_index"] or stat.get("is_view"):
+            continue
+        type_raw = stat["type_raw"]
+        if type_raw not in loaded:
+            group_file, errors = load_group_file(type_raw)
+            if errors:
+                print(f"WARNING: groups file for {type_raw} is invalid ({errors[0]}) — published without groups")
+            loaded[type_raw] = group_file
+        group_file = loaded[type_raw]
+        if group_file is None:
+            continue
+        key = group_file.group_of().get(stat["slug"])
+        if key is None:
+            continue
+        folder_key = "/".join(
+            _quartz_slugify_segment(seg) for seg in [stat["lang"], *stat["type"].split("/")]
+        )
+        folder = folders.setdefault(folder_key, {"groups": {}, "pages": {}})
+        group = next(g for g in group_file.groups if g.key == key)
+        folder["groups"][key] = group.label_for(stat["lang"])
+        folder["pages"][_quartz_slugify_segment(stat["slug"])] = key
+    out_path = output_dir / GROUP_MANIFEST_NAME
+    if not folders:
+        if out_path.exists():
+            out_path.unlink()
+            print(f"Removing stale build output: {out_path}")
+        return False
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps({"version": 1, "folders": folders}, ensure_ascii=False, sort_keys=True, indent=1) + "\n",
+        encoding="utf-8",
+    )
+    return True
+
+
+# The AI-facing index of the published site (llmstxt.org). Written at the
+# content/ root next to GROUP_MANIFEST_NAME: it is not a `.md`, so Quartz's
+# builtin Assets emitter copies it to public/ under the same name — the slug
+# rules quartz_asset_slug() ports keep a lowercase name with a non-.md
+# extension unchanged.
+LLMS_TXT_NAME = "llms.txt"
+# How many pages the "Key pages" section lists. The whole wiki would push the
+# file past the few-to-tens of KB the convention expects (a pilot wiki holds
+# over 1,000 pages across two languages); the Type folders listed under "Index"
+# reach the rest.
+LLMS_KEY_PAGES_LIMIT = 50
+# A description longer than this is cut at a word boundary. properties.description
+# is meant to be 2-3 sentences, so this only bounds the file when one is not.
+LLMS_DESCRIPTION_MAX_CHARS = 300
+
+
+def load_site_meta(repo_root: Path) -> tuple[str | None, str | None]:
+    """Return (pageTitle, baseUrl) from quartz.config.yaml, either None when unusable.
+
+    Read at build time rather than passed in: `.github/workflows/deploy.yml`
+    rewrites `baseUrl` to the Pages URL in the checkout just before `npm run
+    build`, so this is the one place the published URL is known. A value still
+    holding an init placeholder (`{PAGE_TITLE}`) is treated as absent.
+    """
+    config_path = repo_root / "quartz.config.yaml"
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None, None
+    configuration = data.get("configuration") if isinstance(data, dict) else None
+    if not isinstance(configuration, dict):
+        return None, None
+
+    def _clean(value: object) -> str | None:
+        if not isinstance(value, str) or not value.strip() or "{" in value:
+            return None
+        return value.strip()
+
+    return _clean(configuration.get("pageTitle")), _clean(configuration.get("baseUrl"))
+
+
+def site_url(base_url: str | None, out_rel: str) -> str:
+    """Return the published URL of `content/<out_rel>` (a page, or a folder ending in `/`).
+
+    Absolute when a baseUrl is known — llms.txt is fetched on its own, often by
+    a tool that does not resolve relative links. Quartz's `baseUrl` carries no
+    scheme (Quartz itself prefixes `https://`); a localhost preview is served
+    over plain http. Without a baseUrl the link is relative to the site root,
+    which is where this file is published.
+    """
+    is_folder = out_rel.endswith("/")
+    slug = quartz_asset_slug(out_rel.rstrip("/")) if out_rel.strip("/") else ""
+    if is_folder and slug:
+        slug += "/"
+    elif slug == "index" or slug.endswith("/index"):
+        slug = slug[: -len("index")]
+    path = quote(slug, safe="/")
+    if not base_url:
+        return f"./{path}"
+    base = re.sub(r"^https?://", "", base_url).rstrip("/")
+    scheme = "http" if base.startswith(("localhost", "127.0.0.1")) else "https"
+    return f"{scheme}://{base}/{path}"
+
+
+def _llms_description(text: object) -> str:
+    """One line of plain text: WikiLinks reduced to their slug, whitespace collapsed."""
+    if not isinstance(text, str):
+        return ""
+    plain = " ".join(WIKILINK_RE.sub(lambda m: m.group(2), text).split())
+    if len(plain) > LLMS_DESCRIPTION_MAX_CHARS:
+        cut = plain[:LLMS_DESCRIPTION_MAX_CHARS]
+        # Back off to a word boundary only when one is near the end: CJK text
+        # has no spaces between words, so a description such as
+        # "acme のエンジニア。……" has its only space near the start, and backing
+        # off to it would keep a single word of a 300-character limit.
+        boundary = cut.rfind(" ")
+        if boundary >= LLMS_DESCRIPTION_MAX_CHARS * 4 // 5:
+            cut = cut[:boundary]
+        plain = cut.rstrip() + "…"
+    return plain
+
+
+def generate_llms_txt(
+    output_dir: Path,
+    repo_root: Path,
+    primary_lang: str,
+    page_stats: list[dict],
+    referrers: dict[str, set[str]],
+    published: set[Path],
+    other_langs: list[str],
+    has_sources: bool,
+) -> Path:
+    """Write content/llms.txt — the site's index for an AI that has not cloned the repository.
+
+    `/wikicommit-ask` and `/wikicommit-search` need a checkout; a reader working
+    elsewhere (another project, a chat client with no shell) can only be handed
+    page URLs one at a time. This file tells such an AI what the wiki covers and
+    where its pages are, so it can fetch only the ones it needs. Like the
+    overview, it is build output: never committed, never LLM-authored.
+
+    Shape (llmstxt.org): H1 with the site name, the primary language's
+    site_description as the summary blockquote, one paragraph on how the pages
+    were made and checked, then `## Index` (one line per Type folder),
+    `## Key pages` (the most linked-to pages, at most LLMS_KEY_PAGES_LIMIT) and
+    `## Optional` (the overview and the source list).
+
+    Only primary_lang pages are listed: a translation answers the same question
+    as its original, and listing both would double the file for no new reach.
+    Review state is stated once in the preamble rather than on every line — each
+    published page shows its own state at the top, which is where an AI that
+    follows a link reads it.
+
+    The links point at the published HTML pages, not at raw Markdown: the
+    repository may be private, and the raw files carry `[[Type/slug]]` WikiLinks
+    that only this build resolves.
+    """
+    site_title, base_url = load_site_meta(repo_root)
+    descriptions = load_site_description(repo_root)
+
+    pages = [
+        p for p in page_stats
+        if p["lang"] == primary_lang and not p["is_index"] and p["out_rel"] in published
+    ]
+    type_counts: dict[str, tuple[str, int]] = {}
+    for p in pages:
+        folder = p["out_rel"].parent.as_posix() + "/"
+        _, count = type_counts.get(p["type"], (folder, 0))
+        type_counts[p["type"]] = (folder, count + 1)
+
+    lines = [f"# {site_title or 'Wiki'}", ""]
+    if primary_lang in descriptions:
+        lines += [f"> {descriptions[primary_lang]}", ""]
+    lines.append(
+        "The pages of this wiki are generated by an LLM from source documents. "
+        "Every page is checked against its sources by a machine when it is generated; "
+        "only some pages have been read through by a person (a sample, by design). "
+        "Each page states its review status at the top."
+    )
+    lines.append("")
+    scope = f"The lists below cover the {len(pages)} pages in `{primary_lang}`"
+    if other_langs:
+        scope += f"; the site also has pages in {', '.join(f'`{lang}`' for lang in other_langs)}"
+    lines += [scope + ".", ""]
+
+    lines += ["## Index", ""]
+    for type_name, (folder, count) in sorted(type_counts.items(), key=lambda kv: (-kv[1][1], kv[0])):
+        noun = "page" if count == 1 else "pages"
+        lines.append(f"- [{_escape_md_link_text(type_name)}]({site_url(base_url, folder)}): {count} {noun}")
+    lines.append("")
+
+    ranked = sorted(pages, key=lambda p: (-len(referrers.get(p["key"], ())), p["title"], p["key"]))
+    lines += ["## Key pages", ""]
+    for p in ranked[:LLMS_KEY_PAGES_LIMIT]:
+        entry = f"- [{_escape_md_link_text(p['title'])}]({site_url(base_url, p['out_rel'].as_posix())})"
+        description = _llms_description(p.get("description"))
+        lines.append(f"{entry}: {description}" if description else entry)
+    lines.append("")
+
+    lines += [
+        "## Optional",
+        "",
+        f"- [Overview]({site_url(base_url, OVERVIEW_DIR_NAME + '/')}): "
+        "page counts by type, language and source, and the most linked-to pages",
+    ]
+    if has_sources:
+        lines.append(
+            f"- [Sources]({site_url(base_url, SOURCES_DIR_NAME + '/')}): "
+            "the source documents this wiki was generated from"
+        )
+
+    out_path = output_dir / LLMS_TXT_NAME
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return Path(LLMS_TXT_NAME)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Convert [[Type/slug]] WikiLinks to relative Markdown links for the Quartz build."
@@ -2614,7 +3689,10 @@ def main() -> int:
             # both pages carry one, and "no record at all" for a wiki whose
             # only page does. That is the misreading this count exists to
             # remove, pointed the other way.
-            if ai_review:
+            # Issue #1031: a translation checked against its original is not a
+            # page checked against sources, so it is not counted here — the
+            # frontmatter field this feeds is labelled "checked against sources".
+            if ai_review and not fm.get("translated_from"):
                 ai_reviewed_pages += 1
         file_converted, file_unresolved, link_keys = convert_file(
             src_path, rel_path, source_dir, output_dir, primary_lang,
@@ -2649,6 +3727,11 @@ def main() -> int:
             "slug": page_slug,
             "key": key,
             "title": str(fm.get("title") or key),
+            # Read by generate_llms_txt() only (Issue #1117).
+            "description": (
+                fm["properties"].get("description")
+                if isinstance(fm.get("properties"), dict) else None
+            ),
             "review_status": fm.get("review_status"),
             # A scalar `tags:` value would otherwise iterate character by
             # character and register one tag per letter.
@@ -2748,7 +3831,10 @@ def main() -> int:
             # `ai_review` is already resolved once per page above and shared with
             # the published stamp and the overview tally (Issue #751), so
             # counting it here adds no walk (Issue #769).
-            lang_ai + (1 if stat["ai_review"] else 0),
+            # Issue #1031: translations are left out for the same reason as the
+            # site-wide count above — split on translated_from, since a language
+            # can hold both originals and translations.
+            lang_ai + (1 if stat["ai_review"] and not stat["is_translation"] else 0),
         )
     generate_root_index(
         output_dir, primary_lang, langs, total_pages, reviewed_pages,
@@ -2783,6 +3869,11 @@ def main() -> int:
                 removed_stale += 1
                 print(f"Removing stale build output: {out_path}")
 
+    generate_llms_txt(
+        output_dir, repo_root, primary_lang, page_stats, referrers, written_rel_paths,
+        [lang for lang in published_langs if lang != primary_lang], bool(source_written),
+    )
+    write_group_manifest(output_dir, page_stats)
     copied_assets, removed_stale_assets = sync_assets(source_dir, output_dir)
 
     print(

@@ -2085,3 +2085,176 @@ def test_main_fetch_url_cli_network_unavailable_has_its_own_code(tmp_path, monke
     err = capsys.readouterr().err
     assert err.startswith("NETWORK_UNAVAILABLE:")
     assert "ERROR:" not in err
+
+
+# ── fetch_url: failures after the request reached the server (#1038) ─────────
+#
+# requests raises ConnectionError for two failures that did reach the server:
+# the server closing or resetting after it read the request, and a read timeout
+# while the body is streaming. Both are that server's problem, not the network's.
+# The servers below are real sockets on 127.0.0.1, so the exception chains are the
+# ones requests and urllib3 actually build; the stand-in markitdown leaves the
+# timeout to the session, as the real one does.
+
+
+def _local_server(behaviour):
+    import socket
+    import threading
+
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+
+    def loop():
+        while True:
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=behaviour, args=(conn,), daemon=True).start()
+
+    threading.Thread(target=loop, daemon=True).start()
+    return srv, srv.getsockname()[1]
+
+
+def _read_request(conn):
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        data = conn.recv(4096)
+        if not data:
+            break
+        buf += data
+
+
+def _reset(conn):
+    import socket
+    import struct
+
+    conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    conn.close()
+
+
+def _install_timeout_markitdown(monkeypatch):
+    """Like _install_session_markitdown(), but passes no timeout: the session's own applies."""
+    import types
+
+    pytest.importorskip("requests")
+
+    class SessionMarkItDown:
+        def __init__(self, requests_session=None, **_kwargs):
+            self.session = requests_session
+
+        def convert_url(self, url):
+            response = self.session.get(url, stream=True)
+            return _FakeConvertResult(b"".join(response.iter_content(512)).decode("utf-8", "replace"))
+
+    fake = types.ModuleType("markitdown")
+    fake.MarkItDown = SessionMarkItDown
+    monkeypatch.setitem(sys.modules, "markitdown", fake)
+
+
+def _no_proxy(monkeypatch):
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setenv("no_proxy", "127.0.0.1")
+
+
+_HEADERS = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: 100000\r\n\r\n"
+
+
+@pytest.mark.parametrize("behaviour", [
+    lambda c: (_read_request(c), c.close()),
+    lambda c: (_read_request(c), _reset(c)),
+], ids=["closed-after-request", "reset-after-request"])
+def test_fetch_url_server_cutting_off_after_the_request_is_an_error(tmp_path, monkeypatch, behaviour):
+    _install_timeout_markitdown(monkeypatch)
+    _no_proxy(monkeypatch)
+    srv, port = _local_server(behaviour)
+    try:
+        result, _path, msg = add_source.fetch_url(f"http://127.0.0.1:{port}/", "out.md", tmp_path)
+    finally:
+        srv.close()
+    assert result == "ERROR", msg
+
+
+@pytest.mark.parametrize("behaviour", [
+    lambda c: (_read_request(c), c.sendall(_HEADERS + b"<p>partial"), __import__("time").sleep(5), c.close()),
+    lambda c: (_read_request(c), __import__("time").sleep(5), c.close()),
+], ids=["stalls-mid-body", "stalls-before-status"])
+def test_fetch_url_stalled_server_times_out_as_an_error(tmp_path, monkeypatch, behaviour):
+    """Without a session timeout this waited forever; with one it is the server's problem."""
+    _install_timeout_markitdown(monkeypatch)
+    _no_proxy(monkeypatch)
+    monkeypatch.setattr(add_source, "FETCH_TIMEOUT", (2, 1))
+    srv, port = _local_server(behaviour)
+    try:
+        result, _path, msg = add_source.fetch_url(f"http://127.0.0.1:{port}/", "out.md", tmp_path)
+    finally:
+        srv.close()
+    assert result == "ERROR", msg
+
+
+@pytest.mark.parametrize("behaviour", [
+    lambda c: (c.recv(10), _reset(c)),
+    lambda c: (c.recv(10), c.close()),
+], ids=["reset-during-handshake", "closed-during-handshake"])
+def test_fetch_url_tls_handshake_cut_off_is_network_unavailable(tmp_path, monkeypatch, behaviour):
+    """A firewall or sandbox that accepts the connection and drops it mid-handshake builds
+    the same chain as a server cutting off after the request (no MaxRetryError), but no
+    request was ever sent. Only where it was raised — inside ssl's do_handshake — tells
+    them apart."""
+    _install_timeout_markitdown(monkeypatch)
+    _no_proxy(monkeypatch)
+    srv, port = _local_server(behaviour)
+    try:
+        result, _path, msg = add_source.fetch_url(f"https://127.0.0.1:{port}/", "out.md", tmp_path)
+    finally:
+        srv.close()
+    assert result == "NETWORK_UNAVAILABLE", msg
+
+
+def test_fetch_url_proxy_resetting_connect_stays_network_unavailable(tmp_path, monkeypatch):
+    """The one shape exceptions cannot tell apart: an https CONNECT reset by a proxy
+    builds the same chain as a server cutting off. With a proxy in effect it stays a
+    deferral, since a wrong deferral is picked up again by the next run."""
+    _install_timeout_markitdown(monkeypatch)
+    srv, port = _local_server(lambda c: (_read_request(c), _reset(c)))
+    for var in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("https_proxy", f"http://127.0.0.1:{port}")
+    try:
+        result, _path, msg = add_source.fetch_url("https://example.com/", "out.md", tmp_path)
+    finally:
+        srv.close()
+    assert result == "NETWORK_UNAVAILABLE", msg
+
+
+def test_fetch_url_proxy_refusing_connect_stays_network_unavailable(tmp_path, monkeypatch):
+    _install_timeout_markitdown(monkeypatch)
+    srv, port = _local_server(lambda c: (
+        _read_request(c), c.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n"), c.close()))
+    for var in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", f"http://127.0.0.1:{port}")
+    monkeypatch.setenv("https_proxy", f"http://127.0.0.1:{port}")
+    try:
+        result, _path, msg = add_source.fetch_url("https://example.com/", "out.md", tmp_path)
+    finally:
+        srv.close()
+    assert result == "NETWORK_UNAVAILABLE", msg
+
+
+def test_fetch_url_gives_every_request_a_timeout(monkeypatch):
+    requests = pytest.importorskip("requests")
+    session = add_source._session_with_timeout(requests, (15, 60))
+    seen = {}
+
+    def fake_request(self, method, url, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(requests.Session, "request", fake_request)
+    session.get("http://example.invalid/")
+    assert seen["timeout"] == (15, 60)

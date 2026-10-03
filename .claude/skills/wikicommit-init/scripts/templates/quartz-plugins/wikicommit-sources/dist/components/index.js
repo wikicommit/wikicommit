@@ -34,17 +34,161 @@ var ja_JP_default = {
   }
 };
 
+// src/i18n/locales/de-DE.ts
+var de_DE_default = {
+  components: {
+    wikicommitSources: {
+      title: "Quellen",
+      inheritedFrom: "Von der Originalseite \xFCbernommene Quellen:",
+      derivedFrom: "Diese Seite wurde aus den folgenden Seiten dieses Wikis zusammengef\xFChrt:",
+      unavailablePage: "entfernt oder nicht ver\xF6ffentlicht",
+      addedBy: "Hinzugef\xFCgt von",
+      unknownAuthor: "unbekannt",
+      adaptationNotice: "Diese Seite wurde von einem LLM aus den oben genannten Quellen zusammengefasst und neu gegliedert; sie ist keine w\xF6rtliche Wiedergabe. Eine angezeigte Lizenz gilt f\xFCr die Quelle, bei der sie steht, nicht f\xFCr diese Seite als Ganzes.",
+      licenseScopeNotice: "Eine angezeigte Lizenz gilt f\xFCr die Quelle, bei der sie steht, nicht f\xFCr diese Seite als Ganzes."
+    }
+  }
+};
+
+// src/i18n/locales/es-ES.ts
+var es_ES_default = {
+  components: {
+    wikicommitSources: {
+      title: "Fuentes",
+      inheritedFrom: "Fuentes heredadas de la p\xE1gina original:",
+      derivedFrom: "Esta p\xE1gina se sintetiz\xF3 a partir de las siguientes p\xE1ginas de esta wiki:",
+      unavailablePage: "eliminada o no publicada",
+      addedBy: "A\xF1adida por",
+      unknownAuthor: "desconocido",
+      adaptationNotice: "Un LLM resumi\xF3 y reestructur\xF3 esta p\xE1gina a partir de las fuentes anteriores; no es una reproducci\xF3n literal. Cualquier licencia que se muestre se aplica a la fuente junto a la que figura, no a esta p\xE1gina en su conjunto.",
+      licenseScopeNotice: "Cualquier licencia que se muestre se aplica a la fuente junto a la que figura, no a esta p\xE1gina en su conjunto."
+    }
+  }
+};
+
+// src/i18n/locales/fr-FR.ts
+var fr_FR_default = {
+  components: {
+    wikicommitSources: {
+      title: "Sources",
+      inheritedFrom: "Sources h\xE9rit\xE9es de la page originale :",
+      derivedFrom: "Cette page a \xE9t\xE9 synth\xE9tis\xE9e \xE0 partir des pages suivantes de ce wiki :",
+      unavailablePage: "supprim\xE9e ou non publi\xE9e",
+      addedBy: "Ajout\xE9e par",
+      unknownAuthor: "inconnu",
+      adaptationNotice: "Cette page a \xE9t\xE9 r\xE9sum\xE9e et restructur\xE9e par un LLM \xE0 partir des sources ci-dessus ; ce n'est pas une reproduction mot pour mot. Toute licence indiqu\xE9e s'applique \xE0 la source \xE0 c\xF4t\xE9 de laquelle elle figure, et non \xE0 cette page dans son ensemble.",
+      licenseScopeNotice: "Toute licence indiqu\xE9e s'applique \xE0 la source \xE0 c\xF4t\xE9 de laquelle elle figure, et non \xE0 cette page dans son ensemble."
+    }
+  }
+};
+
+// src/i18n/locales/it-IT.ts
+var it_IT_default = {
+  components: {
+    wikicommitSources: {
+      title: "Fonti",
+      inheritedFrom: "Fonti ereditate dalla pagina originale:",
+      derivedFrom: "Questa pagina \xE8 stata sintetizzata dalle seguenti pagine di questo wiki:",
+      unavailablePage: "rimossa o non pubblicata",
+      addedBy: "Aggiunta da",
+      unknownAuthor: "sconosciuto",
+      adaptationNotice: "Questa pagina \xE8 stata riassunta e riorganizzata da un LLM a partire dalle fonti qui sopra; non ne \xE8 una riproduzione letterale. Qualsiasi licenza indicata si applica alla fonte accanto a cui \xE8 riportata, non a questa pagina nel suo insieme.",
+      licenseScopeNotice: "Qualsiasi licenza indicata si applica alla fonte accanto a cui \xE8 riportata, non a questa pagina nel suo insieme."
+    }
+  }
+};
+
+// src/i18n/locales/pl-PL.ts
+var pl_PL_default = {
+  components: {
+    wikicommitSources: {
+      title: "\u0179r\xF3d\u0142a",
+      inheritedFrom: "\u0179r\xF3d\u0142a odziedziczone ze strony oryginalnej:",
+      derivedFrom: "Ta strona zosta\u0142a zsyntetyzowana z nast\u0119puj\u0105cych stron tej wiki:",
+      unavailablePage: "usuni\u0119ta lub nieopublikowana",
+      addedBy: "Dodane przez",
+      unknownAuthor: "nieznany",
+      adaptationNotice: "Ta strona jest streszczeniem i przeredagowaniem powy\u017Cszych \u017Ar\xF3de\u0142 przez LLM; nie jest dos\u0142own\u0105 kopi\u0105. Wy\u015Bwietlona licencja dotyczy \u017Ar\xF3d\u0142a, przy kt\xF3rym jest podana, a nie ca\u0142ej tej strony.",
+      licenseScopeNotice: "Wy\u015Bwietlona licencja dotyczy \u017Ar\xF3d\u0142a, przy kt\xF3rym jest podana, a nie ca\u0142ej tej strony."
+    }
+  }
+};
+
+// src/i18n/locales/pt-BR.ts
+var pt_BR_default = {
+  components: {
+    wikicommitSources: {
+      title: "Fontes",
+      inheritedFrom: "Fontes herdadas da p\xE1gina original:",
+      derivedFrom: "Esta p\xE1gina foi sintetizada a partir das seguintes p\xE1ginas deste wiki:",
+      unavailablePage: "removida ou n\xE3o publicada",
+      addedBy: "Adicionada por",
+      unknownAuthor: "desconhecido",
+      adaptationNotice: "Esta p\xE1gina foi resumida e reestruturada por um LLM a partir das fontes acima; n\xE3o \xE9 uma reprodu\xE7\xE3o literal. Qualquer licen\xE7a exibida se aplica \xE0 fonte ao lado da qual aparece, n\xE3o a esta p\xE1gina como um todo.",
+      licenseScopeNotice: "Qualquer licen\xE7a exibida se aplica \xE0 fonte ao lado da qual aparece, n\xE3o a esta p\xE1gina como um todo."
+    }
+  }
+};
+
+// src/i18n/locales/ru-RU.ts
+var ru_RU_default = {
+  components: {
+    wikicommitSources: {
+      title: "\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438",
+      inheritedFrom: "\u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0438, \u0443\u043D\u0430\u0441\u043B\u0435\u0434\u043E\u0432\u0430\u043D\u043D\u044B\u0435 \u043E\u0442 \u0438\u0441\u0445\u043E\u0434\u043D\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u044B:",
+      derivedFrom: "\u042D\u0442\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u0441\u043E\u0441\u0442\u0430\u0432\u043B\u0435\u043D\u0430 \u0438\u0437 \u0441\u043B\u0435\u0434\u0443\u044E\u0449\u0438\u0445 \u0441\u0442\u0440\u0430\u043D\u0438\u0446 \u044D\u0442\u043E\u0439 \u0432\u0438\u043A\u0438:",
+      unavailablePage: "\u0443\u0434\u0430\u043B\u0435\u043D\u0430 \u0438\u043B\u0438 \u043D\u0435 \u043E\u043F\u0443\u0431\u043B\u0438\u043A\u043E\u0432\u0430\u043D\u0430",
+      addedBy: "\u0414\u043E\u0431\u0430\u0432\u0438\u043B(\u0430)",
+      unknownAuthor: "\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u043E",
+      adaptationNotice: "\u042D\u0442\u0430 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0430 \u2014 \u043F\u0435\u0440\u0435\u0441\u043A\u0430\u0437 \u0438 \u043F\u0435\u0440\u0435\u0440\u0430\u0431\u043E\u0442\u043A\u0430 \u043F\u0440\u0438\u0432\u0435\u0434\u0451\u043D\u043D\u044B\u0445 \u0432\u044B\u0448\u0435 \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u043E\u0432, \u0432\u044B\u043F\u043E\u043B\u043D\u0435\u043D\u043D\u044B\u0435 LLM; \u044D\u0442\u043E \u043D\u0435 \u0434\u043E\u0441\u043B\u043E\u0432\u043D\u043E\u0435 \u0432\u043E\u0441\u043F\u0440\u043E\u0438\u0437\u0432\u0435\u0434\u0435\u043D\u0438\u0435. \u0423\u043A\u0430\u0437\u0430\u043D\u043D\u0430\u044F \u043B\u0438\u0446\u0435\u043D\u0437\u0438\u044F \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0441\u044F \u043A \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0443, \u0440\u044F\u0434\u043E\u043C \u0441 \u043A\u043E\u0442\u043E\u0440\u044B\u043C \u043E\u043D\u0430 \u043F\u0440\u0438\u0432\u0435\u0434\u0435\u043D\u0430, \u0430 \u043D\u0435 \u043A \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u0432 \u0446\u0435\u043B\u043E\u043C.",
+      licenseScopeNotice: "\u0423\u043A\u0430\u0437\u0430\u043D\u043D\u0430\u044F \u043B\u0438\u0446\u0435\u043D\u0437\u0438\u044F \u043E\u0442\u043D\u043E\u0441\u0438\u0442\u0441\u044F \u043A \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0443, \u0440\u044F\u0434\u043E\u043C \u0441 \u043A\u043E\u0442\u043E\u0440\u044B\u043C \u043E\u043D\u0430 \u043F\u0440\u0438\u0432\u0435\u0434\u0435\u043D\u0430, \u0430 \u043D\u0435 \u043A \u044D\u0442\u043E\u0439 \u0441\u0442\u0440\u0430\u043D\u0438\u0446\u0435 \u0432 \u0446\u0435\u043B\u043E\u043C."
+    }
+  }
+};
+
+// src/i18n/locales/zh-CN.ts
+var zh_CN_default = {
+  components: {
+    wikicommitSources: {
+      title: "\u6765\u6E90",
+      inheritedFrom: "\u7EE7\u627F\u81EA\u539F\u6587\u9875\u9762\u7684\u6765\u6E90\uFF1A",
+      derivedFrom: "\u672C\u9875\u9762\u7531\u672C Wiki \u4E2D\u7684\u4EE5\u4E0B\u9875\u9762\u7EFC\u5408\u800C\u6210\uFF1A",
+      unavailablePage: "\u5DF2\u5220\u9664\u6216\u672A\u53D1\u5E03",
+      addedBy: "\u6DFB\u52A0\u8005\uFF1A",
+      unknownAuthor: "\u672A\u77E5",
+      adaptationNotice: "\u672C\u9875\u9762\u7531 LLM \u6839\u636E\u4E0A\u8FF0\u6765\u6E90\u8FDB\u884C\u6982\u62EC\u548C\u91CD\u65B0\u7EC4\u7EC7\uFF0C\u5E76\u975E\u9010\u5B57\u8F6C\u8F7D\u3002\u6240\u663E\u793A\u7684\u8BB8\u53EF\u8BC1\u4EC5\u9002\u7528\u4E8E\u4E0E\u5176\u5E76\u5217\u7684\u6765\u6E90\uFF0C\u4E0D\u9002\u7528\u4E8E\u672C\u9875\u9762\u6574\u4F53\u3002",
+      licenseScopeNotice: "\u6240\u663E\u793A\u7684\u8BB8\u53EF\u8BC1\u4EC5\u9002\u7528\u4E8E\u4E0E\u5176\u5E76\u5217\u7684\u6765\u6E90\uFF0C\u4E0D\u9002\u7528\u4E8E\u672C\u9875\u9762\u6574\u4F53\u3002"
+    }
+  }
+};
+
 // src/i18n/index.ts
 var locales = {
   "en-US": en_US_default,
-  "ja-JP": ja_JP_default
+  "ja-JP": ja_JP_default,
+  "de-DE": de_DE_default,
+  "es-ES": es_ES_default,
+  "fr-FR": fr_FR_default,
+  "it-IT": it_IT_default,
+  "pl-PL": pl_PL_default,
+  "pt-BR": pt_BR_default,
+  "ru-RU": ru_RU_default,
+  "zh-CN": zh_CN_default
 };
 function i18n(locale) {
   return locales[locale] || en_US_default;
 }
 var LANG_TO_LOCALE = {
   en: "en-US",
-  ja: "ja-JP"
+  ja: "ja-JP",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+  it: "it-IT",
+  pl: "pl-PL",
+  pt: "pt-BR",
+  ru: "ru-RU",
+  zh: "zh-CN"
 };
 function resolveLocale(frontmatterLang, cfgLocale) {
   if (typeof frontmatterLang === "string") {

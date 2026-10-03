@@ -11,6 +11,8 @@ export default {
         degreeMin: "下限",
         degreeMax: "上限",
         degreeNoBound: "0 は境界なし",
+        labelLimit: "画面内のラベル数",
+        labelLimitHint: "0 は倍率で決める",
         reset: "リセット",
         legend: "凡例",
         legendPages: "ページ",

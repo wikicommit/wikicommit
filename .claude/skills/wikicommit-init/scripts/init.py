@@ -284,7 +284,7 @@ def _apply_footer_repo_url(config_content: str, repo_url: str | None) -> str:
 #
 # This is NOT the same table as `LANG_TO_LOCALE` in the WikiCommit plugins' own
 # `src/i18n/index.ts`. That one lists the languages *WikiCommit itself* has written
-# translations for (two: en, ja); this one lists what the community plugins already
+# translations for (ten, fixed by the Wikipedia portal — Issue #1017); this one lists what the community plugins already
 # translate (28). Naming them alike would make them look like two copies to keep in
 # sync, which they are not.
 #
@@ -309,7 +309,7 @@ DEFAULT_QUARTZ_LOCALE = "en-US"
 # The languages WikiCommit has written its *own* labels for (Issue #825). Kept
 # apart from QUARTZ_LOCALE_BY_PRIMARY_LANG above for the reason stated there:
 # that table is what the community plugins already translate (28 languages),
-# this one is what this project translates (2), and they move for different
+# this one is what this project translates (10 — Issue #1017), and they move for different
 # reasons.
 #
 # It exists to tell the operator, once, at the moment they pick a primary_lang
@@ -327,7 +327,7 @@ DEFAULT_QUARTZ_LOCALE = "en-US"
 # checks it against every surface the notice names — the plugins' own
 # LANG_TO_LOCALE / locales and convert_wikilinks.py's *_LABELS dicts — so the
 # copies cannot drift apart silently.
-WIKICOMMIT_UI_LANGS = ("en", "ja")
+WIKICOMMIT_UI_LANGS = ("en", "ja", "de", "es", "fr", "it", "pl", "pt", "ru", "zh")
 
 
 def ui_language_notice(primary_lang: str) -> str | None:

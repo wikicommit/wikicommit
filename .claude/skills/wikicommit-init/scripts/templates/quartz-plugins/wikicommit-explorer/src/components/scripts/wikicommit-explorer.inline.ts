@@ -5,8 +5,13 @@
 // of processTrie() (Issue #209) — everything else (trie building, rendering,
 // collapse/expand + localStorage persistence) is kept identical so this fork
 // diverges from upstream as little as possible.
+//
+// Second change (Issue #1035): a page listed in wikicommit-groups.json is
+// inserted under a virtual group folder inside its Type folder. Its data — and
+// so its href — is untouched; only its position in the tree moves.
 import { simplifySlug, resolveBasePath } from "@quartz-community/utils/path"
 import { foldCurrentLangSegment } from "../../util/foldLang"
+import { groupedPlacement } from "../../util/groups"
 
 // Simple trie node implementation for client-side
 class FileTrieNode {
@@ -45,7 +50,7 @@ class FileTrieNode {
     return child;
   }
 
-  insert(path, file) {
+  insert(path, file, hintParts) {
     if (path.length === 0) return;
     this.isFolder = true;
     const segment = path[0];
@@ -60,14 +65,28 @@ class FileTrieNode {
       if (!child) {
         child = this.makeChild(path, undefined);
       }
-      const fileParts = (file.filePath || file.slug || "").split("/");
+      const fileParts = hintParts || (file.filePath || file.slug || "").split("/");
       child.fileSegmentHint = fileParts[fileParts.length - path.length];
-      child.insert(path.slice(1), file);
+      child.insert(path.slice(1), file, hintParts);
     }
   }
 
-  add(file) {
-    this.insert(file.slug.split("/"), file);
+  add(file, groups) {
+    const placement = groupedPlacement(file.slug, file.filePath, groups);
+    if (!placement) {
+      this.insert(file.slug.split("/"), file);
+      return;
+    }
+    this.insert(placement.path, file, placement.hintParts);
+    // Mark the virtual folder: shown under its label, never rendered as a link
+    // (it has no page), opened when it holds the page being viewed.
+    let node = this;
+    for (const segment of placement.path.slice(0, -1)) {
+      node = node.children.find((c) => c.slugSegment === segment);
+      if (!node) return;
+    }
+    node.isGroup = true;
+    node.displayNameOverride = placement.label;
   }
 
   sort(sortFn) {
@@ -85,9 +104,9 @@ class FileTrieNode {
     this.children.forEach((c) => c.map(mapFn));
   }
 
-  static fromEntries(entries) {
+  static fromEntries(entries, groups) {
     const trie = new FileTrieNode([], null);
-    entries.forEach(([, entry]) => trie.add(entry));
+    entries.forEach(([, entry]) => trie.add(entry, groups));
     return trie;
   }
 }
@@ -155,6 +174,20 @@ function processTrie(trie, sortFn, filterFn, mapFn, currentSlug) {
   return trie;
 }
 
+// The group manifest (Issue #1035), fetched once per page load. Absent on a
+// wiki with no .wikicommit/groups/ (convert_wikilinks.py writes it only when
+// there is something to say), so a failed fetch is the normal case and means
+// "no groups" — the tree is then built exactly as before.
+let groupsPromise = null;
+function loadGroups() {
+  if (!groupsPromise) {
+    groupsPromise = fetch(resolveBasePath("wikicommit-groups.json"))
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+  }
+  return groupsPromise;
+}
+
 // Build trie from content index data
 async function buildFileTrie(dataFns, currentSlug) {
   try {
@@ -178,7 +211,8 @@ async function buildFileTrie(dataFns, currentSlug) {
       return null;
     }
 
-    const trie = FileTrieNode.fromEntries(entries);
+    const groups = await loadGroups();
+    const trie = FileTrieNode.fromEntries(entries, groups);
     console.log("[Explorer] Trie root children:", trie.children.length);
 
     // Parse data functions from string if provided
@@ -234,7 +268,7 @@ function renderTree(node, container, currentSlug, folderBehavior, savedState, pa
     if (folderTitle) folderTitle.textContent = node.displayName || node.slugSegment;
     if (folderContainer) folderContainer.dataset.folderpath = node.slug;
 
-    if (folderBehavior === "link" && folderButton) {
+    if (folderBehavior === "link" && folderButton && !node.isGroup) {
       const folderLink = document.createElement("a");
       folderLink.className = folderButton.className;
       const folderHref = simplifySlug(node.slug);
@@ -254,8 +288,9 @@ function renderTree(node, container, currentSlug, folderBehavior, savedState, pa
     // if this folder is a prefix of the current path we want to open it anyways
     const simpleFolderPath = simplifySlug(node.slug);
     const folderIsPrefixOfCurrentSlug =
-      simpleFolderPath &&
-      simpleFolderPath === simplifiedCurrentSlug.slice(0, simpleFolderPath.length);
+      (simpleFolderPath &&
+        simpleFolderPath === simplifiedCurrentSlug.slice(0, simpleFolderPath.length)) ||
+      (node.isGroup && node.children.some((c) => c.data && c.data.slug === currentSlug));
 
     if ((!isCollapsed || folderIsPrefixOfCurrentSlug) && folderOuter) {
       folderOuter.classList.add("open");

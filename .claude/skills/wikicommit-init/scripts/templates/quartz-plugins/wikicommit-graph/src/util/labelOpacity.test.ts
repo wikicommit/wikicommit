@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { labelAlpha, zoomLabelAlpha } from "./labelOpacity";
+import {
+  DEFAULT_LABEL_LIMIT,
+  type LabelCandidate,
+  labelAlpha,
+  normalizeLabelLimit,
+  restingLabelAlpha,
+  selectLabels,
+  zoomLabelAlpha,
+} from "./labelOpacity";
+import { i18n } from "../i18n";
 
 const INLINE = readFileSync(
   join(import.meta.dirname, "..", "components", "scripts", "graph.inline.ts"),
@@ -121,5 +130,191 @@ describe("the inline script has one writer of label.alpha", () => {
     // The replaced loop called activeLabels.indexOf() inside a walk of the
     // label container: ~1M comparisons per zoom or pan at 969 nodes.
     expect(INLINE).not.toContain("activeLabels");
+  });
+});
+
+// Issue #1128: on a 1000-page wiki the zoom ramp alone filled the screen with
+// text, and every zoom in between left all labels half transparent. The global
+// graph now labels at most `labelLimit` nodes of those on screen.
+describe("selectLabels", () => {
+  const VIEW = { x0: -100, y0: -100, x1: 100, y1: 100 };
+  function node(
+    id: string,
+    degree: number,
+    opts: { x?: number | null; y?: number | null; secondary?: boolean } = {},
+  ): LabelCandidate {
+    return {
+      id,
+      x: opts.x === undefined ? 0 : opts.x,
+      y: opts.y === undefined ? 0 : opts.y,
+      degree,
+      secondary: opts.secondary ?? false,
+    };
+  }
+
+  it("returns null for limit 0, which hands the labels back to the zoom ramp", () => {
+    expect(selectLabels([node("a", 1)], VIEW, 0)).toBeNull();
+  });
+
+  it("labels everything on screen while that fits under the limit", () => {
+    const chosen = selectLabels(
+      [node("a", 0), node("b", 5), node("t", 9, { secondary: true })],
+      VIEW,
+      3,
+    );
+    expect(chosen).toEqual(new Set(["a", "b", "t"]));
+  });
+
+  it("only counts what is on screen", () => {
+    const chosen = selectLabels([node("in", 0), node("out", 99, { x: 500 })], VIEW, 1);
+    expect(chosen).toEqual(new Set(["in"]));
+  });
+
+  it("treats the viewport edge as inside", () => {
+    const chosen = selectLabels([node("edge", 0, { x: 100, y: -100 })], VIEW, 1);
+    expect(chosen).toEqual(new Set(["edge"]));
+  });
+
+  it("skips nodes the simulation has not placed yet", () => {
+    const chosen = selectLabels([node("a", 1, { x: null }), node("b", 0)], VIEW, 5);
+    expect(chosen).toEqual(new Set(["b"]));
+  });
+
+  it("keeps the best-connected nodes when over the limit", () => {
+    const chosen = selectLabels(
+      [node("low", 1), node("high", 9), node("mid", 5), node("none", 0)],
+      VIEW,
+      2,
+    );
+    expect(chosen).toEqual(new Set(["high", "mid"]));
+  });
+
+  it("ranks pages before tags and sources however connected those are", () => {
+    // A tag that has become a hub would otherwise take the top slot from the
+    // pages the reader came to read.
+    const chosen = selectLabels(
+      [node("tag", 50, { secondary: true }), node("p1", 1), node("p2", 2)],
+      VIEW,
+      2,
+    );
+    expect(chosen).toEqual(new Set(["p1", "p2"]));
+  });
+
+  it("fills slots the pages leave over with tags and sources, by degree", () => {
+    const chosen = selectLabels(
+      [node("p", 1), node("t-low", 1, { secondary: true }), node("t-high", 7, { secondary: true })],
+      VIEW,
+      2,
+    );
+    expect(chosen).toEqual(new Set(["p", "t-high"]));
+  });
+
+  it("breaks degree ties by id, so the choice does not flicker between frames", () => {
+    const a = selectLabels([node("b", 1), node("a", 1), node("c", 1)], VIEW, 2);
+    const b = selectLabels([node("c", 1), node("b", 1), node("a", 1)], VIEW, 2);
+    expect(a).toEqual(new Set(["a", "b"]));
+    expect(b).toEqual(a);
+  });
+
+  it("never returns more than the limit", () => {
+    const many = Array.from({ length: 1000 }, (_, i) =>
+      node("n" + i, i % 7, { x: (i % 200) - 100 }),
+    );
+    expect(selectLabels(many, VIEW, 40)?.size).toBe(40);
+  });
+});
+
+describe("restingLabelAlpha", () => {
+  it("is 1 for a chosen label and 0 otherwise — no half-transparent middle", () => {
+    expect(restingLabelAlpha(true, 0.4)).toBe(1);
+    expect(restingLabelAlpha(false, 0.4)).toBe(0);
+  });
+
+  it("falls back to the zoom ramp when no limit is in force", () => {
+    expect(restingLabelAlpha(undefined, 0.4)).toBe(0.4);
+  });
+
+  it("still loses to hover: a chosen non-neighbour goes to 0 while focusing", () => {
+    expect(labelAlpha(false, false, true, restingLabelAlpha(true, 0))).toBe(0);
+    expect(labelAlpha(false, true, true, restingLabelAlpha(false, 0))).toBe(1);
+  });
+});
+
+describe("normalizeLabelLimit", () => {
+  it("defaults to 40", () => {
+    expect(DEFAULT_LABEL_LIMIT).toBe(40);
+    expect(normalizeLabelLimit(undefined)).toBe(40);
+    expect(normalizeLabelLimit("abc")).toBe(40);
+    expect(normalizeLabelLimit(-1)).toBe(40);
+  });
+
+  it("keeps 0, which means no limit", () => {
+    expect(normalizeLabelLimit(0)).toBe(0);
+  });
+
+  it("floors fractions and reads numeric strings", () => {
+    expect(normalizeLabelLimit(12.7)).toBe(12);
+    expect(normalizeLabelLimit("15")).toBe(15);
+  });
+});
+
+describe("the inline script wires the label limit", () => {
+  function fn(name: string): string {
+    const start = INLINE.indexOf("function " + name + "(");
+    expect(start, name).toBeGreaterThan(-1);
+    return INLINE.slice(start, INLINE.indexOf("\n      }\n", start));
+  }
+
+  it("applies the limit to the global graph only", () => {
+    // The local graph holds a neighbourhood and has no bar to change it from.
+    expect(INLINE).toMatch(
+      /var labelLimit = depth < 0 \? normalizeLabelLimit\(config\.labelLimit\) : 0;/,
+    );
+  });
+
+  it("chooses labels inside renderLabels, the one writer", () => {
+    expect(fn("renderLabels")).toContain("selectLabels(");
+    expect(fn("renderLabels")).toContain("restingLabelAlpha(");
+  });
+
+  it("redoes the choice per tick while a limit is in force", () => {
+    expect(INLINE).toMatch(
+      /simulation\.on\("tick", function \(\) \{\s*if \(labelLimit > 0\) renderLabels\(\);/,
+    );
+  });
+
+  it("changes the limit without rebuilding the graph", () => {
+    // showGlobalGraph() re-seeds the simulation, which loses the layout.
+    expect(INLINE).toContain("update({ labelLimit: v }, true);");
+    expect(INLINE).toMatch(/relabelOnly \? labelLimitSetters\.get\(graphContainer\)/);
+  });
+
+  it("stores the limit only when it differs from the quartz.config.yaml value", () => {
+    // Storing it on every filter change (or on Reset) would pin the YAML value
+    // of the day in the browser and hide a later retune from the reader.
+    expect(INLINE).toContain("if (nextLimit !== configuredLabelLimit(graphContainer)) {");
+    expect(INLINE).toContain("filters.labelLimit = nextLimit;");
+  });
+
+  it("resets to the quartz.config.yaml value, not to a constant", () => {
+    expect(INLINE).toContain("labelLimit: configuredLabelLimit(graphContainer),");
+    expect(INLINE).toContain(
+      'graphContainer.dataset["cfgDefault"] = graphContainer.dataset["cfg"]',
+    );
+  });
+});
+
+describe("label limit strings", () => {
+  it("every locale carries them, with an ASCII 0 in the hint", () => {
+    const dir = join(import.meta.dirname, "..", "i18n", "locales");
+    const codes = readdirSync(dir)
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => f.replace(/\.ts$/, ""));
+    expect(codes.length).toBeGreaterThan(1);
+    for (const code of codes) {
+      const controls = i18n(code).components.graph.controls as Record<string, string>;
+      expect(controls.labelLimit, `${code}.labelLimit`).toBeTruthy();
+      expect(controls.labelLimitHint, `${code}.labelLimitHint`).toContain("0");
+    }
   });
 });

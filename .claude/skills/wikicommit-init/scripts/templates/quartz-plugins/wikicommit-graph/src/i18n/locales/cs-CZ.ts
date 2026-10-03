@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Max",
         degreeNoBound: "0 = bez omezení",
+        labelLimit: "Popisků na obrazovce",
+        labelLimitHint: "0 = podle přiblížení",
         reset: "Obnovit",
         legend: "Legenda",
         legendPages: "Stránky",

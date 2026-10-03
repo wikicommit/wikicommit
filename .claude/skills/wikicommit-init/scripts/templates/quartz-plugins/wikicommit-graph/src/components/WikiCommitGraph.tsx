@@ -18,6 +18,9 @@ export interface D3Config {
   centerForce: number;
   linkDistance: number;
   fontSize: number;
+  /** Steepness of upstream's zoom ramp for label opacity. Applies to the local
+   *  graph, and to the global graph only when `labelLimit` is 0 — otherwise
+   *  the global graph's labels are chosen by `labelLimit` instead. */
   opacityScale: number;
   removeTags: string[];
   showTags: boolean;
@@ -35,6 +38,14 @@ export interface D3Config {
   /** Hide nodes with more links than this among the currently shown set.
    *  0 disables the bound. This is what tames a tag that has become a hub. */
   maxDegree?: number;
+  /** Global graph only: how many labels show at once while nothing is hovered.
+   *  If the nodes on screen number at most this, all of them are labelled;
+   *  otherwise the best-connected this many are (pages first, then tag and
+   *  source nodes), at full opacity, and the rest at none. 0 turns the limit
+   *  off and the zoom ramp (`opacityScale`) decides, as upstream does. The
+   *  control bar can change it at runtime and the change is kept in the
+   *  browser until Reset, which returns to this value. */
+  labelLimit?: number;
   /** Language codes to show. Empty means every language. */
   langs?: string[];
   /** Type names to show, written the way `type:` writes them minus `schema:` —
@@ -54,7 +65,8 @@ export interface D3Config {
    *  `GraphFilterConfig.showIndexes`.
    *
    *  No control bar item writes this key; it is set here or in
-   *  `quartz.config.yaml`. Exposing it in the bar is Issue #985's. */
+   *  `quartz.config.yaml`. It is deliberately not exposed in the bar
+   *  (Issue #1018). */
   showIndexes?: boolean;
 }
 
@@ -97,6 +109,7 @@ const defaultOptions: GraphOptions = {
     showControls: true,
     minDegree: 0,
     maxDegree: 0,
+    labelLimit: 40,
     langs: [],
     types: [],
     showSources: true,

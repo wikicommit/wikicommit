@@ -11,6 +11,8 @@ export default {
         degreeMin: "Мін",
         degreeMax: "Макс",
         degreeNoBound: "0 = без обмеження",
+        labelLimit: "Підписів на екрані",
+        labelLimitHint: "0 = за масштабом",
         reset: "Скинути",
         legend: "Умовні позначення",
         legendPages: "Сторінки",
@@ -18,7 +20,8 @@ export default {
         legendVisited: "Відвідані",
         legendUnvisited: "Невідвідані",
         legendVisitedHint: "Сторінки, які ви відкривали в цьому браузері",
-        legendTagsAlways: "Теги завжди відображаються цим кольором, незалежно від того, чи ви їх відкривали",
+        legendTagsAlways:
+          "Теги завжди відображаються цим кольором, незалежно від того, чи ви їх відкривали",
       },
     },
   },

@@ -1207,27 +1207,111 @@ def print_path_cache_path(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str
     return ("CACHE_PATH", cache_path.relative_to(repo_root.resolve()).as_posix(), "")
 
 
-def _is_connection_failure(exc: BaseException) -> bool:
-    """`exc` か、その原因の連鎖のどこかが `requests` の接続段階の失敗か（Issue #1020）。
+# (connect, read) seconds for every request fetch_url() makes (Issue #1038).
+# markitdown calls session.get() with no timeout, and requests' default is to
+# wait forever: a server that sent its headers and then stopped, or never sent
+# a status line, held the run until the harness killed it, with nothing
+# recorded. The read timeout is per socket read, not for the whole body.
+FETCH_TIMEOUT = (15, 60)
 
-    `markitdown` が例外を包み直しても判定が変わらないよう、`__cause__` / `__context__` を
-    辿る。循環に備えて同じ例外は 2 度見ない。
 
-    `SSLError` は `ConnectionError` の子だが除外する — TLS ハンドシェイクまで進んだ
-    ＝ サーバーには届いており、証明書の失効・自己署名はそのサイト固有の問題である。
-    """
-    import requests
-
+def _exception_chain(exc: BaseException) -> list[BaseException]:
+    """`exc` とその `__cause__` / `__context__` の連鎖（循環に備えて同じ例外は 2 度見ない）。"""
+    chain: list[BaseException] = []
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, requests.exceptions.SSLError):
-            return False
-        if isinstance(current, requests.exceptions.ConnectionError):
-            return True
+        chain.append(current)
         current = current.__cause__ or current.__context__
+    return chain
+
+
+def _proxy_applies(url: str) -> bool:
+    """この URL へのリクエストにプロキシが効くか（環境変数と NO_PROXY から決まる）。"""
+    import requests
+
+    try:
+        proxies = requests.utils.get_environ_proxies(url)
+        return bool(requests.utils.select_proxy(url, proxies))
+    except Exception:  # noqa: BLE001 - unknown means "cannot rule the proxy out"
+        return True
+
+
+def _is_connection_failure(exc: BaseException, url: str | None = None) -> bool:
+    """リクエストがサーバーに届かなかったか（Issue #1020 / #1038）。
+
+    `requests.exceptions.ConnectionError` の系列を基本とし、`markitdown` が例外を
+    包み直しても判定が変わらないよう `__cause__` / `__context__` を辿る。ただし
+    `ConnectionError` はサーバーに届いた後の失敗も含むので、次の 3 つは除く:
+
+    - `SSLError` — TLS ハンドシェイクまで進んだ ＝ サーバーには届いている
+    - 連鎖に urllib3 の `ReadTimeoutError` がある — 読み取りのタイムアウト。
+      requests は本文受信中のそれを `ReadTimeout` ではなく `ConnectionError` で送出する
+    - `ProtocolError` があり `MaxRetryError` を経由しない、かつその URL にプロキシが
+      効いていない — サーバーがリクエストを受けてから切った。接続段階の失敗
+      （名前解決・接続拒否・接続タイムアウト・プロキシの拒否）はすべて urllib3 の
+      再試行の枠（`MaxRetryError`）を通るので、ここで分かれる。プロキシが効いている
+      ときは、https の CONNECT をプロキシがリセットした場合と連鎖が同じになり
+      区別できないので、接続失敗（保留）側に残す — 誤っても次の実行で拾われる。
+      TLS ハンドシェイクの途中でリセットされた場合も `MaxRetryError` を経由せず同じ
+      連鎖になるが、リクエストはまだ送られていないので接続失敗側に残す（下記
+      `_failed_during_tls_handshake()`）
+    """
+    import requests
+
+    try:
+        from urllib3.exceptions import MaxRetryError, ProtocolError, ReadTimeoutError
+    except ImportError:  # pragma: no cover - urllib3 always ships with requests
+        MaxRetryError = ProtocolError = ReadTimeoutError = ()  # type: ignore[assignment]
+
+    chain = _exception_chain(exc)
+    if not any(isinstance(e, requests.exceptions.ConnectionError) for e in chain):
+        return False
+    if any(isinstance(e, requests.exceptions.SSLError) for e in chain):
+        return False
+    if ReadTimeoutError and any(isinstance(e, ReadTimeoutError) for e in chain):
+        return False
+    if (
+        ProtocolError
+        and any(isinstance(e, ProtocolError) for e in chain)
+        and not any(isinstance(e, MaxRetryError) for e in chain)
+        and url is not None
+        and not _proxy_applies(url)
+        and not _failed_during_tls_handshake(chain)
+    ):
+        return False
+    return True
+
+
+def _failed_during_tls_handshake(chain: list[BaseException]) -> bool:
+    """連鎖のどれかが TLS ハンドシェイクの最中（`ssl` の `do_handshake`）に送出されたか。
+
+    ファイアウォールやサンドボックスが接続を受け付けてからハンドシェイク中に
+    リセットすると、requests は `ConnectionError → ProtocolError → ConnectionResetError`
+    を送出し、`MaxRetryError` を経由しない — サーバーがリクエストを受けてから切った
+    場合と例外の型は同じである。違いは送出された場所だけで、前者ではリクエストが
+    まだ送られていない。`do_handshake` は標準ライブラリ `ssl` の名前なので、
+    urllib3 の内部の関数名より変わりにくい。
+    """
+    for e in chain:
+        tb = e.__traceback__
+        while tb is not None:
+            if tb.tb_frame.f_code.co_name == "do_handshake":
+                return True
+            tb = tb.tb_next
     return False
+
+
+def _session_with_timeout(requests_module, timeout):
+    """Every request made through the returned session gets `timeout` unless it passes one."""
+
+    class _TimeoutSession(requests_module.Session):
+        def request(self, method, url, **kwargs):
+            kwargs.setdefault("timeout", timeout)
+            return super().request(method, url, **kwargs)
+
+    return _TimeoutSession()
 
 
 def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
@@ -1251,21 +1335,23 @@ def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
     ソースではなく環境の問題として `ERROR`（404・変換失敗・`ReadTimeout` 等、そのソースに
     固有の失敗）と分ける（Issue #1020）。Pass 1 は前者を `status: failed` にせず保留し、
     連続したら処理全体を止める — ガード C（Issue #574）と同じ線引きである。
-    `ReadTimeout` は `ConnectionError` の子ではないので `ERROR` のまま残る（接続は
-    できたが応答が遅い ＝ そのサーバーの問題）。名前解決の失敗は消えたドメイン
+    サーバーに届いた後の失敗（読み取りのタイムアウト・リクエスト受信後の切断）は
+    `ConnectionError` として送出されても `ERROR` にする（`_is_connection_failure()`。
+    Issue #1038）。すべてのリクエストに `FETCH_TIMEOUT` を与える — 無いと本文の途中で
+    止まったサーバーを永久に待つ。名前解決の失敗は消えたドメイン
     （ソースの問題）でも起きるため 1 件では判断できず、それが「連続 2 件で停止」の理由である。
     """
     import requests
     from markitdown import MarkItDown
 
-    session = requests.Session()
+    session = _session_with_timeout(requests, FETCH_TIMEOUT)
     session.headers.update({"User-Agent": USER_AGENT})
     md = MarkItDown(requests_session=session)
 
     try:
         result = md.convert_url(url)
     except Exception as e:  # noqa: BLE001 - surfaced verbatim as an extraction failure
-        code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e) else "ERROR"
+        code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e, url) else "ERROR"
         return (code, output, f"{type(e).__name__}: {e}")
 
     out_path = Path(output)

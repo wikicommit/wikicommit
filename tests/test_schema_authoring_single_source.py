@@ -33,14 +33,20 @@ from check_skill_md_lines import instruction_files  # noqa: E402
 AUTHORING = REPO / ".claude/skills/wikicommit-init/scripts/templates/schema-authoring.md"
 
 # Every path that writes a .wikicommit/schema/<Type>.md, and the `provenance`
-# value it stamps. wikicommit-generate stamps one of two depending on how the
-# candidate was approved (Issue #507).
+# value it stamps. wikicommit-generate used to stamp one of two depending on how
+# the candidate was approved (Issue #507); since Issue #1069 a non-interactive
+# run defers instead of approving, so only a human-answered prompt stamps.
 TYPE_WRITING_SKILLS = {
     "wikicommit-init": ("init-theme",),
     "wikicommit-collect": ("collect",),
-    "wikicommit-generate": ("generate-interactive", "generate-auto"),
+    "wikicommit-generate": ("generate-interactive",),
     "wikicommit-schema-propose": ("schema-propose",),
 }
+
+# Values no path writes any more but that type files already on disk still carry
+# (Issue #1069). The authoring file keeps listing them so that it and a written
+# file's own `provenance` stay one vocabulary.
+LEGACY_PROVENANCE = ("generate-auto",)
 
 # Phrases that only appear when the procedure is being *stated* rather than
 # referred to. Each is verbatim from the authoring file, so a copy-paste back
@@ -111,7 +117,10 @@ def test_applies_to_lists_exactly_the_provenance_values_the_paths_stamp():
     """
     fm = yaml.safe_load(authoring_text().split("---\n")[1])
     listed = fm["wikicommit"]["applies_to"]
-    expected = sorted(v for values in TYPE_WRITING_SKILLS.values() for v in values)
+    expected = sorted(
+        [v for values in TYPE_WRITING_SKILLS.values() for v in values]
+        + list(LEGACY_PROVENANCE)
+    )
     assert sorted(listed) == expected, (
         f"applies_to is {sorted(listed)} but the paths stamp {expected}"
     )

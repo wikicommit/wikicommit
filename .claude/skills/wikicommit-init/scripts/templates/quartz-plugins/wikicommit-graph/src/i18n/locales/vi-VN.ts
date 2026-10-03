@@ -11,6 +11,8 @@ export default {
         degreeMin: "Tối thiểu",
         degreeMax: "Tối đa",
         degreeNoBound: "0 = không giới hạn",
+        labelLimit: "Nhãn trên màn hình",
+        labelLimitHint: "0 = theo mức thu phóng",
         reset: "Đặt lại",
         legend: "Chú giải",
         legendPages: "Trang",

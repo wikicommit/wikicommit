@@ -46,6 +46,10 @@ export default {
       // Over-claiming here would repeat, in the opposite direction, the error
       // Issue #740 is correcting for `reviewed`.
       aiReviewAt: "Checked against sources:",
+      // Issue #1031: a translation page is checked against the page it was
+      // translated from, not against sources, so it says so. Stamped by
+      // convert_wikilinks.py as `ai_review_stage: translate-check`.
+      aiReviewOriginalAt: "Checked against the original page:",
       aiReviewBy: "Checking model:",
       unknown: "unknown",
       reviewStatusLink: "Check this page's review status",

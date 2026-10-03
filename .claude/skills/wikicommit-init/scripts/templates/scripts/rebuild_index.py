@@ -36,6 +36,7 @@ import sys
 from pathlib import Path
 
 from _frontmatter import parse_frontmatter
+from _groups import load_group_file
 from _wikilink import (
     ENTITY_DIR,
     VIEW_DIR,
@@ -248,12 +249,56 @@ def rebuild_index(type_dir: Path) -> tuple[str, int] | None:
     # _write_source_dir_index() / generate_overview_page()) already writes
     # `- [title](link)` for the same reason. remove_page.py's
     # remove_index_entry() tolerates the marker.
-    body_lines = [f"- [[{type_name}/{slug}]]" for slug, _title in entries]
-    content = frontmatter + "\n" + ("\n".join(body_lines) + "\n" if body_lines else "")
+    slugs = [slug for slug, _title in entries]
+    group_file, group_errors = load_group_file(type_name)
+    if group_errors:
+        # An invalid group file never breaks the index: it is listed flat, as
+        # if the file were absent, and check_groups.py says what is wrong.
+        print(
+            f"WARNING: groups file for {type_name} is invalid ({group_errors[0]}) — "
+            f"{type_dir / 'index.md'} listed without groups; run check_groups.py for details"
+        )
+    if group_file is None:
+        body = "\n".join(f"- [[{type_name}/{slug}]]" for slug in slugs) + "\n" if slugs else ""
+    else:
+        body = _grouped_body(type_name, lang, slugs, group_file)
+    content = frontmatter + "\n" + body
 
     index_path = type_dir / "index.md"
     index_path.write_text(content, encoding="utf-8")
     return str(index_path), len(entries)
+
+
+def _grouped_body(type_name: str, lang: str, slugs: list[str], group_file) -> str:
+    """The Type index split into `## <label>` sections (Issue #1035).
+
+    Groups come in the file's order, each listing its pages in slug order (the
+    same order as an ungrouped index); a group with no page in this language is
+    left out rather than shown as an empty heading. Pages no group claims go
+    last under the unclassified heading — that is where a page generated after
+    the last grouping lands until someone groups it again. A slug the file
+    names but this directory does not hold is simply not listed here;
+    check_groups.py reports it.
+
+    Only this file changes: grouping lives in `.wikicommit/groups/`, so no page
+    under the Type is touched and no `review_status` moves.
+    """
+    present = set(slugs)
+    sections: list[tuple[str, list[str]]] = []
+    claimed: set[str] = set()
+    for group in group_file.groups:
+        members = sorted(s for s in group.pages if s in present)
+        claimed.update(group.pages)
+        if members:
+            sections.append((group.label_for(lang), members))
+    rest = [s for s in slugs if s not in claimed]
+    if rest:
+        sections.append((group_file.unclassified_label_for(lang), rest))
+    blocks = []
+    for heading, members in sections:
+        lines = [f"## {heading}", ""] + [f"- [[{type_name}/{slug}]]" for slug in members]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks) + "\n" if blocks else ""
 
 
 def collect_target_dirs(args: list[str]) -> list[Path]:

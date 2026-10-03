@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Maks",
         degreeNoBound: "0 = bez ograniczenia",
+        labelLimit: "Etykiety na ekranie",
+        labelLimitHint: "0 = według powiększenia",
         reset: "Resetuj",
         legend: "Legenda",
         legendPages: "Strony",
@@ -18,7 +20,8 @@ export default {
         legendVisited: "Odwiedzone",
         legendUnvisited: "Nieodwiedzone",
         legendVisitedHint: "Strony otwarte w tej przeglądarce",
-        legendTagsAlways: "Tagi są zawsze rysowane tym kolorem, niezależnie od tego, czy je otwierano",
+        legendTagsAlways:
+          "Tagi są zawsze rysowane tym kolorem, niezależnie od tego, czy je otwierano",
       },
     },
   },

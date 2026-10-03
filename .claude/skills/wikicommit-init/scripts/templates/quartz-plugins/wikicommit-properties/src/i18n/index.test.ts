@@ -13,7 +13,7 @@ describe("i18n", () => {
   })
 
   it("falls back to en-US for an unsupported locale", () => {
-    expect(i18n("fr-FR")).toBe(enUS)
+    expect(i18n("ko-KR")).toBe(enUS)
   })
 
   it("falls back to en-US when no locale is given", () => {
@@ -43,7 +43,7 @@ describe("resolveLocale", () => {
   })
 
   it("falls back to cfg.locale when frontmatter.lang is a language this plugin has no locale for", () => {
-    expect(resolveLocale("fr", "ja-JP")).toBe("ja-JP")
+    expect(resolveLocale("ko", "ja-JP")).toBe("ja-JP")
   })
 
   it("falls back to en-US when both frontmatter.lang and cfg.locale are absent", () => {

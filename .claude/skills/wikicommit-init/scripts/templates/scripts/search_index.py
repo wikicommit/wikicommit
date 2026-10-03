@@ -38,10 +38,15 @@ CACHE_DIR = Path(".wikicommit/.cache")
 DB_PATH = CACHE_DIR / "search_index.sqlite3"
 
 # bm25() takes one weight per column in table-definition order (path, title,
-# lang, type, tags, review_status, body), including UNINDEXED columns. Title
-# hits are weighted far above body hits per the Issue #126 spec; UNINDEXED
+# lang, type, tags, review_status, body, aliases), including UNINDEXED columns.
+# Title hits are weighted far above body hits per the Issue #126 spec; UNINDEXED
 # columns take a placeholder 0.0 since they are never part of the MATCH.
-BM25_WEIGHTS = (0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+# `aliases` weighs like the title (Issue #1078): an alias is another name for
+# the page, and where the source's own wording is kept only as an alias — a
+# language the wiki has no translation into — it is the one place that wording
+# can be found at all. It comes last so `body` keeps column index 6, which
+# snippet() is called with.
+BM25_WEIGHTS = (0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 10.0)
 
 # snippet()'s max_tokens counts trigram tokens (3-char, overlapping by 2), so
 # N tokens span roughly N+2 characters. 64 gives a "~32 chars either side of
@@ -51,7 +56,7 @@ SNIPPET_MAX_TOKENS = 64
 # Mixed into the fingerprint so an index written by a version of this script
 # that stored different columns or indexed pages differently is rebuilt even
 # when no page changed. Bump it whenever _build()'s output changes shape.
-INDEX_FORMAT = "1"
+INDEX_FORMAT = "2"
 
 
 def collect_pages() -> list[Path]:
@@ -92,7 +97,7 @@ def _create_index_table(con: sqlite3.Connection) -> bool:
         con.execute(
             "CREATE VIRTUAL TABLE pages USING fts5("
             "path UNINDEXED, title, lang UNINDEXED, type UNINDEXED, "
-            'tags, review_status UNINDEXED, body, tokenize="trigram")'
+            'tags, review_status UNINDEXED, body, aliases, tokenize="trigram")'
         )
     except sqlite3.OperationalError:
         return False
@@ -195,11 +200,12 @@ def _build(pages: list[Path], fingerprint: str) -> int:
                     _tags_to_text(fm.get("tags")),
                     str(fm.get("review_status") or "pending"),
                     body,
+                    _tags_to_text(fm.get("aliases")),
                 ))
 
             con.executemany(
-                "INSERT INTO pages (path, title, lang, type, tags, review_status, body) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO pages (path, title, lang, type, tags, review_status, body, aliases) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 rows,
             )
             con.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
@@ -421,7 +427,7 @@ def query_index(
         if lang:
             sql += " AND lang = ?"
             params.append(lang)
-        sql += " ORDER BY bm25(pages, ?, ?, ?, ?, ?, ?, ?) LIMIT ?"
+        sql += " ORDER BY bm25(pages, ?, ?, ?, ?, ?, ?, ?, ?) LIMIT ?"
         params.extend(BM25_WEIGHTS)
         params.append(limit)
 

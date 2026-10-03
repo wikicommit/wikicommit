@@ -9,7 +9,7 @@ pass_token: "a3f1c07d"
 ## Contents
 
 1. Collect the queued source management files (tiers, the 5-source cap, what `partial` and `retracted` mean here)
-2. Exit cleanly when nothing is queued — **this closes the run record**
+2. Who collects: the driver, not you
 3. Read `source.type` / `source.path` / `source.url`
 4. Extract text: guard B (known JS shell) → guard C (fetch capability) → the URL scratch cache → the `type: path` extraction cache → the per-extension routes → guard A (low density)
 5. Empty or unreadable extraction → `status: failed` + `## Failure Reason`
@@ -17,7 +17,7 @@ pass_token: "a3f1c07d"
 
 - Pass 2a: the summary, the source-language judgment, and the source-as-entity judgment
 
-**Stamp `--pass pass1-extract` before extracting each source**, with `--token a3f1c07d` (the run-record block is in `SKILL.md`; the token is this file's `pass_token`, and `record_run.py` opens this file itself to check it). This is the stamp that survives compaction, so it is the one that always marks how far a run got.
+**When this pass is done, report it to the driver** — run the `then` line the driver gave you for `pass1-extract`, with `--token a3f1c07d` (this file's `pass_token`; the driver opens this file itself to compare, so a pass carried out without reading it is refused rather than recorded) and the outcome that fits: `extracted`, `failed` (step 5), `deferred` (guard A or a network failure), `unchanged` (a forced recheck whose content has not changed), or `halted` with `--reason` (guard C, or two network failures in a row). The driver checks the result on disk before it moves on, and records the pass on the run record — a pass that never reaches `done` shows up as not run.
 
 1. Collect source management files from `.wikicommit/source/` whose `status` is `pending` or `outdated`, plus those with `status: partial` **and a non-empty `failed_pages`**:
    - **`status: retracted` is never collected.** The condition above is an allowlist and `retracted` is not on it; a later edit that widens the list must not put a withdrawn source back into circulation. The argument branch below never reaches one either — Step 0 stops on `RETRACTED:` before Pass 1 begins.
@@ -29,7 +29,7 @@ pass_token: "a3f1c07d"
      **Within a tier, a file carrying a `## Deferred Reason` sorts after one that does not.** A deferral leaves `status` untouched, so without this the same deferred sources would hold the same slots every run — and a non-interactive run defers them again — so nothing behind them would ever come up. An interactive run still sees them in the list it shows, and option (a) takes everything.
 
      `outdated` goes first because a published page's source has changed, so what is on the site is *wrong*, where a never-processed source is only *missing*. It cannot starve the backlog: a source only becomes `outdated` when its content changes, so the tier is small and does not refill on its own.
-   - If the count exceeds 5, do not start processing yet — show the count and the matching management file paths, then ask the user to choose: **(a)** process all of them in this run, or **(b)** process only the first 5 in the order above and leave the rest untouched for a later run. If the user picks (b), proceed with only those 5; the rest keep their `status` and a later no-argument `/wikicommit-generate` picks them up — nothing else is needed. If the count is 5 or fewer, proceed with all of them without asking. **In a non-interactive run, take (b) without asking** and say so in the Completion Notice: the unprocessed files stay queued by construction. Do not read the absence of an answer as (a).
+   - If the count exceeds 5, do not start processing yet (the driver asks this as its `batch-cap` step: `all` is (a) below, `first-five` is (b)) — show the count and the matching management file paths, then ask the user to choose: **(a)** process all of them in this run, or **(b)** process only the first 5 in the order above and leave the rest untouched for a later run. If the user picks (b), proceed with only those 5; the rest keep their `status` and a later no-argument `/wikicommit-generate` picks them up — nothing else is needed. If the count is 5 or fewer, proceed with all of them without asking. **In a non-interactive run, take (b) without asking** and say so in the Completion Notice: the unprocessed files stay queued by construction. Do not read the absence of an answer as (a).
    - **Group the list you show under three headings**, in this order, so a source that has never been touched is not presented as interchangeable with one being re-run:
 
      ```
@@ -41,7 +41,7 @@ pass_token: "a3f1c07d"
      ```
 
      A file belongs to the first group when its `source.hash` is empty, the second when it has a hash but no `last_generated_at`, and the third otherwise. The split between the first two tells a stalled queue apart from a slow one. It only carries meaning for `type: url`/`wikicommit` sources, which get a hash only once Pass 1 fetches them: `add_source.py` hashes a `type: path` file at registration, so a local file never read still lands in the second group. Say so when the first group is empty but the second is not, rather than letting `Never fetched — 0` read as "everything has been retrieved".
-2. If no target files are found, output "No management files to process", **close the run record** (`record_run.py end <path>`, with no `--source`/`--page`/`--outcome` — there is nothing to name), and exit. This exit is usually taken before the rest of this file has been read, so the rule is restated here: leaving the record open reports a correctly finished run as one that did not finish, on every `/wikicommit-status` from then on. Closing it with nothing named is also what tells `check_run_records.py` this was a no-op rather than a run that lost its stamps.
+2. You do not collect the files yourself: the driver's `collect` and `select` steps apply the rule above, ask the batch-cap question when there are more than 5, and hand you one file at a time as `item`. When nothing is queued the driver ends the run itself with "No management files to process". The rules are stated here so you can explain the order and grouping when the cap question is asked.
 3. For each source management file, read `source.type` and `source.path` / `source.url`.
 4. Extract text based on `source.type` and file extension:
    - `type: wikicommit` (federated source) / `type: url` → **Known JS-shell domain check (guard B)**: before attempting any fetch, run:
@@ -58,7 +58,7 @@ pass_token: "a3f1c07d"
      python .wikicommit/scripts/check_extraction_quality.py check-fetch-capability <source.url>
      ```
 
-     `MISSING_PACKAGE:` (exit 1) → **stop processing entirely**, close the run record with `record_run.py end <path> --halted-reason "missing package: <name>"` (this path changes no file, so without that line the run leaves no trace at all), and display the `pip install` command from the script's output, exactly like the `markitdown --version` prerequisite check below. This is an environment problem the user fixes once, not a property of this source, so it must not be recorded as a `status: failed` extraction failure. `OK:` (exit 0) → proceed. This only needs to pass once per host per run.
+     `MISSING_PACKAGE:` (exit 1) → **stop processing entirely**, report `halted` to the driver with `--reason "missing package: <name>"` (this path changes no file, so without that the run leaves no trace at all), and display the `pip install` command from the script's output, exactly like the `markitdown --version` prerequisite check below. This is an environment problem the user fixes once, not a property of this source, so it must not be recorded as a `status: failed` extraction failure. `OK:` (exit 0) → proceed. This only needs to pass once per host per run.
 
      Guard C is a separate axis from guards A and B: a YouTube page fetched without `youtube-transcript-api` is a *partial* extraction of real prose, which neither of the other guards can tell from a complete one. Checking *before* fetching is also what keeps "the package is missing" distinguishable from "this video has no captions" (step 6 below), which call for opposite responses.
 
@@ -92,6 +92,8 @@ pass_token: "a3f1c07d"
      - `HASH_MATCH:` (exit 0) → the cached scratch file is still valid for the management file's current `source.hash`. Skip the fetch and the write-hash step below entirely, and jump straight to the "read the scratch file's content in full" step near the end of this bullet.
      - `HASH_MISMATCH:` (exit 1, including "scratch file doesn't exist") → the cache cannot be reused. Proceed with the fetch below; this always fetches fresh content, so a hash change is never masked by an old cache.
 
+     The scratch file need not have been written by this Skill: `/wikicommit-ask --include-source` fetches a URL source that has no cache and moves the result here, but only when it hashes to the management file's `source.hash`. This check is what makes that safe, so it is the same check either way.
+
      If no scratch file exists yet at that path (or this is a forced recheck — see above), skip the cache check and go straight to the fetch below:
 
      ```bash
@@ -101,7 +103,7 @@ pass_token: "a3f1c07d"
      `--fetch-url` creates the scratch file's parent directory itself (it is already gitignored) and writes exactly what `markitdown` produced to the output path, with nothing in between.
 
      - `NETWORK_UNAVAILABLE:` (exit code 3 — the request never reached the server: name resolution, connection or proxy failed) → **defer this source; do not mark it `status: failed`**. A sandbox with network access off, a proxy, or no connection is the environment, not the source; recording it as `failed` would put every URL source in the run behind a wrong verdict and a generation-failure Issue each. Defer it exactly as the non-interactive `LOW_DENSITY:` branch below does — leave `status` as it is, write the `NETWORK_UNAVAILABLE:` line verbatim into `## Deferred Reason`, add it to the Completion Notice's deferred list, skip to the next source — with one difference: **on a forced recheck, do not set `status: pending`**. Nothing was fetched, so `source.hash` still describes the content the source's pages were built from, and requeueing it would regenerate unchanged pages. The same holds in an interactive run — there is no question for a person here that retrying later would not answer better.
-       **Two in a row stop the run.** Count consecutive `NETWORK_UNAVAILABLE:` results across sources; any `FETCHED:` or `ERROR:` (both prove the network reached a server) resets the count, and a cache hit that skips the fetch leaves it as it is. On the second in a row, **stop processing entirely** as guard C does: close the run record with `record_run.py end <path> --halted-reason "network unavailable"`, say that fetching is failing before it reaches any server, and that the sources not yet reached are untouched and still queued. One is not enough to stop on, because a domain that no longer exists fails name resolution the same way — and that one source is deferred, not lost. Sources already processed in this run keep their results.
+       **Two in a row stop the run.** Count consecutive `NETWORK_UNAVAILABLE:` results across sources; any `FETCHED:` or `ERROR:` (both prove the network reached a server) resets the count, and a cache hit that skips the fetch leaves it as it is. On the second in a row, **stop processing entirely** as guard C does: report `halted` to the driver with `--reason "network unavailable"`, say that fetching is failing before it reaches any server, and that the sources not yet reached are untouched and still queued. One is not enough to stop on, because a domain that no longer exists fails name resolution the same way — and that one source is deferred, not lost. Sources already processed in this run keep their results.
      - `ERROR:` (exit code 1 — HTTP error status like 403/404, a read timeout, login-required page, unsupported content, etc.) → treat this source as extraction failure (step 5 below) and skip to the next source; do not run the command below.
      - `FETCHED:` (exit 0), forced recheck → run the `--check-hash` comparison described above and branch on `HASH_MATCH`/`HASH_MISMATCH`.
      - `FETCHED:` (exit 0), normal (non-recheck) source → run:
@@ -183,6 +185,8 @@ pass_token: "a3f1c07d"
      - **On a forced recheck, set `status: pending` rather than leaving it.** A `RECHECK:` source reaches here with `status` still `generated`/`failed`/`excluded`, which nothing collects, and `--write-hash` has just replaced `source.hash` with the *new* content's hash — so re-running `/wikicommit-generate <url>` would return `HASH_MATCH`, report "No changes", and lose the changed source behind a success message. Writing `pending` is the same requeue `/wikicommit-reconcile` performs, and `reconcile_ingest_status.py` will not undo it (a source generated before carries `generated_pages` and a `last_generated_at`, and the script skips on either).
      - Write the `LOW_DENSITY:` line verbatim into a **`## Deferred Reason`** section of the management file (create it if absent, overwrite if present), in English regardless of `<primary_lang>`, like `## Failure Reason`. Delete that section as soon as this source reaches any other outcome, exactly as `## Failure Reason` is deleted.
      - Add the source to a running list rolled up in the Completion Notice (`references/completion-notice.md`), and skip to the next source.
+
+     **A deferral is for the cases this Skill names, and only those**: `LOW_DENSITY:` with nobody to ask, `NETWORK_UNAVAILABLE:`, a Pass 2b type candidate with nobody to ask, and an `action: update` page whose existing source cannot be fetched (end of `references/pass2c-entities.md`). When something fits none of them, do not defer it (or fail or exclude it) because that is the nearest fit; stop and report it.
 
      Either way the source stays in the queue, so an interactive run picks it up and asks. `/wikicommit-status` counts it separately from "not reached yet", so the deferral stays visible between runs.
 

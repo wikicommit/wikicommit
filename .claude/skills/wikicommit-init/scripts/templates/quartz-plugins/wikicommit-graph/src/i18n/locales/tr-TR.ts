@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Maks",
         degreeNoBound: "0 = sınır yok",
+        labelLimit: "Ekrandaki etiketler",
+        labelLimitHint: "0 = yakınlaştırmaya göre",
         reset: "Sıfırla",
         legend: "Gösterge",
         legendPages: "Sayfalar",

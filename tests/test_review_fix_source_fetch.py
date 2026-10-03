@@ -48,3 +48,20 @@ def test_review_records_a_version_mismatch_in_the_note_not_as_a_finding():
     assert "whose hash differs from the one this page records" in text
     assert "Do not raise it as a finding" in text
     assert "version-mismatch lines from Step 4 item 1" in text
+
+
+@pytest.mark.parametrize("name", sorted(TEXTS))
+def test_fetch_is_settled_after_it_lands(name):
+    """A fetch is offered to the cache via `--settle` (Issue #1137), after the fetch."""
+    text = TEXTS[name]
+    fetch = text.index("../wikicommit-generate/scripts/add_source.py --fetch-url")
+    settle = text.index("resolve_source_cache_path.py --settle")
+    assert fetch < settle, f"{name} settles before it fetches"
+    label = "review" if name == "wikicommit-review" else "fix"
+    assert f'--settle ".wikicommit/.cache/refetch/{label}-<n>.md"' in text
+    assert "--page-hash" in text
+    assert "read=" in text, f"{name} must read the file --settle names, not the scratch path"
+
+
+def test_review_takes_the_version_note_from_settle():
+    assert "`page=mismatch` means it differs" in TEXTS["wikicommit-review"]

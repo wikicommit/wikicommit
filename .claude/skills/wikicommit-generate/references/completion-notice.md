@@ -2,8 +2,8 @@
 
 ## Contents
 
-- Close the run record **first**
-- The notice itself: the counts, then the conditional blocks — `ambiguous` entities, `exclude` decisions with their reasons, `failed_pages`, types added by Pass 2b, deferred sources, types declined, source-language mismatches, extraction warnings, ShareAlike sources, and the checkpoint roll-up
+- Report `completion` to the driver **first** — that is what closes the run record
+- The notice itself: the counts, then the conditional blocks — `ambiguous` entities, `exclude` decisions with their reasons, name matches left for a person, `failed_pages`, types added by Pass 2b, deferred sources, types declined, source-language mismatches, extraction warnings, ShareAlike sources, and the checkpoint roll-up
 
 What to report when a run ends, and how. Most of it is conditional branches, and none of it
 is needed until a run is ending.
@@ -16,22 +16,25 @@ mismatches, extraction warnings) are built as the passes run, by instructions in
 
 ## Read this before closing the run record
 
-**The call that closes the run record is in this file, not in `SKILL.md`** — deliberately.
+**What closes the run record is reporting this step to the driver, and this step is the last one** — deliberately.
 Forgetting to read this file would otherwise cost a report and nothing else, and nothing
-would say so; with the closing call here, forgetting it leaves the record open, and
-`/wikicommit-status` reports that as `INCOMPLETE_RUN:`.
+would say so; as it is, a run that never reaches `completion` stays open, and
+`/wikicommit-status` reports that as `INCOMPLETE_RUN:` while `/wikicommit-merge` refuses
+the files it touched.
 
 Display a summary of the results (pages succeeded / skipped / failed / excluded).
 
-**Close the run record first**, so the timings and counts it holds are this run's:
+**Report `completion` to the driver first**, so the timings and counts the record holds are this run's:
 
 ```bash
-python .wikicommit/scripts/record_run.py end <the path start printed> \
-    --source <each source management file processed> --page <each page written> \
-    --outcome generated=<N> --outcome failed=<N> --outcome excluded=<N>
+python .wikicommit/scripts/driver.py done <the run path> --step completion --outcome reported \
+    --page <each page written> \
+    --count generated=<N> --count failed=<N> --count excluded=<N>
 ```
 
-Then report its path, elapsed time and the passes it stamped in the notice — that duration exists nowhere else, and **the record is not committed**, so this run's own output is the only place a reader sees any of it. In unattended cloud runs the record dies with the VM, so this line is the only way the stamps reach a PR body.
+The driver fills in the sources itself (it handed them to you) and closes the record.
+
+Then report the run record's path, elapsed time and the passes it stamped in the notice — that duration exists nowhere else, and **the record is not committed**, so this run's own output is the only place a reader sees any of it. In unattended cloud runs the record dies with the VM, so this line is the only way the stamps reach a PR body.
 
 ```
 Run record: .wikicommit/run/20260907-104233-generate.md (22m14s)
@@ -88,6 +91,21 @@ in this group are the ones this applies to.
 **Only the `privacy` group points at `/wikicommit-remove`** — that is the trailing note's job, and it is printed only when that group is non-empty, since it is about that policy and repeating it under an ordinary off-subject exclusion would read as if `theme` had the same reach-back caveat. Under `theme_mismatch`, name the page and stop there: nothing about being off-subject argues for taking a page down. **The trailing note therefore says "the pages named in this group", not "above"** — both groups can name pages, and a note that swept up the off-subject ones would undo the distinction the grouping exists to draw.
 
 **Never call `/wikicommit-remove` yourself.** A policy decides what to create, not what to destroy; removal is irreversible, and which `removed_reason` applies (`obsolete` where the subject drifted out of scope, `gdpr` where a person asked) is a judgment that belongs to a person.
+
+If Pass 2c's name match (`match_existing_names.py`) left anything for a person, list it — informational, no action is required to finish the run. Show only the groups that have entries:
+
+```
+These entities share a name with an existing page but were written as new pages, because the source describes a different thing:
+- "Report V(3)" — existing page: .wikicommit/entity/en/Report/report-v.md — the source is the 2024 edition; the existing page records the 2022 one
+
+These names match more than one existing page of the same type, so no page was updated from them:
+- "Function calling" — .wikicommit/entity/en/DefinedTerm/function-calling.md, .wikicommit/entity/en/DefinedTerm/tool-use-design-pattern.md
+
+These names match an existing page of a different type, so that page was not updated:
+- "Claude Code" (extracted as DefinedTerm) — .wikicommit/entity/en/SoftwareApplication/claude-code.md
+```
+
+**Say what the match was and stop there.** Whether two pages are one concept, or a name should move from one page to another, is a person's decision made on the pages; this run only reports that the names collide.
 
 If `.wikicommit/entity-policy.md` was present but could not be read or parsed (see the preamble), repeat that warning here, so an accidentally disabled policy is visible in the run's own summary rather than only in a line that scrolled past:
 
@@ -172,24 +190,21 @@ a subdirectory: the path is derived straight from `type:`, so .wikicommit/schema
 found for schema:Book.
 ```
 
-If Pass 2b added one or more new `.wikicommit/schema/<Type>.md` files during this run, list them too, since they are new local files the user has not yet seen committed anywhere. Annotate each entry with how it was approved per Pass 2b step 3 in `SKILL.md` — a human answered the prompt, or it was auto-approved with no prompt shown because the run was non-interactive and the candidate cleared the stricter bar:
+If Pass 2b added one or more new `.wikicommit/schema/<Type>.md` files during this run, list them too, since they are new local files the user has not yet seen committed anywhere. Only an interactive run adds one — a human answered the Pass 2b prompt (`references/pass2b-type.md` step 3); a non-interactive run defers the source instead, and that belongs in the deferral block below:
 
 ```
 The following Schema.org type(s) were added to .wikicommit/schema/ during this run:
 - schema:GovernmentService — approved for "児童手当の申請手続き" (source: .wikicommit/source/path/raw/paper-2024.pdf.md)
-- schema:Dataset — auto-approved with no human confirmation (non-interactive run, cleared the stricter
-  bar) — for the named benchmark "HotPotQA" (source: .wikicommit/source/url/arxiv.org/hotpotqa-paper.md)
 
 These will be included in the next /wikicommit-merge batch (new schema files are picked up
-alongside wiki pages — see that Skill's git add scope). Auto-approved entries get no special marker in
-the schema file itself. That batch merges automatically once its mechanical quality checks pass, with no
+alongside wiki pages — see that Skill's git add scope). That batch merges automatically once its mechanical quality checks pass, with no
 human approval step in between, so this is not a review gate — it is the same after-the-fact
 `git log`/PR-diff audit trail every other WikiCommit change relies on.
 ```
 
 Do **not** word that last part as "reviewed before merge" — the accurate description is "recorded in git
 history for later audit". The batch auto-merges on mechanical checks alone, so calling it review would
-tell the user a human looked at the type when none did.
+tell the user someone reviewed the merge, when the only human involvement was answering the prompt.
 
 Quote each added type's `granularity` verbatim in that block. It is the only part of the
 file that was written as free prose rather than verified against the vocabulary, nothing downstream
@@ -221,15 +236,16 @@ undocumented type less likely to be chosen from here on. No Skill can write the 
 .wikicommit/schema/HowTo.md yourself if you want the rule to hold from both directions.
 ```
 
-Report this even when the run was non-interactive: nobody reads it in the moment, but it lands in the
-run's output alongside everything else, and unlike the type file itself the gap leaves no other trace.
+Report this whenever it applies: unlike the type file itself, the gap leaves no other trace.
 
 **If any source was deferred, list every one.** A deferral is what this Skill does in a
 non-interactive run when it reaches a judgment only a person can make: it stops that source, changes
-nothing about it, and leaves it in the queue. Three things produce one — guard A's `LOW_DENSITY:` in Pass 1,
+nothing about it, and leaves it in the queue. Four things produce one — guard A's `LOW_DENSITY:` in Pass 1,
 a fetch that returned `NETWORK_UNAVAILABLE:` (this one also happens in an interactive run,
-and what it waits for is a network rather than a person), and a Pass 2b type candidate that did not
-clear the stricter auto-approval bar. All three write a
+and what it waits for is a network rather than a person), a Pass 2b type candidate — any candidate, since a
+non-interactive run never adds a type without a person — and an `action: update` page one of whose existing
+sources could not be fetched (end of Pass 2c; this one also happens in an interactive run, and what it waits
+for is a machine that can fetch that source, or a person retracting it). All four write a
 `## Deferred Reason` section to the source's management file, so unlike everything else in this notice
 the record outlives the run; report it here anyway, because this is where someone reading the run learns
 there is anything to go back for.
@@ -240,11 +256,15 @@ The following source(s) were deferred — a person needs to look at them, and th
   natural-language ratio (non-prose breakdown: links 12%, numbers/tables 71%, other markup 17%). That
   shape fits a statistics table as well as it fits an empty JS shell, and the two cannot be told apart
   from the text alone.
-- .wikicommit/source/path/raw/gaming-report.pdf.md — schema:VideoGame was considered for "Elden Ring"
-  but did not clear the "obviously implied" bar that lets a type be added with no human in the loop.
+- .wikicommit/source/path/raw/gaming-report.pdf.md — schema:VideoGame was considered for "Elden Ring".
+  Adding a type cannot be undone by any Skill, so it waits for someone to answer the prompt.
 - .wikicommit/source/url/example.org/annual-report.md — the fetch never reached the server (the
   connection failed). Nothing is wrong with this source that is known yet; run again where the network
   is reachable.
+- .wikicommit/source/url/example.com/research-acceleration.md — it updates
+  .wikicommit/entity/en/Organization/openai.md, and that page's existing source https://openai.com/about/
+  could not be fetched (ERROR: 403). The page is reviewed against all of its sources, so nothing was
+  written. Run again where that host answers, or retract that source if it cannot be had.
 
 Nothing about these sources was decided: their status is unchanged and they are still queued — behind
 sources this run has not tried yet, so a repeated unattended run does not spend its whole quota on them.
@@ -258,8 +278,8 @@ to "fix" it by deleting and re-adding the management file, which discards the ex
 answers nothing.
 
 If Pass 2b step 3's running list has one or more declined type candidates, list them too. There is
-only one way a candidate lands here — **a human answered N**. A candidate that failed the stricter bar
-in a non-interactive run is not declined; it defers the source, and belongs in the deferral block above instead. By this point in the run, Pass 4 (step 5) has already finished for every source and its own
+only one way a candidate lands here — **a human answered N**. A candidate reached in a non-interactive run
+is not declined; it defers the source, and belongs in the deferral block above instead. By this point in the run, Pass 4 (step 5) has already finished for every source and its own
 `failed_pages` list (below) is fully known — cross-check against it so this block is accurate about what
 actually happened to each motivating entity: a declined type's motivating entities are not guaranteed to
 have become real pages; one may have separately hit `failed_pages` for an unrelated reason (a
@@ -267,9 +287,7 @@ source-integrity review failure), in which case say so instead of claiming it "w
 it from the "existing installed schema/ type" framing below (it has no page, fallback or otherwise). This
 list exists only in this run's own output, never persisted anywhere (Pass 2b step 5). Annotate each
 bullet individually with its actual recorded outcome from step 3 — do not use one blanket sentence for
-the whole list, since different bullets in the same run can have different outcomes; and do not confuse
-this block with the auto-approved block above, which is a different outcome of the same non-interactive
-path.
+the whole list, since different bullets in the same run can have different outcomes.
 **Do not suggest running `/wikicommit-schema-propose` to reconsider these** — its `check_schema_coverage.py`-based
 detection only finds `type:` strings with no dedicated schema file at all, which is not the case for an
 entity that did get a page (it already has a working, covered type), so it ends in a "No schema

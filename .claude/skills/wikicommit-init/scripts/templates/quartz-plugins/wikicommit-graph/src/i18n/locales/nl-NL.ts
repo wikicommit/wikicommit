@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Max",
         degreeNoBound: "0 = geen grens",
+        labelLimit: "Labels in beeld",
+        labelLimitHint: "0 = op zoomniveau",
         reset: "Herstellen",
         legend: "Legenda",
         legendPages: "Pagina's",
@@ -18,7 +20,8 @@ export default {
         legendVisited: "Bezocht",
         legendUnvisited: "Niet bezocht",
         legendVisitedHint: "Pagina's die je in deze browser hebt geopend",
-        legendTagsAlways: "Tags worden altijd in deze kleur getekend, of je ze nu hebt geopend of niet",
+        legendTagsAlways:
+          "Tags worden altijd in deze kleur getekend, of je ze nu hebt geopend of niet",
       },
     },
   },

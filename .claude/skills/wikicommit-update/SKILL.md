@@ -208,7 +208,7 @@ The consequence differs by check, and that is the part worth writing down:
 
 - **`check_orphans.py` `DUPLICATE:`** → this is the one that actually blocks. `/wikicommit-merge` runs this check unscoped, so **this wiki cannot merge anything until it is fixed.** Say that plainly, and say it before the user writes their next page.
 - **`check_wikilinks.py`, a wrong Type segment** → `/wikicommit-merge` only looks at changed files, so it does not stop there today. `/wikicommit-status` reports it as `TYPE_MISMATCH:` and will keep doing so.
-- **Everything else** — `validate_frontmatter.py` and `check_raw_html.py` errors, and links to a `status: removed` page → merge passes over them and **no standing check reports them**. Nobody sees them again until that page is next written.
+- **Everything else** — `validate_frontmatter.py` and `check_raw_html.py` errors, and links to a `status: removed` page → merge passes over them until the page is next written, and **`/wikicommit-status` reports them on every run** under `Blocking errors merge does not re-check`.
 
 If this repository publishes with Quartz, build it too:
 
@@ -264,7 +264,7 @@ git push -u origin "wikicommit/update-<installed version>"
 gh pr create --base "<default branch>" --title "..." --body "..."
 ```
 
-<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update and -init; tests/test_commit_trailer_vendor_table.py holds them together) -->
+<!-- commit-trailers:start (this block is identical in wikicommit-merge, -schema-propose, -update, -init and -organize; tests/test_commit_trailer_vendor_table.py holds them together) -->
 **Commit trailers.** Always write `Generated-By:   <current model ID>`: the ID of the model actually running this Skill, exactly as the runtime reports it — the same self-reported value `wikicommit-generate` writes into a page's `generated_by` (keep any suffix; do not shorten or normalize it; never hardcode one). Then choose `<Co-Authored-By line>` from the start of that same ID, so the two lines can never name different vendors:
 
 | `<current model ID>` starts with | `<Co-Authored-By line>` |
@@ -284,7 +284,7 @@ If the default branch has moved on since this branch was cut, rebase it (`git fe
 
 The body should carry: the version range, what was refreshed, what the user declined and why, orphans deleted and kept, and the regeneration candidates from Step 9.
 
-**Any pre-existing finding from Step 7 goes in too, under its own heading, kept apart from what this update changed.** Quote the finding verbatim and give its consequence — `DUPLICATE:` means this wiki cannot merge anything until it is fixed; a wrong Type segment means `/wikicommit-status` will keep reporting it; the rest means no standing check watches it at all. This is where such a finding gets read: the Skill does not auto-merge, so a person is already looking at this page.
+**Any pre-existing finding from Step 7 goes in too, under its own heading, kept apart from what this update changed.** Quote the finding verbatim and give its consequence — `DUPLICATE:` means this wiki cannot merge anything until it is fixed; a wrong Type segment means `/wikicommit-status` will keep reporting it; the rest means `/wikicommit-status` reports it on every run until it is fixed, and `/wikicommit-merge` will block once that page is next changed. This is where such a finding gets read: the Skill does not auto-merge, so a person is already looking at this page.
 
 ### Step 9: Report
 

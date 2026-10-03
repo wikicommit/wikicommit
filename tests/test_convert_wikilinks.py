@@ -762,10 +762,16 @@ def test_root_index_never_embeds_theme_even_when_configured(tmp_path):
 # The reader-facing counterpart to `theme` (which Issue #670 removed from the
 # published page precisely because it was written for the LLM, not for readers).
 # It goes in the body, one line per language under that language's own link, so
-# it never needs a caption and is never limited to the banner's two locales.
+# it never needs a caption and is never limited to the banner's locales.
 
 def root_index_body(root: Path) -> str:
     return (root / "content" / "index.md").read_text(encoding="utf-8").split("---", 2)[2]
+
+
+def _it_counts_one() -> str:
+    # These wikis are Italian (Issue #1017 made `it` one of WikiCommit's own UI
+    # languages), so the count segment is Italian; site_description is not.
+    return _convert_wikilinks.ROOT_INDEX_LABELS["it"]["counts_one"].format(pages=1, reviewed=0)
 
 
 def test_root_index_shows_site_description_for_every_language(tmp_path):
@@ -784,9 +790,10 @@ def test_root_index_shows_site_description_for_every_language(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [it](./it/) (1 page / 0 read and checked by a person) — Base di conoscenza sul Decameron." in body
-    assert "- [en](./en/) (1 page / 0 read and checked by a person) — A knowledge base on the Decameron." in body
-    assert "- [ja](./ja/) (1 page / 0 read and checked by a person) — 「デカメロン」の知識ベース。" in body
+    counts = _it_counts_one()
+    assert f"- [it](./it/){counts} — Base di conoscenza sul Decameron." in body
+    assert f"- [en](./en/){counts} — A knowledge base on the Decameron." in body
+    assert f"- [ja](./ja/){counts} — 「デカメロン」の知識ベース。" in body
 
 
 def test_root_index_omits_description_only_for_languages_without_one(tmp_path):
@@ -803,10 +810,11 @@ def test_root_index_omits_description_only_for_languages_without_one(tmp_path):
     assert result.returncode == 0
 
     body = root_index_body(tmp_path)
-    assert "- [it](./it/) (1 page / 0 read and checked by a person) — Base di conoscenza sul Decameron." in body
+    counts = _it_counts_one()
+    assert f"- [it](./it/){counts} — Base di conoscenza sul Decameron." in body
     # The language without an entry keeps the counts but no dash — not an empty dash.
-    assert "- [en](./en/) (1 page / 0 read and checked by a person)\n" in body
-    assert "- [en](./en/) (1 page / 0 read and checked by a person) —" not in body
+    assert f"- [en](./en/){counts}\n" in body
+    assert f"- [en](./en/){counts} —" not in body
 
 
 def test_root_index_without_site_description_is_unchanged(tmp_path):
@@ -2662,13 +2670,14 @@ def test_overview_source_language_table_counts_langs_and_keeps_unrecorded_last(t
         write_source(
             tmp_path, f"url/example.com/{name}.md",
             f"---\nsource:\n  type: url\n  url: https://example.com/{name}\n  hash: sha256:x\n"
-            f"{lang_line}status: generated\ngenerated_pages: []\n---\n\n## Summary\n\nS.\n",
+            f"{lang_line}status: generated\ngenerated_pages: []\n"
+            f"last_generated_at: \"2026-06-01\"\n---\n\n## Summary\n\nS.\n",
         )
     # A management file from before the field existed has no lang key at all.
     write_source(
         tmp_path, "url/example.com/g.md",
         "---\nsource:\n  type: url\n  url: https://example.com/g\n  hash: sha256:x\n"
-        "status: generated\n---\n\n## Summary\n\nS.\n",
+        "status: generated\nlast_generated_at: \"2026-06-01\"\n---\n\n## Summary\n\nS.\n",
     )
     write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
     assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
@@ -2680,6 +2689,61 @@ def test_overview_source_language_table_counts_langs_and_keeps_unrecorded_last(t
     assert "| `ko` | 1 |" in section
     assert "| Not recorded | 4 |" in section
     assert section.index("| `ja`") < section.index("| `ko`") < section.index("| Not recorded")
+    assert "Not processed yet |" not in section
+
+
+def test_overview_source_language_table_separates_unprocessed_from_unrecorded(tmp_path):
+    """Issue #1135: a source that has never finished a run (empty
+    `last_generated_at`) has no language because it is still in the queue, not
+    because it was taken in before the field existed — it gets its own row."""
+    write_config(tmp_path, primary_lang="en")
+    files = {
+        # registered, never fetched (add_source.py's shape)
+        "a": "  lang:\nstatus: pending\nlast_generated_at:\n",
+        "b": "  lang:\nstatus: pending\nlast_generated_at:\n",
+        # failed in Pass 1
+        "c": "  lang:\nstatus: failed\nlast_generated_at:\n",
+        # processed before Issue #989, never re-read
+        "d": "  lang:\nstatus: generated\nlast_generated_at: \"2026-06-01\"\n",
+        # held back after Pass 2a (Issue #910): still pending, but the language is
+        # known, so it is a language row
+        "e": "  lang: ja\nstatus: pending\nlast_generated_at:\n",
+        # excluded in Pass 4 before Issue #989: a finished run that never writes
+        # last_generated_at, so it is "not recorded", not the queue
+        "f": "  lang:\nstatus: excluded\nlast_generated_at:\n",
+    }
+    for name, tail in files.items():
+        write_source(
+            tmp_path, f"url/example.com/{name}.md",
+            f"---\nsource:\n  type: url\n  url: https://example.com/{name}\n  hash: sha256:x\n"
+            f"{tail}---\n\n## Summary\n\nS.\n",
+        )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+
+    out = read_overview(tmp_path)
+    section = out[out.index("### By language"):out.index("### Source type x generated page type")]
+    assert "| `ja` | 1 |" in section
+    assert "| Not processed yet | 3 |" in section
+    assert "| Not recorded | 2 |" in section
+    assert "(the queue)" in section
+
+
+def test_overview_source_language_table_shows_only_unprocessed_on_a_new_wiki(tmp_path):
+    """Issue #1135: a wiki whose only language-less sources are the queue must
+    show no "Not recorded" row at all."""
+    write_config(tmp_path, primary_lang="en")
+    write_source(
+        tmp_path, "url/example.com/a.md",
+        "---\nsource:\n  type: url\n  url: https://example.com/a\n  hash:\n  lang:\n"
+        "status: pending\nlast_generated_at:\n---\n",
+    )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+    out = read_overview(tmp_path)
+    section = out[out.index("### By language"):out.index("### Source type x generated page type")]
+    assert "| Not processed yet | 1 |" in section
+    assert "| Not recorded |" not in section
 
 
 def test_overview_source_language_table_reads_unquoted_no_as_norwegian(tmp_path):
@@ -2705,7 +2769,10 @@ def test_overview_source_language_labels_exist_for_every_language():
     sys.path.insert(0, str(SCRIPT.parent))
     import convert_wikilinks as cw
     for labels in [cw.DEFAULT_OVERVIEW_LABELS, *cw.OVERVIEW_LABELS.values()]:
-        for key in ("by_source_lang", "col_source_lang", "source_lang_unknown", "source_lang_note"):
+        for key in (
+            "by_source_lang", "col_source_lang", "source_lang_unknown",
+            "source_lang_unprocessed", "source_lang_note",
+        ):
             assert labels[key]
 
 
@@ -3032,7 +3099,8 @@ def write_wikicommit_page(root: Path, lang: str, type_name: str, slug: str, body
 
 def record_review(root: Path, page_rel: str, *, model: str, reviewed_at: str,
                   findings: str | None = None,
-                  result: str = "pass") -> subprocess.CompletedProcess:
+                  result: str = "pass",
+                  stage: str = "generate-pass4") -> subprocess.CompletedProcess:
     """Write one `kind: ai` record via record_review.py itself.
 
     Deliberately the real writer rather than a hand-built file: what this test
@@ -3042,7 +3110,7 @@ def record_review(root: Path, page_rel: str, *, model: str, reviewed_at: str,
     """
     args = [
         sys.executable, str(RECORD_SCRIPT), page_rel,
-        "--kind", "ai", "--stage", "generate-pass4", "--result", result,
+        "--kind", "ai", "--stage", stage, "--result", result,
         "--model", model, "--reviewed-at", reviewed_at,
     ]
     if findings is not None:
@@ -3107,6 +3175,31 @@ def test_stale_ai_verdict_is_withheld_after_the_page_changes(tmp_path):
     published = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
     assert "ai_review_model" not in published
     assert "ai_review_at" not in published
+
+
+def test_ai_verdict_survives_a_merge_link_rewrite(tmp_path):
+    """The banner agrees with `/wikicommit-status`: a link rewritten by a recorded
+    merge is not a change to the page the verdict judged."""
+    write_config(tmp_path, primary_lang="ja")
+    linked = PAGE_WITH_STAMPS.replace("本文。", "[[Person/old-name]] と働いた。")
+    page = write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", linked)
+    write_wikicommit_page(tmp_path, "ja", "Person", "new-name", PAGE_WITH_STAMPS)
+    record_review(
+        tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+        model="claude-opus-5[1m]", reviewed_at="2026-09-05",
+    )
+    (tmp_path / ".wikicommit" / "relations.yml").write_text(
+        "- relation: same\n  pages: [Person/new-name, Person/old-name]\n"
+        "  merged_into: Person/new-name\n",
+        encoding="utf-8",
+    )
+    page.write_text(linked.replace("[[Person/old-name]]", "[[Person/new-name]]"), encoding="utf-8")
+
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    published = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
+    assert 'ai_review_model: "claude-opus-5[1m]"' in published
 
 
 def test_page_with_no_record_publishes_exactly_as_before(tmp_path):
@@ -3646,3 +3739,165 @@ def test_source_page_never_renders_generation_notes(tmp_path):
     assert "Hand-written operator note." not in out
     # `## Summary` は従来どおり公開され、後続の節を巻き込まないこと。
     assert "Introduces the article." in out
+
+
+# --- translate-check (Issue #1031) ---------------------------------------------
+
+TRANSLATION_REL = ".wikicommit/entity/en/Person/yamada-taro.md"
+
+
+def _translated_and_checked(root: Path) -> None:
+    _two_lang_config(root)
+    write_wikicommit_page(root, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    write_wikicommit_page(root, "en", "Person", "yamada-taro", TRANSLATION_OF_YAMADA)
+    record_review(
+        root, ".wikicommit/entity/ja/Person/yamada-taro.md",
+        model="claude-opus-5[1m]", reviewed_at="2026-09-05",
+    )
+    record_review(
+        root, TRANSLATION_REL, model="claude-opus-5[1m]",
+        reviewed_at="2026-09-06", stage="translate-check",
+    )
+
+
+def test_a_translation_check_is_stamped_with_its_stage(tmp_path):
+    """The banner has to say "against the original page", not "against sources"."""
+    _translated_and_checked(tmp_path)
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    translation = (tmp_path / "content" / "en" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
+    assert 'ai_review_stage: "translate-check"' in translation
+    assert 'ai_review_at: "2026-09-06"' in translation
+    # Pages checked against their sources keep the stamp they always had.
+    original = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
+    assert "ai_review_stage" not in original
+
+
+def test_overview_reports_translation_checks_on_their_own_line(tmp_path):
+    """Checked against the original is not checked against sources; the two
+    numbers never share a label or a denominator."""
+    _translated_and_checked(tmp_path)
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    overview = (tmp_path / "content" / "overview" / "index.md").read_text(encoding="utf-8")
+    assert "**出典と照合済み（AI）**: 1 / 1 (100%)" in overview
+    assert "**原文と照合済み（AI）**: 1 / 1 (100%)" in overview
+    # Issue #1030's "no check recorded" line is replaced once a check exists.
+    assert "原文との照合は記録されていません" not in overview
+    assert "翻訳したときに訳文を原文ページと照合しています" in overview
+
+
+def test_root_index_does_not_count_a_translation_check_as_checked_against_sources(tmp_path):
+    _translated_and_checked(tmp_path)
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    body = (tmp_path / "content" / "index.md").read_text(encoding="utf-8").split("---", 2)[2]
+    assert "- [ja](./ja/)（1 ページ / 出典と照合 1 / 人が読んで確認 0）" in body
+    assert "- [en](./en/)（1 ページ / 人が読んで確認 0）" in body
+
+
+# ── content/llms.txt (Issue #1117) ───────────────────────────────────────────────
+
+def llms_txt(root: Path) -> str:
+    return (root / "content" / "llms.txt").read_text(encoding="utf-8")
+
+
+def write_quartz_config(root: Path, title: str = "Test Wiki", base_url: str = "owner.github.io/repo") -> None:
+    (root / "quartz.config.yaml").write_text(
+        f"configuration:\n  pageTitle: {title}\n  baseUrl: {base_url}\n", encoding="utf-8"
+    )
+
+
+def test_llms_txt_has_title_summary_and_link_lines(tmp_path):
+    write_config(tmp_path, primary_lang="ja", targets=["en"],
+                 extra="site_description:\n  ja: テスト用の Wiki。\n  en: A test wiki.\n")
+    write_quartz_config(tmp_path)
+    write_page(tmp_path, "ja", "Person", "yamada",
+               '---\ntitle: 山田太郎\nproperties:\n  description: "[[Organization/acme]] のエンジニア。"\n---\n\nBody.\n')
+    write_page(tmp_path, "ja", "Organization", "acme", "---\ntitle: Acme\n---\n\n[[Person/yamada]]\n")
+    write_page(tmp_path, "en", "Person", "yamada", "---\ntitle: Yamada\n---\n\nBody.\n")
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    text = llms_txt(tmp_path)
+    lines = text.splitlines()
+    assert lines[0] == "# Test Wiki"
+    # The primary language's description is the summary; other languages' are not.
+    assert "> テスト用の Wiki。" in lines
+    assert "A test wiki." not in text
+    assert "## Index" in lines and "## Key pages" in lines and "## Optional" in lines
+    # Type folders and pages link to the published HTML, slugged the way Quartz
+    # publishes them (segments lowercased, no .md).
+    assert "- [Person](https://owner.github.io/repo/ja/person/): 1 page" in lines
+    assert "- [Organization](https://owner.github.io/repo/ja/organization/): 1 page" in lines
+    # The description is plain text: a WikiLink is reduced to its slug.
+    assert "- [山田太郎](https://owner.github.io/repo/ja/person/yamada): acme のエンジニア。" in lines
+    # No description, no trailing colon.
+    assert "- [Acme](https://owner.github.io/repo/ja/organization/acme)" in lines
+    assert "- [Overview](https://owner.github.io/repo/overview/)" in text
+    # Only primary_lang pages are listed; other languages are named once.
+    assert "Yamada]" not in text
+    assert "`en`" in text
+
+
+def test_llms_txt_ranks_key_pages_by_inbound_links_and_caps_the_list(tmp_path):
+    write_config(tmp_path, primary_lang="en")
+    write_quartz_config(tmp_path)
+    limit = _convert_wikilinks.LLMS_KEY_PAGES_LIMIT
+    for i in range(limit + 5):
+        write_page(tmp_path, "en", "Thing", f"t{i:03d}", f"---\ntitle: T{i:03d}\n---\n\n[[Thing/t999]]\n")
+    write_page(tmp_path, "en", "Thing", "t999", "---\ntitle: Hub\n---\n\nBody.\n")
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    text = llms_txt(tmp_path)
+    key_section = text.split("## Key pages", 1)[1].split("## Optional", 1)[0]
+    entries = [line for line in key_section.splitlines() if line.startswith("- [")]
+    assert len(entries) == limit
+    # The most linked-to page comes first; the Index still counts every page.
+    assert entries[0].startswith("- [Hub](")
+    assert f"- [Thing](https://owner.github.io/repo/en/thing/): {limit + 6} pages" in text
+
+
+def test_llms_txt_links_are_relative_without_a_quartz_config(tmp_path):
+    write_config(tmp_path, primary_lang="en")
+    write_page(tmp_path, "en", "Person", "alice", "---\ntitle: Alice\n---\n\nBody.\n")
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    lines = llms_txt(tmp_path).splitlines()
+    assert lines[0] == "# Wiki"
+    assert "- [Alice](./en/person/alice)" in lines
+
+
+def test_llms_txt_uses_http_for_a_localhost_preview(tmp_path):
+    write_config(tmp_path, primary_lang="en")
+    write_quartz_config(tmp_path, base_url="localhost:8080")
+    write_page(tmp_path, "en", "Person", "alice", "---\ntitle: Alice\n---\n\nBody.\n")
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "- [Alice](http://localhost:8080/en/person/alice)" in llms_txt(tmp_path)
+
+
+def test_llms_txt_cuts_a_long_description():
+    long = "word " * 200
+    cut = _convert_wikilinks._llms_description(long)
+    assert len(cut) <= _convert_wikilinks.LLMS_DESCRIPTION_MAX_CHARS + 1
+    assert cut.endswith("…")
+    assert _convert_wikilinks._llms_description(None) == ""
+
+
+def test_llms_txt_does_not_cut_cjk_description_back_to_an_early_space():
+    # A Japanese description has spaces only around embedded ASCII words, so
+    # backing off to the last space would keep a single word.
+    text = "[[Organization/acme]] のエンジニア。" + "あ" * 400
+    cut = _convert_wikilinks._llms_description(text)
+    assert len(cut) == _convert_wikilinks.LLMS_DESCRIPTION_MAX_CHARS + 1
+    assert cut.startswith("acme のエンジニア。あ")

@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min",
         degreeMax: "Max",
         degreeNoBound: "0 = no bound",
+        labelLimit: "Labels on screen",
+        labelLimitHint: "0 = by zoom level",
         reset: "Reset",
         legend: "Legend",
         legendPages: "Pages",

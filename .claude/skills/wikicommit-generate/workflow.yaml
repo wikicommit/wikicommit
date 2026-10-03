@@ -1,0 +1,137 @@
+# The steps of /wikicommit-generate, in order, for .wikicommit/scripts/driver.py.
+#
+# The driver returns one step at a time and decides on disk whether it is done
+# (`check:`), so the order below is the order a run takes whether or not anyone
+# remembers it. What each agent step *does* is in its instructions file; what it
+# *leaves on disk* is checked by scripts/workflow_checks.py.
+#
+# Questions a pass asks inside its own instructions (Step 0's policy conflict,
+# guard A's low-density warning, Pass 2b's [y/N], a retry beyond max_retries)
+# stay in those files. What they do when nobody can answer is stated here under
+# `non_interactive`, and the driver hands that rule to the agent with the step,
+# so the rule is fixed by this file rather than re-derived per prompt.
+
+skill: wikicommit-generate
+record_sources: sources
+
+steps:
+  - id: preflight
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", preflight, --run, "{run}"]
+
+  - id: freshness
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", freshness]
+
+  - id: register
+    type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-source-argument, --run, "{run}"]
+    instructions: references/step0-register.md
+    outcomes:
+      registered: "add_source.py created, updated or queued a management file for a recheck; pass --add registered=<that management file> for each"
+      nothing: "nothing to process (unchanged, retracted, declined, or refused by the policy check)"
+      halted: "add_source.py exited with an error; pass --reason"
+    finishes_on: [nothing]
+    halts_on: [halted]
+    adds: [registered]
+    non_interactive: "a policy conflict registers nothing and is reported (outcome nothing)"
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-register, --run, "{run}", --outcome, "{outcome}"]
+
+  - id: collect
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", collect, --run, "{run}"]
+    produces: candidates
+    finish_if_empty: "No management files to process"
+
+  - id: batch-cap
+    type: human
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", over-cap, --run, "{run}", --list, candidates]
+    ask: >-
+      More than 5 management files are queued. Show the count and the files from the
+      run record's `candidates` list, grouped as references/pass1-extract.md step 1
+      describes, and ask whether to process all of them in this run or only the first 5.
+    choices:
+      all: "process every queued file in this run"
+      first-five: "process the first 5 in order and leave the rest queued"
+    non_interactive: first-five
+
+  - id: select
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", select, --run, "{run}", --list, candidates, --answer-step, batch-cap]
+    produces: sources
+
+  - id: per-source
+    for_each: sources
+    steps:
+      - id: pass1-extract
+        type: agent
+        instructions: references/pass1-extract.md
+        also_read: references/text-extraction-routing.md
+        stamp: true
+        outcomes:
+          extracted: "the text was extracted and extracted_tokens written"
+          failed: "status: failed with a ## Failure Reason (the rest of this source is skipped)"
+          deferred: "a ## Deferred Reason was written and status left as it was (the rest of this source is skipped)"
+          unchanged: "a forced recheck found the same content; nothing was written (the rest of this source is skipped)"
+          halted: "the run must stop (missing package, network unavailable); pass --reason"
+        ends_item_on: [failed, deferred, unchanged]
+        halts_on: [halted]
+        non_interactive: "a LOW_DENSITY source is deferred, not failed"
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass1, --item, "{item}", --outcome, "{outcome}"]
+
+      - id: pass2b-type
+        type: agent
+        instructions: references/pass2b-type.md
+        stamp: true
+        outcomes:
+          ok: "no type was needed, or a type was approved and its file written (pass --touched for it)"
+          deferred: "a type candidate is waiting on a person; ## Deferred Reason written (the rest of this source is skipped)"
+        ends_item_on: [deferred]
+        non_interactive: "every type candidate defers the source; no type is ever approved"
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass2b, --item, "{item}", --outcome, "{outcome}"]
+
+      - id: pass2c-entities
+        type: agent
+        instructions: references/pass2c-entities.md
+        stamp: true
+        outcomes:
+          ok: "the analysis JSON was produced, ## Summary written back, and every action: update page's existing sources are in hand"
+          deferred: "an existing source of an action: update page could not be fetched; ## Deferred Reason written (the rest of this source is skipped)"
+          halted: "a second NETWORK_UNAVAILABLE in a row (counting Pass 1's); pass --reason"
+        ends_item_on: [deferred]
+        halts_on: [halted]
+        check_on_halt: true   # `halted` writes a deferral first; hold it to the same check
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass2c, --item, "{item}", --outcome, "{outcome}"]
+
+      - id: pass3-generate
+        type: agent
+        instructions: references/pass3-generate.md
+        stamp: true
+        outcomes:
+          ok: "pages were generated in memory for Pass 4 (nothing is written to disk yet)"
+          nothing: "no entity had action create or update"
+
+      - id: pass4-review
+        type: agent
+        instructions: references/pass4-review.md
+        stamp: true
+        outcomes:
+          ok: "pages were reviewed, written, and the management file's final status written"
+          halted: "the review could not be run as specified (rules_version mismatch twice); pass --reason"
+        halts_on: [halted]
+        non_interactive: "a page still failing after max_retries goes to failed_pages; retries are never extended"
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass4, --item, "{item}"]
+
+  - id: rebuild-index
+    type: script
+    run: ["{python}", .wikicommit/scripts/rebuild_index.py]
+
+  - id: reconcile
+    type: script
+    run: ["{python}", .wikicommit/scripts/reconcile_ingest_status.py]
+
+  - id: completion
+    type: agent
+    instructions: references/completion-notice.md
+    outcomes:
+      reported: "the Completion Notice was shown; pass --count generated=<N> --count failed=<N> --count excluded=<N> and --page for each page written"

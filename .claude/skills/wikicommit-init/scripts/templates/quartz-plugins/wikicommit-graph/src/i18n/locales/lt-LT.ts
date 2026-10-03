@@ -11,6 +11,8 @@ export default {
         degreeMin: "Min.",
         degreeMax: "Maks.",
         degreeNoBound: "0 = be ribos",
+        labelLimit: "Etikečių ekrane",
+        labelLimitHint: "0 = pagal mastelį",
         reset: "Atstatyti",
         legend: "Legenda",
         legendPages: "Puslapiai",

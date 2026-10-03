@@ -27,6 +27,8 @@
 //      state (Issue #986). This is the second insertion in the drawing code:
 //      three separate places used to write `label.alpha`, and between them the
 //      neighbourhood of a hovered node was never distinguished from the rest.
+//      The global graph's resting labels are then chosen by a limit on how
+//      many are on screen rather than by the zoom alone (Issue #1128).
 //
 // The D3 force simulation is untouched.
 import { controlsSignature } from "../../util/controlBar";
@@ -36,7 +38,13 @@ import {
   filterNodes,
   selectedTypeFacets,
 } from "../../util/nodeFilter";
-import { labelAlpha, zoomLabelAlpha } from "../../util/labelOpacity";
+import {
+  labelAlpha,
+  normalizeLabelLimit,
+  restingLabelAlpha,
+  selectLabels,
+  zoomLabelAlpha,
+} from "../../util/labelOpacity";
 
 import {
   removeAllChildren,
@@ -157,6 +165,30 @@ import {
     // held weakly, so a bar replaced by an SPA navigation is simply not found
     // and its entry is collectable.
     var controlBarStates = new WeakMap();
+
+    // WikiCommit (8): how the bar reaches a global render that is already on
+    // screen (Issue #1128). Changing the label limit does not change the node
+    // set, so it must not go through showGlobalGraph(): that rebuilds the
+    // simulation from random positions and the layout the reader was looking
+    // at is lost on every keystroke. renderGraph() registers a setter here
+    // keyed on its container and removes it in its cleanup.
+    var labelLimitSetters = new WeakMap();
+
+    // The YAML value Reset returns the limit to. dataset.cfg cannot answer
+    // that once stored filters have been merged over it, so the
+    // server-rendered value is kept aside before the first merge. An SPA
+    // navigation rebuilds the container from the markup, which drops this
+    // attribute along with the merged cfg, so it is always re-read from YAML.
+    function configuredLabelLimit(graphContainer) {
+      try {
+        var base = JSON.parse(
+          graphContainer.dataset["cfgDefault"] || graphContainer.dataset["cfg"] || "{}",
+        );
+        return normalizeLabelLimit(base.labelLimit);
+      } catch {
+        return normalizeLabelLimit(undefined);
+      }
+    }
 
     function readLabels(bar) {
       try {
@@ -346,6 +378,50 @@ import {
       };
     }
 
+    // WikiCommit (8): the label limit (Issue #1128). Built from the same parts
+    // as the degree range and placed right after it, so the bar gains one
+    // input and no new row of legend. 0 hands the labels back to the zoom ramp,
+    // which is what the hint on `title` says.
+    function buildLabelLimit(labels, value, onChange) {
+      var wrapper = document.createElement("div");
+      wrapper.className = "global-graph-controls__field";
+      var caption = document.createElement("span");
+      caption.textContent = labels.labelLimit || "Labels on screen";
+      wrapper.appendChild(caption);
+
+      var row = document.createElement("span");
+      row.className = "global-graph-controls__range";
+      var item = document.createElement("label");
+      item.className = "global-graph-controls__range-item";
+      var itemCaption = document.createElement("span");
+      itemCaption.textContent = labels.degreeMax || "Max";
+      item.appendChild(itemCaption);
+      var input = document.createElement("input");
+      input.type = "number";
+      input.min = "0";
+      input.value = String(value);
+      input.title = labels.labelLimitHint || "0 = by zoom level";
+      item.appendChild(input);
+      row.appendChild(item);
+      wrapper.appendChild(row);
+
+      input.addEventListener("change", function () {
+        var v = Math.max(0, parseInt(input.value, 10) || 0);
+        // The relabel path does not re-render the bar, so no syncer runs to
+        // show the value actually applied (a typed "-5" applies 0).
+        if (input.value !== String(v)) input.value = String(v);
+        onChange(v);
+      });
+      return {
+        field: wrapper,
+        // Same caret guard as the degree inputs.
+        sync: function (value2) {
+          var next = String(value2);
+          if (input.value !== next) input.value = next;
+        },
+      };
+    }
+
     // WikiCommit (5): the legend (Issue #841). Static — it has no state to sync
     // and nothing to write back — so it is built like any other field and then
     // left alone. Both halves are shown because they are read together: a node
@@ -445,7 +521,7 @@ import {
       removeAllChildren(bar);
       var syncers = [];
 
-      function update(patch) {
+      function update(patch, relabelOnly) {
         // Read the live cfg rather than the `config` this bar was built from:
         // once the bar outlives a render, that captured value is one or more
         // changes behind, and merging a patch into it would silently undo them.
@@ -459,15 +535,33 @@ import {
         }
         var next = Object.assign({}, current, patch);
         graphContainer.dataset["cfg"] = JSON.stringify(next);
-        storeFilters({
+        var filters = {
           langs: next.langs || [],
           types: next.types || [],
           showSources: next.showSources !== false,
           showTags: next.showTags !== false,
           minDegree: next.minDegree || 0,
           maxDegree: next.maxDegree || 0,
-        });
-        showGlobalGraph();
+        };
+        // Stored only when the reader moved it off the YAML value (Issue
+        // #1128). Storing it unconditionally — on any filter change, or on
+        // Reset — would pin today's YAML value in the browser, and a limit the
+        // operator later retunes in quartz.config.yaml would never reach them.
+        var nextLimit = normalizeLabelLimit(next.labelLimit);
+        if (nextLimit !== configuredLabelLimit(graphContainer)) {
+          filters.labelLimit = nextLimit;
+        }
+        storeFilters(filters);
+        // The label limit leaves the node set alone, so it redraws the labels
+        // of the graph already on screen instead of rebuilding it (Issue
+        // #1128). The fallback covers a render still awaiting app.init(),
+        // which has not registered its setter yet.
+        var setLabelLimit = relabelOnly ? labelLimitSetters.get(graphContainer) : null;
+        if (setLabelLimit) {
+          setLabelLimit(normalizeLabelLimit(next.labelLimit));
+        } else {
+          showGlobalGraph();
+        }
       }
 
       if (facets.langs.length > 1) {
@@ -545,6 +639,17 @@ import {
       syncers.push(function (cfg) {
         degreeControl.sync(cfg.minDegree || 0, cfg.maxDegree || 0);
       });
+      var labelLimitControl = buildLabelLimit(
+        labels,
+        normalizeLabelLimit(config.labelLimit),
+        function (v) {
+          update({ labelLimit: v }, true);
+        },
+      );
+      bar.appendChild(labelLimitControl.field);
+      syncers.push(function (cfg) {
+        labelLimitControl.sync(normalizeLabelLimit(cfg.labelLimit));
+      });
 
       var reset = document.createElement("button");
       reset.type = "button";
@@ -558,6 +663,11 @@ import {
           showTags: true,
           minDegree: 0,
           maxDegree: 0,
+          // Back to quartz.config.yaml, not to a constant (Issue #1128): the
+          // other keys' reset values are their YAML defaults too, and an
+          // operator who tuned the limit for their wiki's size should not
+          // lose that to a reader's Reset.
+          labelLimit: configuredLabelLimit(graphContainer),
         });
       });
       bar.appendChild(reset);
@@ -601,6 +711,10 @@ import {
       // dataset.cfg on every call (rather than reading it once at startup),
       // that is all it takes for a change to take effect.
       var showControls = config.showControls;
+      // Global graph only (Issue #1128); the local graph keeps the zoom ramp.
+      // Mutable: the control bar changes it on a live render through
+      // labelLimitSetters rather than by re-rendering.
+      var labelLimit = depth < 0 ? normalizeLabelLimit(config.labelLimit) : 0;
       var filterConfig = {
         langs: config.langs || [],
         types: config.types || [],
@@ -614,8 +728,8 @@ import {
         showTags: !!showTags,
         removeTags: removeTags,
         // Defaults to hidden, so the spelling is `=== true` rather than
-        // showSources' `!== false` (Issue #983). No control writes this key —
-        // the control bar's exposure is Issue #985's — so it arrives only from
+        // showSources' `!== false` (Issue #983). No control writes this key,
+        // by decision (Issue #1018), so it arrives only from
         // `quartz.config.yaml`, and storeFilters()'s fixed key list leaves a
         // YAML-set `true` alone when stored filters merge over dataset.cfg.
         showIndexes: config.showIndexes === true,
@@ -779,6 +893,16 @@ import {
         }
       }
 
+      // Link counts for ranking labels (Issue #1128), counted once here rather
+      // than per frame the way nodeRadius() does.
+      var degreeById = new Map();
+      for (var i = 0; i < graphLinks.length; i++) {
+        var ds = graphLinks[i].source.id;
+        var dt = graphLinks[i].target.id;
+        degreeById.set(ds, (degreeById.get(ds) || 0) + 1);
+        degreeById.set(dt, (degreeById.get(dt) || 0) + 1);
+      }
+
       var styles = getComputedStyle(document.documentElement);
       var secondary = resolveColor(styles.getPropertyValue("--secondary").trim(), "#c792ea");
       var tertiary = resolveColor(styles.getPropertyValue("--tertiary").trim(), "#82aaff");
@@ -924,19 +1048,55 @@ import {
       // rather than from a hoisted copy: upstream derived it inside the zoom
       // handler and wrote it straight onto the labels there, which is why
       // nothing outside a zoom event could ask what the resting opacity was.
+      //
+      // With a label limit in force (global graph, Issue #1128) the resting
+      // value is 1 for the nodes `selectLabels()` picks from what is on screen
+      // and 0 for the rest; hover still comes first.
       function renderLabels() {
         var defaultScale = 1 / scale;
         var activeScale = defaultScale * 1.1;
         var zoomAlpha = zoomLabelAlpha(currentTransform.k, opacityScale);
         var focusing = hoveredNodeId !== null && focusOnHover;
+        var chosen = selectLabels(labelCandidates, visibleArea(), labelLimit);
 
         for (var i = 0; i < nodeRenderData.length; i++) {
           var nodeData = nodeRenderData[i];
-          var hovered = hoveredNodeId === nodeData.simulationData.id;
+          var id = nodeData.simulationData.id;
+          var hovered = hoveredNodeId === id;
+          var resting = restingLabelAlpha(chosen ? chosen.has(id) : undefined, zoomAlpha);
           nodeData.label.scale.set(hovered ? activeScale : defaultScale);
-          nodeData.label.alpha = labelAlpha(hovered, nodeData.active, focusing, zoomAlpha);
+          nodeData.label.alpha = labelAlpha(hovered, nodeData.active, focusing, resting);
         }
       }
+
+      // The canvas rectangle in simulation coordinates: the inverse of the
+      // zoom transform, then of the width/2, height/2 offset animate() adds.
+      function visibleArea() {
+        var k = currentTransform.k;
+        return {
+          x0: -currentTransform.x / k - width / 2,
+          y0: -currentTransform.y / k - height / 2,
+          x1: (width - currentTransform.x) / k - width / 2,
+          y1: (height - currentTransform.y) / k - height / 2,
+        };
+      }
+
+      // Built once; x / y are read through getters so each call sees the
+      // simulation's current positions without rebuilding the array.
+      var labelCandidates = nodes.map(function (n) {
+        var kind = classifyNode(n.id).kind;
+        return {
+          id: n.id,
+          get x() {
+            return n.x;
+          },
+          get y() {
+            return n.y;
+          },
+          degree: degreeById.get(n.id) || 0,
+          secondary: kind === "tag" || kind === "source",
+        };
+      });
 
       function renderNodes() {
         for (var i = 0; i < nodeRenderData.length; i++) {
@@ -1197,13 +1357,27 @@ import {
         requestAnimationFrame(animate);
       }
 
-      simulation.on("tick", function () {});
+      // WikiCommit (8): which nodes are on screen changes as the layout
+      // settles, so the label choice is redone once per tick (Issue #1128).
+      // Without a limit nothing here depends on positions and the tick stays
+      // the no-op upstream had.
+      simulation.on("tick", function () {
+        if (labelLimit > 0) renderLabels();
+      });
+      var setLabelLimit = function (n) {
+        labelLimit = n;
+        renderLabels();
+      };
+      if (depth < 0) labelLimitSetters.set(graph, setLabelLimit);
       simulation.restart();
       renderPixiFromD3();
       animate();
 
       return function () {
         stopAnimation = true;
+        // Only our own entry: a superseded render is cleaned up after the
+        // render that replaced it has already registered.
+        if (labelLimitSetters.get(graph) === setLabelLimit) labelLimitSetters.delete(graph);
         simulation.stop();
         try {
           app.destroy(true);
@@ -1285,6 +1459,9 @@ import {
           // WikiCommit (3): reapply the persisted filters before rendering, so
           // an SPA navigation (which restores the server-rendered dataset.cfg)
           // does not silently reset them.
+          if (graphContainer.dataset["cfgDefault"] === undefined) {
+            graphContainer.dataset["cfgDefault"] = graphContainer.dataset["cfg"] || "{}";
+          }
           var stored = loadStoredFilters();
           if (stored) {
             try {

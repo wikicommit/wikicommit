@@ -11,6 +11,8 @@ export default {
         degreeMin: "Мин",
         degreeMax: "Макс",
         degreeNoBound: "0 = без ограничения",
+        labelLimit: "Подписей на экране",
+        labelLimitHint: "0 = по масштабу",
         reset: "Сбросить",
         legend: "Условные обозначения",
         legendPages: "Страницы",
@@ -18,7 +20,8 @@ export default {
         legendVisited: "Посещённые",
         legendUnvisited: "Непосещённые",
         legendVisitedHint: "Страницы, которые вы открывали в этом браузере",
-        legendTagsAlways: "Теги всегда отображаются этим цветом, независимо от того, открывали ли вы их",
+        legendTagsAlways:
+          "Теги всегда отображаются этим цветом, независимо от того, открывали ли вы их",
       },
     },
   },

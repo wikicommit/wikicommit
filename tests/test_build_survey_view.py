@@ -239,3 +239,64 @@ def test_source_count_is_omitted_for_translations_and_view_pages(tmp_path):
     assert "PAGE: Person/taro | Taro | backlinks=0 | tags= | links=" in result.stdout
     assert "PAGE: View/loop | Loop | backlinks=0 | tags= | links=" in result.stdout
     assert "sources=" not in result.stdout
+
+
+# --- --pages: reduce only the search candidates (Issue #1075) ---------------
+
+def test_pages_mode_lists_only_named_pages_in_the_given_order_and_flags_them(tmp_path):
+    write_config(tmp_path)
+    a = write_page(tmp_path, "ja", "Person", "a", fm("A"), body="## Career\n[[Person/b]]\n")
+    b = write_page(tmp_path, "ja", "Person", "b", fm("B", extra="derived_from:\n  - path: x\n    source_commit: ''\n"))
+    t = write_page(tmp_path, "en", "Person", "a", fm("A-en", lang="en", extra="translated_from: x\n"))
+    write_page(tmp_path, "ja", "Person", "c", fm("C"))
+    result = run(tmp_path, ["--pages"] + [str(p.relative_to(tmp_path)) for p in (t, a, b)])
+    assert result.returncode == 0
+    page_lines = [ln for ln in result.stdout.splitlines() if ln.startswith("PAGE:")]
+    assert len(page_lines) == 3
+    assert "A-en" in page_lines[0] and page_lines[0].endswith("| translation")
+    assert "| A |" in page_lines[1] and "translation" not in page_lines[1] and "synthesized" not in page_lines[1]
+    assert page_lines[2].endswith("| synthesized")
+    assert "HEADINGS: Career" in result.stdout
+    assert "HUB:" not in result.stdout and "TYPE:" not in result.stdout
+    assert "SUMMARY: pages=3, missing=0" in result.stdout
+
+
+def test_pages_mode_flags_a_view_page_and_reports_missing_ones(tmp_path):
+    write_config(tmp_path)
+    view_dir = tmp_path / ".wikicommit" / "view" / "ja"
+    view_dir.mkdir(parents=True)
+    (view_dir / "loop.md").write_text("---\ntitle: Loop\nlang: ja\nderived_from: []\n---\n\nx\n", encoding="utf-8")
+    removed = write_page(tmp_path, "ja", "Person", "gone", fm("Gone", extra="status: removed\n"))
+    result = run(tmp_path, ["--pages", ".wikicommit/view/ja/loop.md",
+                            str(removed.relative_to(tmp_path)), ".wikicommit/entity/ja/Person/nope.md"])
+    assert result.returncode == 0
+    assert "View/loop" in result.stdout and "| synthesized" in result.stdout
+    assert result.stdout.count("MISSING:") == 2
+    assert "SUMMARY: pages=1, missing=2" in result.stdout
+
+
+def test_a_body_quoting_derived_from_is_not_flagged_synthesized(tmp_path):
+    """The case a whole-file grep got wrong: the field appears only in the body."""
+    write_config(tmp_path)
+    p = write_page(tmp_path, "ja", "DefinedTerm", "schema", fm("S", type_name="DefinedTerm"),
+                   body="```yaml\nderived_from:\n  - path: x\n```\n")
+    result = run(tmp_path, ["--pages", str(p.relative_to(tmp_path))])
+    assert "synthesized" not in result.stdout
+
+
+def test_pages_mode_with_no_paths_answers_zero_rather_than_failing(tmp_path):
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Person", "a", fm("A"))
+    result = run(tmp_path, ["--pages"])
+    assert result.returncode == 0
+    assert "SUMMARY: pages=0, missing=0" in result.stdout
+
+
+def test_pages_mode_does_not_count_view_pages_as_backlinks(tmp_path):
+    write_config(tmp_path)
+    a = write_page(tmp_path, "ja", "Person", "a", fm("A"))
+    view_dir = tmp_path / ".wikicommit" / "view" / "ja"
+    view_dir.mkdir(parents=True)
+    (view_dir / "loop.md").write_text("---\ntitle: Loop\nlang: ja\nderived_from: []\n---\n\n[[Person/a]]\n", encoding="utf-8")
+    result = run(tmp_path, ["--pages", str(a.relative_to(tmp_path))])
+    assert "backlinks=0" in result.stdout

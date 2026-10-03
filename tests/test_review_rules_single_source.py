@@ -38,6 +38,7 @@ REVIEW_SKILLS = {
     "wikicommit-generate": REPO / ".claude/skills/wikicommit-generate/SKILL.md",
     "wikicommit-review": REPO / ".claude/skills/wikicommit-review/SKILL.md",
     "wikicommit-synthesize": REPO / ".claude/skills/wikicommit-synthesize/SKILL.md",
+    "wikicommit-translate": REPO / ".claude/skills/wikicommit-translate/SKILL.md",
 }
 
 # Phrases that only appear when a rule is being *stated* rather than referred to.
@@ -69,6 +70,11 @@ CHOREOGRAPHY = {
         "record_review.py",
     ),
     "wikicommit-synthesize": (
+        "generate.max_retries",
+        "rebuild_index.py",
+        "record_review.py",
+    ),
+    "wikicommit-translate": (
         "generate.max_retries",
         "rebuild_index.py",
         "record_review.py",
@@ -198,7 +204,7 @@ def test_each_skill_checks_for_the_rules_file_at_the_start_of_the_run():
 
 def test_the_two_subagent_paths_verify_the_echoed_rules_version():
     """wikicommit-review reads the rules itself, so it has nothing to verify."""
-    for name in ("wikicommit-generate", "wikicommit-synthesize"):
+    for name in ("wikicommit-generate", "wikicommit-synthesize", "wikicommit-translate"):
         text = skill_instructions(name)
         assert "rules_version" in text, f"{name} does not check the echo"
         # Not a bare "once": that matches incidental prose ("once per run") in a
@@ -219,6 +225,7 @@ def test_the_two_subagent_paths_hand_the_subagent_its_path_label():
     for name, stage in (
         ("wikicommit-generate", "generate-pass4"),
         ("wikicommit-synthesize", "synthesize-step5.5"),
+        ("wikicommit-translate", "translate-check"),
     ):
         text = skill_instructions(name)
         assert stage in text, (
@@ -237,7 +244,7 @@ def test_the_rules_file_says_where_the_path_label_comes_from():
 
 def test_the_two_subagent_paths_state_the_sender_side_contract():
     """The receiver-side rule cannot stop the sender from over-sharing."""
-    for name in ("wikicommit-generate", "wikicommit-synthesize"):
+    for name in ("wikicommit-generate", "wikicommit-synthesize", "wikicommit-translate"):
         text = skill_instructions(name)
         assert "and nothing else" in text, (
             f"{name} does not bound what goes into the subagent's prompt"
@@ -259,7 +266,7 @@ def test_the_rules_file_separates_common_rules_from_per_path_differences():
     text = _flat(rules_text())
     assert "Rules that hold on every path" in text
     assert "Differences by path" in text
-    for stage in ("generate-pass4", "review-skill", "synthesize-step5.5"):
+    for stage in ("generate-pass4", "review-skill", "synthesize-step5.5", "translate-check"):
         assert stage in text, f"the rules file does not address the {stage} path"
 
 
@@ -333,3 +340,32 @@ def test_return_format_names_the_values_of_page_at_fault():
     start = text.index("### 4. What to return")
     section = text[start:text.index("###", start + 1)]
     assert "`page_at_fault` (one of `under-review` / `other`" in section
+
+
+def test_translate_check_inverts_completeness_only_on_its_own_path():
+    """Omission is a defect for a translation and only for a translation.
+
+    Part 1 rule 2 must stay absolute for the other three paths, so the inversion
+    lives in the `translate-check` section and nowhere else.
+    """
+    text = _flat(rules_text())
+    part3 = text[text.index("Differences by path"):]
+    section = part3[part3.index("### `translate-check`"):]
+    assert "Completeness is a criterion on this path, and only on this path" in section
+    assert "Completeness is a criterion on this path" not in text[: text.index("Differences by path")]
+
+
+def test_translate_check_runs_only_checks_1_and_2():
+    """Checks 3-9 are the original page's job or cannot happen in a translation."""
+    text = rules_text()
+    for heading in text.splitlines():
+        if not heading.startswith("### ") or "—" not in heading:
+            continue
+        number = heading[4:].split(".", 1)[0]
+        if not number.isdigit():
+            continue
+        applies = heading.split("—", 1)[1]
+        if number in ("1", "2"):
+            assert "all paths" in applies, heading
+        else:
+            assert "all paths" not in applies and "translate-check" not in applies, heading

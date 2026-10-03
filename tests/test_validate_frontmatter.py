@@ -7,6 +7,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).parent.parent / ".wikicommit" / "scripts" / "validate_frontmatter.py"
 VOCAB_ENV_VAR = "WIKICOMMIT_TEST_SCHEMA_ORG_JSONLD"
 
@@ -1119,6 +1121,68 @@ def test_invalid_expires_at_format(tmp_path):
     assert result.returncode == 1
     assert "ERROR" in result.stdout
     assert "expires_at" in result.stdout
+
+
+def _expires_page(tmp_path, expires_at, generated_at):
+    setup_schemas(tmp_path)
+    return write_page(
+        tmp_path, "en", "Person", "yamada",
+        textwrap.dedent(f"""\
+            title: "Yamada"
+            lang: en
+            type: "schema:Person"
+            review_status: pending
+            generated_at: {generated_at}
+            expires_at: {expires_at}
+            sources:
+              - type: manual
+                author: test
+                created_at: "2026-01-01"
+            """),
+    )
+
+
+@pytest.mark.parametrize("expires_at", ['"2025-11-14"', '"2026-09-28"', "2025-11-14"])
+def test_expires_at_not_after_generated_at_warns(tmp_path, expires_at):
+    """Issue #1130: a date already past at generation schedules nothing.
+
+    The unquoted case is parsed by YAML as a date object, and must still be
+    compared. Equal dates warn too — the page is EXPIRED on its first day.
+    """
+    page = _expires_page(tmp_path, expires_at, '"2026-09-28"')
+    result = run([str(page)], cwd=tmp_path)
+    assert result.returncode == 0
+    warn = [ln for ln in result.stdout.splitlines() if ln.startswith("WARNING") and "expires_at" in ln]
+    assert len(warn) == 1
+    assert "not after generated_at 2026-09-28" in warn[0]
+
+
+def test_expires_at_after_generated_at_is_quiet(tmp_path):
+    page = _expires_page(tmp_path, '"2026-11-01"', '"2026-09-28"')
+    result = run([str(page)], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "expires_at" not in result.stdout
+
+
+def test_expires_at_without_generated_at_is_not_compared(tmp_path):
+    setup_schemas(tmp_path)
+    page = write_page(
+        tmp_path, "en", "Person", "yamada",
+        textwrap.dedent("""\
+            title: "Yamada"
+            lang: en
+            type: "schema:Person"
+            review_status: pending
+            expires_at: "2000-01-01"
+            sources:
+              - type: manual
+                author: test
+                created_at: "2026-01-01"
+            """),
+    )
+    result = run([str(page)], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "expires_at" not in result.stdout
 
 
 def test_invalid_wikidata_prefix(tmp_path):

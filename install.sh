@@ -31,7 +31,7 @@ done
 INSTALL_DIR="$(pwd)/${INSTALL_SUBDIR}"
 
 # Skills to install
-SKILLS=("wikicommit-init" "wikicommit-generate" "wikicommit-merge" "wikicommit-review" "wikicommit-remove" "wikicommit-fix" "wikicommit-status" "wikicommit-collect" "wikicommit-search" "wikicommit-ask" "wikicommit-quiz" "wikicommit-synthesize" "wikicommit-serve" "wikicommit-translate" "wikicommit-schema-propose" "wikicommit-update" "wikicommit-reconcile")
+SKILLS=("wikicommit-init" "wikicommit-generate" "wikicommit-merge" "wikicommit-review" "wikicommit-remove" "wikicommit-fix" "wikicommit-status" "wikicommit-collect" "wikicommit-search" "wikicommit-ask" "wikicommit-quiz" "wikicommit-synthesize" "wikicommit-serve" "wikicommit-translate" "wikicommit-schema-propose" "wikicommit-update" "wikicommit-reconcile" "wikicommit-relate" "wikicommit-organize")
 
 echo "WikiCommit Skills Installer"
 echo ""

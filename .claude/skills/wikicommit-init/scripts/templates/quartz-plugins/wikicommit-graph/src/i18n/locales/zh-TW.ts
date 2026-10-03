@@ -11,6 +11,8 @@ export default {
         degreeMin: "最小",
         degreeMax: "最大",
         degreeNoBound: "0 = 不限",
+        labelLimit: "畫面上的標籤數",
+        labelLimitHint: "0 = 依縮放程度",
         reset: "重設",
         legend: "圖例",
         legendPages: "頁面",

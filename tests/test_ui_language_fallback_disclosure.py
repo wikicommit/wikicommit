@@ -1,11 +1,10 @@
 """Who is told that WikiCommit's own labels fell back to English (Issue #825).
 
-WikiCommit writes its own labels in two languages. A wiki whose `primary_lang`
-is neither gets its page bodies and Quartz's chrome in that language, and the
-review banner, sources box, page properties and generated index/overview pages
-in English. Issue #809 settled that this fallback is the right behaviour — an
-unverifiable translation of a sentence that says what this wiki does *not*
-vouch for fails invisibly, English fails visibly — and left one question open:
+WikiCommit writes its own labels in ten languages (Issue #1017). A wiki whose
+`primary_lang` is none of them gets its page bodies and Quartz's chrome in that
+language, and the review banner, sources box, page properties and generated
+index/overview pages in English. Issue #809 settled that this fallback is the
+right behaviour for a language outside the set, and left one question open:
 whether a reader should be told it happened.
 
 Issue #825 answered no for readers and yes for the operator, once, at init. The
@@ -103,7 +102,7 @@ def _convert_label_langs(dict_name: str) -> set[str]:
     raise AssertionError(f"{dict_name} is gone from convert_wikilinks.py")
 
 
-@pytest.mark.parametrize("lang", ["en", "ja"])
+@pytest.mark.parametrize("lang", ["en", "ja", "de", "es", "fr", "it", "pl", "pt", "ru", "zh"])
 def test_a_translated_language_prints_nothing(lang):
     """The common case has to stay silent, or the line stops being read."""
     assert _init_module().ui_language_notice(lang) is None, (
@@ -112,7 +111,7 @@ def test_a_translated_language_prints_nothing(lang):
     )
 
 
-@pytest.mark.parametrize("lang", ["it", "fr", "IT", " it "])
+@pytest.mark.parametrize("lang", ["ko", "nl", "KO", " ko "])
 def test_an_untranslated_language_is_disclosed_to_the_operator(lang):
     """Case and surrounding space must not decide whether the operator is told."""
     notice = _init_module().ui_language_notice(lang)
@@ -131,7 +130,7 @@ def test_the_notice_says_what_does_not_fall_back():
     Page bodies and Quartz's own chrome do follow the chosen language — only
     WikiCommit's own additions fall back, and the split is not guessable.
     """
-    notice = _init_module().ui_language_notice("it")
+    notice = _init_module().ui_language_notice("ko")
     assert "Page bodies" in notice and "Quartz" in notice, (
         "init.py's UI-language notice no longer distinguishes what still renders "
         "in the chosen language from what falls back (Issue #825)."

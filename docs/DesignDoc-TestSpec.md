@@ -40,6 +40,8 @@
 | Skill ツリーの固定パス混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_tree_paths.py` を **blocking** で実行し、配布 Skill の指示文（`.md`）に `.claude/skills/<name>/…` の固定パスがあると失敗させる（Issue #1021）。[L14](#l14-skill-ツリーの固定パス混入チェック-対応済みissue-1021) |
 | Skill 指示文への Claude Code ツール名混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_tool_names.py` を **blocking** で実行し、配布 Skill の指示文（`.md`）に `Read tool` / `Bash tool` / `WebFetch` 等の Claude Code 固有のツール名があると失敗させる（Issue #1015）。[L15](#l15-skill-指示文への-claude-code-ツール名混入チェック-対応済みissue-1015) |
 | 配布物の Issue 番号混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_distributed_issue_refs.py` を **blocking** で実行する。配布スクリプトの出力文字列（実行時のメッセージ・argparse の help）の `Issue #NNN` は 0 件、配布 Skill の指示文は Skill ごとの件数上限（ラチェット）を超えると失敗させる（Issue #1054）。[L16](#l16-配布物の-issue-番号混入チェック-対応済みissue-1054) |
+| 配布ペイロード変更時の `CHANGELOG.md` 書き忘れチェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが **pull_request でだけ** `tools/check_changelog_entry.py` を **blocking** で実行し、`.claude/skills/wikicommit-*` を変えたブランチがルートの `CHANGELOG.md` を触っておらず、トレーラー `Changelog: none — <理由>` も無いと失敗させる（Issue #1029）。[L17](#l17-配布ペイロード変更時の-changelogmd-書き忘れチェック-対応済みissue-1029) |
+| 分割済み DesignDoc の Issue 番号ラチェット（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_designdoc_issue_refs.py` を **blocking** で実行し、仕様の現在形と経緯に分割済みの `docs/DesignDoc-*.md` の `Issue #NNN` がファイルごとの上限を超えると失敗させる（Issue #1138）。[L18](#l18-分割済み-designdoc-の-issue-番号ラチェット-対応済みissue-1138) |
 | ルート生成物一覧の単一情報源化と、その不変条件の検証 | ✅ 済み | `init.py` の生成物と `print_next_steps.py` の `git add` 案内は、`.claude/skills/wikicommit-init/scripts/_root_outputs.py` という 1 つの宣言的な一覧から組み立てられる（Issue #642。この一覧は init.py の verbatim コピーも駆動するため、ルート生成物の追加は 1 箇所の編集で済む）。`tests/test_root_outputs.py` が一覧自体の不変条件（variant の妥当性・パスの一意性・宣言したテンプレートの実在・`git add` から意図的に外したパス〈`package-lock.json`〉と条件付きパス〈`.wikicommit/schemaorg-vocab.json`〉の扱い）と、**生成できない 3 つ目の一覧である SKILL.md の散文**が Quartz 限定の生成物を漏らしていないことを検証する。実際に init.py を走らせて案内どおりの `git add` 後に未追跡ファイルが残らないことの検証は `tests/test_smoke_local.py`（Issue #556）が引き続き担う |
 | ユーザー向け出力テンプレートへの内部語彙混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_user_facing_vocabulary.py` を **blocking** で実行し、`.claude/skills/wikicommit-*/SKILL.md` のユーザー向けフェンス済みテンプレートに `Step N`/`Pass N`・`Route A`/`Route B`・`Issue #NNN`/`PR #NNN` が混入していると失敗させる（Issue #588。`docs/DesignDoc-skills.md` §11.8）。[L10](#l10-ユーザー向け出力テンプレートへの内部語彙混入チェック-対応済みissue-588) |
 | 配布スクリプトのコンソール出力言語チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_script_output_language.py` を **blocking** で実行し、`.claude/skills/**/scripts/*.py` の `print()` 出力に日本語が含まれていると失敗させる（Issue #770。`docs/DesignDoc-ScriptSpec.md`「共通規則」）。[L11](#l11-配布スクリプトのコンソール出力言語チェック-対応済みissue-770) |
@@ -317,7 +319,7 @@ Issue #1015 はこれを役割で書き直した（「read the file in full」�
 
 ### L16. 配布物の Issue 番号混入チェック（✅ 対応済み・Issue #1054）
 
-公開リポジトリはスナップショット push であり Issue を 1 件も持たないため、配布物の `Issue #NNN` は利用者から辿れない（`docs/DesignDoc-skills.md` §11.9 の該当コールアウト）。`tools/check_distributed_issue_refs.py` が 2 つの範囲を強さを変えて見る。
+公開リポジトリはスナップショット push であり Issue を 1 件も持たないため、配布物の `Issue #NNN` は利用者から辿れない（`docs/DesignDoc-skills.md` §11.9「Issue 番号も残さない」）。`tools/check_distributed_issue_refs.py` が 2 つの範囲を強さを変えて見る。
 
 | 範囲 | 強さ | 理由 |
 |---|---|---|
@@ -325,6 +327,31 @@ Issue #1015 はこれを役割で書き直した（「read the file in full」�
 | 配布 Skill の指示文（`check_skill_md_lines.instruction_files()` の集合）＋ `templates/review-rules.md`・`templates/schema-authoring.md` | **Skill ごとの上限（ラチェット）** | 移行が Skill 単位で進むので途中では 0 にならない。`CAPS` を現在値で固定し、増えたら失敗、減ったら `NOTE:` で下げ先を示す。全 Skill が 0 になった時点で上限表は「0 件」の 1 規則に畳める（Issue #1060 の時点で全 Skill が 0。表はまだ畳んでいない） |
 
 **番号だけを見る**。経緯の文（「以前は X だった」）は機械的に検出できないので、PR レビューで扱う。`review-rules.md`・`schema-authoring.md` を `wikicommit-init` の集計に含めるのは、両者がそのテンプレート配下に置かれ、エージェントが指示として読むからである（`templates/guides/*.md` は人が読む手順書なので対象外）。**blocking** とした理由は L9 / L14 と同じ。
+
+### L17. 配布ペイロード変更時の `CHANGELOG.md` 書き忘れチェック（✅ 対応済み・Issue #1029）
+
+Issue #1016 が `CHANGELOG.md` 冒頭に「Which changes get an entry」を置いたが、散文の基準は書き忘れを止めない — 0.7.0 以降の 10 件が `[Unreleased]` から落ちたのは、基準が無かったことと、PR の時点で誰も `[Unreleased]` を見なかったことが重なったためで、後者は基準を書いても残る。`tools/check_changelog_entry.py` がそれを PR の時点で止める。
+
+| 論点 | 決定 | 理由 |
+|---|---|---|
+| 判定の単位 | **ブランチ**（`merge-base(<base>, HEAD)..HEAD` のコミット済みの変更）。CI は `pull_request` でだけ走らせ、`push: main` では走らせない | squash 後の main で落としても直す手段が無い。`merge-base` から見るので、ローカル（Actions の課金枠切れ時のフォールバック。`review-and-merge` Step 3.5.4）でも `--base origin/main` で同じ判定ができる。CI は `fetch-depth: 0` で履歴を取る |
+| 対象のパス | `.claude/skills/wikicommit-*` のうち、`dist/`・テストファイル（`*.test.*`・`*.spec.*`・`test/`・`__tests__/`・`__mocks__/`）・CHANGELOG の写し（`wikicommit-init/CHANGELOG.md`・`changelog/`）を除いたもの | `dist/` は基準自体が「先行するソース変更のエントリに従う」と書いている。テストは利用者が実行するものを変えない。`tests/`・`docs/` だけの変更はパスの時点で対象外になり、除外を書く必要も無い（検討事項 3） |
+| エントリの判定 | ルートの `CHANGELOG.md` を触ったか | 編集する写しはルート側で、Skill ツリー側との一致は `tests/test_changelog_sync.py` が守る。`[Unreleased]` の中身までは見ない — 触ったかで足り、文面の妥当性はレビューの領分 |
+| 除外の置き場 | コミットトレーラー `Changelog: none — <理由>`（区切りは em ダッシュ・en ダッシュ・ハイフン・コロン）。**理由が空なら落とす** | PR 本文は squash 後に配布リポジトリへ届かないが、除外の記録が届く必要は無い（検討事項 2）。トレーラーなら `git` だけで読め、ローカルでも同じ判定になる。理由を必須にするのは L10 の `skill-vocabulary-exception` と同じ — 基準の「利用者が実行・目にするものが何も変わらない」が当てはまる理由を言い直させるため |
+
+**既知の限界**: 未コミットの変更は見ない。`CHANGELOG.md` を 1 行触れば中身に関わらず通る。除外の理由の妥当性は判定しない（いずれも PR レビューで扱う）。
+
+### L18. 分割済み DesignDoc の Issue 番号ラチェット（✅ 対応済み・Issue #1138）
+
+`docs/DesignDoc-*.md` は 1 ファイルずつ「現在の仕様」（本文）と「経緯」（`docs/history/<同名>.md`）に分ける（`docs/README.md` §4）。分けた後に新しい Issue が経緯を本文へ足すと元に戻るので、`tools/check_designdoc_issue_refs.py` が分割済みのファイルだけを見る。
+
+| 論点 | 決定 | 理由 |
+|---|---|---|
+| 対象 | `CAPS` に載せたファイルだけ | 未分割のファイルは経緯が本文にあるのが現状であり、数えても下げ先が無い。分割する PR で、分割後の件数を上限として足す |
+| 判定 | ファイルごとの上限（ラチェット）。増えたら失敗、減ったら `NOTE:` で下げ先を示す | L16 と同じ形。本文に残す番号（現在の仕様を決めた Issue を 1 つだけ名指す等）を 0 に強制しない |
+| 対になる history の存在 | 無ければ失敗 | 上限だけを持って経緯の置き場が無いと、経緯を本文から消しただけになる |
+
+**番号だけを見る**。経緯の文（「以前は X だった」）は機械的に検出できないので、`CONTRIBUTING.md` の規則と PR レビューで扱う。**blocking** とした理由は L9 / L14 と同じ。
 
 ---
 

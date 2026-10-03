@@ -7,9 +7,11 @@
 
 Git ベースの知識管理プラットフォーム。ソースドキュメントから LLM が Wiki ページを生成し、自動・人間によるレビューを経て静的 Wiki として公開します。SKILL.md 群として実装されており、Claude Code などユーザー自身が契約している LLM 環境上でそのまま動作します。
 
-**LLM は 1 人が読める速さを超えてページを書くため、レビューは分割できなければなりません。** WikiCommit はレビューの単位をページ 1 枚に固定します — 1 ページが 1 つの追跡 Issue で、それだけを Close すれば完了です。レビューする人はそのページだけを読めばよく、知識ベース全体を読む必要も、他の人のレビューを待つ必要もありません。増えていく Wiki が 1 人の読み手の前で詰まらないのは、この単位によります。そして分割できることは、**全ページを読まなくてよい**ことでもあります — 機械は全ページをその元になった文書と照合し、人が読むのはそこからの抜取です（[Step 3](#step-3-マージ後レビュー)）。
+**目的は、AI が使える、出所の追える知識基盤を作り、その知識を人が興味に応じて読める形で公開することです。** 各ページは登録したソースから作られ、どの文書のどの版から作ったかを記録し、機械がその文書と照合します。照合の結果はページごとに記録され、公開ページにも表示されます。人は、その中から興味のあるページを読みます。出所を追えることが要るのは公開するからです — ページを読む人は作った人ではなく、判断の材料はページに付いた記録です。
 
-WikiCommit は *LLM wiki* — LLM が資料を読み、そこから Wiki を書いて育てていく考え方（[Andrej Karpathy の LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)）— の一実装です。加えているのはレビューの側です。どのページも PR を通って入り、元になった文書と照合され、人がそのページだけを読んで確認できます。各ページは [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)（Open Knowledge Format）v0.1 が唯一必須とする Schema.org の `type` を持つので、Wiki の知識は WikiCommit にしか読めない形式に閉じ込められません。
+**Wiki は、その両方を満たす形として選んでいます。** 機械は型・リンク・出典を構造として読み、人はリンクをたどって読みます。各ページは 1 つの主題について書かれ、[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)（Open Knowledge Format）v0.1 が唯一必須とする Schema.org の `type` を持つので、Wiki の知識は WikiCommit にしか読めない形式に閉じ込められず、ページを 1 枚ずつ照合できます。ページを LLM が書くのは、散らばったソースから型付きのページを作り、更新し続ける作業を人の手に残さないためです。
+
+WikiCommit は *LLM wiki* — LLM が資料を読み、そこから Wiki を書いて育てていく考え方（[Andrej Karpathy の LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)）— の一実装として始まりました。加えているのは、どのページも元になった文書と照合すること、その判定をページ 1 枚ごとに記録すること、そしてすべての変更が PR を通ることです。
 
 > **Status**: パイロットリポジトリでの実運用検証を進めており、破壊的変更が入ることがあります。
 
@@ -120,7 +122,9 @@ flowchart LR
 
 ### Step 3: マージ後レビュー
 
-**機械は全ページを、人は一部を読みます。** 各ページは生成時にその元になった文書と照合され、WikiLink はマージ前に検証されます — つまり人の読みはそのどちらのやり直しでもありません。人が足すのは自動チェックが届かないもの、すなわち実在の人物・組織に対して書きすぎていないか、読者自身の知識と食い違っていないか、別のバッチで書かれた他のページと矛盾していないか、です。全ページを読むことは目標ではありません（`/wikicommit-status` が特に見る価値のあるページを挙げます）。
+**LLM は 1 人が読める速さを超えてページを書くため、レビューは分割できなければなりません。** WikiCommit はレビューの単位をページ 1 枚に固定します — 1 ページが 1 つの追跡 Issue で、それだけを Close すれば完了です。レビューする人はそのページだけを読めばよく、知識ベース全体を読む必要も、他の人のレビューを待つ必要もありません。増えていく Wiki が 1 人の読み手の前で詰まらないのは、この単位によります。
+
+**機械は全ページを、人は一部を読みます。** 分割できることは、全ページを読まなくてよいことでもあります。各ページは生成時にその元になった文書と照合され、WikiLink はマージ前に検証されます — つまり人の読みはそのどちらのやり直しでもありません。人が足すのは自動チェックが届かないもの、すなわち実在の人物・組織に対して書きすぎていないか、読者自身の知識と食い違っていないか、別のバッチで書かれた他のページと矛盾していないか、です。全ページを読むことは目標ではありません（`/wikicommit-status` が特に見る価値のあるページを挙げます）。
 
 レビュー追跡 Issue（`wikicommit-review` ラベル。`review_status: pending` のページごとに自動生成）を確認します。Close が述べるのは 2 つです — このページの知識が人に渡ったこと、そして読んでいて明らかに変だと思う点は無かったこと。内容が正しいことの保証ではありません。
 
@@ -140,7 +144,7 @@ flowchart LR
 
 > Skills は [agentskills.io](https://agentskills.io) 標準準拠の SKILL.md 群のため、Codex など他の対応コーディングエージェントでも原理的には動作するはずですが、現時点で動作検証を行っているのは Claude Code のみです。
 >
-> **Codex では、書き込み系 Skill の自律起動を止める仕組みが違います。** 9 本（`collect`・`fix`・`init`・`reconcile`・`remove`・`review`・`schema-propose`・`synthesize`・`update`）が持つ `disable-model-invocation: true` は Claude Code の設定で Codex は読まず、`.claude/settings.json` の `skillOverrides` も Claude Code しか読みません。Codex 向けには、その 9 本それぞれに `policy.allow_implicit_invocation: false` を書いた `agents/openai.yaml` を同梱し、description にも「明示的に頼まれたときだけ使う」と書いています。ただし Codex がこの設定を実際に守るかは、Codex 本体ではまだ確認していません。確認できるまでは、これらの Skill は名前で呼び出し（`$wikicommit-…`）、`wikicommit-merge` を走らせる前に残った変更を確認してください。
+> **Codex では、書き込み系 Skill の自律起動を止める仕組みが違います。** 11 本（`collect`・`fix`・`init`・`organize`・`reconcile`・`relate`・`remove`・`review`・`schema-propose`・`synthesize`・`update`）が持つ `disable-model-invocation: true` は Claude Code の設定で Codex は読まず、`.claude/settings.json` の `skillOverrides` も Claude Code しか読みません。Codex 向けには、その 11 本それぞれに `policy.allow_implicit_invocation: false` を書いた `agents/openai.yaml` を同梱し、description にも「明示的に頼まれたときだけ使う」と書いています。ただし Codex がこの設定を実際に守るかは、Codex 本体ではまだ確認していません。確認できるまでは、これらの Skill は名前で呼び出し（`$wikicommit-…`）、`wikicommit-merge` を走らせる前に残った変更を確認してください。
 >
 > **WikiCommit はネットワークと `.git` への書き込みを要します。** ネットワークは URL ソースの取得（`/wikicommit-generate <url>`）・`gh`（`/wikicommit-merge` の PR・マージ・追跡 Issue）・lychee が使い、`.git` へは `/wikicommit-merge`（ブランチ作成・コミット）と `/wikicommit-init`（基盤コミット）が書き込みます。**Codex の既定のサンドボックスはこの両方を塞ぎます。** Codex のドキュメント（[Agent approvals & security](https://learn.chatgpt.com/docs/agent-approvals-security)。2026-09-24 確認）によれば、バージョン管理下のフォルダでの対話セッションの既定は `workspace-write` で、そこではネットワークが無効、`.git` は（`.agents`・`.codex` とともに）読み取り専用として保護されます。
 >
@@ -168,16 +172,24 @@ flowchart LR
 
 WikiCommit は LLM 推論を提供しません — ユーザーが自身の Claude Code / GitHub Copilot / API 契約を持ち込み、その契約にはコンテキスト長の要件があります。それを決めるのは `/wikicommit-generate` で、ソース件数によらない固定分が約 49K、そこに 1 回の実行で処理するソース 1 件あたりの分が乗ります。
 
-**1 件あたりはソース次第で大きく変わります** — 短いブログ記事ならはるかに軽く、PDF レポートならはるかに重い。下の 2 列は実測した 2 例（日本語 Wikipedia 記事 1 本 ＝ 約 15K、混在ワークロード 30 件の実行からの逆算 ＝ 約 22K）であって、仕様ではありません。
+**1 件あたりはソース次第で大きく変わります** — 短いブログ記事ならはるかに軽く、PDF レポートならはるかに重い。下の 2 列は実測した 2 例（日本語 Wikipedia 記事 1 本 ＝ 約 15K、混在ワークロード 30 件の実行からの逆算 ＝ 約 22K）であって、仕様ではありません。各欄は（コンテキスト長 − 49K）÷ 1 件あたりを切り捨てた値で、収まる最大の件数です。**これらの数字はすべて Claude Code で測ったものです** — 他のエージェントは Skill の読み込み方もトークンの数え方（とくに日本語）も異なりうるため、そちらでは測るまで目安として扱ってください。
 
 | コンテキスト長 | 1 件 15K なら | 1 件 22K なら |
 | --- | --- | --- |
-| 200K | 約 10 件 | 約 7 件 |
+| 128K | 約 5 件 | 約 3 件 |
+| 200K | 約 10 件 | 約 6 件 |
+| 272K | 約 14 件 | 約 10 件 |
 | 1M | 約 63 件 | 約 43 件 |
 
-**これは引き上げられる設定値ではなく、実行が収まらなくなる地点です。** 超えるとセッションが実行の途中で compaction され、Skill 自身の指示が部分的に失われ、それでも**出力は一見正常に見えます**。`/wikicommit-generate` は 1 回に 5 件を超える前に確認を求めますが、それは**上限ではなくプロンプト**であり、「全件処理」と答えることは想定された使い方です — 上表はその費用です。確実な回避策は実行を分けることで、残したソースは状態が変わらないため次回の実行がそのまま拾います。
+**これは引き上げられる設定値ではなく、実行が収まらなくなる地点です。** 超えるとエージェントは実行の途中で会話を縮めることになり、Skill 自身の指示がどれだけ残るかはエージェントによります — Claude Code は各 Skill の先頭 5,000 トークンだけを再添付するため手順の大半が失われ、それでも**出力は一見正常に見えます**。`/wikicommit-generate` は 1 回に 5 件を超える前に確認を求めますが、それは**上限ではなくプロンプト**であり、「全件処理」と答えることは想定された使い方です — 上表はその費用です。確実な回避策は実行を分けることで、残したソースは状態が変わらないため次回の実行がそのまま拾います。
 
-Claude Code では Opus 5 / 4.8 / 4.6 と Sonnet 4.6 が既定 200K、Sonnet 5 と Fable 5 / 5.1 はネイティブ 1M で、Opus は `[1m]` サフィックスによりプラン次第で 1M に届きます（2026-09 時点。最新は [Claude Code のモデル設定ドキュメント](https://code.claude.com/docs/en/model-config)を参照してください）。
+**128K では 5 件ガードの既定そのものが収まりません**（1 件 22K なら約 159K）。「先頭 5 件のみ」と答えても足りないので、ソースを 1 件ずつ名指しするか（`/wikicommit-generate <path|url>` は渡したソースだけを処理します）、より大きいコンテキスト長のモデルに切り替えてください。
+
+コンテキスト長はエージェントと選ぶモデルで決まります（2026-10 時点）:
+
+- **Claude Code**: Opus 5 / 4.8 / 4.6 と Sonnet 4.6 が既定 200K、Sonnet 5 と Fable 5 / 5.1 はネイティブ 1M で、Opus は `[1m]` サフィックスによりプラン次第で 1M に届きます（[モデル設定ドキュメント](https://code.claude.com/docs/en/model-config)）
+- **Codex**: Codex 自身のモデル一覧にあるモデルは既定 272K です（[openai/codex の `models.json`](https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json)）
+- **GitHub Copilot**: GitHub はモデルごとの既定の長さを公開していません。最新のモデルは VS Code と Copilot CLI で 1M の拡張コンテキストを選べます（[サポートされているモデル](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities)）。Copilot CLI では `/context` が使用中のモデルのコンテキスト長を表示します
 
 自分のソースの重さは 1 度実行すれば `grep extracted_tokens .wikicommit/source/**/*.md` で分かります — ただしこの値が数えているのは**抽出だけ**なので、上の 1 件あたりより小さく出ます。固定分の内訳と compaction が具体的に何を落とすかは [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6 にあります。
 
@@ -265,7 +277,7 @@ Skill が代行するのではなく、人が一度だけ手でたどる設定�
 
 ## Skills 一覧
 
-主要な経路です（全 17 Skill は下の表）。**書き込み系はローカル書き出しで止まり、Git 操作は `/wikicommit-merge` に集約されます。**
+主要な経路です（全 19 Skill は下の表）。**書き込み系はローカル書き出しで止まり、Git 操作は `/wikicommit-merge` に集約されます。**
 
 ```mermaid
 flowchart TD
@@ -301,6 +313,8 @@ flowchart TD
 | 15 | 運用・プレビュー | `/wikicommit-serve [--build]` | Wiki をローカルでビルド・プレビュー |
 | 16 | 運用・プレビュー | `/wikicommit-update` | インストール済み配布物と同期（PR・非auto-merge） |
 | 17 | 運用・プレビュー | `/wikicommit-reconcile <--source <path\|url>\|--type <Type>\|--all>` | ポリシー・型テンプレート・生成ルールの変更後にソースをキューへ戻す |
+| 18 | レビュー・品質管理 | `/wikicommit-relate [<Type/slug> ...]` | ページ同士の関係（同一・上位下位・関連・別物・系列）を人が決めて記録する |
+| 19 | 運用・プレビュー | `/wikicommit-organize <Type>` | 型の下のページをグループに分け、索引と公開サイトの左ペインに見出しとして表示する（ページは書き換えない。PR を作成・非 auto-merge） |
 
 ## 技術スタック
 
