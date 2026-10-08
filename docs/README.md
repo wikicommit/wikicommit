@@ -82,7 +82,7 @@ ScriptSpec はスクリプトごとに `## <スクリプト名>` の節を持つ
 | ソース管理ファイル（`.wikicommit/source/`）と `status` の遷移 | data §4.3、ScriptSpec `reconcile_ingest_status.py`・`check_ingest_freshness.py` |
 | view・ページ同士の関係・グループ分け | data §4.5.1・§4.5.2・§4.5.3、ScriptSpec `record_relation.py`・`check_name_collisions.py`・`check_groups.py`・`merge_pages.py`・`rename_page.py` |
 | 型テンプレート（`.wikicommit/schema/`）と型の選択 | data §5.1〜§5.5、ScriptSpec `check_schema_org_type.py`・`check_schema_coverage.py`・`check_schema_files.py`・`check_installed_type_usage.py` |
-| `/wikicommit-generate` の生成工程（Pass 1〜4・ガード・保留・`--regenerate`） | pipeline §6.1、skills §11.6、§11.5 の「非対話実行が人間の判断に当たったときの扱い」、ScriptSpec `check_extraction_quality.py`・`driver.py` |
+| `/wikicommit-generate` の生成工程（Pass 1〜4・ガード・保留・`--regenerate`） | pipeline §6.1、skills §11.6、§11.5 の「非対話実行が人間の判断に当たったときの扱い」、ScriptSpec `check_extraction_quality.py`・`skill_workflow.py` |
 | レビュー規律（Pass 4 / synthesize / translate の照合）とレビュー記録 | pipeline §7（チェック種別・機械レビューが評価しないもの）、data §4.6・§4.8、ScriptSpec `record_review.py`・`check_review_coverage.py`・`build_onehop_context.py` |
 | `/wikicommit-merge`・品質ゲート・レビュー追跡 Issue のテンプレート | pipeline §6.2・§7、CISpec |
 | `review_status` と人のレビュー（経路 A / B・Close 同期） | pipeline §6.3、ScriptSpec `reset_review_on_content_change.py` |
@@ -92,8 +92,9 @@ ScriptSpec はスクリプトごとに `## <スクリプト名>` の節を持つ
 | コミットトレーラー | pipeline §6.7 |
 | Skill を足す・SKILL.md を書き換える | skills §11.0〜§11.3・§11.7〜§11.9、TestSpec L5・L7・L9・L10・L14〜L16 |
 | `.wikicommit/scripts/` のスクリプトを足す・変える | ScriptSpec 共通規則・スクリプト一覧・当該スクリプトの節、skills §11.5（置き場所の規則） |
-| 実行記録・ドライバー | skills §11.0、ScriptSpec `driver.py`・`record_run.py`・`check_run_records.py` |
+| 実行記録・Skill ワークフローエンジン | skills §11.0、ScriptSpec `skill_workflow.py`・`record_run.py`・`check_run_records.py` |
 | 公開サイト（Quartz・プラグイン・バナー・俯瞰ページ） | publish §8 |
+| 外部リンク検証（lychee。merge は変わったページ・status は全ページ） | CISpec「外部リンク検証」、skills §11.0、ScriptSpec `check_external_links.py` |
 | テスト・lint・CI | TestSpec、CISpec |
 
 この表は節の見出しを指しており、DesignDoc の分割（§4）で見出しは変わりません。節を足したり見出しを変えたりしたら、この表も直してください。

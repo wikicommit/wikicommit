@@ -44,7 +44,7 @@ The other four are relations *between* pages. They are written to `.wikicommit/r
 
 ### 1. Check the wiki
 
-Stop with a message if `.wikicommit/config.yml` is missing (this is not a WikiCommit wiki) or if `.wikicommit/scripts/record_relation.py` is missing (the wiki's scripts predate this Skill; `/wikicommit-update` brings them in).
+Stop with a message if `.wikicommit/config.yml` is missing (this is not a WikiCommit wiki) or if `.wikicommit/scripts/record_relation.py` or `.wikicommit/scripts/resolve_source_cache_path.py` is missing (the wiki's scripts predate this Skill; `/wikicommit-update` brings them in).
 
 **A non-interactive run decides nothing.** Every outcome here rests on a person's answer, so when no one can answer, list what would be asked (the groups from step 2 with their material from step 3) and stop without writing.
 
@@ -69,7 +69,7 @@ python .wikicommit/scripts/build_survey_view.py --pages <page path> [<page path>
 
 prints the description, headings, backlink count and source count for each in one call; take the aliases from each page's frontmatter.
 
-Then look in the sources for what they say about identity or inclusion — "X is also called Y", "X is a kind of Y". Read each source through its cached extraction (`python ../wikicommit-ask/scripts/resolve_source_cache_path.py`, as `/wikicommit-ask --include-source` does). Quote what you find with the source it came from. **If no source says anything about it, say so in those words** — the person is then deciding on their own knowledge, and should know it.
+Then look in the sources for what they say about identity or inclusion — "X is also called Y", "X is a kind of Y". Read each source through its cached extraction (`python .wikicommit/scripts/resolve_source_cache_path.py`, as `/wikicommit-ask --include-source` does — including its exit `2` and `OUTSIDE:` answers, on which the source is not read at all). Quote what you find with the source it came from. **If no source says anything about it, say so in those words** — the person is then deciding on their own knowledge, and should know it.
 
 ### 4. Ask
 
@@ -124,7 +124,7 @@ Say, for each group, the relation decided and that it was recorded, or that it w
 - `/wikicommit-merge` commits `.wikicommit/relations.yml` (and, for a series, the renamed pages).
 - A pair recorded here is no longer reported by `/wikicommit-status` as a name collision.
 - For a same decision, the pages stay separate until they are merged: `/wikicommit-generate --regenerate <page to keep> --merge <other page> [...]` rebuilds the kept page from all their sources, carries the other names over as its aliases, takes the other pages down and rewrites the links to them. Ask which page to keep — the one whose title and slug should stay.
-- For a series, each renamed page and its translations are back at `review_status: pending` — the title is content, and a person's sign-off covered the old one — so `/wikicommit-merge` opens a review-tracking Issue for each; close the old pages' open tracking Issues after it, noting the new name. The old slugs' URLs stop working on the published site. The translations are listed as stale until `/wikicommit-translate` runs. A `GROUPS:` line names a group file that still lists the old slug; change it there.
+- For a series, each renamed page and translation whose title changed is back at `review_status: pending` — the title is content, and a person's sign-off covered the old one — so `/wikicommit-merge` opens a review-tracking Issue for each pending page; close the old pages' open tracking Issues after it, noting the new name. A page whose title already carried the year (only its slug changed) keeps its review status. The old slugs' URLs stop working on the published site. The translations are listed as stale until `/wikicommit-translate` runs. The old page's AI review carries over; where the title changed, `/wikicommit-status` lists it as a stale review until `/wikicommit-review` runs on the new page (a slug-only rename leaves the original's check standing). A `GROUPS:` line names a group file that still lists the old slug; change it there.
 - For a distinct decision where the shared name is an alias on one side, dropping that alias or qualifying the title stops readers confusing the two; offer `/wikicommit-fix` for that.
 
 ## Notes

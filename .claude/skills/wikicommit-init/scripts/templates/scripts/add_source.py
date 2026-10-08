@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
-add_source.py — wikicommit-generate のバックエンドスクリプト。
+add_source.py — ソース登録のスクリプト。wikicommit-generate Step 0 が主な呼び出し元で、
+wikicommit-collect・wikicommit-ask・resolve_source_cache_path.py も `--fetch-url` 等を呼ぶ
+（そのため Skill 内ではなく `.wikicommit/scripts/` に置く。Issue #1210）。
 
 ソースファイルまたは URL を .wikicommit/source/ 配下の管理ファイルとして登録する。
 既存の管理ファイルが存在する場合はハッシュを比較して status を更新する。
@@ -238,8 +240,9 @@ def read_management_file(path: Path) -> str | None:
     BOM 付きの管理ファイルを plain `utf-8` で読むと、先頭に BOM 文字が残るため
     `_frontmatter_slice()` が frontmatter を検出できず、`source.path` / `hash` が
     どれも読み取れなくなる（`.wikicommit/scripts/_frontmatter.py` が同じ理由で
-    utf-8-sig に統一しているのと同じ問題。このスクリプトは自己完結のため import
-    できず、方針だけを踏襲する）。同一性走査でこれが起きると、既存の管理ファイル
+    utf-8-sig に統一しているのと同じ問題。管理ファイルの読み書きは行単位の自前
+    パースで行っており、`_frontmatter.py` の dict 化とは別の処理なので方針だけを
+    踏襲する）。同一性走査でこれが起きると、既存の管理ファイル
     が見つからないまま「導出先が別ソースに占有されている」と誤判定され、同じ
     ソースに対する2つ目の管理ファイルが作られてしまう。
     """
@@ -458,6 +461,17 @@ def mgmt_path_for_file(source_path: str, repo_root: Path) -> Path:
         # truncation is safe.
         name = f"{_truncate_stem(rel.name, _path_hash_suffix(str(rel)))}.md"
     return repo_root / ".wikicommit" / "source" / "path" / rel.parent / name
+
+
+def _resolves_inside(path: Path, repo_root: Path) -> bool:
+    """Whether `path`, symlinks followed, lies under `repo_root` — the same
+    test `validate_frontmatter.py` and `resolve_source_cache_path.py --obtain`
+    apply to `sources[].path`, so a source registered here is never one the
+    page citing it cannot carry."""
+    try:
+        return path.resolve().is_relative_to(repo_root.resolve())
+    except (OSError, RuntimeError):
+        return False
 
 
 def normalize_source_path(source_path: str) -> str:
@@ -814,6 +828,10 @@ def process_file(
     abs_source = repo_root / source_path
     if Path(source_path).is_absolute():
         err = f"ERROR: {source_path}: absolute paths are not accepted; give a path relative to the repository root"
+    elif not _resolves_inside(abs_source, repo_root):
+        # `..` or a symlink pointing out: validate_frontmatter.py rejects the
+        # page that would cite it, and review / fix refuse to read it.
+        err = f"ERROR: {source_path}: resolves outside the repository"
     elif not abs_source.exists():
         err = f"ERROR: {source_path}: file does not exist"
     elif not abs_source.is_file():
@@ -1112,7 +1130,7 @@ def extract_cache_path(mgmt_path: Path, repo_root: Path) -> Path | None:
     return repo_root / ".wikicommit" / ".cache" / "extract-path" / rel
 
 
-def check_path_cache(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str]:
+def check_path_cache(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str, str | None]:
     """`type: path` の抽出テキストキャッシュが今のファイルの版に対して有効か確認する
     （Issue #885）。read-only。
 
@@ -1132,22 +1150,67 @@ def check_path_cache(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str]:
     残る限界は「抽出ツールの版が変わってもキャッシュは失効しない」ことだが、これは
     `type: url` 側とまったく同じ性質であり、新しく持ち込むものではない。
 
+    **`.md` / `.txt` は `RAW` を返す（キャッシュを持たない）。拡張子はシンボリック
+    リンクを辿った解決先のもので判定する**（Issue #1216）。`raw/notes.md` がリポジトリ内の
+    PDF を指すとき、リンク名で判定すると generate の Pass 1 は PDF のバイトを `.md` として
+    読み、review / fix（`resolve_source_cache_path.py --obtain`。Issue #1208）は実体の PDF を
+    抽出して照合する — 生成と照合が別のテキストを見る。判定をエージェントの拡張子の読みに
+    任せず、`--obtain` と同じ規則でここに置く。`RAW` の 2 番目の値は読むファイル（解決先の
+    リポジトリルート相対パス）。それ以外の拡張子のキャッシュの置き場は従来どおり管理
+    ファイル（リンク名）から決まり、`--obtain` も同じ位置を引くので、generate が書いた
+    抽出結果に 2 回目以降の review / fix が当たる。抽出するファイル（解決先）は戻り値の
+    4 番目で返す。
+
+    **存在の判定とハッシュも解決先（`repo_root / target`）に対して行う**（Issue #1242）。
+    範囲の検査・`RAW` の判定・存在・ハッシュ・`extract=` がすべて同じ 1 回の解決に
+    拠るので、その間にリンクが張り替わっても、ハッシュを取ったファイルと抽出させる
+    ファイルが食い違わない（`resolve_source_cache_path.py --obtain` も解決先をハッシュ
+    する）。CLI は 4 番目をそのまま `extract=` に使い、管理ファイルを読み直さない。
+
     Returns:
-        (result_code, cache_path_str, message)
-        result_code: "CACHE_VALID" | "CACHE_STALE" | "ERROR"
+        (result_code, path_str, message, extract)
+        result_code: "CACHE_VALID" | "CACHE_STALE" | "RAW" | "ERROR"
+        extract: 抽出するファイル（解決先のリポジトリルート相対パス）。解決先が
+        リポジトリ内のファイルとして存在するときだけ値を持ち、それ以外は None
+        （`RAW` では 2 番目と同じ値）。
     """
     mgmt_path = repo_root / mgmt_rel
     if not mgmt_path.is_file():
-        return ("ERROR", mgmt_rel, "the management file does not exist")
+        return ("ERROR", mgmt_rel, "the management file does not exist", None)
 
     existing = mgmt_path.read_text(encoding="utf-8-sig")
     source_type = parse_frontmatter_source_type(existing)
     if source_type != "path":
-        return ("ERROR", mgmt_rel, f"source.type is not path (currently: {source_type})")
+        return ("ERROR", mgmt_rel, f"source.type is not path (currently: {source_type})", None)
 
     source_path = parse_frontmatter_source_path(existing)
     if not source_path:
-        return ("ERROR", mgmt_rel, "source.path is not set")
+        return ("ERROR", mgmt_rel, "source.path is not set", None)
+
+    raw_path = repo_root / source_path
+    # Checked before the existence test (Issue #1207): a hand-written
+    # management file can name `../../secret` or an absolute path, and
+    # CACHE_STALE's "no longer exists" reason would reveal whether that file
+    # exists. Outside the repository is an ERROR, not CACHE_STALE — the source
+    # could never be registered in that form, so re-extracting it is not the
+    # fix; the management file is.
+    # One resolution serves both the containment check and the RAW target, so
+    # a link swapped between two resolutions cannot hand back an unchecked path
+    # (the same reason as `resolve_source_cache_path.py`'s `_target_inside`).
+    target = _source_target(raw_path, repo_root)
+    if target is None:
+        return ("ERROR", mgmt_rel, f"source.path resolves outside the repository: {source_path}", None)
+
+    # Existence and the hash go through `target` too (Issue #1242), not through
+    # `raw_path` again: re-opening the link would resolve it a second time, and
+    # a link swapped in between would hash one file and extract another.
+    target_path = repo_root / target
+    extract = target.as_posix() if target_path.is_file() else None
+
+    # Before the cache path is derived: a `.md` / `.txt` source needs no cache,
+    # so a management file in a pre-#476 tree still gets its answer.
+    if target.suffix.lower() in RAW_TEXT_SUFFIXES and extract is not None:
+        return ("RAW", extract, "read it directly; a .md / .txt source is never cached", extract)
 
     cache_path = extract_cache_path(mgmt_path, repo_root)
     if cache_path is None:
@@ -1157,29 +1220,52 @@ def check_path_cache(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str]:
             "the management file is not under .wikicommit/source/path/, so no cache path "
             "can be derived for it (a pre-Issue-#476 .wikicommit/ingest/ tree is never "
             "auto-migrated)",
+            extract,
         )
     cache_rel = cache_path.relative_to(repo_root.resolve()).as_posix()
 
-    raw_path = repo_root / source_path
-    if not raw_path.is_file():
-        return ("CACHE_STALE", cache_rel, f"the source file no longer exists: {source_path}")
+    if extract is None:
+        return ("CACHE_STALE", cache_rel, f"the source file no longer exists: {source_path}", None)
 
     recorded = parse_frontmatter_hash(existing)
     if not recorded or recorded == '""':
-        return ("CACHE_STALE", cache_rel, "source.hash is not set")
+        return ("CACHE_STALE", cache_rel, "source.hash is not set", extract)
 
-    current = sha256_file(str(raw_path))
+    try:
+        current = sha256_file(str(target_path))
+    except OSError as exc:
+        # Unreadable (permissions) or gone since the is_file() above: still a
+        # CACHE_STALE line naming the file, not a traceback that drops extract=.
+        return ("CACHE_STALE", cache_rel, f"the source file could not be read: {exc.strerror or exc}", extract)
     if current != recorded:
         return (
             "CACHE_STALE",
             cache_rel,
             "the source file changed since it was registered, so any cache is for an older version",
+            extract,
         )
 
     if not cache_path.is_file():
-        return ("CACHE_STALE", cache_rel, "no extraction cache has been written for this source yet")
+        return ("CACHE_STALE", cache_rel, "no extraction cache has been written for this source yet", extract)
 
-    return ("CACHE_VALID", cache_rel, current)
+    return ("CACHE_VALID", cache_rel, current, extract)
+
+
+# Read raw, never cached: the file is already the extracted text. The same set
+# as `resolve_source_cache_path.py`'s `_RAW_SUFFIXES` (a test keeps the two in
+# step; this script stays import-free, so they are not shared by import).
+RAW_TEXT_SUFFIXES = {".md", ".txt"}
+
+
+def _source_target(raw_path: Path, repo_root: Path) -> Path | None:
+    """`raw_path` with symlinks followed, relative to `repo_root`; None if outside
+    or unresolvable. The file whose bytes are the source (Issue #1216)."""
+    try:
+        resolved = raw_path.resolve()
+        root = repo_root.resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return resolved.relative_to(root) if resolved.is_relative_to(root) else None
 
 
 def print_path_cache_path(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str]:
@@ -1409,8 +1495,10 @@ def main_from_args(argv: list[str] | None = None) -> int:
         "--check-path-cache",
         metavar="INGEST_FILE",
         help="For a type: path source, check whether its extraction cache is still valid for the "
-        "file's current version (read-only; never touches source.hash). Prints CACHE_VALID with "
-        "the cache path, or CACHE_STALE with the reason. Ignores the positional 'source' argument.",
+        "file's current version (read-only; never touches source.hash). Prints RAW with the file "
+        "to read for a .md / .txt source (judged on the symlink's target), CACHE_VALID with "
+        "the cache path, or CACHE_STALE with extract=<the file to extract> and the reason. "
+        "Ignores the positional 'source' argument.",
     )
     parser.add_argument(
         "--path-cache-path",
@@ -1532,14 +1620,23 @@ def main_from_args(argv: list[str] | None = None) -> int:
         return 1
 
     if args.check_path_cache:
-        result, path, msg = check_path_cache(args.check_path_cache, repo_root)
+        result, path, msg, extract_file = check_path_cache(args.check_path_cache, repo_root)
+        # The file to extract, symlinks followed (Issue #1216), from the same
+        # resolution check_path_cache hashed (Issue #1242): Pass 1 routes on its
+        # extension, not on the link's name.
+        extract = f" extract={extract_file}" if extract_file else ""
+        if result == "RAW":
+            print(f"RAW: {path} ({msg})")
+            return 0
         if result == "CACHE_VALID":
             print(f"CACHE_VALID: {path} ({msg})")
             return 0
         if result == "CACHE_STALE":
-            print(f"CACHE_STALE: {path} ({msg})")
+            print(f"CACHE_STALE: {path}{extract} ({msg})")
             return 1
-        print(f"ERROR: {path}: {msg}", file=sys.stderr)
+        # ERROR is handled like CACHE_STALE by Pass 1, so it still names the
+        # file to extract when there is one (a pre-#476 tree's link to a PDF).
+        print(f"ERROR: {path}{extract}: {msg}", file=sys.stderr)
         return 1
 
     if args.path_cache_path:

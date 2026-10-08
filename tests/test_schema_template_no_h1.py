@@ -80,8 +80,11 @@ def test_synthesize_skill_does_not_ask_for_a_top_heading():
     templates, so Step 5 states the prohibition instead; this asserts the
     original positive phrasing has not come back.
     """
-    skill_md = (
-        REPO_ROOT / ".claude" / "skills" / "wikicommit-synthesize" / "SKILL.md"
-    ).read_text(encoding="utf-8")
+    # Since Issue #1195 Step 5 lives in references/write-page.md, so read every
+    # instruction file the Skill can reach.
+    skill_dir = REPO_ROOT / ".claude" / "skills" / "wikicommit-synthesize"
+    skill_md = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(skill_dir.rglob("*.md"))
+    )
     assert "as a heading at the top of the document" not in skill_md
     assert "Do not open the body with an H1" in skill_md

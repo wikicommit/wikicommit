@@ -1,0 +1,64 @@
+# The steps of /wikicommit-translate, in order, for .wikicommit/scripts/skill_workflow.py.
+#
+# One item is one (source page, target language) pair, written
+# `<source page> -> <lang>`. Single-page mode collects the pairs from the run's
+# arguments; batch mode collects them from check_translation_status.py, glossary
+# (DefinedTerm) pairs first. Each pair is one agent step whose completion is
+# checked on disk by scripts/workflow_checks.py: the translation written with its
+# translated_from / source_commit / review_status, and a translate-check review
+# record from this run — or, for a discarded pair, the discarded record alone.
+
+skill: wikicommit-translate
+
+steps:
+  - id: preflight
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", preflight, --run, "{run}"]
+
+  - id: collect
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", collect, --run, "{run}"]
+    produces: candidates
+    finish_if_empty: "Nothing to translate"
+
+  - id: batch-cap
+    type: human
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", over-cap, --run, "{run}", --list, candidates]
+    ask: >-
+      More than 5 (source page, target language) pairs need translating. Show the
+      count and the pairs from the run record's `candidates` list, in that order
+      (DefinedTerm pages come first), and ask whether to translate all of them in
+      this run or only the first 5 of that order and leave the rest for a later run.
+    choices:
+      all: "translate every pair in this run"
+      first-five: "translate the first 5 in order; the rest stay untranslated or stale for the next run"
+    non_interactive: first-five
+
+  - id: select
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", select, --run, "{run}", --list, candidates, --answer-step, batch-cap]
+    produces: pairs
+
+  - id: per-pair
+    for_each: pairs
+    steps:
+      - id: translate
+        type: agent
+        instructions: references/translate-page.md
+        outcomes:
+          translated: "the translation passed translate-check, was written with its write-back fields, and the pass was recorded"
+          discarded: "the translation still failed after generate.max_retries; nothing was written and the discard was recorded"
+          halted: "the review could not be run as specified (rules_version mismatch twice); pass --reason"
+        halts_on: [halted]
+        non_interactive: "a pair still failing after max_retries is discarded; retries are never extended"
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pair, --run, "{run}", --item, "{item}", --outcome, "{outcome}"]
+
+  - id: rebuild-index
+    type: script
+    run: ["{python}", .wikicommit/scripts/rebuild_index.py]
+
+  - id: report
+    type: agent
+    instructions: references/completion-report.md
+    outcomes:
+      reported: "the completion report was shown; pass --count translated=<N> --count failed=<N> and --page for each translation written"

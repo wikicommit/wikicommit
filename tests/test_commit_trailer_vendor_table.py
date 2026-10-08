@@ -11,11 +11,21 @@ a numbered list item).
 """
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 SKILLS = Path(__file__).parent.parent / ".claude" / "skills"
+
+sys.path.insert(0, str(SKILLS.parent.parent / "tools"))
+from check_skill_md_lines import instruction_files  # noqa: E402
+
+
+def _instructions(skill: str) -> str:
+    """Every instruction file of the Skill: `wikicommit-merge` keeps its commit
+    step in `references/commit.md`, which its workflow engine hands out (Issue #1094)."""
+    return "\n".join(p.read_text(encoding="utf-8") for p in instruction_files(SKILLS / skill))
 COPIES = ("wikicommit-merge", "wikicommit-schema-propose", "wikicommit-update", "wikicommit-init", "wikicommit-organize")
 
 BLOCK_RE = re.compile(
@@ -24,7 +34,7 @@ BLOCK_RE = re.compile(
 
 
 def _block(skill: str) -> str:
-    text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
+    text = _instructions(skill)
     blocks = BLOCK_RE.findall(text)
     assert len(blocks) == 1, f"{skill}: expected exactly one commit-trailers block, found {len(blocks)}"
     return "\n".join(line.strip() for line in blocks[0].splitlines())
@@ -49,6 +59,6 @@ def test_the_table_maps_each_vendor_and_writes_nothing_otherwise():
 def test_the_commit_template_leaves_the_co_author_line_to_the_table(skill):
     """A literal `noreply@anthropic.com` line in the heredoc would be copied
     as-is by a non-Claude model — the misattribution this Issue removes."""
-    text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
+    text = _instructions(skill)
     assert "<Co-Authored-By line>\nGenerated-By:   <current model ID>" in text
     assert "Co-Authored-By: <Claude display name> <noreply@anthropic.com>\nGenerated-By:" not in text

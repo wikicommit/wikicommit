@@ -1,4 +1,4 @@
-"""Tests for .claude/skills/wikicommit-generate/scripts/add_source.py (#88)"""
+"""Tests for add_source.py (.wikicommit/scripts/, Issue #1210) (#88)"""
 
 import hashlib
 import importlib.util
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-SCRIPT = Path(__file__).parent.parent / ".claude" / "skills" / "wikicommit-generate" / "scripts" / "add_source.py"
+SCRIPT = Path(__file__).parent.parent / ".claude/skills/wikicommit-init/scripts/templates/scripts/add_source.py"
 
 _spec = importlib.util.spec_from_file_location("add_source", SCRIPT)
 add_source = importlib.util.module_from_spec(_spec)
@@ -151,6 +151,27 @@ def test_process_file_new_registration_creates_pending(tmp_path):
     mgmt_file = tmp_path / path
     content = mgmt_file.read_text(encoding="utf-8")
     assert add_source.parse_frontmatter_status(content) == "pending"
+
+
+@pytest.mark.parametrize("form", ["dotdot", "symlink"])
+def test_process_file_refuses_a_path_resolving_outside_the_repository(tmp_path, form):
+    """A source that `validate_frontmatter.py` would reject on the page citing
+    it, and review / fix would refuse to read, is not registered either."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"secret\n")
+    if form == "dotdot":
+        rel = "../outside.pdf"
+    else:
+        (repo / "raw").mkdir()
+        (repo / "raw" / "link.pdf").symlink_to(outside)
+        rel = "raw/link.pdf"
+
+    result, _path, _msg = add_source.process_file(rel, repo)
+
+    assert result == "ERROR"
+    assert not (repo / ".wikicommit").exists()
 
 
 def test_process_file_hash_match_non_outdated_skips(tmp_path):
@@ -1819,7 +1840,7 @@ def test_check_path_cache_is_stale_before_anything_is_written(tmp_path):
     mgmt = _path_source(tmp_path, "raw/paper.pdf")
     rel = mgmt.relative_to(tmp_path).as_posix()
 
-    result, path, msg = add_source.check_path_cache(rel, tmp_path)
+    result, path, msg, _extract = add_source.check_path_cache(rel, tmp_path)
     assert result == "CACHE_STALE"
     assert path == ".wikicommit/.cache/extract-path/raw/paper.pdf.md"
     assert "no extraction cache" in msg
@@ -1832,7 +1853,7 @@ def test_check_path_cache_is_valid_when_the_file_is_unchanged(tmp_path):
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text("extracted text\n", encoding="utf-8")
 
-    result, _path, _msg = add_source.check_path_cache(rel, tmp_path)
+    result, _path, _msg, _extract = add_source.check_path_cache(rel, tmp_path)
     assert result == "CACHE_VALID"
 
 
@@ -1847,7 +1868,7 @@ def test_check_path_cache_goes_stale_when_the_raw_file_changes(tmp_path):
     cache.write_text("extracted text\n", encoding="utf-8")
     (tmp_path / "raw/paper.pdf").write_bytes(b"different bytes\n")
 
-    result, _path, msg = add_source.check_path_cache(rel, tmp_path)
+    result, _path, msg, _extract = add_source.check_path_cache(rel, tmp_path)
     assert result == "CACHE_STALE"
     assert "changed since it was registered" in msg
 
@@ -1857,7 +1878,7 @@ def test_check_path_cache_goes_stale_when_the_raw_file_is_gone(tmp_path):
     rel = mgmt.relative_to(tmp_path).as_posix()
     (tmp_path / "raw/paper.pdf").unlink()
 
-    result, _path, msg = add_source.check_path_cache(rel, tmp_path)
+    result, _path, msg, _extract = add_source.check_path_cache(rel, tmp_path)
     assert result == "CACHE_STALE"
     assert "no longer exists" in msg
 
@@ -1890,7 +1911,7 @@ def test_check_path_cache_rejects_a_url_source(tmp_path):
         "---\nsource:\n  type: url\n  url: https://example.com/article\n  hash: \"\"\n---\n",
         encoding="utf-8",
     )
-    result, _path, msg = add_source.check_path_cache(
+    result, _path, msg, _extract = add_source.check_path_cache(
         mgmt.relative_to(tmp_path).as_posix(), tmp_path
     )
     assert result == "ERROR"
@@ -1898,7 +1919,7 @@ def test_check_path_cache_rejects_a_url_source(tmp_path):
 
 
 def test_check_path_cache_errors_on_a_missing_management_file(tmp_path):
-    result, _path, msg = add_source.check_path_cache(
+    result, _path, msg, _extract = add_source.check_path_cache(
         ".wikicommit/source/path/raw/nope.pdf.md", tmp_path
     )
     assert result == "ERROR"
@@ -1941,7 +1962,7 @@ def test_a_management_file_outside_the_path_root_reports_error_not_a_traceback(t
 
     assert add_source.extract_cache_path(mgmt, tmp_path) is None
     for fn in (add_source.check_path_cache, add_source.print_path_cache_path):
-        result, path, msg = fn(rel, tmp_path)
+        result, path, msg = fn(rel, tmp_path)[:3]
         assert result == "ERROR", fn.__name__
         assert path == rel
         assert ".wikicommit/source/path/" in msg
@@ -2258,3 +2279,231 @@ def test_fetch_url_gives_every_request_a_timeout(monkeypatch):
     monkeypatch.setattr(requests.Session, "request", fake_request)
     session.get("http://example.invalid/")
     assert seen["timeout"] == (15, 60)
+
+
+# ── check_path_cache with source.path outside the repository (Issue #1207) ──
+
+def _outside_mgmt(repo: Path, name: str, source_path: str) -> str:
+    mgmt = repo / ".wikicommit" / "source" / "path" / f"{name}.md"
+    mgmt.parent.mkdir(parents=True, exist_ok=True)
+    mgmt.write_text(
+        "---\n"
+        "source:\n"
+        "  type: path\n"
+        f"  path: {source_path}\n"
+        "  hash: sha256:" + "0" * 64 + "\n"
+        "status: pending\n"
+        "---\n",
+        encoding="utf-8",
+    )
+    return mgmt.relative_to(repo).as_posix()
+
+
+@pytest.mark.parametrize("kind", ["dotdot", "absolute", "symlink"])
+def test_check_path_cache_refuses_a_source_path_outside_the_repository(tmp_path, monkeypatch, kind):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"secret")
+    (repo / "link").symlink_to(secret)
+    source_path = {"dotdot": "../secret.txt", "absolute": str(secret), "symlink": "link"}[kind]
+    rel = _outside_mgmt(repo, kind, source_path)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("an outside source.path was hashed")
+
+    monkeypatch.setattr(add_source, "sha256_file", _boom)
+    result, path, msg, _extract = add_source.check_path_cache(rel, repo)
+    assert result == "ERROR"
+    assert path == rel
+    assert "resolves outside the repository" in msg
+    assert "no longer exists" not in msg
+
+
+def test_check_path_cache_outside_answer_is_the_same_whether_or_not_the_file_exists(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (tmp_path / "secret.txt").write_bytes(b"secret")
+    present = add_source.check_path_cache(_outside_mgmt(repo, "a", "../secret.txt"), repo)
+    absent = add_source.check_path_cache(_outside_mgmt(repo, "b", "../missing.txt"), repo)
+    assert present[0] == absent[0] == "ERROR"
+    assert present[2].replace("secret.txt", "X") == absent[2].replace("missing.txt", "X")
+
+
+# ── Issue #1216: Pass 1 judges the extension on the symlink's target ─────────
+
+
+def _linked_source(tmp_path: Path, link_rel: str, target_rel: str, content: bytes) -> str:
+    """Register `link_rel`, a symlink to `target_rel`, and return its management file."""
+    target = tmp_path / target_rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(content)
+    link = tmp_path / link_rel
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(target)
+    mgmt = tmp_path / ".wikicommit" / "source" / "path" / (link_rel + ".md")
+    mgmt.parent.mkdir(parents=True, exist_ok=True)
+    mgmt.write_text(
+        "---\nsource:\n  type: path\n"
+        f"  path: {link_rel}\n  hash: {add_source.sha256_file(str(link))}\n"
+        "status: pending\n---\n",
+        encoding="utf-8",
+    )
+    return mgmt.relative_to(tmp_path).as_posix()
+
+
+def test_check_path_cache_answers_raw_for_a_plain_text_source(tmp_path):
+    mgmt = _path_source(tmp_path, "raw/notes.md", b"# notes\n")
+    result, path, _msg, _extract = add_source.check_path_cache(mgmt.relative_to(tmp_path).as_posix(), tmp_path)
+    assert (result, path) == ("RAW", "raw/notes.md")
+
+
+def test_a_md_named_link_to_a_pdf_is_extracted_not_read_raw(tmp_path):
+    """The case that made generate and review see different text: Pass 1 read the
+    PDF's bytes as `.md` because the link is named `.md`."""
+    rel = _linked_source(tmp_path, "raw/notes.md", "docs/scan.pdf", b"%PDF-1.4 bytes")
+    result, path, _msg, extract = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_STALE"
+    # The cache is keyed on the management file (the link's name), as --obtain keys it.
+    assert path == ".wikicommit/.cache/extract-path/raw/notes.md.md"
+    assert extract == "docs/scan.pdf"
+
+
+def test_a_pdf_named_link_to_a_text_file_is_read_raw_from_the_target(tmp_path):
+    rel = _linked_source(tmp_path, "raw/paper.pdf", "docs/paper.txt", b"plain text\n")
+    result, path, _msg, _extract = add_source.check_path_cache(rel, tmp_path)
+    assert (result, path) == ("RAW", "docs/paper.txt")
+
+
+def test_a_cache_written_for_a_md_named_link_is_found_again(tmp_path):
+    rel = _linked_source(tmp_path, "raw/notes.md", "docs/scan.pdf", b"%PDF-1.4 bytes")
+    _result, cache, _msg = add_source.print_path_cache_path(rel, tmp_path)
+    (tmp_path / cache).write_text("extracted\n", encoding="utf-8")
+    result, path, _msg, _extract = add_source.check_path_cache(rel, tmp_path)
+    assert (result, path) == ("CACHE_VALID", cache)
+
+
+def test_check_path_cache_cli_prints_raw_and_the_file_to_extract(tmp_path):
+    import subprocess
+
+    raw_rel = _path_source(tmp_path, "raw/a.md", b"# a\n").relative_to(tmp_path).as_posix()
+    link_rel = _linked_source(tmp_path, "raw/b.md", "docs/b.pdf", b"%PDF")
+
+    def run(mgmt_rel):
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--repo-root", str(tmp_path), "--check-path-cache", mgmt_rel],
+            capture_output=True, text=True, check=False,
+        )
+
+    got = run(raw_rel)
+    assert got.returncode == 0 and got.stdout.startswith("RAW: raw/a.md ")
+    got = run(link_rel)
+    assert got.returncode == 1
+    assert got.stdout.startswith(
+        "CACHE_STALE: .wikicommit/.cache/extract-path/raw/b.md.md extract=docs/b.pdf ("
+    )
+
+
+# ── Issue #1242: one resolution serves the hash, existence and extract= ──────
+
+
+def test_check_path_cache_hashes_the_resolved_target_not_the_link(tmp_path, monkeypatch):
+    """The hash is taken on the file the containment check and `extract=` name,
+    not by opening the link again (a second resolution)."""
+    rel = _linked_source(tmp_path, "raw/notes.md", "docs/scan.pdf", b"%PDF-1.4 bytes")
+    hashed = []
+    real = add_source.sha256_file
+
+    def _record(path):
+        hashed.append(path)
+        return real(path)
+
+    monkeypatch.setattr(add_source, "sha256_file", _record)
+    result, _path, _msg, extract = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_STALE"
+    assert extract == "docs/scan.pdf"
+    assert hashed == [str(tmp_path / "docs/scan.pdf")]
+
+
+def test_check_path_cache_has_no_extract_when_the_source_is_gone(tmp_path):
+    mgmt = _path_source(tmp_path, "raw/paper.pdf")
+    (tmp_path / "raw/paper.pdf").unlink()
+    result, _path, msg, extract = add_source.check_path_cache(
+        mgmt.relative_to(tmp_path).as_posix(), tmp_path
+    )
+    assert result == "CACHE_STALE" and "no longer exists" in msg
+    assert extract is None
+
+
+def test_check_path_cache_names_the_file_to_extract_for_a_pre_476_tree(tmp_path):
+    raw = tmp_path / "raw/paper.pdf"
+    raw.parent.mkdir(parents=True)
+    raw.write_bytes(b"%PDF")
+    mgmt = tmp_path / ".wikicommit/ingest/path/raw/paper.pdf.md"
+    mgmt.parent.mkdir(parents=True)
+    mgmt.write_text(
+        "---\nsource:\n  type: path\n  path: raw/paper.pdf\n  hash: sha256:ab12\n---\n",
+        encoding="utf-8",
+    )
+    result, _path, _msg, extract = add_source.check_path_cache(
+        mgmt.relative_to(tmp_path).as_posix(), tmp_path
+    )
+    assert (result, extract) == ("ERROR", "raw/paper.pdf")
+
+
+@pytest.mark.parametrize("pre_476", [False, True])
+def test_check_path_cache_cli_reads_the_management_file_once(tmp_path, monkeypatch, capsys, pre_476):
+    """CACHE_STALE / ERROR print extract= from check_path_cache's own answer,
+    without reading the management file and resolving source.path again."""
+    if pre_476:
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs/b.pdf").write_bytes(b"%PDF")
+        mgmt = tmp_path / ".wikicommit/ingest/path/b.pdf.md"
+        mgmt.parent.mkdir(parents=True)
+        mgmt.write_text(
+            "---\nsource:\n  type: path\n  path: docs/b.pdf\n  hash: sha256:ab12\n---\n",
+            encoding="utf-8",
+        )
+        rel = mgmt.relative_to(tmp_path).as_posix()
+    else:
+        rel = _linked_source(tmp_path, "raw/b.md", "docs/b.pdf", b"%PDF")
+    calls = []
+    real = add_source.parse_frontmatter_source_path
+
+    def _count(content):
+        calls.append(content)
+        return real(content)
+
+    monkeypatch.setattr(add_source, "parse_frontmatter_source_path", _count)
+    code = add_source.main_from_args(["--repo-root", str(tmp_path), "--check-path-cache", rel])
+    out = capsys.readouterr()
+    assert code == 1
+    assert len(calls) == 1
+    line = out.err if pre_476 else out.out
+    assert " extract=docs/b.pdf" in line
+
+
+def test_the_raw_suffixes_agree_with_resolve_source_cache_path():
+    """Pass 1 (`--check-path-cache`) and review / fix (`--obtain`) must split
+    READ from EXTRACT on the same extensions; the scripts do not import each other."""
+    resolver_path = SCRIPT.parent / "resolve_source_cache_path.py"
+    spec = importlib.util.spec_from_file_location("resolve_source_cache_path_suffixes", resolver_path)
+    resolver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver)
+    assert resolver._RAW_SUFFIXES == add_source.RAW_TEXT_SUFFIXES
+
+
+def test_check_path_cache_reports_an_unreadable_source_as_stale(tmp_path, monkeypatch):
+    """An OSError while hashing (permissions, or the file vanishing after the
+    existence check) is a CACHE_STALE answer that still names the file, not a
+    traceback."""
+    rel = _linked_source(tmp_path, "raw/notes.md", "docs/scan.pdf", b"%PDF-1.4 bytes")
+
+    def _denied(path):
+        raise PermissionError(13, "Permission denied", path)
+
+    monkeypatch.setattr(add_source, "sha256_file", _denied)
+    result, _path, msg, extract = add_source.check_path_cache(rel, tmp_path)
+    assert result == "CACHE_STALE"
+    assert "could not be read" in msg
+    assert extract == "docs/scan.pdf"

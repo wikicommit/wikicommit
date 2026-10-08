@@ -73,7 +73,7 @@
 
 | ファイル | 対象関数 | assert 対象 |
 |---|---|---|
-| `.claude/skills/wikicommit-generate/scripts/add_source.py` | `sha256_file` | 既知内容のファイルに対する `sha256:` 値の正確性 |
+| `add_source.py`（`.wikicommit/scripts/`。テンプレートは `.claude/skills/wikicommit-init/scripts/templates/scripts/`） | `sha256_file` | 既知内容のファイルに対する `sha256:` 値の正確性 |
 | 同上 | `mgmt_path_for_file` / `mgmt_path_for_url` | ソース管理ファイルの生成先パス計算（[DesignDoc-data.md](DesignDoc-data.md) §4.3 のパス規則） |
 | 同上 | `parse_frontmatter_status` / `update_frontmatter_status` | `status` 遷移 `pending → generated → partial → outdated → failed`（[DesignDoc-data.md](DesignDoc-data.md) §4.3 の状態表） |
 | 同上 | `process_file` / `process_url` | 新規登録（hash 計算・`pending` 作成）／ハッシュ一致時のスキップ／ハッシュ一致かつ既存 `status: outdated` → `pending` へ復帰（ハッシュが元に戻った場合）／ハッシュ不一致時は `status: outdated` に設定（hash 値は更新せず据え置き）／既に `outdated` の状態でさらにハッシュ不一致 → 変更なし |

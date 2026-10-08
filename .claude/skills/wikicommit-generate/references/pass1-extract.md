@@ -9,7 +9,7 @@ pass_token: "a3f1c07d"
 ## Contents
 
 1. Collect the queued source management files (tiers, the 5-source cap, what `partial` and `retracted` mean here)
-2. Who collects: the driver, not you
+2. Who collects: the workflow engine, not you
 3. Read `source.type` / `source.path` / `source.url`
 4. Extract text: guard B (known JS shell) → guard C (fetch capability) → the URL scratch cache → the `type: path` extraction cache → the per-extension routes → guard A (low density)
 5. Empty or unreadable extraction → `status: failed` + `## Failure Reason`
@@ -17,7 +17,7 @@ pass_token: "a3f1c07d"
 
 - Pass 2a: the summary, the source-language judgment, and the source-as-entity judgment
 
-**When this pass is done, report it to the driver** — run the `then` line the driver gave you for `pass1-extract`, with `--token a3f1c07d` (this file's `pass_token`; the driver opens this file itself to compare, so a pass carried out without reading it is refused rather than recorded) and the outcome that fits: `extracted`, `failed` (step 5), `deferred` (guard A or a network failure), `unchanged` (a forced recheck whose content has not changed), or `halted` with `--reason` (guard C, or two network failures in a row). The driver checks the result on disk before it moves on, and records the pass on the run record — a pass that never reaches `done` shows up as not run.
+**When this pass is done, report it to the workflow engine** — run the `then` line the workflow engine gave you for `pass1-extract`, with `--token a3f1c07d` (this file's `pass_token`; the workflow engine opens this file itself to compare, so a pass carried out without reading it is refused rather than recorded) and the outcome that fits: `extracted`, `failed` (step 5), `deferred` (guard A or a network failure), `unchanged` (a forced recheck whose content has not changed), or `halted` with `--reason` (guard C, or two network failures in a row). The workflow engine checks the result on disk before it moves on, and records the pass on the run record — a pass that never reaches `done` shows up as not run.
 
 1. Collect source management files from `.wikicommit/source/` whose `status` is `pending` or `outdated`, plus those with `status: partial` **and a non-empty `failed_pages`**:
    - **`status: retracted` is never collected.** The condition above is an allowlist and `retracted` is not on it; a later edit that widens the list must not put a withdrawn source back into circulation. The argument branch below never reaches one either — Step 0 stops on `RETRACTED:` before Pass 1 begins.
@@ -29,7 +29,7 @@ pass_token: "a3f1c07d"
      **Within a tier, a file carrying a `## Deferred Reason` sorts after one that does not.** A deferral leaves `status` untouched, so without this the same deferred sources would hold the same slots every run — and a non-interactive run defers them again — so nothing behind them would ever come up. An interactive run still sees them in the list it shows, and option (a) takes everything.
 
      `outdated` goes first because a published page's source has changed, so what is on the site is *wrong*, where a never-processed source is only *missing*. It cannot starve the backlog: a source only becomes `outdated` when its content changes, so the tier is small and does not refill on its own.
-   - If the count exceeds 5, do not start processing yet (the driver asks this as its `batch-cap` step: `all` is (a) below, `first-five` is (b)) — show the count and the matching management file paths, then ask the user to choose: **(a)** process all of them in this run, or **(b)** process only the first 5 in the order above and leave the rest untouched for a later run. If the user picks (b), proceed with only those 5; the rest keep their `status` and a later no-argument `/wikicommit-generate` picks them up — nothing else is needed. If the count is 5 or fewer, proceed with all of them without asking. **In a non-interactive run, take (b) without asking** and say so in the Completion Notice: the unprocessed files stay queued by construction. Do not read the absence of an answer as (a).
+   - If the count exceeds 5, do not start processing yet (the workflow engine asks this as its `batch-cap` step: `all` is (a) below, `first-five` is (b)) — show the count and the matching management file paths, then ask the user to choose: **(a)** process all of them in this run, or **(b)** process only the first 5 in the order above and leave the rest untouched for a later run. If the user picks (b), proceed with only those 5; the rest keep their `status` and a later no-argument `/wikicommit-generate` picks them up — nothing else is needed. If the count is 5 or fewer, proceed with all of them without asking. **In a non-interactive run, take (b) without asking** and say so in the Completion Notice: the unprocessed files stay queued by construction. Do not read the absence of an answer as (a).
    - **Group the list you show under three headings**, in this order, so a source that has never been touched is not presented as interchangeable with one being re-run:
 
      ```
@@ -41,7 +41,7 @@ pass_token: "a3f1c07d"
      ```
 
      A file belongs to the first group when its `source.hash` is empty, the second when it has a hash but no `last_generated_at`, and the third otherwise. The split between the first two tells a stalled queue apart from a slow one. It only carries meaning for `type: url`/`wikicommit` sources, which get a hash only once Pass 1 fetches them: `add_source.py` hashes a `type: path` file at registration, so a local file never read still lands in the second group. Say so when the first group is empty but the second is not, rather than letting `Never fetched — 0` read as "everything has been retrieved".
-2. You do not collect the files yourself: the driver's `collect` and `select` steps apply the rule above, ask the batch-cap question when there are more than 5, and hand you one file at a time as `item`. When nothing is queued the driver ends the run itself with "No management files to process". The rules are stated here so you can explain the order and grouping when the cap question is asked.
+2. You do not collect the files yourself: the workflow engine's `collect` and `select` steps apply the rule above, ask the batch-cap question when there are more than 5, and hand you one file at a time as `item`. When nothing is queued the workflow engine ends the run itself with "No management files to process". The rules are stated here so you can explain the order and grouping when the cap question is asked.
 3. For each source management file, read `source.type` and `source.path` / `source.url`.
 4. Extract text based on `source.type` and file extension:
    - `type: wikicommit` (federated source) / `type: url` → **Known JS-shell domain check (guard B)**: before attempting any fetch, run:
@@ -58,7 +58,7 @@ pass_token: "a3f1c07d"
      python .wikicommit/scripts/check_extraction_quality.py check-fetch-capability <source.url>
      ```
 
-     `MISSING_PACKAGE:` (exit 1) → **stop processing entirely**, report `halted` to the driver with `--reason "missing package: <name>"` (this path changes no file, so without that the run leaves no trace at all), and display the `pip install` command from the script's output, exactly like the `markitdown --version` prerequisite check below. This is an environment problem the user fixes once, not a property of this source, so it must not be recorded as a `status: failed` extraction failure. `OK:` (exit 0) → proceed. This only needs to pass once per host per run.
+     `MISSING_PACKAGE:` (exit 1) → **stop processing entirely**, report `halted` to the workflow engine with `--reason "missing package: <name>"` (this path changes no file, so without that the run leaves no trace at all), and display the `pip install` command from the script's output, exactly like the `markitdown --version` prerequisite check below. This is an environment problem the user fixes once, not a property of this source, so it must not be recorded as a `status: failed` extraction failure. `OK:` (exit 0) → proceed. This only needs to pass once per host per run.
 
      Guard C is a separate axis from guards A and B: a YouTube page fetched without `youtube-transcript-api` is a *partial* extraction of real prose, which neither of the other guards can tell from a complete one. Checking *before* fetching is also what keeps "the package is missing" distinguishable from "this video has no captions" (step 6 below), which call for opposite responses.
 
@@ -74,10 +74,10 @@ pass_token: "a3f1c07d"
 
    **Hash write-back** (`type: url` / `type: wikicommit`): the management file is registered with `hash: ""`; this step fills it in via script rather than by hand-editing YAML, which is unreliable. `<scratch-path>` below is the source management file's path relative to `.wikicommit/source/url/`, without the `.md` extension, with the `/` separators kept intact (e.g. `.wikicommit/source/url/example.com/article.md` → `example.com/article`). Do not flatten the separators to `-`: the nested file `example.com/article.md` and a legacy flat file `example.com-article.md` would then collide on the same scratch name.
 
-     **Forced recheck** (source flagged `RECHECK:` in Step 0 — a source whose `status` was already `generated`/`failed`/`excluded`): skip the **Cache check** below unconditionally and go straight to the fetch — a kept scratch file from the prior run would trivially "match" the unchanged `source.hash` and short-circuit the very re-fetch the recheck exists to perform. After the fetch succeeds, before running `--write-hash` (which unconditionally overwrites `source.hash`), first run `--check-hash` against the freshly-fetched scratch file to compare it with the management file's *current* `source.hash`:
+     **Forced recheck** (source flagged `RECHECK:` in Step 0 — a source whose `status` was already `generated`/`failed`/`excluded`). **Not on the second time round** (`reprocess-pass1-extract`): the first time round already re-fetched it and, being deferred, set `status: pending` with the new hash written, so a second `--check-hash` would return `HASH_MATCH`, end the source as `unchanged`, and throw away the person's answer — treat it as a normal source. Otherwise: skip the **Cache check** below unconditionally and go straight to the fetch — a kept scratch file from the prior run would trivially "match" the unchanged `source.hash` and short-circuit the very re-fetch the recheck exists to perform. After the fetch succeeds, before running `--write-hash` (which unconditionally overwrites `source.hash`), first run `--check-hash` against the freshly-fetched scratch file to compare it with the management file's *current* `source.hash`:
 
      ```bash
-     python scripts/add_source.py --check-hash <source-management-file> --content-file ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
+     python .wikicommit/scripts/add_source.py --check-hash <source-management-file> --content-file ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
      ```
 
      - `HASH_MATCH:` (exit 0) → the remote content is unchanged since the last successful check. Do **not** run `--write-hash` and do **not** proceed to Pass 2–4 for this source — leave the management file's `status`/`hash` exactly as they were. Notify the user "No changes: `<url>`" and move on to the next source.
@@ -86,7 +86,7 @@ pass_token: "a3f1c07d"
      For a normal (non-recheck) `type: url`/`wikicommit` source, apply the **Cache check** instead: the scratch file at `.wikicommit/.cache/ingest-fetch/<scratch-path>.md` is *kept* after a successful fetch, so a source processed again with an unchanged `source.hash` can reuse it instead of re-fetching. Before fetching, if that scratch file exists, run:
 
      ```bash
-     python scripts/add_source.py --check-hash <source-management-file> --content-file ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
+     python .wikicommit/scripts/add_source.py --check-hash <source-management-file> --content-file ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
      ```
 
      - `HASH_MATCH:` (exit 0) → the cached scratch file is still valid for the management file's current `source.hash`. Skip the fetch and the write-hash step below entirely, and jump straight to the "read the scratch file's content in full" step near the end of this bullet.
@@ -97,19 +97,19 @@ pass_token: "a3f1c07d"
      If no scratch file exists yet at that path (or this is a forced recheck — see above), skip the cache check and go straight to the fetch below:
 
      ```bash
-     python scripts/add_source.py --fetch-url "<source.url>" --output ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
+     python .wikicommit/scripts/add_source.py --fetch-url "<source.url>" --output ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
      ```
 
      `--fetch-url` creates the scratch file's parent directory itself (it is already gitignored) and writes exactly what `markitdown` produced to the output path, with nothing in between.
 
-     - `NETWORK_UNAVAILABLE:` (exit code 3 — the request never reached the server: name resolution, connection or proxy failed) → **defer this source; do not mark it `status: failed`**. A sandbox with network access off, a proxy, or no connection is the environment, not the source; recording it as `failed` would put every URL source in the run behind a wrong verdict and a generation-failure Issue each. Defer it exactly as the non-interactive `LOW_DENSITY:` branch below does — leave `status` as it is, write the `NETWORK_UNAVAILABLE:` line verbatim into `## Deferred Reason`, add it to the Completion Notice's deferred list, skip to the next source — with one difference: **on a forced recheck, do not set `status: pending`**. Nothing was fetched, so `source.hash` still describes the content the source's pages were built from, and requeueing it would regenerate unchanged pages. The same holds in an interactive run — there is no question for a person here that retrying later would not answer better.
-       **Two in a row stop the run.** Count consecutive `NETWORK_UNAVAILABLE:` results across sources; any `FETCHED:` or `ERROR:` (both prove the network reached a server) resets the count, and a cache hit that skips the fetch leaves it as it is. On the second in a row, **stop processing entirely** as guard C does: report `halted` to the driver with `--reason "network unavailable"`, say that fetching is failing before it reaches any server, and that the sources not yet reached are untouched and still queued. One is not enough to stop on, because a domain that no longer exists fails name resolution the same way — and that one source is deferred, not lost. Sources already processed in this run keep their results.
+     - `NETWORK_UNAVAILABLE:` (exit code 3 — the request never reached the server: name resolution, connection or proxy failed) → **defer this source; do not mark it `status: failed`**. A sandbox with network access off, a proxy, or no connection is the environment, not the source; recording it as `failed` would put every URL source in the run behind a wrong verdict and a generation-failure Issue each. Defer it exactly as the `LOW_DENSITY:` deferral below does — leave `status` as it is, write the `NETWORK_UNAVAILABLE:` line verbatim into `## Deferred Reason`, add it to the Completion Notice's deferred list, skip to the next source — with one difference: **on a forced recheck, do not set `status: pending`**. Nothing was fetched, so `source.hash` still describes the content the source's pages were built from, and requeueing it would regenerate unchanged pages. The same holds in an interactive run — there is no question for a person here that retrying later would not answer better.
+       **Two in a row stop the run.** Count consecutive `NETWORK_UNAVAILABLE:` results across sources; any `FETCHED:` or `ERROR:` (both prove the network reached a server) resets the count, and a cache hit that skips the fetch leaves it as it is. On the second in a row, **stop processing entirely** as guard C does: report `halted` to the workflow engine with `--reason "network unavailable"`, say that fetching is failing before it reaches any server, and that the sources not yet reached are untouched and still queued. One is not enough to stop on, because a domain that no longer exists fails name resolution the same way — and that one source is deferred, not lost. Sources already processed in this run keep their results.
      - `ERROR:` (exit code 1 — HTTP error status like 403/404, a read timeout, login-required page, unsupported content, etc.) → treat this source as extraction failure (step 5 below) and skip to the next source; do not run the command below.
      - `FETCHED:` (exit 0), forced recheck → run the `--check-hash` comparison described above and branch on `HASH_MATCH`/`HASH_MISMATCH`.
      - `FETCHED:` (exit 0), normal (non-recheck) source → run:
 
        ```bash
-       python scripts/add_source.py --write-hash <source-management-file> --content-file ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
+       python .wikicommit/scripts/add_source.py --write-hash <source-management-file> --content-file ".wikicommit/.cache/ingest-fetch/<scratch-path>.md"
        ```
 
        Check the output: `HASH_WRITTEN:` → proceed. `ERROR:` (exit code 1) → treat this source as extraction failure (step 5 below) and skip to the next source.
@@ -119,29 +119,30 @@ pass_token: "a3f1c07d"
 
      **Never derive the cache path yourself** — both commands below print it, and that is the only way to get it. It mirrors the management file's path under `.wikicommit/source/path/` **including the trailing `.md`**, so `raw/paper.pdf.md` and `raw/paper.docx.md` stay distinct; re-deriving it by stripping and re-adding the extension makes them collide.
 
-     Before dispatching to a route below — **except for a `.md` / `.txt` source, which is never cached (see below), so skip both commands entirely for those** — ask whether an extraction from an earlier run is still good for this file's current version:
+     Before dispatching to a route below — for **every** `type: path` source, `.md` / `.txt` included — ask whether an extraction from an earlier run is still good for this file's current version. **Do not judge the extension from `source.path` yourself**: a source path can be a symlink (`raw/notes.md` pointing at a PDF), and the route is chosen by the file it resolves to — the one `/wikicommit-review` and `/wikicommit-fix` check the page against — so the command names that file:
 
      ```bash
-     python scripts/add_source.py --check-path-cache <source-management-file>
+     python .wikicommit/scripts/add_source.py --check-path-cache <source-management-file>
      ```
 
+     - `RAW: <file>` (exit 0) → the source resolves to a `.md` / `.txt` file, which is already text and is never cached. Read `<file>` (not `source.path`) in full — that is the "read the file directly" route below — and skip the rest of this cache section.
      - `CACHE_VALID:` (exit 0) → the printed path holds this exact version's extracted text. **Skip step 4's routing entirely** — no extraction tool is called, and no Skill needs to be installed for this source on this run. Read that file in full (read the rest in further chunks if one read truncates it) and use it as the extracted text for steps 5–6 and Pass 2.
-     - `CACHE_STALE:` (exit 1) → extract normally. The reason on that line (no cache yet, the file changed, or the file is gone) makes no difference here: whatever is cached is not this version.
-     - `ERROR:` → the management file is unreadable or is not a `type: path` source. Treat it as `CACHE_STALE:` and extract normally; this check is an optimization and must not be the thing that stops a source from being processed.
+     - `CACHE_STALE: <cache> extract=<file> (<reason>)` (exit 1) → extract `<file>`, choosing the route below by **its** extension (it is `source.path` with symlinks followed). The reason makes no difference here: whatever is cached is not this version. When the file is gone there is no `extract=`; extraction then fails as step 5 describes.
+     - `ERROR:` → the management file is unreadable or is not a `type: path` source. Treat it as `CACHE_STALE:` and extract normally — the file named by `extract=` when the line has one (it does whenever the path resolves to a file in the repository), routed by its extension, otherwise `source.path`; this check is an optimization and must not be the thing that stops a source from being processed.
 
      **This check never touches `source.hash`, and neither may anything you do with the cache.** For `type: path`, `source.hash` is the hash of the **raw file** — the reference point `check_ingest_freshness.py` compares against the file on disk. Handing the cache file to `--write-hash` would overwrite it with an extracted-text hash, and freshness detection for that source would report no change when the file has changed. That is also why the check validates by re-hashing the raw file, not the cache.
 
-     After a route below produces text successfully (and only then — a failed extraction must not be cached, and a `.md` / `.txt` source is not cached at all), ask where it belongs and write it there verbatim:
+     After a route below produces text successfully (and only then — a failed extraction must not be cached, and a `.md` / `.txt` source is not cached at all — that is, one that got `RAW:`; a `source.path` ending in `.md` / `.txt` that got `CACHE_STALE:` is a link to another format and **is** cached), ask where it belongs and write it there verbatim:
 
      ```bash
-     python scripts/add_source.py --path-cache-path <source-management-file>
+     python .wikicommit/scripts/add_source.py --path-cache-path <source-management-file>
      ```
 
      `CACHE_PATH:` prints the path and creates its parent directory. Write exactly the extracted text to it, with no summarizing, truncating or re-wrapping — a later run reads this file *instead of* extracting, so anything lost here is lost for good. `.wikicommit/.cache/` is gitignored, so nothing needs to be cleaned up before `/wikicommit-merge`.
 
      **`.md` / `.txt` sources are deliberately not cached**: the raw file *is* the extracted text, so a cache would be a byte-identical second copy in the category where sources run largest. A cache does not expire when the extraction tool changes version, and it is per-machine (a fresh clone extracts everything once).
 
-   - `type: path`, `.md` / `.txt` → read the file directly
+   - `type: path`, `.md` / `.txt` (`RAW:` above) → read the printed file directly
    - `type: path`, `.pdf` (scanned) → Call the `ocr-and-documents` skill
    - `type: path`, `.pdf` (text-based) → Two-tier fallback (on some setups `npx skills add ... --skill pdf` does not make the `pdf` skill visible to the agent; see the install table in `references/text-extraction-routing.md`):
      1. Check whether the `pdf` skill is available and recognized, e.g. by checking that `../pdf/SKILL.md` exists (a sibling of this Skill's directory, whichever Skill tree this is). If it exists, call the `pdf` skill (preferred — better table/encrypted-PDF handling).
@@ -164,7 +165,7 @@ pass_token: "a3f1c07d"
    python .wikicommit/scripts/check_extraction_quality.py check-density "<the scratch file or extraction cache>"
    ```
 
-   For a `type: path` `.md`/`.txt` source — the one kind with no such file, because it is not cached — pipe the extracted text in via a quoted-delimiter heredoc, which hands arbitrary content (possibly containing shell metacharacters, e.g. backticks in a quoted code sample) to stdin without shell interpretation:
+   For a `type: path` source that got `RAW:` — the one kind with no such file, because it is not cached (judge it by that line, not by `source.path`'s extension) — pipe the extracted text in via a quoted-delimiter heredoc, which hands arbitrary content (possibly containing shell metacharacters, e.g. backticks in a quoted code sample) to stdin without shell interpretation:
 
    ```bash
    python .wikicommit/scripts/check_extraction_quality.py check-density <<'EOF'
@@ -174,10 +175,11 @@ pass_token: "a3f1c07d"
 
    `OK:` (exit 0) → proceed to step 6 below.
 
-   `LOW_DENSITY:` (exit 1) → **a warning to raise with the human, not an automatic failure**. Unlike guard B — a deterministic verdict about a domain already confirmed broken — this is a text-shape heuristic, and a link-dense government site or a statistics table has essentially the same shape as a JS shell; genuine sources are flagged often enough that failing them outright on this signal is not justified. Branch on whether this run is interactive:
+   `LOW_DENSITY:` (exit 1) → **a warning to raise with the human, not an automatic failure**. Unlike guard B — a deterministic verdict about a domain already confirmed broken — this is a text-shape heuristic, and a link-dense government site or a statistics table has essentially the same shape as a JS shell; genuine sources are flagged often enough that failing them outright on this signal is not justified. **Do not ask here**, whether or not someone is present: the question is asked once the loop over the sources is over (the workflow engine's `ask-deferred` step), so a batch does not stop on it and nobody has to wait by it. Branch on the `lists` the workflow engine handed you with this step — they hold the person's answers when this source comes round a second time in the same run:
 
-   - **Interactive** (a live human can answer right now): show the script's `LOW_DENSITY:` line verbatim — including its `non-prose breakdown:` figures, which let the human tell a link-dense real page (`links` dominant) or a statistics document (`numbers/tables` dominant) from a script/JSON shell (`other markup` dominant) — and ask whether to continue with this source. Continue → proceed to step 6 as if the check had returned `OK:`, and add this source to a running list rolled up in the Completion Notice (`references/completion-notice.md`), so the override is recorded. Decline → mark `status: failed` exactly like the empty/unreadable case above, writing the `LOW_DENSITY:` line verbatim into `## Failure Reason`.
-   - **Non-interactive/subagent-driven** (no real answer will ever arrive): **defer this source — do not mark it `status: failed`**. It must not go on to Pass 2 — passing a genuine shell through unreviewed produces a page citing a source URL that never contained its content. But `status: failed` is the wrong way to stop it: it takes the source out of every collection condition, and nothing then reports it (Pass 1 does not collect `failed`, and `wikicommit-merge`'s generation-failure Issue keys on `failed_pages`, which is empty because no page was attempted).
+   - **This source is in `continue-low-density`** (the person chose to continue): proceed to step 6 as if the check had returned `OK:`, and add this source to a running list rolled up in the Completion Notice (`references/completion-notice.md`), so the override is recorded.
+   - **This source is in `fail-low-density`** (the person declined): mark `status: failed` exactly like the empty/unreadable case above, writing the `LOW_DENSITY:` line verbatim into `## Failure Reason`. Do this **before step 4, without fetching or extracting again** — take the line from the source's current `## Deferred Reason`. The answer is already given, and a re-fetch that hit `NETWORK_UNAVAILABLE:` would leave you a deferral the completion check refuses for this source.
+   - **Otherwise** (the first time round, or the person has not answered): **defer this source — do not mark it `status: failed`**. It must not go on to Pass 2 — passing a genuine shell through unreviewed produces a page citing a source URL that never contained its content. But `status: failed` is the wrong way to stop it: it takes the source out of every collection condition, and nothing then reports it (Pass 1 does not collect `failed`, and `wikicommit-merge`'s generation-failure Issue keys on `failed_pages`, which is empty because no page was attempted).
 
      Deferring means, precisely:
 
@@ -186,11 +188,11 @@ pass_token: "a3f1c07d"
      - Write the `LOW_DENSITY:` line verbatim into a **`## Deferred Reason`** section of the management file (create it if absent, overwrite if present), in English regardless of `<primary_lang>`, like `## Failure Reason`. Delete that section as soon as this source reaches any other outcome, exactly as `## Failure Reason` is deleted.
      - Add the source to a running list rolled up in the Completion Notice (`references/completion-notice.md`), and skip to the next source.
 
-     **A deferral is for the cases this Skill names, and only those**: `LOW_DENSITY:` with nobody to ask, `NETWORK_UNAVAILABLE:`, a Pass 2b type candidate with nobody to ask, and an `action: update` page whose existing source cannot be fetched (end of `references/pass2c-entities.md`). When something fits none of them, do not defer it (or fail or exclude it) because that is the nearest fit; stop and report it.
+     **A deferral is for the cases this Skill names, and only those**: `LOW_DENSITY:` with no answer yet, `NETWORK_UNAVAILABLE:`, a Pass 2b type candidate with no answer yet, and an `action: update` page whose existing source cannot be fetched (end of `references/pass2c-entities.md`). When something fits none of them, do not defer it (or fail or exclude it) because that is the nearest fit; stop and report it.
 
-     Either way the source stays in the queue, so an interactive run picks it up and asks. `/wikicommit-status` counts it separately from "not reached yet", so the deferral stays visible between runs.
+     The `## Deferred Reason` is what the person is shown at the end of the loop, so write the `LOW_DENSITY:` line exactly as the script printed it. If nobody answers — a run started with `--non-interactive`, or a person who leaves it for later — the source stays in the queue, and the next run with someone present asks again. `/wikicommit-status` counts it separately from "not reached yet", so the deferral stays visible between runs.
 
-   Make the interactive/non-interactive determination the same way Pass 2b step 1 does, **once per invocation**, and hold it constant — whichever pass first needs it makes the judgment and the other reuses it, so a single run never shows a prompt for one decision and silently defaults another.
+   Whether anyone can answer is not yours to judge here: the run was started with or without `--non-interactive`, and that alone decides whether the question is asked.
 6. Otherwise, compute an approximate token count for the extracted text (a rough estimate is fine — e.g., character count ÷ 4, rounded to the nearest integer; no model-specific tokenizer is required) and write it to the management file's `extracted_tokens` field. Overwrite any existing value every time this step is reached — unconditionally as soon as extraction succeeds, regardless of the Pass 2–4 outcome (unlike `last_generated_at`, which Pass 4 only sets on the `generated`/`partial` branches).
 
    **Missing-transcript note**: for a YouTube source, first check that the extracted text actually is a YouTube-converter result — it starts with a `# YouTube` heading and carries a `### Video Metadata` section with the video's title, keywords and runtime. If it does **not**, `markitdown` never recognized the URL as a video and fell through to its generic HTML converter: this happens for every YouTube URL that is not a `/watch?v=…` (or `youtu.be/<id>`) link — `/shorts/<id>`, `/playlist?list=…`, and channel pages all produce a few hundred characters of footer/navigation links with no title, description or transcript, and guard A does not catch them. Treat that as an extraction failure (step 5 above): mark `status: failed`, write a `## Failure Reason` naming the URL form and pointing at the `https://www.youtube.com/watch?v=<id>` equivalent to register instead, notify the user, and skip to the next source — do **not** send footer links to Pass 2. If it *is* a YouTube-converter result but has no `### Transcript` section, then — since guard C already guaranteed `youtube-transcript-api` is installed — *this particular video has no captions*, a fact about the source rather than a broken environment. Do **not** mark that case `status: failed`: the title, keywords, runtime and description are real content and may be enough. Append the source (its management file path) to a running list rolled up in the Completion Notice (`references/completion-notice.md`), and carry on to Pass 2 — the user decides whether a description-only page is worth keeping.

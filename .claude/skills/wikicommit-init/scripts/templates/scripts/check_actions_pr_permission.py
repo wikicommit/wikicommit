@@ -36,7 +36,9 @@ SETTING_NAME = '"Allow GitHub Actions to create and approve pull requests"'
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, check=False)
+    # gh writes UTF-8 whatever the locale.
+    return subprocess.run(args, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", check=False)
 
 
 def resolve_repo() -> str | None:

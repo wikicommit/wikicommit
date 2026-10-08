@@ -827,6 +827,17 @@ Issue #1117 で追加した。起票時は「段階 1 で実験（パイロッ�
 
 実装時に確かめたこと: Quartz v5（`jackyzha0/quartz` の `5.0.0`）の組み込み emitter は `ComponentResources`・`Assets`・`Static` で、`Assets` は `content/` の `.md` とページ型が持つ拡張子以外を `slugifyFilePath` した名前でコピーする。`slugifyFilePath`（`@quartz-community/utils`）は各セグメントを小文字にし、`.md`・`.html` 以外の拡張子を残す。Quartz 本体は `robots.txt` を出さない。いずれもソースを読んでの判断で、実際のビルド・Pages 上での取得は行っていない。
 
+Issue #1163 で実サイトを確かめた（2026-10-06、パイロット `wikicommit/ai-driven-dev-wiki`、配布物 0.9.0）。`https://wikicommit.github.io/ai-driven-dev-wiki/llms.txt` は HTTP 200 で 19,997 B（en 1,173 ページ、Key pages 50 件）、並べたリンク 68 件はすべて 200 を返した — `LLMS_KEY_PAGES_LIMIT` を見直す必要は無い。`wikicommit.github.io/robots.txt` は 404 で、GitMCP の取得を妨げるものは無かった。
+
+GitMCP は Claude Code に HTTP の MCP サーバーとして登録して使った（`wikicommit.gitmcp.io/ai-driven-dev-wiki`）。観察したこと:
+
+- 検索ツールは「context rot」で 0 件だった（Key pages に同じ語があるのに）。0 件のとき GitMCP は `llms.txt` の本文をそのまま返し、エージェントはその一覧から URL を取ってページを読みに行った。サブパスの `llms.txt` を読むことはこれで確かめられた
+- 答えは正しいページ（`context-rot` と、そこからリンクされた一覧外の `attention-budget`）に基づき、出典が 1 本だけである旨まで書いた
+- レビュー状態は公開ページからは取れず、エージェントは GitHub 上のページの frontmatter を読んで `pending` と答えた。`pending` のバナーが状態を文字で書かないためである（本文の「既知の不足」）
+- 日本語の質問（2 問目）は、`llms.txt` が en だけを並べるため、ja のページの URL を言語切替リンクの形から組み立てて答えた。ただし 1 問目と同じセッションで聞いたので、検索や `llms.txt` を改めて引いたかは分からない
+
+`/wikicommit-ask` との 4 観点の比較と、一覧外のページへ降りられるかの確認（予定の 3〜5 問目）は、運用者の判断で行わなかった。ask 自体の検証がまだであり、`llms.txt` は動いていることが確かめられれば十分としたため。
+
 ## 9. 検索エンジン実装
 
 ### 9.1 全文検索（キーワード）

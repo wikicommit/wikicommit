@@ -2,6 +2,8 @@
 name: wikicommit-schema-propose
 description: Detect wiki page types with no dedicated .wikicommit/schema/ file, propose a new standard (Schema.org) or custom type file, and open a PR for human review (no auto-merge). Use this only when someone explicitly asks to add schema files for types that lack one. It opens a PR that changes .wikicommit/schema/, so do not use it just to list the uncovered types — wikicommit-status reports them without writing.
 disable-model-invocation: true
+metadata:
+  requires: "wikicommit-init"
 ---
 
 # wikicommit-schema-propose

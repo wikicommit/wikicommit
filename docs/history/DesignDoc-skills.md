@@ -10,7 +10,7 @@
 
 - SKILL.md には「何を達成してほしいか」と「守るべき制約」を記述する。**実行順序は、工程が少なく短い Skill ではエージェントに委ねるが、長い多段の Skill ではスクリプト（ドライバー）が持つ**（下記コールアウト。Issue #1085）。**各工程の中の判断はどちらの場合もエージェントに委ねる。**
 
-#### 多段の Skill の進行はドライバーが持つ — 判断はエージェントが持つ
+#### 多段の Skill の進行は Skill ワークフローエンジンが持つ — 判断はエージェントが持つ
 
 > **多段の Skill の進行はドライバーが持つ — 判断はエージェントが持つ（Issue #1085）**: 上の表の「マルチステップフロー＝エージェントが動的に組み立て」は、長い手順では記憶の問題になっていた。`/wikicommit-generate` の実際の失敗は 4 件とも同じ形である — 長い手順の末尾の工程が抜けた（#406）、書き戻しが漏れた（#474）、結果の受け渡しが欠けた（#452）、散文でしか書かれていない部分を即興で誤った（#947）。どれもエージェントが**進行と手順の細部を覚えて自分で組み立てている**ことに由来し、対策はいずれも見つかった 1 箇所をスクリプトへ移すものだった。`record_run.py` の実行記録と checkpoint（#790・#797）は進行を**記録**するが、次に何をすべきかは**指示しない**ので、打点の欠落は実行が終わってからしか分からず、`token: mismatch` を読む者もいなかった。
 >
@@ -50,6 +50,48 @@
 > `status --stop-hook` は標準入力のペイロードを読み、開いた実行があれば `{"decision": "block", "reason": "..."}` を返す。同じ停止の試みの中での 2 回目（`stop_hook_active`）は通す — 死んだセッションの実行が後のセッションを無限に止め続けないためで、理由の文面が `abandon` の手順を案内する。
 >
 > **採らなかった案**: Claude Code の dynamic workflows（Claude Code 専用で、途中で人の入力を受け付けない）／LangGraph 等のフレームワーク（フレームワークが LLM を呼ぶ側に立ち、LLM の持ち込みを手放す）／Beads（管理ファイルの `status` と Pass 1 の収集条件が既に同じ役割を果たしており、工程は強制しない）／スクリプトが `claude -p` 等を子プロセスで起動する（途中で利用者に尋ねられない・ハーネス差の吸収が要る・Bash ツールの時間制限を超える。人がいない実行向けの口としては将来ありうる）／状態機械ライブラリ（工程が数十程度なら自作と大差ない）。**2 つ目の Skill（`wikicommit-merge`）への適用は別に扱う**（Issue #1094）。
+>
+> **2 つ目の Skill（`wikicommit-merge`）への当てはめ（Issue #1094）**: Issue #1085 の段階的な計画の 2 として、項目の繰り返しを持たない merge にエンジンを当て、エンジンの汎用性を確かめた。Issue #1085 の時点で merge は出口の確認（`check-merge`）だけを持ち、自身の Step 0〜10 の進行はエージェントの記憶にあり、実行記録は `record_run.py start` / `end` で開閉していた。検討した点と結論:
+>
+> - **外部の待ち（Step 7 のポーリング）は `script` ではなく `agent` 工程にした。** ドライバーは `script` 工程を `advance()` の中で同期実行するので、最大 300 秒の待ちを 1 つのスクリプトにすると、`next` / `done` の 1 回の呼び出しがエージェントのシェルの時間制限（Claude Code の Bash ツールは既定 2 分）を超える。待ちをエージェントに残し、完了は GitHub の `state` を見る確認で決めた。エンジンに「長い工程」の種類を足す案（バックグラウンド実行と再ポーリング）は、merge 1 つのために状態の種類を増やすことになるため採らなかった
+> - **Git 操作の完了はディスクと remote で確かめる。** コミットは「`wikicommit/merge-*` 上・既定のブランチより先のコミット・検出したパスに未コミットの残りが無い」、PR は「番号が記録された・ブランチが `origin` にある」、マージは「`gh pr view` が `MERGED`・既定のブランチに戻っている」。最後だけが GitHub に問い合わせる確認である
+> - **warning の続行確認は `human` 工程にし、非対話の既定を `proceed` にした**（Issue #945 の「記録して続行」）。warning は実行記録の一覧（`warnings`）に入れ、PR 本文はそこから書く — 以前は Step 3 から Step 6 へエージェントの記憶で運んでいた
+> - **Step 8 / 9 の Issue 作成には完了の確認を置かない。** 失敗したページは飛ばして報告する設計で、次の実行の全件走査が拾う（Issue #1062 の全件取得もこれを前提にする）。「全ページに open な Issue がある」を確認にすると、許容している API の失敗で実行が `blocked` になる。工程の途中で止まった場合は工程を最初からやり直すだけでよく、マーカー照合が重複を防ぐ
+> - **実行記録はドライバーが開閉する**（Issue #790 の `record_run.py start` / `end` を置き換えた）。`check-merge` が merge 自身の実行を数えないよう `--except-run` を足した
+> - **エンジンへの追加は 2 つ**（`human` 工程の `finishes_on`・`check-merge --except-run`）で、どちらも merge 固有の語を含まない（`tests/test_driver.py` の固定語に `wikicommit-merge` と `gh pr` を足した）。Step 2 の分類と Step 3 の品質ゲートは決定論的だが、今回は手順ファイルのまま `agent` 工程に置いた（スクリプト化は別 Issue）
+> - **残りの多段の Skill**: `translate` / `synthesize` には広げる（generate と同じ項目ごとの繰り返しとレビュー記録の書き戻しを持つ）。`init` / `update` には広げない（ドライバー自身を置く・置き換える Skill であり、工程も短い）
+>
+> **項目の繰り返しを持つ 2 つ目の Skill（`wikicommit-translate`）への当てはめ（Issue #1194）**: それまで translate は `record_run.py start` / `end` で実行記録を開閉し、Step 0〜4 の進行（一括モードの組ごとの翻訳・`translate-check` の記録・`source_commit` の書き戻し）はエージェントの記憶にあった。synthesize（Issue #1195）と同時に進めると §11.0・§11.5 の同じ表で衝突するため、translate を先に入れた。検討した点と結論:
+>
+> - **項目は組を 1 文字列にした（`<原文ページ> -> <言語>`）。** 翻訳ページのパスを項目にする案は、原文ページの言語がパスから決まらない（原文は `primary_lang` に限らない）ため採らなかった。組から翻訳ページのパスを導く規則は `check_translation_status.py` と同じ（言語の区画だけを置き換える）
+> - **翻訳・照合・書き出しを 1 工程にした。** 翻訳はレビューを通るまで書かないので、工程を分けても前半の完了をディスクで確かめられない。代わりに 1 工程の確認が 3 つの書き込み（翻訳ページ・`source_commit`・レビュー記録）をまとめて見る。`source_commit` は値まで確かめる（原文に未コミットの変更があるかコミットが無ければ空文字列、そうでなければ原文の最新コミット） — generate で実際に起きた「書き戻しの漏れ」の形がここにあたる
+> - **レビュー記録は「この実行の中で書かれたもの」だけを数える。** 記録のファイル名の時刻（ローカル時刻）を実行記録の `started_at` と比べる。前回の実行の記録で今回の組が完了になると、照合を飛ばした組が通る
+> - **一括モードの並びは従来どおり**（`DefinedTerm` の組を先頭に、群内は `check_translation_status.py` が報告したパスの昇順。`STALE` は翻訳ページのパス、`UNTRANSLATED` は原文ページのパス）。並べ方を変える理由は無いので、文書化されていた規則をスクリプトに移しただけにした
+> - **エンジンへの追加は無い。** `tests/test_driver.py` の固定語に `wikicommit-translate`・`translated_from`・`source_commit` を足した
+> - **`--arg` の書き方**: `--lang` のように `--` で始まる引数は `--arg --lang` と書くと argparse が別のオプションとして読むので、`--arg=--lang` と書くよう SKILL.md に明記した。generate の `--regenerate` 等にも同じ問題があったので、generate の SKILL.md も同じ PR で `--arg=` の書き方に直した
+>
+> **項目の繰り返しを持たない Skill（`wikicommit-synthesize`）への当てはめ（Issue #1195）**: それまで synthesize は `record_run.py start` / `end` で実行記録を開閉し、Step 0〜11 の進行（俯瞰・grounding の選別・合成・Step 5.5 の照合と記録・書き出し・view index の再構築）はエージェントの記憶にあった。translate（Issue #1194）の後に入れた。検討した点と結論:
+>
+> - **一覧の繰り返しを作らなかった。** 1 回の実行が書くのは 1 ページなので、項目を 1 つだけ持つ `for_each` にする案は採らなかった（工程名に項目が付くだけで、何も確かめやすくならない）。工程をまたぐ値（トピック・`kind`・grounding・ページのパス）は merge の PR 番号と同じく `done --add` で実行記録の一覧に置いた
+> - **検索・選別（`ground`）と書き出し（`write`）を分けた。** translate は翻訳と書き出しを 1 工程にしたが、synthesize の選別の結果はディスクで確かめられる（grounding ページが `primary_lang` の原文で、翻訳でも合成でもなく、上限以下）。分けることで `write` の確認が `derived_from` を「読んだページ」と過不足なく突き合わせられる。generate で起きた「書き戻しの漏れ」の synthesize 版は、`derived_from` から 1 ページ落ちる・別のページが紛れ込む形になる
+> - **`source_commit` は SKILL.md の手順どおり `git log -1` の値を期待した。** translate と違い、grounding ページの未コミットの変更は空文字列にしない（従来の手順がそうであり、`check_derivation_freshness.py` もそれを前提にしている。変えるなら別 Issue）
+> - **上書き確認の非対話の既定は「上書きしない」（`declined`）にした。** 従来の手順は非対話時を決めていなかった。view ツリーはこの Skill の出力だけを持ち取り返しはつくが、既存の合成ページは人が読んだかもしれず、§11.5 の「既定を決めておく」の安全側に当たる
+> - **検索の `ERROR:` は `halted` にした。** 従来は「エラーを表示して止まる」（実行記録は開いたまま）だった。ドライバーでは halt が理由付きで実行を閉じるので、`check_run_records.py` が理由を出せる
+> - **エンジンへの追加は無い。** `tests/test_driver.py` の固定語に `wikicommit-synthesize`・`derived_from`・`synthesize-step5.5` を足した。`--arg` は translate と同じく `--arg=<value>` の書き方にした（PR #1199 のレビューで残った指摘のうち synthesize の分）
+>
+> **merge の分類と品質ゲートのスクリプト工程化（Issue #1196）**: PR #1188 は進行の移行に範囲を絞り、Step 2 の分類と Step 3 の品質ゲートを手順ファイルのまま `quality-checks` という `agent` 工程に残した。一覧は実行記録に残らず、再開した `commit` 工程は Step 2 を計算し直していた。
+>
+> - **分類は一覧 1 つにつき 1 工程（`classify-*`）にした。** `produces` は 1 工程 1 一覧であり、1 工程で複数の一覧を出せるようエンジンを広げる案は採らなかった（変更がエンジン・リプレイ・全 Skill に及ぶ）。`(種類, パス)` の 1 一覧に詰める案も、`commit` 工程が値を解析し直すことになるので採らなかった
+> - **速い検査は 1 つの `script` 工程にした。** Issue #1094 の決定どおり。blocking は従来の `blocked` outcome から、exit 1 による halt（理由は最初の所見）に変わった。`markdownlint-cli2` は決定では触れていなかったが、`npx` を Python から起動できない（Windows の `npx.cmd`）ため lychee とともに `agent` 工程に残した
+> - **lychee は Issue #1094 の決定と違う形にした。** 決定は「区切って返す」工程をエンジンに足すことだったが、PR #1188 はその前提を足さずにマージ可能待ちを `agent` 工程にしていた。本 Issue では足さないほうを採り、ラッパーが続きをファイルに持って約 100 秒で返し、エージェントが呼び直す形にした。理由は本文の同じ節（使い手が merge の 2 工程しか無い・再開時の待ちの続きを全 Skill のリプレイが扱うことになる）。1 回の呼び出しの上限は、新しいバッチを始めるのを 45 秒まで・1 回の lychee の打ち切りを呼び出し開始から 100 秒までとした（Claude Code の既定 120 秒の内側）
+> - **warning の受け渡しを変えた。** 従来はエージェントが `--add warnings=<ツールごとの Markdown の束>` を渡していたが、エンジンの `produces` は 1 行の値しか読めない。所見はツールごとのファイル（`.wikicommit/.cache/merge/<run>/`）に置き、一覧には `<tool> (<件数>)` だけを入れ、PR 本文は `workflow_checks.py pr-body` が組み立てる形にした。`.wikicommit/.cache/` に置いたのは、検査をやり直せば作り直せる派生データであり、`.wikicommit/run/` の回転（`*.md` だけを消す）に取り残されるファイルを作らないため
+> - **#1182 との順序**: 本 Issue と Issue #1182（全ページの lychee を `/wikicommit-status` へ）は同じリリースに入れ、#1182 が入るまで次のリリースを切らない（`DesignDoc-CISpec.md`「外部リンク検証」）
+>
+> **子プロセスの出力の文字コードを全 Skill とエンジンに広げた（Issue #1256）**: Issue #1237 は merge の `workflow_checks.py` の `run()` だけを UTF-8 に揃え、方針の範囲を merge に限っていた。エンジンが `workflow_checks.py` の出力をロケールの文字コードで読む 1 段、エンジン自身の JSON の出力、共有モジュールの `git()` と他 3 Skill の自前の `subprocess.run` が残っていた。あわせて、エンジンの `changed_files()` だけが `git status --porcelain` を `-z` 無しで読み、非 ASCII のパスを引用符付きの 8 進エスケープのまま `touched` と突き合わせていた（ロケールと無関係にどの OS でも起きる。merge の `porcelain()` は既に `-z`）。
+>
+> - **`run()` の置き場はエンジンにした。** Issue の候補は「共有モジュールに `run()` を 1 本置く」だったが、共有モジュールは既にエンジンを import しており（`run_state`）、エンジンは共有モジュールを import できない（エンジンは Skill の知識を持たない）。エンジンの `run_command` を UTF-8 にし、共有モジュールはそれを `run` として配る形にすると、実装が 1 本で済み、エンジンとチェックの読み方が食い違いえない。merge の `run()` は削除した。
+> - **エンジンの JSON は `ensure_ascii=True` に戻さず、標準入出力を `reconfigure` した。** `\uXXXX` ではエージェントが読むパスが読めなくなるため。
+> - **古い `.wikicommit/scripts/` では全 Skill が止まる。** 4 本の `workflow_checks.py` は共有モジュールから `run` を import するので、`run` を持たない共有モジュールでは既存のブートストラップが exit 2 で `/wikicommit-update` を案内する（Issue #1219 と同じ扱い）。
 
 ### 11.1 Skill の配置
 
@@ -205,6 +247,24 @@
 >
 > **20,000 B を超える reference ファイルには TOC を置く。** 公式ガイダンスは 300 行を閾値に挙げるが、このリポジトリの指示散文は 1 行 40〜170 B とばらつくため行数は読む量をほとんど言わない（Issue #887 が size 指標に対して同じ訂正を行っている）。
 
+#### `shared/` に置く条件
+
+> **`shared/` は Issue #1176 で新設した。** `wikicommit-review` Step 4 item 1 と `wikicommit-fix` Step 3 は、取り下げガード → 抽出キャッシュ照会 → 抽出 Skill / `add_source.py --fetch-url` → `--settle` という同じ取得手順をほぼ同文で持っていた（それぞれ約 5KB）。Issue #1158 で `wikicommit-review` を閾値の下へ戻したときは、理由説明を圧縮しただけで余裕は約 500 B だった。
+>
+> **検討した置き場所**: (1) `wikicommit-ask/references/`（Issue #1176 が挙げた候補）をそのまま使い、指標は無改修 — 持ち主の `wikicommit-ask`（32,893 B）に読まない約 5.6KB が乗って余裕を失い、review・fix は兄弟ディレクトリへ散文を移しただけで軽く見える。Issue #887 が総面積を導入した理由（「別ファイルに出しただけ」を改善と報告しない）にそのまま反するので採らなかった。(2) `.wikicommit/` のデータファイル — §11.5 の既存の規則に沿うが、手順が Skill 内スクリプトの使い方であり、Skill の更新に再 init が要ること・ファイルが無いときの分岐が両 Skill に要ることから採らなかった。(3) 決定論的な部分をスクリプトへ寄せる — キャッシュ照会・パス型のハッシュ照合・取得・`--settle` を 1 コマンドにすれば実際に指示が減るが、抽出 Skill への分岐はスクリプトにできず、範囲が Issue #1176 を超えるため別 Issue の草案にした。
+>
+> **採ったのは `wikicommit-ask/shared/` ＋ 読み手への計上**。`references/` の名前のまま「他 Skill から名指しされたら読み手に計上」とする案は、`text-extraction-routing.md`（5,871 B。review・fix はキャッシュが無いときだけ読む）まで review に計上され、`wikicommit-review` が閾値を超えるため採らなかった。ディレクトリ名で「複数 Skill が毎回読む手順」を明示する形にした。
+>
+> **実測（2026-10-06）**: 一本化前は review 39,501 B・fix 35,423 B（合計 74,924 B）。一本化後は review 本体 34,082 B ＋ 共有 5,650 B ＝ 39,732 B、fix 本体 29,818 B ＋ 共有 5,650 B ＝ 35,468 B（ディスク上の合計 69,550 B）。**読み手に計上する限り review の余裕は増えない**（指示を読ませる量が変わっていないため）。余裕を本当に作るのは (3) である。
+>
+> **Issue #1190 で決定論的な部分を `resolve_source_cache_path.py --obtain` に寄せた。** Issue #1176 の一本化は重複を消したが、共有ファイルは読み手全員に計上されるので review の総面積は 39,732 B（一本化前 39,501 B）とほぼ変わらず、閾値 40,000 B までの余裕は約 270 B だった。指示を読ませる量が変わっていない以上これは指標として正しく、余裕を作るには指示そのものを減らすしかない。手順の大半（キャッシュ照会の exit 0/1/2、`type: path` キャッシュの版の照合、`--fetch-url` の 3 種の結果、`--settle`、古い scratch の扱い）は決定論的だったので 1 エントリ 1 コマンドにし、共有ファイルは呼び方と出力行ごとの扱いだけにした（5,650 B → 約 3.5KB）。`type: path` キャッシュの有効性は、以前の散文が言っていた「生ファイルがページの `sources[].hash` と一致するか」ではなく、`add_source.py --check-path-cache` と同じ「生ファイルが管理ファイルの `source.hash` と一致するか」で判定する — キャッシュはその版の抽出結果であり、ページの hash と管理ファイルの hash は一致するとは限らないため。`--fetch-url` は import せずサブプロセスで呼ぶ（`add_source.py` は自己完結スクリプトであり、取得の実装を 1 つに保つ）。`wikicommit-ask --include-source` は乗せなかった（取得前の `check-fetch-capability`・`NETWORK_UNAVAILABLE` 後に残りを取得しない挙動・`ask-fetch/` の通し番号・`type: path` で抽出 Skill を呼ばない挙動が ask 固有で、モードに分岐を足すと散文の削減分より複雑さが増える）。
+>
+> **実測（2026-10-06）**: review 39,732 B → 37,391 B、fix 35,468 B → 33,298 B。
+>
+> **Issue #1211 で `shared/source-fetch.md` を削除し、`shared/` に置いたファイルは無くなった。** Issue #1210 で `resolve_source_cache_path.py` が `.wikicommit/scripts/` に移り、手順はどの Skill のものでもなくなっていた。残っていた決定論的な部分（`check_retracted_sources.py --list` による取り下げ除外・エントリごとの `--obtain`・古い scratch の除去）を `--obtain-sources`（ページのパスを stdin に取り、その `sources` 全件を処理する）に寄せ、各 Skill に残る散文（呼び方と印字行ごとの扱い）を review・fix に数行ずつ戻した。検討したこと: (1) 入力を `sources` の YAML を stdin で渡す形にする案は、エージェントにハッシュを写させることになるので、ページのパスを渡す形を採った（どのページかは呼び出し側が決める）。review の「Step 3 より前の hash を渡す」は、`page=` を使うのが `type: url` の版ずれ記録だけで、Step 3 が書き換えるのは `type: path` の hash だけなので不要になった。(2) `refetch/` の後始末はスクリプトからは読み終えたことが分からないので呼び出し側の `rm -f` に残し、代わりに実行の最初に同じラベルの古い scratch を消す。(3) 印字にエージェント向けの指示文を埋め込む案は採らず、キーワードと次の行動を 1 対 1 にする形を ScriptSpec の共通規則に足した。(4) ask の `--include-source` は取得前の `check-fetch-capability`・`ask-fetch/` の通し番号・`type: path` で抽出 Skill を呼ばない挙動が ask 固有なので乗せず、Issue #1206 のガードは既存の `OUTSIDE:` 行のまま。(5) `tools/check_skill_md_lines.py` の `shared/` の計上は、次に置かれたときに「兄弟ディレクトリへ移しただけ」を通さないためのガードなので残した。依存表からは ask → generate・review / fix → ask の行が消え、review / fix → generate（`text-extraction-routing.md`）が直接の依存になった。
+>
+> **実測（2026-10-07）**: review 37,836 B → 35,230 B、fix 33,743 B → 31,228 B（`tools/check_skill_md_lines.py` の総面積）。
+
 #### Skill ツリーの位置を仮定してよい箇所・してはならない箇所
 
 **Skill は `.claude/skills/` にあるとは限らない。** Claude Code はそこを読むが、Codex は `.agents/skills/` を読み、`npx skills add --agent codex` 単独では `.claude/skills/` は作られない（Copilot は公式ドキュメント上 `.github/skills/`・`.claude/skills/`・`.agents/skills/` のいずれも読むので、`.claude/skills/` に実体を置く限り当たらない見込みが高い — 実機確認は Issue #732）。上の図が `.claude/skills/` で描かれているのは開発リポジトリの配置であって、配布先の前提ではない。
@@ -214,6 +274,12 @@
 **再混入は `tools/check_skill_tree_paths.py` が止める**（blocking。`docs/DesignDoc-TestSpec.md` L14）。固定パスは Issue #732 の起票時の 22 箇所から Issue #1021 の時点で 57 箇所へ、止めるものが無いまま増えていた。
 
 **採らなかった案**（詳細は Issue #1021 のコメント）: 実行時に自分のディレクトリを解決する手順を指示文に書かせる案（B1。標準が既に定めている書き方を独自の手順で再現することになる）、共有スクリプトを `.wikicommit/scripts/` へ移す案（B2。問題の 2 本は既にそこにあり、Skill ツリーを読みに行く側である）、`--agent claude-code` の併用を必須にする案（B3）、symlink 配置を推奨にする案（B5。どちらも Codex 単独配置のサポートと矛盾し、B5 は Windows で `core.symlinks` を持たない clone の Claude Code 側を壊しうる）。
+
+#### Skill 間の依存
+
+> **Skill ごとの依存表と `metadata.requires` を置いた（Issue #1210）**: それまで Skill 間の依存はどこにも宣言されておらず、指示文の `../` を grep しないと分からなかった。手で書いた図（§11.5「委譲関係の全体像」）は既にずれていた — `resolve_source_cache_path.py` の呼び出し元に generate（`--regenerate`）と relate が無く、`remove_page.py` の呼び出し元は空だった（generate の `--merge` が無い）。宣言の置き場は SKILL.md の frontmatter（`metadata.requires`）と §11.3 の表の 2 つにし、`tests/test_skill_dependencies.py` が両方を実際の参照と突き合わせる。1 か所の一覧（開発リポジトリ内のファイル）にする案は採らなかった — 部分インストール（README の `--skill wikicommit-generate` の例）で何と一緒に入れるかを書くとき、配布される側に宣言があるほうが使える。
+>
+> **移した時点の依存**: 移す前は ask → generate（`add_source.py --fetch-url`）と generate → ask（`--regenerate` が `resolve_source_cache_path.py` を呼ぶ）の両方があり、循環していた。移した後に残るのは init への参照（update → `init.py`、generate / merge → テンプレート側の `check_distribution_freshness.py`、`schema-authoring.md` の予備）、collect → generate、`shared/source-fetch.md`（review / fix → ask、ask → generate の routing 表）だけで、循環は無い。
 
 ### 11.4 将来のマルチエージェント対応
 
@@ -267,6 +333,12 @@
 > 探索順（`.claude/skills` → `.agents/skills`）は `_skill_tree.py` に 1 か所だけ置く。**Skill 内スクリプトにも写しは要らなかった** — Skill 内スクリプトは自分の `__file__` から兄弟を辿れるので、Skill ツリーの位置を知る必要があるのは、`.wikicommit/scripts/` から Skill ツリーを覗く側だけである（Issue #1021 の本文は写しが 2 か所要ると見込んでいた）。
 >
 > **両方に実体がある場合（`--copy` で 2 エージェントに入れた場合）**: 同じインストールから来た写しなので通常は同一バイトであり、順序は答えを変えない。食い違っている場合、`check_distribution_freshness.py` は `.claude/skills` 側と比較する（Claude Code が実行する写しであり、Issue #1021 より前から動いていたリポジトリの答えが変わらない）。`record_run.py` は **どちらかの写しが `--token` を裏づければ `ok`** とする — エージェントは自分のランタイムが読む写しを読んだのであり、このスクリプトにはどちらのランタイムかが分からないので、もう一方の写しが違うことを理由に「読まずに実行した」と記録してはならない。`mismatch` は引き続き「ディスク上のどの写しも裏づけない」を意味する。**照合先を引数で受け取る形にはしない** — スクリプトが自分でファイルを開くことが第三者性の根拠である（Issue #797）。
+>
+> **複数の Skill から使うスクリプトを `.wikicommit/scripts/` へ移した（Issue #1210）**: 上の表の 3 本（`add_source.py`・`remove_page.py`・`resolve_source_cache_path.py`）は、Skill 内に置く理由をそれぞれ「慣行」「崩れている」「反例」と評価されていた。規則を「複数の Skill から使うスクリプトは `.wikicommit/scripts/` に置く。ただし呼び出し元 → 呼び出し先の関係がある場合は呼び出し先の Skill 内に置いてよい」に書き直し、3 本とも移した（`add_source.py` は collect → generate の呼び出し関係にも当たるが、ask も使うので例外に当たらない）。`remove_page.py` が複製していた `normalize_entity_prefix()`・`parse_wiki_path()`・`parse_view_path()`・frontmatter の読み取りは共有モジュールの import に置き換えた。`resolve_source_cache_path.py` の `sys.path.insert(0, ".wikicommit/scripts")`（cwd 相対）は他の共有スクリプトと同じ `Path(__file__).parent` に揃えた。`add_source.py` は import を持たないまま置いた（写しが無いので変える理由が無い）。
+>
+> **古い wiki の扱い — 止めるほうを選んだ**: `/wikicommit-update` の PR をマージするまで、`.wikicommit/scripts/` に移したスクリプトが無い。`schema-authoring.md` が採っている「Skill ツリーの写しを読む」経路（`../wikicommit-init/scripts/templates/…`）に揃える案は採らなかった — データファイル 1 本なら読む先を 1 文で切り替えられるが、スクリプトは generate・collect・ask・review・fix・relate・remove の呼び出しごとにパスの分岐を書くことになり、`skill_workflow.py` 等が無いときに既に採っている「`/wikicommit-update` を案内して止まる」と同じ扱いのほうが指示が少ない。generate は `preflight` 工程が 3 本の有無をスクリプトで確かめる。
+>
+> **`workflow_checks.py` の読み込み部分は複製のまま形をテストで縛った（Issue #1233）**: 共有モジュールを読み込む 9〜10 行（`sys.path.insert` → `try` → `except ImportError` → 案内 → `sys.exit(2)`）が 4 本に複製され、案内の文面も 2 通りあった。加えて `except ImportError` が PyYAML の欠落まで `/wikicommit-update` へ案内していた（generate・merge は `_frontmatter` / `skill_workflow` の import が `try` の中で `yaml` の `ModuleNotFoundError` を出す）一方、translate・synthesize は `try` の外で `import yaml` していたので traceback と exit 1 で終わり、`when:` から呼ばれれば「飛ばす」と読まれえた。エンジン経由ではエンジン自身が先に `import yaml` で止まるので、誤案内が出るのは `references/*.md` が指示する直接実行に限られる。`name == "yaml"` のときだけ PyYAML の導入を案内し、`import yaml` を `try` の中へ移し、`except` 節を 4 本で同一にした。小さなローダを共有する案は採らなかった — `.wikicommit/scripts/` に置けば古い wiki に無いという同じ問題を持ち（それを報告するコードを置けない）、どれかの Skill の木に置けば translate・synthesize がその Skill に依存し `metadata.requires` と README の依存表に宣言が要る。依存の判定を「`.wikicommit/scripts/` のモジュール以外すべて」にしなかったのは、自前のモジュール名の一覧を 4 本に持たせることになるためで、配布物の第三者依存は現状 PyYAML だけである。
 
 #### ルート生成物の一覧は 1 つに保つ
 
@@ -296,6 +368,8 @@
 
 #### Skill 内スクリプトへの越境呼び出し
 
+> **越境呼び出しの大半が無くなった（Issue #1210）**: collect・review・fix・ask・relate・generate が兄弟 Skill 相対で呼んでいた `add_source.py`・`resolve_source_cache_path.py`・`remove_page.py` を `.wikicommit/scripts/` へ移したため、残る越境は update → `init.py` と、generate / merge / update がテンプレート側の `check_distribution_freshness.py` を呼ぶものだけになった。下の「`.wikicommit/scripts/` へ移さなかった理由」（対応表）は「`add_source.py` は Skill 内の自己完結スクリプトである」を前提にしており、移した後はその前提が無い。それでも対応表は `add_source.py` に置いたままにした — 登録と候補提示の 2 経路がどちらも同じスクリプトを通るので、写しは無い。本文の節は「`add_source.py` の対応表」に移した。
+>
 > **`add_source.py --license-for-url` — Skill 内スクリプトへの越境呼び出しの最初の例（Issue #646）**（その後 `wikicommit-review` / `wikicommit-fix` が同じ `add_source.py` の `--fetch-url` と `wikicommit-ask` の `resolve_source_cache_path.py` を呼ぶようになった — いずれも取得・同一性判定の実装を 1 つに保つためで、下の理由と同じ形である。Issue #1015 / #1047。`wikicommit-collect` Step 5.5 は索引ページの取得に、`wikicommit-ask --include-source` はキャッシュの無い URL ソースの取得に〈Issue #1036〉、それぞれ `--fetch-url` を呼ぶ）: 本節冒頭の置き場所の規則（呼び出し元が 1 Skill なら `.claude/skills/<name>/scripts/`、複数なら `.wikicommit/scripts/`）に対する、意図的な例外である（**かつてここは「1 件の例外」「唯一の越境呼び出し」と書いていたが、上の後続で既に偽になっている**）。`wikicommit-collect` が `wikicommit-generate` の Skill 内スクリプトを直接呼ぶ。
 >
 > **`.wikicommit/scripts/` へ移さなかった理由**: 移すべき実体は `KNOWN_SOURCE_LICENSES`（登録可能ドメイン → SPDX 識別子の対応表）とそれを引く 2 関数だが、`add_source.py` は `.wikicommit/scripts/` からの import を一切持たない自己完結スクリプトである（上表の `resolve_source_cache_path.py` の行が述べる既存の制約。**慣行であって硬い制約ではない** — その区別は本節冒頭のコールアウト〈Issue #947〉を参照）。したがって共有モジュール化には (a) この制約を壊す、(b) 対応表を 2 か所に複製する、のどちらかが要る。(b) は「登録時に記録される値」と「候補提示で見せる値」が食い違いうるという、この機能が防ごうとしているものそのものを作り込む（食い違ったときの見え方が最悪 — 人間は提示された条件で承認し、記録されるのは別の条件になる）。(a) は 1 モードのために既存の設計制約を壊す。
@@ -366,6 +440,14 @@
 **「保留する」は「永続化する」ではない。** Issue #315 が旧 `better_type_candidate` を消した理由（「later, maybe としか言わない間接的な信号」が問題の根源だった）は今も有効であり、保留は候補を記録するのではなく**そのソースの処理を進めない**だけである。次の実行が同じソースを同じ状態から読み直し、同じ候補に到達する。
 
 **そして、この方針が呼び出し側のループ設計に掛かる。** サブエージェントの中は定義上ずっと非対話なので、保留が無い状態でバッチをサブエージェントに委ねると、ガード A の誤検知（saitama 実測で 8 件中 4 件）がそのまま `status: failed` になり、**しかもそれはどの報告にも現れなかった**（Pass 1 は `failed` を収集せず、`check_ingest_freshness.py` は触らず、`wikicommit-merge` Step 9 は `failed_pages` を見ていたため Pass 1 の失敗では発火しなかった）。Issue #910 はその最後の穴も塞いだ — Step 9 が `status: failed` も対象にし、`wikicommit-status` Step 15 が `failed` / `excluded` / 保留 / `ambiguous` をそれぞれ数える。
+
+##### 保留した質問は繰り返しの後にまとめて尋ねる
+
+Issue #1116 までは、ガード A の `LOW_DENSITY:` と Pass 2b の型候補は対話か非対話かで振る舞いが分かれていた — 対話実行はその場で尋ね、非対話実行はそのソースを保留した（Issue #910・#1069）。これには 3 つの不便があった。(1) 30 件の対話実行で途中の 3 件の質問のために人が張り付く必要があり、離席している間は実行が止まる。(2) 対話か否かは `pass1-extract.md` / `pass2b-type.md` がエージェント自身に判定させる自己申告で、サブエージェントの中から呼ばれると人がいても非対話と判定しうる（Issue #892）。(3) 非対話と判定した実行の保留は、その実行の中では二度と拾われない。
+
+Issue #1116 で、どちらの実行でも保留に倒し、繰り返しの後の `human` 工程でまとめて尋ね、答えたソースだけを同じ実行の中で処理し直す形にした。
+
+**採らなかった案**: 実行を分けて答えを持ち越す（ガード A の「続行する」を記録する場所が管理ファイルに要り、Issue #910 の「`status` に値を足さない」「受け皿だけ先に配らない」に反する。次の実行で同じ警告にまた当たって保留になる）。答えを 1 つの `human` 工程の答えの値に詰める（項目ごと・型ごとの答えを表せない。`human` 工程に `adds` を持たせて一覧で渡すことにした）。2 回目の繰り返しでも質問の工程を置く（終わりの保証が要る。答えの無い候補は保留のまま終える）。
 
 ### 11.6 wikicommit-generate の多段生成アルゴリズム
 

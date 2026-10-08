@@ -46,7 +46,9 @@ Every page whose title changes goes back to `review_status: pending` (and
 loses `reviewed_by`): the title is content, and a person's sign-off covers the
 text they read. Its translations are left for `/wikicommit-translate` like any
 other translation of a changed page. Review records stay where they are: a
-record names the page path it judged.
+record names the page path it judged. `check_review_coverage.py` and the publish
+banner follow the `renamed_at` item back to them (Issue #1162); with the title
+changed, the verdict reads as `STALE_REVIEW:` until the new page is reviewed.
 
 Refused (exit 1, nothing written) when the page is missing, removed, a
 translation, a synthesized page or outside `primary_lang`; when the year is not
@@ -229,12 +231,18 @@ def cmd_apply(args) -> int:
         raise Refused(str(exc)) from exc
 
     new_original = rel(plan["moves"][0][2])
-    for _, old, new, _, new_title, is_translation in plan["moves"]:
+    for _, old, new, old_title, new_title, is_translation in plan["moves"]:
         with old.open(encoding="utf-8", newline="") as f:
             content = f.read()
         with new.open("w", encoding="utf-8", newline="") as f:
             f.write(content)
-        retitle(new, new_title, new_original if is_translation else None)
+        # Only a page whose title changes loses its review status, as in the
+        # branch above: a slug is a file name, not text a person read. A
+        # translation still points at the original's new path.
+        if old_title != new_title:
+            retitle(new, new_title, new_original if is_translation else None)
+        elif is_translation:
+            apply_frontmatter_fields(new, sets=[("translated_from", new_original)])
         print(f"WROTE: {rel(new)}")
     for _, old, new, _, _, _ in plan["moves"]:
         apply_frontmatter_fields(old, sets=[

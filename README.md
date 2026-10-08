@@ -7,11 +7,11 @@
 
 A Git-based knowledge management platform. An LLM generates wiki pages from your source documents, and after automated and human review, they're published as a static wiki. It's implemented as a set of SKILL.md files and runs as-is on whatever LLM environment you already subscribe to, such as Claude Code.
 
-**The goal is a knowledge base an AI can use, with every page traceable to where it came from — published so that people can read whatever interests them.** Each page is built from sources you register, records exactly which version of which document it came from, and is checked by the machine against those documents; the result of that check is recorded and shown on the published page. People then read the pages they care about. Publishing is why the traceability matters: the person reading a page is not the person who made it, and the record attached to the page is what they have to judge it by.
+**The goal is a knowledge base an AI can use, with every page traceable to where it came from — published so that people can read whatever interests them.** Each page is built from sources you register, records exactly which version of which document it came from, and is checked by the machine against those documents; the result of that check is recorded and shown on the published page. People then read the pages they care about. The traceability matters because the reader does not already know the content: someone reading the published wiki did not make it, and even when you build one to study a subject yourself, you are reading about what you do not yet know. Either way, the reader cannot spot an error or tell where the source ends, and the record attached to the page is what they have to judge it by.
 
 **A wiki is the shape that serves both.** A machine reads its types, links, and sources as structure; a person reads it by following links. Each page is one subject with a Schema.org `type` — the one field [OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (Open Knowledge Format) v0.1 requires — so what the wiki knows is not locked into a format only WikiCommit reads, and each page can be checked on its own. An LLM writes the pages so that turning scattered sources into typed pages, and keeping them up to date, is not left to a person's hands.
 
-WikiCommit started as an implementation of the *LLM wiki* idea — an LLM that reads your sources and writes and maintains a wiki from them, as sketched in [Andrej Karpathy's LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f). What it adds is checking every page against the documents it was written from, recording a verdict for each page on its own, and sending every change through a PR.
+In short: a small, source-traceable Wikipedia on a subject you want to learn, built by one person together with an AI, read to learn from, and publishable. **How** it is made comes from the *LLM wiki* idea — an LLM that reads your sources and writes and maintains a wiki from them, as sketched in [Andrej Karpathy's LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f); WikiCommit started as an implementation of it. **What** it makes comes from Wikipedia — one article per subject, verifiable, with no original research — rather than the linked personal notes most LLM wiki implementations mean by "wiki". What it adds to the LLM wiki idea is checking every page against the documents it was written from, recording a verdict for each page on its own, and sending every change through a PR.
 
 > **Status**: Actively being validated through real-world use in pilot repositories; breaking changes may occur.
 
@@ -211,11 +211,12 @@ You can measure your own sources after a single run: `grep extracted_tokens .wik
 # --copy is recommended -- see the note below.
 npx skills add wikicommit/wikicommit --copy
 
-# To install only a specific Skill
-npx skills add wikicommit/wikicommit --skill wikicommit-generate --copy
+# To install only specific Skills, add the Skills they depend on too
+# (see "Installing only some Skills" below)
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-init --copy
 
-# To install multiple specific Skills at once (repeat --skill)
-npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge --copy
+# To install several specific Skills at once (repeat --skill)
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge --skill wikicommit-init --copy
 
 # To install every Skill without prompts (when in doubt, this is a safe choice)
 # Note: do not combine bare --all with --copy. --all is shorthand for
@@ -247,6 +248,28 @@ bash /tmp/wikicommit/install.sh
 > **Devcontainers and GitHub Codespaces**: install from *inside* the container, not on the host before
 > building it. Doing so removes the boundary the symlinks cannot cross, and is worth doing even with
 > `--copy` since the CLI's default placement may change.
+
+### Installing only some Skills
+
+Some Skills read files that live inside another Skill's directory, so installing one without the
+other leaves part of it silently not working — for example, `wikicommit-generate` without
+`wikicommit-init` loses its fallback for adding a type and its check that `.wikicommit/scripts/`
+matches the installed release. When you install only some Skills — naming them with `--skill`, or
+ticking them in the interactive picker — also install every Skill in the right-hand column for each
+of them. The column already follows dependencies through (a Skill that
+needs `wikicommit-generate` also needs what `wikicommit-generate` needs); each Skill declares its direct
+dependencies in its `SKILL.md` frontmatter as `metadata.requires`, and this table is checked
+against those declarations. Skills not listed need no other Skill.
+
+| Skill | Also install |
+|---|---|
+| `wikicommit-generate` | `wikicommit-init` |
+| `wikicommit-merge` | `wikicommit-init` |
+| `wikicommit-schema-propose` | `wikicommit-init` |
+| `wikicommit-update` | `wikicommit-init` |
+| `wikicommit-collect` | `wikicommit-generate` `wikicommit-init` |
+| `wikicommit-review` | `wikicommit-generate` `wikicommit-init` |
+| `wikicommit-fix` | `wikicommit-generate` `wikicommit-init` |
 
 After installation, run this in the repository where you want to initialize the wiki:
 

@@ -97,6 +97,15 @@ def build_required_fields(default_schema: dict, type_schema: dict) -> list[str]:
     return result
 
 
+def _inside_repo(path: Path, repo_root: Path) -> bool:
+    """Whether `path`, symlinks followed, lies under `repo_root` (an absolute
+    `sources[].path` or one climbing out with `..` does not)."""
+    try:
+        return path.resolve().is_relative_to(repo_root.resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
 def validate_source_item(src: object, idx: int, repo_root: Path) -> list[tuple[str, str]]:
     errors: list[tuple[str, str]] = []
     if not isinstance(src, dict):
@@ -111,9 +120,12 @@ def validate_source_item(src: object, idx: int, repo_root: Path) -> list[tuple[s
     if src_type == "path":
         if "path" not in src:
             errors.append((f"sources[{idx}].path", "required field is missing"))
-        else:
-            if not (repo_root / str(src["path"])).exists():
-                errors.append((f"sources[{idx}].path", f"file does not exist: {src['path']}"))
+        elif not _inside_repo(repo_root / str(src["path"]), repo_root):
+            # Before the existence check, so the report does not tell whether a
+            # file outside the repository exists.
+            errors.append((f"sources[{idx}].path", f"resolves outside the repository: {src['path']}"))
+        elif not (repo_root / str(src["path"])).exists():
+            errors.append((f"sources[{idx}].path", f"file does not exist: {src['path']}"))
         if "hash" not in src:
             errors.append((f"sources[{idx}].hash", "required field is missing"))
         elif not str(src["hash"]).startswith("sha256:"):

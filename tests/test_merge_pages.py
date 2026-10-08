@@ -18,7 +18,7 @@ SCRIPTS = REPO_ROOT / ".wikicommit" / "scripts"
 MERGE = SCRIPTS / "merge_pages.py"
 REWRITE = SCRIPTS / "rewrite_merged_links.py"
 RECORD = SCRIPTS / "record_relation.py"
-REMOVE = REPO_ROOT / ".claude" / "skills" / "wikicommit-remove" / "scripts" / "remove_page.py"
+REMOVE = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts" / "templates" / "scripts" / "remove_page.py"
 CHECKS = REPO_ROOT / ".claude" / "skills" / "wikicommit-generate" / "scripts" / "workflow_checks.py"
 
 KEEP = ".wikicommit/entity/en/DefinedTerm/tool-use.md"
@@ -172,7 +172,7 @@ def test_rewrite_dry_run_writes_nothing(tmp_path):
 
 def _run_record(root: Path, args: list[str], log: list[dict]) -> Path:
     path = root / "run.md"
-    path.write_text("---\n" + yaml.safe_dump({"args": args, "driver": {"log": log}}) + "---\n", encoding="utf-8")
+    path.write_text("---\n" + yaml.safe_dump({"args": args, "workflow": {"log": log}}) + "---\n", encoding="utf-8")
     return path
 
 
@@ -180,6 +180,9 @@ def test_merge_ready_only_after_the_kept_page_was_rebuilt(tmp_path):
     args = ["--regenerate", KEEP, "--merge", ABSORB]
     rebuilt = [{"step": "pass4-review", "item": KEEP, "outcome": "rebuilt"}]
     failed = [{"step": "pass4-review", "item": KEEP, "outcome": "failed"}]
+    # workflow_checks.py imports its shared helpers from `.wikicommit/scripts/` (Issue #1219).
+    (tmp_path / ".wikicommit").mkdir(exist_ok=True)
+    (tmp_path / ".wikicommit" / "scripts").symlink_to(SCRIPTS.resolve(), target_is_directory=True)
     assert run(tmp_path, CHECKS, "merge-ready", "--run", str(_run_record(tmp_path, args, rebuilt))).returncode == 0
     assert run(tmp_path, CHECKS, "merge-ready", "--run", str(_run_record(tmp_path, args, failed))).returncode == 1
     plain = _run_record(tmp_path, ["--regenerate", KEEP], rebuilt)

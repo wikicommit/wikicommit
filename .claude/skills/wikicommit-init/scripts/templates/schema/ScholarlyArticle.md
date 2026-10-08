@@ -7,6 +7,7 @@ wikicommit:
     - A paper mentioned only in passing (e.g. cited alongside several others with no independent discussion of its own findings) is an incidental mention, not an independent subject — do not create a page for it
     - author lists multiple names; link each author who independently qualifies for their own [[Person/slug]] page with a WikiLink, and list others as plain text
     - The body should summarize the paper's own contribution (what it studied, what it found/proposed), not restate the full abstract verbatim
+    - "properties.keywords is the paper's own declared keyword list, not topics you choose: when the paper has a Keywords section (or its equivalent — Index Terms, Key words, CCS Concepts), copy every entry in the paper's order and wording; when it has none, omit keywords entirely. Subject terms you picked from the content go in tags:, and an arXiv subject classification (e.g. Software Engineering (cs.SE)) is not a keyword"
     - Boundary with NewsArticle/BlogPosting — a ScholarlyArticle is peer-reviewed or preprint academic work (a paper, survey, or dissertation with an abstract and citations) — not journalistic reporting about research (use NewsArticle) and not an informal blog post discussing or summarizing research (use BlogPosting), even when the topic is technical
 title: ""
 type: "schema:ScholarlyArticle"

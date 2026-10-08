@@ -6,13 +6,13 @@ pass_token: "e2c5a91f"
 
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to the Skill's directory (the parent of this `references/` directory), not to the repository root — the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there. Paths starting with `.wikicommit/` are repository-root paths as before.
 
-The driver gives you this step only when the run was invoked with a source argument. It registers that source and names the management file the rest of the run processes. **Finish it with `driver.py done`** as the driver's `then` line shows, passing this file's `pass_token` (`e2c5a91f`) as `--token` and one of these outcomes:
+The workflow engine gives you this step only when the run was invoked with a source argument. It registers that source and names the management file the rest of the run processes. **Finish it with `skill_workflow.py done`** as the workflow engine's `then` line shows, passing this file's `pass_token` (`e2c5a91f`) as `--token` and one of these outcomes:
 
-- `registered`, with `--add registered=<management file>` for **each** management file `add_source.py` created, updated, or queued for a recheck (a directory with `--include` can register several). The driver's check confirms each named file exists under `.wikicommit/source/`, and processes exactly these.
+- `registered`, with `--add registered=<management file>` for **each** management file `add_source.py` created, updated, or queued for a recheck (a directory with `--include` can register several). The workflow engine's check confirms each named file exists under `.wikicommit/source/`, and processes exactly these.
 - `nothing` — there is nothing to process: `SKIP:` on a finished `type: path` source, `RETRACTED:`, a policy conflict declined or left unanswered, or anything else below that says to exit. The run ends normally.
 - `halted`, with `--reason "<the error>"` — `add_source.py` exited 1.
 
-Say which one it was, and why, before you report it; the driver records the outcome but not your explanation.
+Say which one it was, and why, before you report it; the workflow engine records the outcome but not your explanation.
 
 
 0. **Read `.wikicommit/source-policy.md` first, before registering anything**. It holds this wiki's answer to "which sources do we take in", which nothing else does: `theme` in `config.yml` decides which *entities* get pages once a source is already in, so it has no say here. **Read it with `python .wikicommit/scripts/read_policy.py .wikicommit/source-policy.md`, not by opening the file**: a `POLICY:` line is followed by the prose to apply, and a `NONE:` line means there is none — carry on without one, exactly as an empty `theme` disables the entity judgment. The script removes the worked example this file ships with, and any other HTML comment, so a shipped example is never mistaken for something this wiki decided. Read the frontmatter separately for `rejected:`, `exclude_domains` and `index_only`; the script deliberately does not touch it.
@@ -35,7 +35,7 @@ Say which one it was, and why, before you report it; the driver records the outc
 2. Run the following command:
 
    ```bash
-   python scripts/add_source.py <source> [--include "<glob>"]
+   python .wikicommit/scripts/add_source.py <source> [--include "<glob>"]
    ```
 
 3. Check the output and notify the user:
@@ -44,7 +44,7 @@ Say which one it was, and why, before you report it; the driver records the outc
      - `generated` / `failed` (`type: path` only — for `type: url`/`wikicommit` this state produces `RECHECK:` instead, see below) → Notify: "No changes (skipped). To regenerate, set the management file's status to `pending` and re-run." — `nothing`.
      - `pending` / `outdated` / `partial` → `registered`.
    - `UPDATED:` → Notify the user that the management file was updated (hash mismatch → `outdated`, or hash unchanged → `outdated → pending` reset) — `registered`.
-   - `RECHECK:` (`type: url` / `wikicommit` only) → The management file's previous run already completed (`status: generated`/`failed`/`excluded`). A URL source's hash can't be recomputed locally, so the only way to know whether the remote content changed is to re-fetch it. Notify the user that WikiCommit will re-fetch the URL to check for changes, then report `registered` for this single management file: treat it as selected for processing even though its current `status` is not `pending`/`outdated`/`partial` (Step 0 having picked exactly this file is what qualifies it, same as the "if an argument was given" override in Pass 1 step 1; the driver processes exactly the files you `--add`) — and mark it as a **forced recheck** so Pass 1 applies the special handling in the "Hash write-back" section of `references/pass1-extract.md` (bypass the scratch-file cache; compare the fresh fetch to the *current* `source.hash` before deciding whether to proceed).
+   - `RECHECK:` (`type: url` / `wikicommit` only) → The management file's previous run already completed (`status: generated`/`failed`/`excluded`). A URL source's hash can't be recomputed locally, so the only way to know whether the remote content changed is to re-fetch it. Notify the user that WikiCommit will re-fetch the URL to check for changes, then report `registered` for this single management file: treat it as selected for processing even though its current `status` is not `pending`/`outdated`/`partial` (Step 0 having picked exactly this file is what qualifies it, same as the "if an argument was given" override in Pass 1 step 1; the workflow engine processes exactly the files you `--add`) — and mark it as a **forced recheck** so Pass 1 applies the special handling in the "Hash write-back" section of `references/pass1-extract.md` (bypass the scratch-file cache; compare the fresh fetch to the *current* `source.hash` before deciding whether to proceed).
    - `RETRACTED:` → A human previously withdrew this source: they read it, judged its content unreliable, and set the management file's `status` to `retracted`. **Quote the reason the message carries** (`add_source.py` reads it out of the management file's `## Retraction Reason` section) and report `nothing` — register nothing, re-fetch nothing. Say what it would take to reverse the decision: edit the management file's `status` back to `pending`, delete its `## Retraction Reason` section, and re-run. Never do that yourself: the machine judges pages *against* their sources and so cannot judge a source, which is why only a human can write this value and only a human can lift it. If the message says no reason was recorded, say that too rather than treating the retraction as doubtful.
    - Exit code 1 (error) → Display the error and report `halted` with the error as `--reason`.
 

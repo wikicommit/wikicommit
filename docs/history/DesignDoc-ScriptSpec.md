@@ -740,6 +740,12 @@ Issue #752 が `rules_version` の echo 検証を成立させられたのは、�
 
 > **その順序が壁時計に依存していたため、後方ステップで最新の実行を削除しうる状態だった（Issue #991）**。`allocate_run_path()` は `datetime.now()` のスタンプをそのまま使っており、ホストが時計を後方へ動かすコンテナでは連続する 2 件が逆順のスタンプを得る。現在は**そのディレクトリに既にある最新記録まで切り上げてから採番する**（`record_review.py` の `allocate_record_path()` とまったく同じ形。決定の全体は `docs/DesignDoc-data.md` §4.8）。**採番はファイル名ではなくスタンプを見る**（`next_seq()`）— skill スラッグは `run_sort_key()` の一部ではないため、`generate` の隣へ切り上げた `merge` の記録は空いている `<stamp>-merge.md` を取って**同値になり**、安定ソートである `sorted()` は `LAST_RUN:` の選択もこのローテーションの削除対象も `glob()` の順に委ねてしまう。同じ理由で、ローテーションがそのスタンプの seq 1 を削って空けた未サフィックスの名前も再利用しない（再利用すると最新の実行が最古の位置に着地する）。こちらの影響が一段重いのは、`run_sort_key()` が `LAST_RUN:` の選択だけでなく**このローテーションが何を消すか**も決めるためである。
 
+## skill_workflow.py
+
+> **`human` 工程の `finishes_on` と `check-merge --except-run`（Issue #1094）**: `wikicommit-merge` をドライバーに載せたときに足した 2 つで、どちらも merge 固有の知識ではなく形の一般化である。前者は Step 3 の warning の続行確認で利用者が「やめる」と答えた場合のためにある — 以前の merge はこの場合、実行記録を開いたまま中断していたが、利用者が決めて止めた実行を `INCOMPLETE_RUN:` に数える理由は無く、`finish_if_empty`（「No changes to merge」）と同じく正常な終わりとして閉じる。halt を流用する案は、`check_run_records.py` が失敗と区別できなくなるため採らなかった。後者は、Issue #1085 の時点では merge が `record_run.py start` で記録を開いていて `driver:` キーを持たず、`open_runs()` に現れなかったため要らなかった。merge 自身がドライバーで進むようになると、自分の実行が開いたまま `check-merge` を呼ぶことになる。merge の工程は `TOUCHED:` を出さないので今の定義では重ならないが、それに頼ると「merge の確認スクリプトが `TOUCHED:` を出したら自分を止める」という離れた不変条件が生まれるため、名指しで除く形にした。
+>
+> **状態の中の定義ファイルのフィールドを `workflow` → `definition` に改名（Issue #1209）**: Issue #1203 が状態キーを `driver:` → `workflow:` にした結果、状態が自前の `workflow`（定義ファイルのパス）を持って `record["workflow"]["workflow"]` という入れ子ができた（PR #1205 のコードレビューの指摘）。3 案を比べた — (1) 現状のまま用語を DesignDoc に明記する: 読み違えの余地が残る。(2) 状態キーを `workflow_state:` などに変える: PR #1205 が決めたばかりのディスク上の形式を変え、旧キーが `driver:`・`workflow:` の 2 つになって、共有モジュールも使う `run_state()` が 3 キーを試すことになる。(3) 状態の中のフィールドを `definition` / `definition_sha256` に変える: 読み替えがエンジンの `load_run()` の中で閉じ、確認スクリプトの側（状態キー名を持たない）に影響しない。(3) を採った。旧フィールド名の記録は状態キーが `workflow:` でも `driver:` でも `next` で再開でき、次の書き込みで新しい名前へ移ることを `tests/test_skill_workflow.py` が確かめる。
+
 ## check_run_records.py
 
 ### 目的

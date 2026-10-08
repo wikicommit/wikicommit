@@ -96,6 +96,24 @@ def test_apply_renames_with_translations_links_and_source_files(tmp_path):
         assert "ERROR" not in check.stdout, check.stdout
 
 
+def test_a_title_already_qualified_keeps_the_review_status_when_only_the_slug_changes(tmp_path):
+    """Issue #1246: a slug is a file name, not text a person read."""
+    wiki(tmp_path)
+    for path, old, new in ((V3, "仕事の未来報告書", "仕事の未来報告書（2025）"),
+                           (V3_EN, "Future of Work Report", "Future of Work Report (2025)")):
+        page = tmp_path / path
+        page.write_text(page.read_text(encoding="utf-8").replace(f'"{old}"', f'"{new}"'), encoding="utf-8")
+    result = run(tmp_path, RENAME, "apply", "--page", V3, "--year", "2025", "--today", "2026-10-02")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "TITLE:" not in result.stdout
+    new = yaml.safe_load((tmp_path / V3_NEW).read_text(encoding="utf-8").split("---")[1])
+    assert new["title"] == "仕事の未来報告書（2025）"
+    assert new["review_status"] == "reviewed" and new["reviewed_by"] == "someone"
+    new_en = yaml.safe_load((tmp_path / V3_EN_NEW).read_text(encoding="utf-8").split("---")[1])
+    assert new_en["title"] == "Future of Work Report (2025)"
+    assert new_en["translated_from"] == V3_NEW
+
+
 def test_a_slug_already_qualified_only_changes_the_title(tmp_path):
     wiki(tmp_path)
     result = run(tmp_path, RENAME, "apply", "--page", V4, "--year", "2026",

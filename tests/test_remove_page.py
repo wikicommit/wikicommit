@@ -1,4 +1,4 @@
-"""Tests for .claude/skills/wikicommit-remove/scripts/remove_page.py (#123)"""
+"""Tests for remove_page.py (.wikicommit/scripts/, Issue #1210) (#123)"""
 
 import importlib.util
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parent.parent / ".claude" / "skills" / "wikicommit-remove" / "scripts" / "remove_page.py"
+SCRIPT = Path(__file__).parent.parent / ".claude/skills/wikicommit-init/scripts/templates/scripts/remove_page.py"
 
 _spec = importlib.util.spec_from_file_location("remove_page", SCRIPT)
 remove_page = importlib.util.module_from_spec(_spec)

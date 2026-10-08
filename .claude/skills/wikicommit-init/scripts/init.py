@@ -365,10 +365,55 @@ def quartz_locale_for(primary_lang: str) -> str:
                                              DEFAULT_QUARTZ_LOCALE)
 
 
-_THEME_LINE_RE = re.compile(r"^theme:.*$", re.MULTILINE)
+def _dump_theme(theme: str) -> str:
+    """Render a theme as one double-quoted YAML scalar on a single line.
+
+    `width=inf` matters: yaml.dump folds a double-quoted scalar at the default width
+    of 80, so a long theme would otherwise span several lines even without a newline
+    in it. Newlines inside the theme are escaped as `\\n`, so the result is always one
+    line, which keeps the value easy to read and edit by hand.
+    """
+    return yaml.dump(
+        theme, default_style='"', allow_unicode=True, width=float("inf")
+    ).strip()
 
 
-_VERSION_LINE_RE = re.compile(r"^wikicommit_version:.*$", re.MULTILINE)
+def _theme_value_span(content: str) -> tuple[int, int] | None:
+    """Character range of the top-level `theme` value in config.yml, or None if absent.
+
+    A range from the parsed node rather than a `^theme:.*$` line match: an existing
+    value may span several lines — a double-quoted scalar folded by an older init, a
+    block scalar (`|`) or a folded plain value written by hand — and replacing only
+    its first line leaves the continuation lines behind, which makes the whole file
+    unparseable. Everything outside the range (comments, other keys) is kept as is.
+    The last `theme` key wins, matching what yaml.safe_load (and so every Skill) reads.
+    """
+    root = yaml.compose(content, Loader=yaml.SafeLoader)
+    if not isinstance(root, yaml.MappingNode):
+        return None
+    span = None
+    for key_node, value_node in root.value:
+        if isinstance(key_node, yaml.ScalarNode) and key_node.value == "theme":
+            span = value_node.start_mark.index, _node_end(value_node)
+    return span
+
+
+def _node_end(node: yaml.Node) -> int:
+    """End index of a node's own text.
+
+    A block collection's end mark sits on the next key, past any comment lines
+    in between; end at its last child instead so those comments are kept.
+    """
+    while isinstance(node, yaml.CollectionNode) and not node.flow_style and node.value:
+        last = node.value[-1]
+        node = last[1] if isinstance(node, yaml.MappingNode) else last
+    return node.end_mark.index
+
+
+# `[^\r\n]*` rather than `.*$`: in a mixed-line-break file (handed out with its `\r`
+# kept, see `_read_keeping_newline()`) `.` would swallow a CRLF line's `\r`, and the
+# rewritten line would come back LF (Issue #1189).
+_VERSION_LINE_RE = re.compile(r"^wikicommit_version:[^\r\n]*", re.MULTILINE)
 
 # The one switch in entity-policy.md, matched as a line rather than as YAML.
 # That file is nine parts commented-out worked example to one part frontmatter,
@@ -376,10 +421,40 @@ _VERSION_LINE_RE = re.compile(r"^wikicommit_version:.*$", re.MULTILINE)
 # — the same way it drops config.yml's commented-out site_description example
 # (Issue #713). What is lost here is worse: the comment block is the file's
 # entire body, including the warning about over-excluding that the template
-# exists to deliver. So this is a textual one-line rewrite, like _update_theme().
+# exists to deliver. So this is a textual rewrite, like _update_theme().
 _EXCLUDE_LIVING_PERSONS_LINE_RE = re.compile(
-    r"^(\s*)exclude_living_persons:.*$", re.MULTILINE
+    r"^(\s*)exclude_living_persons:[^\r\n]*", re.MULTILINE
 )
+
+
+def _read_keeping_newline(path: Path) -> tuple[str, str]:
+    """`path`'s text with LF line breaks, and the line break to write it back with (Issue #1189).
+
+    `Path.read_text()` translates CRLF to LF on the way in and `write_text()` translates LF
+    to `os.linesep` on the way out, so a single-value rewrite through them changes the line
+    ending of every line whenever the file's convention and the running OS's default differ
+    (a CRLF config.yml on Linux/macOS, an LF one on Windows) — `git diff` then shows the
+    whole file. Reading with `newline=""` sees the bytes as they are.
+
+    A file whose every break is CRLF is handed out normalized to LF, so the line-oriented
+    regexes below need not know about `\r`, and goes back as CRLF. Anything else (LF, or a
+    mix) is handed out untouched and written back as is, with LF for whatever the caller
+    adds — normalizing a mixed file would rewrite the lines that were already LF.
+    """
+    with path.open(encoding="utf-8", newline="") as f:
+        raw = f.read()
+    crlf = raw.count("\r\n")
+    if crlf and crlf == raw.count("\n"):
+        return raw.replace("\r\n", "\n"), "\r\n"
+    return raw, "\n"
+
+
+def _write_with_newline(path: Path, text: str, newline: str) -> None:
+    """Write `text` (LF breaks) back with `newline`, untranslated by the OS (Issue #1189)."""
+    if newline != "\n":
+        text = text.replace("\n", newline)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        f.write(text)
 
 
 def _set_exclude_living_persons(policy_path: Path) -> bool:
@@ -391,16 +466,16 @@ def _set_exclude_living_persons(policy_path: Path) -> bool:
     `--update-<field>` path to overwrite that decision later.
     """
     try:
-        content = policy_path.read_text(encoding="utf-8")
+        content, newline = _read_keeping_newline(policy_path)
         if not _EXCLUDE_LIVING_PERSONS_LINE_RE.search(content):
             return False
         # A lambda replacement, not a raw string: re.sub would interpret
         # backslash escapes in the replacement text (same reason as
-        # _update_theme() above, Issue #371).
+        # set_frontmatter_field.py, Issue #371).
         content = _EXCLUDE_LIVING_PERSONS_LINE_RE.sub(
             lambda m: f"{m.group(1)}exclude_living_persons: true", content, count=1
         )
-        policy_path.write_text(content, encoding="utf-8")
+        _write_with_newline(policy_path, content, newline)
         return True
     except OSError:
         return False
@@ -470,13 +545,18 @@ def _merge_skill_overrides(settings_path: Path, template_path: Path) -> str:
     return "updated"
 
 
-def _read_config(repo_root: Path) -> tuple[Path, str] | None:
-    """The config.yml path and its text, or None after printing why not."""
+def _read_config(repo_root: Path) -> tuple[Path, str, str] | None:
+    """The config.yml path, its text (LF breaks) and the line break to write it back
+    with (see `_read_keeping_newline()`), or None after printing why not."""
     config_path = repo_root / ".wikicommit" / "config.yml"
     if not config_path.is_file():
         print(f"ERROR: {config_path} does not exist (run wikicommit-init first)", file=sys.stderr)
         return None
-    return config_path, config_path.read_text(encoding="utf-8")
+    try:
+        return (config_path, *_read_keeping_newline(config_path))
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"ERROR: could not read {config_path}: {e}", file=sys.stderr)
+        return None
 
 
 def _update_version(repo_root: Path, version: str) -> int:
@@ -497,20 +577,20 @@ def _update_version(repo_root: Path, version: str) -> int:
     read = _read_config(repo_root)
     if read is None:
         return 1
-    config_path, content = read
+    config_path, content, newline = read
     try:
         new_line = f'wikicommit_version: "{version}"'
         if _VERSION_LINE_RE.search(content):
             # Lambda replacement rather than a raw string, for the same reason
-            # _update_theme() gives: re.sub interprets backslash escapes in a string
-            # replacement.
+            # set_frontmatter_field.py gives (Issue #371): re.sub interprets backslash
+            # escapes in a string replacement.
             content = _VERSION_LINE_RE.sub(lambda _m: new_line, content, count=1)
         else:
             # A config.yml created before Issue #577 has no stamp at all. Prepend rather
             # than append: the template carries it as the first line, and keeping that
             # position means a stamped file looks the same however it got stamped.
             content = new_line + "\n" + content
-        config_path.write_text(content, encoding="utf-8")
+        _write_with_newline(config_path, content, newline)
         print(f"UPDATED: {config_path.relative_to(repo_root)} (wikicommit_version)")
         return 0
     except Exception as e:
@@ -577,7 +657,7 @@ def _add_config_keys(repo_root: Path, templates_dir: Path, keys: list[str]) -> i
     if not template_path.is_file():
         print(f"ERROR: {template_path} does not exist", file=sys.stderr)
         return 1
-    config_path, content = read
+    config_path, content, newline = read
     try:
         template_lines = template_path.read_text(encoding="utf-8").splitlines()
         existing = {
@@ -622,7 +702,7 @@ def _add_config_keys(repo_root: Path, templates_dir: Path, keys: list[str]) -> i
                     file=sys.stderr,
                 )
                 return 1
-            config_path.write_text(content, encoding="utf-8")
+            _write_with_newline(config_path, content, newline)
             print(f"UPDATED: {config_path.relative_to(repo_root)} ({', '.join(added)})")
         print(f"SUMMARY: added={len(added)}")
         return 0
@@ -665,36 +745,72 @@ def _template_key_block(template_lines: list[str], key: str) -> list[str] | None
 
 
 def _update_theme(repo_root: Path, theme: str) -> int:
-    """Rewrite only the `theme:` line of an already-existing config.yml (#374).
+    """Rewrite only the `theme` value of an already-existing config.yml (#374).
 
     Unlike write_file()'s --no-overwrite handling (which skips config.yml wholesale
     on a repeat init to protect the rest of the file), this is an explicit,
     single-field update the caller opted into by name — it always overwrites
     whatever theme value was previously there.
     """
-    config_path = repo_root / ".wikicommit" / "config.yml"
-    if not config_path.is_file():
-        print(f"ERROR: {config_path} does not exist (run wikicommit-init first)", file=sys.stderr)
+    read = _read_config(repo_root)
+    if read is None:
         return 1
+    config_path, content, newline = read
     try:
-        content = config_path.read_text(encoding="utf-8")
-        theme_yaml = yaml.dump(theme, default_style='"', allow_unicode=True).strip()
-        new_line = f"theme: {theme_yaml}"
-        if _THEME_LINE_RE.search(content):
-            # A lambda replacement (not the raw string) is required here: re.sub
-            # interprets backslash escapes (\n, \\, ...) in a string replacement,
-            # which would corrupt any YAML-escaped backslash/newline already
-            # inside theme_yaml. set_frontmatter_field.py uses the same lambda
-            # pattern for the identical reason (Issue #371).
-            content = _THEME_LINE_RE.sub(lambda _m: new_line, content, count=1)
+        theme_yaml = _dump_theme(theme)
+        try:
+            span = _theme_value_span(content)
+            before = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            print(
+                f"ERROR: {config_path.relative_to(repo_root)} is not valid YAML, so the "
+                f"theme was not updated; fix the file by hand first ({e})",
+                file=sys.stderr,
+            )
+            return 1
+        if before is not None and not isinstance(before, dict):
+            print(
+                f"ERROR: {config_path.relative_to(repo_root)} is not a YAML mapping, so the "
+                "theme was not updated; fix the file by hand first",
+                file=sys.stderr,
+            )
+            return 1
+        if span is not None:
+            start, end = span
+            old_value = content[start:end]
+            # A block scalar's range runs through its trailing line breaks (and any
+            # blank lines kept with it); put them back so the next key stays on its
+            # own line.
+            trailing = old_value[len(old_value.rstrip()):]
+            # An empty value (`theme:` with nothing after it) has an empty range right
+            # after the colon, so it needs the separating space.
+            replacement = theme_yaml if start != end else f" {theme_yaml}"
+            content = content[:start] + replacement + trailing + content[end:]
         else:
             # A config.yml created before #160 has no theme field at all; append
             # one. theme is a flat top-level key, so its position doesn't affect
             # parsing.
             if content and not content.endswith("\n"):
                 content += "\n"
-            content += ("\n" if content else "") + new_line + "\n"
-        config_path.write_text(content, encoding="utf-8")
+            content += ("\n" if content else "") + f"theme: {theme_yaml}" + "\n"
+        # Refuse to write a file that no longer says what was asked: a config.yml
+        # every Skill reads with yaml.safe_load must stay parseable, hold the new
+        # theme and keep every other key exactly as it was.
+        try:
+            after = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            after = None
+            reason = f"it would no longer parse ({e})"
+        else:
+            reason = "the result did not read back as the requested theme"
+        expected = dict(before or {}, theme=theme)
+        if after != expected:
+            print(
+                f"ERROR: {config_path.relative_to(repo_root)} was not changed: {reason}",
+                file=sys.stderr,
+            )
+            return 1
+        _write_with_newline(config_path, content, newline)
         print(f"UPDATED: {config_path.relative_to(repo_root)} (theme)")
         return 0
     except Exception as e:
@@ -877,8 +993,9 @@ def main() -> int:
         # yaml.dump handles all YAML-significant characters (quotes, backslashes,
         # newlines, control chars) correctly; manual backslash/quote-only escaping
         # left newlines silently folded to spaces and control chars unescaped
-        # (producing a config.yml that fails to parse at all).
-        theme_yaml = yaml.dump(args.theme, default_style='"', allow_unicode=True).strip()
+        # (producing a config.yml that fails to parse at all). _dump_theme() also
+        # keeps it on a single line.
+        theme_yaml = _dump_theme(args.theme)
         config_content = (
             config_template
             .replace("{VERSION}", _read_template_version(templates_dir))

@@ -40,7 +40,8 @@ docs/DesignDoc-skills.md section 11.6, which draws the same line.
 
 ## What counts as instruction surface
 
-Every `.md` under the Skill's directory, including `SKILL.md`. `scripts/` holds
+Every `.md` under the Skill's directory, including `SKILL.md` — except that a
+`shared/` file is charged to its readers instead (next section). `scripts/` holds
 `.py` and drops out on its own. Two exclusions are deliberate:
 
 - **`CHANGELOG.md` and `changelog/`** (in `wikicommit-init`) — a distribution
@@ -52,6 +53,26 @@ Every `.md` under the Skill's directory, including `SKILL.md`. `scripts/` holds
   Skills at once, so they cannot be charged to any one of them. They are out of
   scope for this metric, and a Skill that leans on one is measured lighter than
   it runs.
+
+## Shared procedure files are charged to the Skills that read them
+
+A file under a Skill's `shared/` directory holds one procedure that **several
+Skills** read, by naming it (`../<owner>/shared/<name>.md` from a sibling,
+`shared/<name>.md` from the owner itself). No Skill has one at present — the
+only one, the review/fix source-fetch procedure, became a script mode — but the
+rule stays so the next one cannot slip under the threshold by moving next door. Charging it to the directory
+it happens to live in would make the owner pay for instructions it never reads
+and let every reader drop below the threshold by moving prose next door — the
+very move this metric exists to see through. So a `shared/` file is counted in
+the surface of **every Skill whose own instruction files name it**, and in no
+other. The owner is just the Skill whose scripts the procedure is about.
+
+Only `shared/` works this way. A `references/` file another Skill happens to
+point at (`wikicommit-generate`'s `text-extraction-routing.md`, read by the
+review and fix Skills only on a cache miss) stays charged to its owner alone,
+so those readers measure lighter than they run at worst. Naming is not followed
+transitively: a `shared/` file pointing at another one does not charge the
+second to its readers.
 
 ## The limit this metric does not see
 
@@ -71,6 +92,8 @@ Exit code: always 0 (warning-only, non-blocking).
 """
 
 import argparse
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -116,6 +139,35 @@ def instruction_files(skill_dir: Path) -> list[Path]:
     return [entry] + [p for p in found if p != entry]
 
 
+# A procedure several Skills read; charged to each reader, not to the owner.
+SHARED_DIR = "shared"
+
+
+def charged_files(skill_dir: Path, skill_dirs: list[Path]) -> list[Path]:
+    """The files whose bytes count toward this Skill's instruction surface.
+
+    Its own instruction files, except its `shared/` ones, plus every `shared/`
+    file — its own or a sibling's — that those files name. See the docstring.
+    """
+    own = [
+        p for p in instruction_files(skill_dir)
+        if p.relative_to(skill_dir).parts[0] != SHARED_DIR
+    ]
+    text = "\n".join(p.read_text(encoding="utf-8-sig") for p in own)
+    charged = list(own)
+    for owner in skill_dirs:
+        for shared in sorted((owner / SHARED_DIR).glob("*.md")):
+            rel = shared.relative_to(owner).as_posix()
+            named = f"../{owner.name}/{rel}" in text
+            if owner == skill_dir and not named:
+                # A bare `shared/<file>` from the owner itself — but not one that
+                # is the tail of another Skill's `../<sibling>/shared/<file>`.
+                named = re.search(r"(?<![\w./-])" + re.escape(rel), text) is not None
+            if named:
+                charged.append(shared)
+    return charged
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Warn on oversized Skill instructions.")
     parser.add_argument(
@@ -132,9 +184,10 @@ def main() -> int:
     over_surface = 0
     over_body = 0
 
-    for skill_dir in collect_skill_dirs():
+    skill_dirs = collect_skill_dirs()
+    for skill_dir in skill_dirs:
         checked += 1
-        files = instruction_files(skill_dir)
+        files = charged_files(skill_dir, skill_dirs)
         surface = sum(len(p.read_text(encoding="utf-8-sig").encode("utf-8")) for p in files)
         body_text = (skill_dir / "SKILL.md").read_text(encoding="utf-8-sig")
         body_bytes = len(body_text.encode("utf-8"))
@@ -159,7 +212,9 @@ def main() -> int:
                 f"{args.body_line_limit}), {body_bytes} B",
             ]
             if len(files) > 1:
-                others = ", ".join(p.relative_to(skill_dir).as_posix() for p in files[1:])
+                others = ", ".join(
+                    Path(os.path.relpath(p, skill_dir)).as_posix() for p in files[1:]
+                )
                 parts.append(f"{len(files)} instruction files: SKILL.md + {others}")
             print(f"WARNING: {skill_dir}: " + "; ".join(parts))
 

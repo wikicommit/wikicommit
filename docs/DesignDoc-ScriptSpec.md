@@ -15,7 +15,7 @@
 - **実行環境**: Python 3.11+
 - **作業ディレクトリ**: リポジトリルート（スクリプト内パスはすべてリポジトリルートからの相対パス）
 - **終了コード**: `0` = 成功・warning のみ、`1` = blocking エラーあり
-- **stdout**: 構造化出力行（`ERROR:` / `WARNING:` / `OK:` / `SUMMARY:` / `ORPHAN:` / `DUPLICATE:` / `WANTED:` / `TYPE_MISMATCH:` / `STALE:` / `OUTDATED:` / `EXPIRED:` / `MISSING_SOURCE:` / `UNTRANSLATED:` / `UNCOVERED:` / `page:` 等）。Skills がパースする。
+- **stdout**: 構造化出力行（`ERROR:` / `WARNING:` / `OK:` / `SUMMARY:` / `ORPHAN:` / `DUPLICATE:` / `WANTED:` / `TYPE_MISMATCH:` / `STALE:` / `OUTDATED:` / `EXPIRED:` / `MISSING_SOURCE:` / `UNTRANSLATED:` / `UNCOVERED:` / `page:` 等）。Skills がパースする。エージェントに次の行動を伝える出力は、**行のキーワードを次の行動に 1 対 1 で対応させ**（`resolve_source_cache_path.py --obtain-sources` の `READ:` は読む・`EXTRACT:` は抽出 Skill を呼ぶ、等）、行に指示文を埋め込まない — 指示は呼び出す SKILL.md に 1 度だけ書く。出力は英語の固定文言なので、指示文を埋め込むとその Skill の版と食い違ったときに直す場所が 2 つになる
 - **stderr**: スクリプト実行時の予期しないエラー（Python 例外・ファイルアクセス失敗等）
 - **出力の言語**: stdout・stderr に出る文字列はすべて英語で書く。読み手は運用者とエージェントであって読者ではないため、管理ファイルの見出しと同じく固定の英語とする。コメント・docstring は日本語のまま据え置く（読み手が開発者であり `docs/` と揃う）。公開ページに出る読者向けラベル（`convert_wikilinks.py` の `ROOT_INDEX_LABELS` / `OVERVIEW_LABELS` / `SOURCE_*_LABELS`）はこの規則の対象外で、`primary_lang` で切り替わる。`tools/check_script_output_language.py` が CI で blocking の回帰ガードとして走るが、`print()` の引数しか見ないため、`_frontmatter.py` のようにメッセージを戻り値として返すスクリプトは手作業で確認する
 
@@ -50,6 +50,7 @@ view ツリー（`.wikicommit/view/<lang>/<slug>.md`。Wiki 自身のページ�
 |---|---|---|
 | 含める | `validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py` / `check_wanted_pages.py` / `check_expires.py` / `check_translation_status.py` / `search_index.py` / `rebuild_index.py` / `convert_wikilinks.py` | view ページも読者に公開されるページであり、リンクし・検索され・索引に載り・鮮度を持つ |
 | 主消費者 | `check_derivation_freshness.py` | `derived_from` を持つページの主な置き場は view ツリーである。**entity ツリーの走査も続ける** — view ツリーができる前に書かれた合成ページはそこに残る（自動移行しない） |
+| 含める（`status: removed` は除く） | `check_external_links.py` | view ページも公開されるページであり、本文に外部リンクを持ちうる。削除済みページは公開されないので調べない |
 | 含める（所見は entity ページにしか出ない） | `check_retracted_sources.py` | view ページは `sources[]` を持たないので直接は一致しないが、走査対象から外さない — 走査の対象と所見の有無は別の話であり、除外すると「view ページは見ていない」という事実が読む側から消える |
 | 除外 | `check_recurring_characters.py` / `check_unlinked_entity_mentions.py`（`properties:` 前提）・`check_schema_coverage.py` / `check_installed_type_usage.py`（`type:` 前提）・`reconcile_ingest_status.py`（`sources[].hash` 前提）・`check_orphans.py`（view ページは生まれつき被リンクゼロ） | いずれも view ページが持たないフィールドを読むか、全件が所見になる |
 | 既定で除外・`--include-view` で包含 | `build_survey_view.py` | 分析をさらに分析することを避ける。着眼点が実際に grounding するのはその下の entity ページである |
@@ -115,7 +116,7 @@ blocking な（exit 1 を返す）ページ検査はスクリプト 4 本・所�
 | `record_review.py` | レビュー 1 件を `.wikicommit/review/` 配下の不変ファイルとして記録（`wikicommit-generate` Pass 4・`wikicommit-review`・`wikicommit-synthesize`・`review-issue-close-sync.yml` 共有） | 引数が entity/view ツリーの外を指す、`--kind ai` に `--model` が無い、`--result` が `discarded` 以外なのにページが存在しない、JSON が壊れている、書き込みに失敗 |
 | `check_review_coverage.py` | レビュー記録の集計・未レビュー／抜取候補／失効の列挙（`wikicommit-status` 専用） | なし（常に 0） |
 | `record_run.py` | 実行 1 回を 1 ファイルとして記録（`start` で開き `end` で閉じる。4 つの書き込み系 Skill が共有） | 引数不正、`end` に渡されたパスが存在しない、`--outcome` の値が整数でない、frontmatter が読めない |
-| `driver.py` | 多段の Skill の工程の順序を持つ（`start` / `next` / `done` / `status` / `check-merge` / `abandon`。`wikicommit-generate` と `wikicommit-merge`） | `done` が受け付けなかった（今の工程でない・確認に失敗・トークンが合わない）、`check-merge` が止めた。使い方の誤り・壊れた工程の定義は exit 2 |
+| `skill_workflow.py` | 多段の Skill の工程の順序を持つ（`start` / `next` / `done` / `status` / `check-merge` / `abandon`。`wikicommit-generate`・`wikicommit-merge`・`wikicommit-translate`・`wikicommit-synthesize`） | `done` が受け付けなかった（今の工程でない・確認に失敗・トークンが合わない）、`check-merge` が止めた。使い方の誤り・壊れたワークフロー定義は exit 2 |
 | `check_run_records.py` | 直近の実行と完走しなかった実行の報告（`wikicommit-status` 専用） | なし（常に 0） |
 | `check_retracted_sources.py` | 人間が取り下げたソース（`status: retracted`）を `sources[]` に持つページの検出（`wikicommit-status`）と、取り下げ済みソースの一覧（`--list`。`wikicommit-review` / `wikicommit-fix` がソースを読む前のガードに使う） | なし（常に 0） |
 | `check_actions_pr_permission.py` | "Allow GitHub Actions to create and approve pull requests" リポジトリ設定の確認（`wikicommit-status` 専用） | なし（常に 0） |
@@ -127,10 +128,14 @@ blocking な（exit 1 を返す）ページ検査はスクリプト 4 本・所�
 | `check_schema_files.py` | 書かれた型ファイル自体が動く形になっているかの検証（`wikicommit-status` 専用） | なし（常に 0） |
 | `check_name_collisions.py` | 同じ名前（タイトル・別名）に答える複数ページの検出。`.wikicommit/relations.yml` で判断済みの組を外す（`wikicommit-status`・`wikicommit-relate` 共有） | なし（常に 0） |
 | `check_groups.py` | `.wikicommit/groups/<Type>.yml` の検証・型ごとの未分類 / stale の件数、`--type` で未分類ページの一覧（`wikicommit-status`・`wikicommit-organize` 共有） | なし（常に 0） |
+| `check_external_links.py` | entity・view の全公開ページの外部リンク切れを lychee で数ページずつ調べる（呼び出しごとにシェルの時間制限の内側で返り、続きはファイルに持つ）。`--last` は最後に完走した結果の読み直し（`wikicommit-status`。バッチを回す関数は `wikicommit-merge` のラッパーも import する） | なし（常に 0。引数の誤りは exit 2） |
 | `record_relation.py` | 人が決めたページ同士の関係を `.wikicommit/relations.yml` に 1 項目追記（`wikicommit-relate` 専用） | 引数不正・存在しないページ・ファイルがリストとして読めない（何も書かない） |
 | `merge_pages.py` | 「同一」のページの統合の計画・記録・確認（`plan` / `record` / `check`。`wikicommit-generate --regenerate --merge` 専用） | 統合を許さない（判断の記録が無い・翻訳・`manual` ソース・ハッシュの食い違い等）、`check` で未完了の部分がある |
 | `rewrite_merged_links.py` | `merged_into` をたどって、吸収されたページへの WikiLink を残すページへ書き換える（同上。`rename_page.py` も使う） | なし（常に 0） |
 | `rename_page.py` | 系列の版の名前を年で修飾する改名（`plan` / `apply`。slug と title・翻訳・リンク・ソース管理ファイル・index を追随させる。`wikicommit-relate` 専用） | 改名を許さない（翻訳・合成ページ・`primary_lang` 以外・年の形式・新しい slug が使用済み等。何も書かない） |
+| `add_source.py` | ソースの登録（管理ファイルのパス計算・ハッシュ・生成・`status` 更新）・`--fetch-url` による URL の取得・`--license-for-url` による既知ライセンスの照会・`type: path` の抽出キャッシュの確認（`wikicommit-generate`・`wikicommit-collect`・`wikicommit-ask`・`resolve_source_cache_path.py` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表と `docs/DesignDoc-pipeline.md` §6.1） | 引数不正・登録の失敗・取得の失敗 |
+| `resolve_source_cache_path.py` | ページの `sources[]` の 1 件から抽出テキストキャッシュを解決し、`--obtain-sources` で review / fix が渡したページの `sources` 全件の本文を得る（`wikicommit-ask`・`wikicommit-review`・`wikicommit-fix`・`wikicommit-relate`・`wikicommit-generate --regenerate` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表） | 管理ファイルもキャッシュも無い・取得できない（exit 2 は取り下げ済み）。`--obtain-sources` は引数の誤り・ページが読めないときだけ（取り下げ・取得失敗は行で伝え exit 0） |
+| `remove_page.py` | ページと翻訳ページに `status: removed` を付与し index から外す（`wikicommit-remove`・`wikicommit-generate --regenerate --merge` 共有） | ページが無い・既に `removed`・`--merged-into` の不備 |
 
 ---
 
@@ -456,7 +461,7 @@ python .wikicommit/scripts/validate_frontmatter.py [<path>...]
 | source.type | フィールド | フォーマット制約 |
 |---|---|---|
 | （全要素） | `type` | `path` / `url` / `wikicommit` / `manual` のいずれか。未定義または許可値以外は ERROR |
-| `path` | `path` | リポジトリ内に実在するパス |
+| `path` | `path` | リポジトリ内に実在するパス。シンボリックリンクを辿った `resolve()` 後のパスがリポジトリルートの配下に無ければ（絶対パス・`..` で外へ出るパス・外を指すシンボリックリンク）`resolves outside the repository` の ERROR とし、存在の判定より前に置く（存在を報告すると、リポジトリ外のファイルの有無が出力から分かる）。登録側の `add_source.py` も絶対パスと、解決先がリポジトリ外になるパス（`..`・外を指すシンボリックリンク）を同じ判定で登録しないので正規のページでは起きず、`resolve_source_cache_path.py --obtain` の `UNAVAILABLE: outside` と同じ判定を品質ゲートでも掛けて、そうした値がマージされる前に止める |
 | `path` | `hash` | `sha256:` プレフィックス |
 | `url` | `url` | `https://` で始まること |
 | `url` | `hash` | `sha256:` プレフィックス |
@@ -537,11 +542,12 @@ OK: 12 files validated, 0 errors, 1 warnings
 ### コマンド
 
 ```
-python .wikicommit/scripts/check_wikilinks.py [--changed <path>... [--deleted <path>...]] [--skip-type-mismatch]
+python .wikicommit/scripts/check_wikilinks.py [--changed <path>...] [--deleted <path>...] [--skip-type-mismatch]
 ```
 
 - `--changed`: 追加・変更されるファイル（WikiLink の参照先を検証する対象）
 - `--deleted`: `status: removed` を新たに付与するファイル（被リンクの残存を確認する対象）
+- `--changed` と `--deleted` は独立した 2 つの検査であり、両方に入ったページは両方の検査を受ける — ページ自身の発リンク（処理 1・2）と、他のページがそのページへ張っている被リンク（処理 3）は別の所見である。`--deleted` だけを渡すと被リンクの検査だけを行う。`wikicommit-merge` は削除するページを `changed_md` にも含めるため、重なりを片方に寄せると被リンク残存の WARNING が出なくなる。merge は 2 つを分けて呼ぶ — `--changed` は変更ページの組ごとに、`--deleted` は削除ページの組ごとに 1 回ずつ（m + k 回）。組の直積で呼ぶと、同じ所見が複数の呼び出しから出て、各呼び出しが被リンク索引のために全ページを読み直す
 - **引数なし**: `.wikicommit/entity/` 配下の全ページ（`assets/` を除く）を検査対象にする。`--changed` 相当だが、**同一コミット内新規追加の例外は無効**にする — あの例外は「参照先はまだ存在しないがこの変更が追加する」という意味であり、対象集合が「既にディスク上にある全ページ」であるときには意味を持たない。有効なままだと全リンクがその分岐を通り、`<primary_lang>` にしか存在しないページへの他言語ページからのリンクが「翻訳ページ未作成」の WARNING を出さずに黙って通ってしまう（このモードが出しうる 2 種類の WARNING の片方が原理的に出なくなる）。`status: removed` ページへのリンクは通常の存在確認経路が同じ ERROR を出す。引数なしで `OK: 0 files checked` を出して終わる実装にはしない — 正常なチェックの成功と区別がつかない。`--deleted` は引数なしモードでは空のまま — 「この変更でこれらのファイルが removed になる」という意味は差分の中にしか存在せず、差分の外に対応物が無い。既に `status: removed` を持つページは `--changed` 側から辿られる。引数なしモードでは、**自身が `status: removed` のページはリンク元として検査しない** — 公開されないページの発リンクは何も壊さず、報告しても誰も二度と編集しないので消えない所見になる（A を削除した後で A が指す B を削除すると、以後 A に ERROR が残り続ける）。`wikicommit-merge` は常に `--changed` を渡すため、差分スコープの挙動はこの分岐の影響を受けない
 - `--skip-type-mismatch`: Type セグメント取り違えの ERROR（下記）を出さない。その所見は `check_wanted_pages.py` が `TYPE_MISMATCH:` として報告しているため、両方を走らせる `wikicommit-status` が同じ所見を 2 回出さないためのフラグである。WARNING にも落とさない — 実在するページを「存在しない」と言うことになり、この分岐が避けようとしている誤りそのものになる。**落とすのは `<Type>/<slug>` がどの言語にも実在しない場合に限る** — それが `check_wanted_pages.py` が `TYPE_MISMATCH:` を出す条件であり、第 3 の言語や removed ページとしてだけ実在する場合は向こうが黙るので、ここの ERROR が唯一の報告になる。`status: removed` へのリンクの ERROR はフラグに関わらず出る。`wikicommit-merge` はこのフラグを渡さない（merge では引き続きブロックする）。重複の除去を SKILL.md の散文（メッセージの文言での除外）に委ねないのは、決定論的に判定できるものを指示に書くことになり、文言が変わると黙って二重報告に戻るためである
 
@@ -557,7 +563,7 @@ python .wikicommit/scripts/check_wikilinks.py [--changed <path>... [--deleted <p
      4. いずれの言語・いずれの Type にも存在しない → **WARNING**（ERROR にしない — ブロックすると LLM・人間の双方が「まだ無い概念は WikiLink 化せず地の文のまま書く」を選びがちになり、複数ソースで繰り返し言及される一般概念がページ化されないまま埋もれる。集計は `check_wanted_pages.py` が別途担う）
    - 参照先ページの `status` が `removed` か → removed の場合は ERROR（変更なし。CLAUDE.md の orphan 検出の非対称設計が指す、削除フローの順序制約回避のための意図的なブロック）
    - 例外: `--changed` 内に同じ `<lang>/<Type>/<slug>` で新規追加されるファイルが存在する場合は上記 ERROR / WARNING としない（同一コミット内の新規追加ページへのリンク）
-3. `--deleted` が指定された場合、削除対象ページへの被リンクを `.wikicommit/entity/` 全体から検索する → 残存する被リンクがあれば WARNING
+3. `--deleted` が指定された場合、削除対象ページへの被リンクを `.wikicommit/entity/`・`.wikicommit/view/` 全体から検索する → 残存する被リンクがあれば WARNING（`--changed` に同じページがあっても行う。リンク元が `status: removed` のページ〈削除対象ページ自身の自己リンク・同じ変更で削除される他のページ・既に削除済みのページ〉は数えない — 公開されないリンクは何も壊さず、報告しても誰も消せない。被リンクはリンク元の言語から `[[Type/slug]]` を解決した先が削除対象ページであるものだけを数える — 同じ slug の翻訳ページへのリンクを言語ごとに重複して報告しないため）
 
 #### Type セグメントの取り違え
 
@@ -896,9 +902,10 @@ python .wikicommit/scripts/check_ingest_freshness.py [<ingest-file>...]
 ### 処理フロー
 
 1. `source.type == path` の管理ファイルを対象（`url` / `wikicommit` はスキップ。URL の鮮度検出は本スクリプトのスコープ外であり、`wikicommit-generate` 再実行時にユーザーが手動で URL を再フェッチして hash を更新することが唯一の検知手段）
-2. `source.path` のファイルで SHA-256 を計算（`sha256sum` コマンドまたは `hashlib`）
-3. `source.hash`（`sha256:` 除いた部分）と比較
-4. 不一致 → OUTDATED として報告し、管理ファイルの `status` を `outdated` に書き換える
+2. `source.path` をシンボリックリンクを辿って `resolve()` した解決先がリポジトリルート（実行時のカレントディレクトリ）の配下に無ければ（絶対パス・`..` で外へ出るパス・外を指すシンボリックリンク）、ファイルを開かずに `WARNING: <管理ファイル>: source.path resolves outside the repository: <path> — not checked` を stderr に出してスキップする。**この判定は存在の判定より前に置く** — 先に存在を確かめると、`source file not found` が出るか否かでリポジトリ外のファイルの有無が出力から分かるため。登録側の `add_source.py` はこうした `source.path` を登録しないので正規の管理ファイルでは起きず、手で書かれた管理ファイルだけが対象になる（`validate_frontmatter.py` が `sources[].path` に掛ける判定と同じ）。`status` は書き換えない（ソースの変化ではなく管理ファイルの誤りであり、`outdated` にすると Pass 1 の収集対象に戻ってしまう）
+3. `source.path` のファイルで SHA-256 を計算（`sha256sum` コマンドまたは `hashlib`）
+4. `source.hash`（`sha256:` 除いた部分）と比較
+5. 不一致 → OUTDATED として報告し、管理ファイルの `status` を `outdated` に書き換える
 
 > **⚠ サイドエフェクトあり（読み取り専用ではない）**: このスクリプトはローカルの管理ファイルを書き換える。`/wikicommit-status` から呼ばれた場合も同様にファイルが変更され `git status` に現れる。変更を main へ反映するには `/wikicommit-merge` を実行すること。意図しない変更を避けたい場合は実行前に `git stash` で退避する。
 
@@ -1167,7 +1174,7 @@ python .wikicommit/scripts/check_distribution_freshness.py [--variant <none|quar
 | `lines` | 同、空行とコメントを除いた行 | `.gitignore` |
 | `none` | 比較しない | `update: skip` のみ |
 
-**`lines` の簡約は `_root_outputs.py` 側にも写しがある**。`init.py` / `print_next_steps.py` が「このリポジトリの `.gitignore` に WikiCommit のパターンが揃っているか」を判定するのに同じ包含判定を要するが、**Skill 内スクリプトから `.wikicommit/scripts/` を import することはできない**（`add_source.py` が同ディレクトリからの import を 1 つも持たない設計制約と同じ。`docs/DesignDoc-skills.md` §11.5）。`remove_page.py` が `normalize_entity_prefix()` を複製しているのと同じ扱いとし、2 つの写しを許容する。**簡約そのもの（空行とコメントを落とす）は同一だが、2 つは同じ答えを返す関数ではない** — `_root_outputs.py` 側は (1) 報告が対処の手順を兼ねるため行の順序を保ち、(2) **variant に応じて `gitignore-quartz.txt` も要求集合に含める**（`content/` / `.quartz-cache/` / `quartz/public/`）。こちら側は下記「既知の限界」のとおり `templates/.gitignore` しか見ないため、`--quartz` リポジトリで Quartz 側のパターンが欠けていても `OUTDATED` にはならない。片方を他方に寄せて統合しないこと。
+**`lines` の簡約は `_root_outputs.py` 側にも写しがある**。`init.py` / `print_next_steps.py` が「このリポジトリの `.gitignore` に WikiCommit のパターンが揃っているか」を判定するのに同じ包含判定を要するが、**`wikicommit-init` の Skill 内スクリプトから `.wikicommit/scripts/` を import することはできない**（`.wikicommit/scripts/` を作る側であり、そこに依存できない。`docs/DesignDoc-skills.md` §11.5）。2 つの写しを許容する。**簡約そのもの（空行とコメントを落とす）は同一だが、2 つは同じ答えを返す関数ではない** — `_root_outputs.py` 側は (1) 報告が対処の手順を兼ねるため行の順序を保ち、(2) **variant に応じて `gitignore-quartz.txt` も要求集合に含める**（`content/` / `.quartz-cache/` / `quartz/public/`）。こちら側は下記「既知の限界」のとおり `templates/.gitignore` しか見ないため、`--quartz` リポジトリで Quartz 側のパターンが欠けていても `OUTDATED` にはならない。片方を他方に寄せて統合しないこと。
 
 **キーの比較は再帰的に行う（ドット区切りのパス）**。`quartz.config.yaml` のトップレベルキーは `configuration`/`layout`/`plugins` の 3 つで今後増えないため、トップレベルのみの比較では意図した用途（例: `configuration:` の下の `pageTitleSuffix`）に対して恒久的に何も報告しない。
 
@@ -1525,9 +1532,9 @@ Type ディレクトリの `index.md`（1 行 1 件の `- [[Type/slug]]` 箇条�
 
 ### 使用場面
 
-- `wikicommit-generate` Skill：全ソース処理後、`index.md` 更新ステップとして引数なしで呼び出す（ドライバーの `workflow.yaml`。`--regenerate` の `workflow-regenerate.yaml` も同じ — 再生成は `title` を変えうる）
+- `wikicommit-generate` Skill：全ソース処理後、`index.md` 更新ステップとして引数なしで呼び出す（エンジンの `workflow.yaml`。`--regenerate` の `workflow-regenerate.yaml` も同じ — 再生成は `title` を変えうる）
 - `wikicommit-translate` Skill：全 `(原文ページ, target言語)` ペア処理後、`index.md` 更新ステップとして引数なしで呼び出す
-- `wikicommit-synthesize` Skill：view ページを書き出した直後、view ツリーの言語ディレクトリ `.wikicommit/view/<lang>` 1 件のみを引数に指定して呼び出す。generate・translate が引数なしで全ディレクトリを走査するのは「長いバッチの末尾で対象ディレクトリの追跡を取りこぼさないため」であり、1 ページしか書かず `<lang>` が確定している本 Skill にはその理由が当てはまらない。引数指定にすることで、対話実行される本 Skill の副作用が該当ディレクトリの外へ広がらない
+- `wikicommit-synthesize` Skill：view ページを書き出した直後、view ツリーの言語ディレクトリ `.wikicommit/view/<lang>` 1 件のみを引数に指定して呼び出す（エンジンの `rebuild-index` 工程。`workflow_checks.py rebuild-index` が実行記録のページのパスからディレクトリを導いて呼ぶ。ページを書かなかった実行では工程ごと飛ばす）。generate・translate が引数なしで全ディレクトリを走査するのは「長いバッチの末尾で対象ディレクトリの追跡を取りこぼさないため」であり、1 ページしか書かず `<lang>` が確定している本 Skill にはその理由が当てはまらない。引数指定にすることで、対話実行される本 Skill の副作用が該当ディレクトリの外へ広がらない
 - `wikicommit-organize` Skill：`.wikicommit/groups/<Type>.yml` を書いて `check_groups.py` で検証した後、その型の `.wikicommit/entity/<lang>/<Type>` ディレクトリを実在する言語すべてについて引数に指定して呼び出す（グループの見出しは index にしか現れないため、書き換わるのは各 `index.md` だけである）
 - `wikicommit-update` Skill：配布物を同期した後の検証ステップの先頭で引数なしで呼び出す（書式やフロントマターの変更を全 index に一度に反映する）
 - `rename_page.py`（`wikicommit-relate` の改名）：スクリプトとしてではなく `rebuild_index()` を import して、改名で動いたページの Type ディレクトリを再構築する
@@ -1903,11 +1910,11 @@ SUMMARY: pages=3, with_reason=1
 ### 処理フロー
 
 1. `.wikicommit/review/` が無ければ全 0 と `NOTE:` を出して終了する — 「まだ一度もレビューを記録していない」と「全部 0 だった」は別の状態であり、区別せずに 0 だけを出すと後者に見える
-2. 各ページの記録ファイルを `record_review.py` の `record_sort_key()` 順（＝時刻順）に読む。**素のファイル名の辞書順ではない** — 同一秒の衝突サフィックス（`...-ai-2.md`）は `-` が `.` より小さいため `...-ai.md` の**前**に来るので、辞書順で最後のファイルを取ると「その秒の最も古い記録」を最新として拾う。書き手（採番）と読み手（最新の判定）が同じキーを共有する
+2. 各ページの記録ファイルを `record_review.py` の `record_sort_key()` 順（＝時刻順）に読む。**素のファイル名の辞書順ではない** — 同一秒の衝突サフィックス（`...-ai-2.md`）は `-` が `.` より小さいため `...-ai.md` の**前**に来るので、辞書順で最後のファイルを取ると「その秒の最も古い記録」を最新として拾う。書き手（採番）と読み手（最新の判定）が同じキーを共有する。**改名したページは古い slug の記録も読む**（`load_page_records()`）— `relations.yml` の `renamed_at` 付きの項目（`rename_page.py apply` が書く。`pages` と `merged_into`）から「このページが改名される前の slug」を連鎖ごとたどり、同じ言語の古いパスの記録ディレクトリから `kind: ai` の記録を読んで、全件を同じ `record_sort_key()` で並べ直す（`kind: human` の記録は引き継がない — 人の確認は改名前の title に掛かっており、`rename_page.py` が `pending` に戻している）。記録は古いパスの下に残っており（不変であるため移さない）、読まないと改名したページは `UNREVIEWED:` に出る。`renamed_at` の無い統合の項目はたどらない（残すページは再生成され、Pass 4 が新しい記録を書く）。view ページは改名されないので対象外。公開時のバナー（`convert_wikilinks.py`）も同じ関数で読む
 3. **standing な記録（kind を問わない）が 1 件も無ければ** `UNREVIEWED:`。ほとんどの場合それは「記録が 1 件も無い」ことだが、**記録はあるが全件が `result: discarded` だった**場合も含む — 破棄された判定は捨てられた下書きを見たものであり、ディスク上の本文について何も述べていない（`action: update` のエンティティで Pass 4 が `max_retries` を使い切ると既存ページはディスクに残ったまま `discarded` が記録されるので、この状態は普通に生じる）。後者では行に注記を添えて状態を区別する — 全件が `result: discarded` なら `(<N> record(s) exist, but every one was discarded; none judged the page as it now stands)`、そうでなければ `(<N> record(s) exist, but none carries a page_content_hash, so none judged the page as it now stands)`。**注記の理由は `result` から読む**（standing でなくした空ハッシュからではない）— 両者は `record_review.py` が書くものについては一致するが、このツリーは人間が手で書けることを意図しているため、`page_content_hash` を持たない手書きの記録を「破棄された」と言うと、存在しなかった破棄を探しに行かせることになる。専用の `DISCARDED_ONLY:` 行は足さない — 2 つの状態は「誰かがこのページを見なければならない」という同じ行動を要求するので 1 本の一覧でよく、`wikicommit-status` Step 17 はカテゴリごとに必ず 1 行を描画するので、ほぼ常に 0 の行を恒久的に足すことになる
 4. **書き出されたページを判定した最新の記録 1 件**（kind を問わず `page_content_hash` が非空のもの。`standing_review()`）を見て、その `attempts >= 2` または findings が 1 件以上あれば `RISKY:` — **これが抜取の設計図**である（下記「`RISKY:` は履歴ではなく『今立っている判定』1 件だけを見る」）
 5. **書き出されたページを実際に判定した最新の `kind: ai` 記録**（`page_content_hash` が非空のもの。`standing_verdict()`）について失効を判定する。`result: discarded` の記録は対象にしない — Pass 4 step 5 は `action: update` のエンティティに対しても `discarded` を記録し、そのとき既存ページはそのまま残る一方 `reviewed_sources` は `--sources-from`（＝取り込もうとしていたソース）から作られるので、ページ側に無いのが当然のソースと突き合わせて `source no longer on the page` を永久に報告し、しかも本当に有効な直前の判定を隠してしまう。突き合わせるのは機械が見た `reviewed_sources` なので AI の記録だけを見る:
-   - `page_content_hash` を再計算して不一致なら `STALE_REVIEW:`（`page content changed since <日付>`）。空ハッシュ（`discarded`）はスキップ。**不一致でも、統合によるリンクの書き換えだけの差なら失効と数えない** — `.wikicommit/relations.yml` の統合の項目（`pages` と `merged_into`）から（吸収したページ, リンクが今指すページ）の組を作り（統合の連鎖 A → B → C は A と B・C の双方に組を作る）、組ごとに現在の本文（frontmatter を含む）の `[[Type/new]]` を `[[Type/old]]` に全置換した版を `record_review.py` の `compute_content_hash()` で計算し、どれかが一致すれば失効としない。部分的な置換は試さないので、統合前から両方にリンクしていたページは `STALE_REVIEW:` に出る（既知の限界）。`relations.yml` が無い・読めない場合は組を作らず、素のハッシュ比較になる。判定は `matches_recorded_content()` にまとめ、公開時のバナー（`convert_wikilinks.py`）も同じ関数を使う — 両者が食い違うと、`/wikicommit-status` が失効と言うページに公開側が判定を表示する
+   - `page_content_hash` を再計算して不一致なら `STALE_REVIEW:`（`page content changed since <日付>`）。空ハッシュ（`discarded`）はスキップ。**不一致でも、統合によるリンクの書き換えだけの差なら失効と数えない** — `.wikicommit/relations.yml` の統合の項目（`pages` と `merged_into`）から（吸収したページ, リンクが今指すページ）の組を作り（統合の連鎖 A → B → C は A と B・C の双方に組を作る）、組ごとに現在の本文（frontmatter を含む）の `[[Type/new]]` を `[[Type/old]]` に全置換した版を `record_review.py` の `compute_content_hash()` で計算し、どれかが一致すれば失効としない。部分的な置換は試さないので、統合前から両方にリンクしていたページは `STALE_REVIEW:` に出る（既知の限界）。`relations.yml` が無い・読めない場合は組を作らず、素のハッシュ比較になる。判定は `matches_recorded_content()` にまとめ、公開時のバナー（`convert_wikilinks.py`）も同じ関数を使う — 両者が食い違うと、`/wikicommit-status` が失効と言うページに公開側が判定を表示する。standing な記録が改名前の slug のものなら、理由に `; the review was of <古い Type/slug>, before the rename` を添える — 改名は title を書き換えるので普通は一致せず、添えないと誰かが本文を直したように読める（`/wikicommit-review` を新しいページに回せば消える）。slug だけが変わった改名では原文ページの本文が同じなので一致し、判定はそのまま立つ。翻訳ページは `translated_from`（ハッシュの対象であり、照合の根拠でもある）が新しいパスに変わるので一致せず `STALE_REVIEW:` になる — 翻訳としても `check_translation_status.py` が `STALE:` と報告し、`/wikicommit-translate` の訳し直しで新しい記録が書かれる
    - `reviewed_sources` の各エントリを現在のページの `sources[]` / `derived_from` と識別子（`url` / `path`）で突き合わせ、`hash` / `source_commit` が変わっていれば `STALE_REVIEW:`（`source changed: <識別子>`）、ページから消えていれば `source no longer on the page: <識別子>`
    - `reviewed_sources` に `status: retracted` のソースが含まれていれば `RETRACTED_EVIDENCE:`
 6. `SUMMARY:` と、モデルごとの `COVERAGE:` を出す。`ai_reviewed` / `human_reviewed` と `COVERAGE:` の `pages` / `findings` / `attempts>=2` はいずれも standing な記録から数える（「レビュー済み」の分子は「今の本文を判定した記録があるページ」でなければ、カバレッジがそのまま過大表明になる）。`COVERAGE:` の 4 つ目の数（`<N> discarded`）だけは別で、**そのページの最新の AI 記録が `result: discarded` であり、かつそれをこのモデルが書いたページ数**を数える — standing な記録には現れない「投げ捨てられた試行」を、カバレッジを水増ししない位置に置き、`COVERAGE:` が静かな `RISKY:` と食い違って見えるのではなく、なぜ静かなのかを自分で説明するためのもの（新しい行ではなく既存行の 1 列なので Step 17 の行数は変わらない）。**モデルごとの最新ではなくページごとの最新で判定する** — この数は「`RISKY:` が黙っている理由」を説明するために在るので、後から別のレビューが今の本文を判定していれば説明すべき沈黙自体が無く、追い越された破棄は数えない
@@ -2057,7 +2064,7 @@ halted_reason: ""
 
 ### `checkpoint` — 実行の**どこまで**を残す
 
-**`wikicommit-generate` の打点は `driver.py` が書く。** 工程の定義で `stamp: true` の工程が `done` で完了したとき、ドライバーが `make_stamp()` で同じ形の打点を `passes` に足す。打点は工程の**入口**ではなく**完了**の時刻になり、トークンの照合は `done` で行われて合わなければ工程を完了にしない（下記の「exit 1 は実行を止めない」「`token:` の 4 値を読む機械は無い」という限界は、ドライバー経由の実行では当たらない — 照合の失敗が、その工程を完了にしない理由として実際に使われる）。`record_run.py checkpoint` 自体は、ドライバーを使わない呼び出し元のために動く。記録の開き方も `open_record()` を共有するので、`check_run_records.py` は両方を同じように読む。
+**`wikicommit-generate` の打点は `skill_workflow.py` が書く。** ワークフロー定義で `stamp: true` の工程が `done` で完了したとき、エンジンが `make_stamp()` で同じ形の打点を `passes` に足す。打点は工程の**入口**ではなく**完了**の時刻になり、トークンの照合は `done` で行われて合わなければ工程を完了にしない（下記の「exit 1 は実行を止めない」「`token:` の 4 値を読む機械は無い」という限界は、エンジン経由の実行では当たらない — 照合の失敗が、その工程を完了にしない理由として実際に使われる）。`record_run.py checkpoint` 自体は、エンジンを使わない呼び出し元のために動く。記録の開き方も `open_record()` を共有するので、`check_run_records.py` は両方を同じように読む。
 
 `ended_at` が答えるのは実行**全体**の生死だけで、その内側で何が起きたかには答えない。打点は残りの 2 つに答える:
 
@@ -2138,56 +2145,61 @@ RUN_ENDED: .wikicommit/run/20260907-104233-generate.md (ended_at=2026-09-07T11:0
 
 ---
 
-## driver.py
+## skill_workflow.py
 
 ### 目的
 
-多段の Skill の**工程の順序**をエージェントの記憶からスクリプトへ移す（設計の全体と、捏造に耐えないことを受け入れる理由は `docs/DesignDoc-skills.md` §11.0「多段の Skill の進行はドライバーが持つ — 判断はエージェントが持つ」）。エージェントは `next` が返す 1 工程だけを行い、`done` で報告する。ドライバーはその工程の確認スクリプトでディスクを見て、通れば記録して次を返し、通らなければ同じ工程を返す。
+多段の Skill の**工程の順序**をエージェントの記憶からスクリプトへ移す（設計の全体と、捏造に耐えないことを受け入れる理由は `docs/DesignDoc-skills.md` §11.0「多段の Skill の進行は Skill ワークフローエンジンが持つ — 判断はエージェントが持つ」）。エージェントは `next` が返す 1 工程だけを行い、`done` で報告する。エンジンはその工程の確認スクリプトでディスクを見て、通れば記録して次を返し、通らなければ同じ工程を返す。
 
-**エンジンは WikiCommit 固有の知識を持たない。** 工程の並び・結果の値・完了の確認は Skill ごとの工程の定義（`<skill>/workflow.yaml`）と確認スクリプト（`<skill>/scripts/workflow_checks.py`）にあり、保存は `record_run.py` に任せる。`tests/test_driver.py` がエンジンのコードにパス・`status` の値・パスの名前が現れないことを固定する。
+**エンジンは WikiCommit 固有の知識を持たない。** 工程の並び・結果の値・完了の確認は Skill ごとのワークフロー定義（`<skill>/workflow.yaml`）と確認スクリプト（`<skill>/scripts/workflow_checks.py`）にあり、保存は `record_run.py` に任せる。`tests/test_skill_workflow.py` がエンジンのコードにパス・`status` の値・パスの名前が現れないことを固定する。
 
 ### コマンド
 
 ```
-python .wikicommit/scripts/driver.py start --workflow <skill>/workflow.yaml --model <id> [--arg <a>]... [--non-interactive]
-python .wikicommit/scripts/driver.py next <run>
-python .wikicommit/scripts/driver.py done <run> --step <id> [--item <item>] [--outcome <o>] [--answer <a>]
+python .wikicommit/scripts/skill_workflow.py start --workflow <skill>/workflow.yaml --model <id> [--arg <a>]... [--non-interactive]
+python .wikicommit/scripts/skill_workflow.py next <run>
+python .wikicommit/scripts/skill_workflow.py done <run> --step <id> [--item <item>] [--outcome <o>] [--answer <a>]
     [--token <t>] [--reason <why>] [--add NAME=VALUE]... [--touched PATH]... [--page PATH]... [--count KEY=VALUE]...
-python .wikicommit/scripts/driver.py status [--stop-hook]
-python .wikicommit/scripts/driver.py check-merge [<changed file>...]
-python .wikicommit/scripts/driver.py abandon <run> --reason <why>
+python .wikicommit/scripts/skill_workflow.py status [--stop-hook]
+python .wikicommit/scripts/skill_workflow.py check-merge [--except-run <run>] [<changed file>...]
+python .wikicommit/scripts/skill_workflow.py abandon <run> --reason <why>
 ```
 
-出力はすべて JSON（stdout）。`start` / `next` / `done` は同じ形で「今の工程」を返す — `step`・`type`・`item`・`instructions`・`also_read`・`outcomes`（または `human` 工程の `ask`・`choices`）・`then`（次に実行するコマンドの雛形）・`notes`（ドライバーが自分で実行したスクリプトの出力。版ずれの警告など、利用者に伝えるもの）。実行が終われば `step: null` と `finished` または `halted_reason`。
+出力はすべて JSON（stdout）。`start` / `next` / `done` は同じ形で「今の工程」を返す — `step`・`type`・`item`・`instructions`・`also_read`・`outcomes`（または `human` 工程の `ask`・`choices`）・`then`（次に実行するコマンドの雛形）・`notes`（エンジンが自分で実行したスクリプトの出力。版ずれの警告など、利用者に伝えるもの）。実行が終われば `step: null` と `finished` または `halted_reason`。
 
-### 工程の定義
+### ワークフロー定義
 
 | キー | 意味 |
 |---|---|
 | `skill` | 実行記録の `skill`（`record_run.py` の `SKILLS` のいずれか） |
 | `record_sources` | 実行が終わったとき、この名前の一覧を実行記録の `sources` に書く |
-| `steps[].type` | `agent`（エージェントが手順ファイルを読んで行う）・`human`（エージェントが人に尋ねる）・`script`（ドライバーが実行する） |
+| `steps[].type` | `agent`（エージェントが手順ファイルを読んで行う）・`human`（エージェントが人に尋ねる）・`script`（エンジンが実行する） |
 | `when` | コマンド。exit 0 ならこの工程を行い、1 なら飛ばす（飛ばしたこともログに残す） |
 | `instructions` / `also_read` | 手順ファイル（Skill ディレクトリ相対）。frontmatter に `pass_token` があれば、`done --token` がそれと一致しないと完了にしない |
 | `outcomes` | `done --outcome` が取れる値と、その意味 |
 | `check` | 完了の確認。exit 0 で完了、それ以外は理由を返して同じ工程のまま |
 | `ends_item_on` / `halts_on` / `finishes_on` | その結果で、この項目の残りの工程を飛ばす／実行を止める（`--reason` 必須）／実行を正常に終える |
+| `finishes_on`（`human` 工程） | その答えで実行を正常に終える（人が「やめる」と決めた実行は失敗ではないので halt にしない。非対話の既定の答えにも効く） |
 | `check_on_halt` | `halts_on` の結果でも `check` を実行する（既定では halt は確認を飛ばす。止まる前に保留を書く工程が、その保留を確認させるためのもの） |
-| `adds` | `done --add NAME=VALUE` で延ばせる一覧 |
+| `adds` | `done --add NAME=VALUE` で延ばせる一覧（`human` 工程にも書ける。答えに添えた値を後の工程へ渡す） |
+| `check`（`human` 工程） | 答えと `--add` の値の確認。`{outcome}` に答えが入る。失敗すれば足した値を戻し、同じ工程のまま |
+| `show_lists` | 挙げた一覧を、工程を返すときに `lists` として添える（前の工程の答えを、手順ファイルを読む工程へ渡す） |
 | `produces` / `finish_if_empty` | `script` 工程の stdout の `ITEM:` 行を一覧にする／空なら実行を正常に終える |
-| `for_each` + 入れ子の `steps` | 一覧の項目ごとに入れ子の工程を繰り返す |
-| `stamp` | 完了時に実行記録の `passes` にも打点する（`check_run_records.py` の `MISSING_PASS:` がこれを読む） |
-| `non_interactive` | `human` 工程では誰もいないときの答え。`agent` 工程では、工程の中で人に尋ねる箇所の非対話時の扱いを文で書き、ドライバーが工程とともに渡す |
+| `for_each` + 入れ子の `steps` | 一覧の項目ごとに入れ子の工程を繰り返す。同じ項目を 2 つの `for_each` が回るとき、`ends_item_on` による早期終了はその `for_each` の中だけに効く |
+| `stamp` | 完了時に実行記録の `passes` にも打点する（`check_run_records.py` の `MISSING_PASS:` がこれを読む）。`true` なら工程の ID で、名前を書けばその名前で打つ（同じ Pass を 2 つ目の繰り返しで行う工程が、1 つ目と同じ名前で打つため） |
+| `non_interactive` | `human` 工程では誰もいないときの答え。`agent` 工程では、工程の中で人に尋ねる箇所の非対話時の扱いを文で書き、エンジンが工程とともに渡す |
 
 コマンドは引数のリストで、リポジトリルートからシェルを介さずに実行する。`{python}`・`{skill_dir}`・`{run}`・`{item}`・`{outcome}` が置き換わる。確認スクリプトが `TOUCHED: <path>` を出すと、そのファイルは実行の `touched` に加わる（`check-merge` が読む）。
 
-### 状態 — ドライバーは状態を持たない
+### 状態 — エンジンは状態を持たない
 
-状態はすべて実行記録の `driver:` キーにある: 工程の定義のパスとハッシュ、対話か否か、一覧、ログ（工程・項目・時刻・結果・答え・照合の結果）、確認に失敗した回数、触れたファイル、実行の状態（`running` / `finished` / `halted` / `abandoned`）。**次の工程は呼ばれるたびにログをリプレイして決める**ので、compaction の後も新しいセッションでも `next` を呼べば同じ工程が返る。条件やスクリプトを実行する前に記録を保存する — スクリプトは記録を自分で読むため、1 つ前の工程が作った一覧は、その時点でディスクに無ければならない。
+状態はすべて実行記録の `workflow:` キーにある（`driver.py` から改名する前に書かれた記録は `driver:` キーに持つ。読むときはこれも受け付け、次に書くときに `workflow:` へ移すので、改名前に始まって途中で止まった実行も `next` で再開できる）: ワークフロー定義のパスとハッシュ（`definition` / `definition_sha256`）、対話か否か、一覧、ログ（工程・項目・時刻・結果・答え・照合の結果）、確認に失敗した回数、触れたファイル、実行の状態（`running` / `finished` / `halted` / `abandoned`）。**次の工程は呼ばれるたびにログをリプレイして決める**ので、compaction の後も新しいセッションでも `next` を呼べば同じ工程が返る。条件やスクリプトを実行する前に記録を保存する — スクリプトは記録を自分で読むため、1 つ前の工程が作った一覧は、その時点でディスクに無ければならない。
+
+**状態の中のフィールドは状態キーと同じ名前を持たない。** 定義ファイルのパスを `workflow` と呼ぶと、状態キー `workflow:` の下で `record["workflow"]["workflow"]` という入れ子になり、状態の mapping と定義ファイルのパスを読み違えやすい。変えたのは状態キーではなく中のフィールドの方である — 状態キーを `workflow_state:` などに変えると旧キーが `driver:` と合わせて 2 つになり、確認スクリプトの共有モジュールが引く `run_state()` も 3 つのキーを試すことになるが、フィールドを変えれば読み替えはエンジンの中（`run_state()`。`load_run()` も `status` / `check-merge` が使う `open_runs()` もここを通る）で閉じる。旧名（`workflow` / `workflow_sha256`）で書かれた記録は、状態キーが `workflow:` でも `driver:` でも読み、次に書くときに新しい名前へ移す。
 
 `done` は**今の工程にしか**受け付けない（別の工程・順番を飛ばした報告は、今の工程を返して断る）。確認に `MAX_CHECK_FAILURES`（3）回続けて失敗すると、`next` は `blocked: true` を返し、止めて人に報告するよう指示する。
 
-実行中に工程の定義が変わった場合（Skill を更新した場合）は、ハッシュの違いを `notes` の警告として伝えて記録のログのまま続ける。ログにある工程が定義から消えていれば、続けられないので `abandon` して始め直すよう返す。
+実行中にワークフロー定義が変わった場合（Skill を更新した場合）は、ハッシュの違いを `notes` の警告として伝えて記録のログのまま続ける。ログにある工程が定義から消えていれば、続けられないので `abandon` して始め直すよう返す。
 
 ### 終わり方と `check_run_records.py`
 
@@ -2200,7 +2212,7 @@ python .wikicommit/scripts/driver.py abandon <run> --reason <why>
 
 ### `check-merge`
 
-開いたまま（`running`）の実行のうち、`touched` が変更されたファイル（引数、無ければ `git status --porcelain`）と重なるものがあれば exit 1 で止める。**止めるのは「未完了の実行があるか」であって「すべての変更がドライバーを経たか」ではない** — ドライバーを使わない経路（`fix` / `remove` / `review` / 手編集）の変更と、終わった実行（完走・halt・abandon）の変更は通す。実行記録は git で追跡しないので、merge を実行したマシンの実行しか見えない。
+開いたまま（`running`）の実行のうち、`touched` が変更されたファイル（引数、無ければ `git status --porcelain`）と重なるものがあれば exit 1 で止める。`--except-run <run>` はその実行を数えない — エンジンで進む Skill（`wikicommit-merge`）が自分の工程の中で呼ぶとき、自分の実行は開いたままであり、運ぶファイルは変更そのものなので、除かなければ自分で自分を止める。除くのは名指しした 1 つだけで、他の開いた実行は従来どおり止める。**止めるのは「未完了の実行があるか」であって「すべての変更がエンジンを経たか」ではない** — エンジンを使わない経路（`fix` / `remove` / `review` / 手編集）の変更と、終わった実行（完走・halt・abandon）の変更は通す。実行記録は git で追跡しないので、merge を実行したマシンの実行しか見えない。
 
 ### `abandon`
 
@@ -2210,11 +2222,29 @@ python .wikicommit/scripts/driver.py abandon <run> --reason <why>
 
 Claude Code / Codex の Stop フックから呼ぶ。開いた実行があれば `{"decision": "block", "reason": ...}` を返し、無ければ何も出さない。同じ停止の試みの中での 2 回目（ペイロードの `stop_hook_active`）は通す。
 
+### 確認スクリプトの共有モジュール（`_workflow_checks.py`）
+
+Skill ごとの確認スクリプト（`<skill>/scripts/workflow_checks.py`。generate・merge・translate・synthesize の 4 本）が同じように読むものは `.wikicommit/scripts/_workflow_checks.py` にあり、4 本はリポジトリルートの `.wikicommit/scripts/` を `sys.path` に足してそこから import する（置き場所の規則は `docs/DesignDoc-skills.md` §11.5「置き場所の判断基準」）。
+
+| 関数・定数 | 内容 | 使う Skill |
+|---|---|---|
+| `read_markdown(path)` | `(frontmatter, 本文)`。frontmatter が無い・読めない・mapping でなければ `{}`。`_frontmatter.py` の `parse_frontmatter_and_body_text()` の上に載る | generate・synthesize（translate は frontmatter だけを返す薄い包みを持つ） |
+| `read_run(run)` | `(実行記録, エンジンの状態)`。状態は**このエンジンの `run_state()`** で引く（`workflow:`、無ければ旧名 `driver:`）。エンジンが開いていない記録の状態は `{}` | 4 本すべて（merge は状態だけを返す `read_state()` で包む） |
+| `listed(state, name)` / `answer_of(state, step)` | 実行の一覧（文字列のリスト）／`human` 工程の最初の答え | 4 本 |
+| `run_started(record)` / `written_since(path, since)` | `started_at` をローカル時刻・秒単位で（読めなければ `None`）／ファイルが `since` 以降に書かれたか | translate・synthesize |
+| `review_record_dir(page)` / `review_records_since(page, since, stage, result=None)` | ページのレビュー記録の置き場所／そのうち `stage`（と `result`）が一致し `since` 以降に書かれたもの。古い順の `(パス, frontmatter)` のリスト | generate（置き場所だけ）・translate・synthesize |
+| `norm(path)` / `git(*args)` | リポジトリ相対の POSIX パス／出力を取り込んだ `git` 呼び出し（起動できなければ 127） | translate・synthesize（translate の `norm()` は旧 `.wikicommit/wiki/` 接頭辞の読み替えを足す） |
+| `BATCH_CAP` / `cmd_over_cap(args, noun)` / `cmd_select(args)` | バッチ上限（5）の問いを出すか／答え `first-five` を一覧に適用する | generate・translate（translate の `over-cap` は単一ページモードなら問わない判定を先に行う） |
+
+**実行記録の状態キーを読むのはエンジンの `run_state()` だけである。** 共有モジュールも 4 本の確認スクリプトもキー名を持たない（`tests/test_workflow_checks_shared.py` が固定する）。
+
+**共有モジュールが無い wiki**（`.wikicommit/scripts/` が `/wikicommit-update` 前の版）では、確認スクリプトは import の失敗で `/wikicommit-update` を案内して **exit 2** で終わる。確認スクリプトの契約は 0 ＝ はい・1 ＝ いいえだが、`when:` の条件が 1 を返すとエンジンは工程を飛ばすので、「判定できない」を「いいえ」と読ませないために 2 にする（エンジンは `when:` の 0・1 以外を条件の失敗として扱い、`script` 工程の非 0 で実行を halt する）。4 Skill ともワークフロー定義の最初の工程が確認スクリプトを呼ぶ `script` 工程なので、実行は最初の工程で halt し、`halted_reason` に案内が載る。
+
 ### 終了コード
 
 - `0`: 成功（`done` が受け付けた・`check-merge` が止めなかった・`start` / `next` / `status` / `abandon`）
 - `1`: `done` が受け付けなかった、`check-merge` が止めた
-- `2`: 使い方の誤り・工程の定義が読めない・実行記録が無い
+- `2`: 使い方の誤り・ワークフロー定義が読めない・実行記録が無い
 
 ---
 
@@ -2342,7 +2372,7 @@ python .wikicommit/scripts/check_retracted_sources.py --list
 
 **別のスクリプトを作らずここに置く理由**は `docs/DesignDoc-data.md` §4.3「`retracted`」の参照側のガードにある（要点: 判定は既にこのファイルにあり、同一性キーの規則の写しを増やさない。§11.5 の置き場所の規則もこれで満たされる）。**ルックアップにはしない** — 識別子を受け取って 1 件を答える形は `check_*` の「走査して報告する」という形から外れる。突き合わせは呼び出し側が行う。
 
-**出力は `resolve_source_cache_path.py` の `RETRACTED:` 行と同じ形にする**（`RETRACTED: <識別子> (<管理ファイルのパス>)`）。参照側 3 経路が同じ形を読むことになり、かつ管理ファイルのパスは人間が書いた `## Retraction Reason` の在り処である — 何が起きたかの唯一の説明はそこにしかない。
+**出力は `resolve_source_cache_path.py` の `RETRACTED:` 行と同じ形にする**（`RETRACTED: <識別子> (<管理ファイルのパス>)`。`--obtain-sources` だけはエントリの位置 `[<n>]` を識別子の前に挟む）。参照側 3 経路が同じ形を読むことになり、かつ管理ファイルのパスは人間が書いた `## Retraction Reason` の在り処である — 何が起きたかの唯一の説明はそこにしかない。
 
 **終了コードは既定モードと同じく常に 0 である**。取り下げが 1 件でもあることを終了コードで伝えない — あちら（`resolve_source_cache_path.py`）が exit 2 を使うのは識別子 1 件への問い合わせだからで、こちらは一覧であり、`check_*` の契約（常に 0）に揃える。
 
@@ -2918,6 +2948,73 @@ SUMMARY: type=DefinedTerm, pages=4, unclassified=1, stale=1, errors=0
 
 ---
 
+## check_external_links.py
+
+### 目的
+
+entity・view の全公開ページの外部リンク切れを lychee で調べる（`/wikicommit-status --links`）。`wikicommit-merge` の lychee はそのバッチで変わったページしか見ないので、書かれた後で切れたリンクを見つけるのはこのスクリプトだけである（分担は `docs/DesignDoc-CISpec.md`「外部リンク検証」）。
+
+バッチを回す関数 `check_link_batches(pages, progress_file, *, batch, budget, limit, what)` もここに置き、merge の `workflow_checks.py links` が import する（import するのはこの関数だけで、lychee の JSON を所見にする `lychee_findings()` はその内側で使われる）。区切り方・続きの持ち方・`.lycheecache` の置き場を 2 つの Skill で 1 つにするためである。
+
+### 所見の形
+
+所見は 1 件ずつ `{"kind": "broken"|"not_checked", "pages": [...], "text": "..."}` で持つ。`check_link_batches()` が返すのも、進捗ファイル・結果ファイルに書くのもこの形である。
+
+- **`kind`**: `broken` はリンク切れ（`BROKEN_LINK:`）、`not_checked` は調べられなかったこと（lychee が無い・時間切れ・起動失敗。`NOT_CHECKED:`）。分類はこのフィールドだけで決め、`text` の書き出しには頼らない — 「調べられなかった」系の文言を足しても、`kind` を付ければリンク切れとして数えられることは無い
+- **`pages`**: 所見が何のページについてか。リンク切れは 1 ページ、バッチ単位の `not_checked` はそのバッチのページ、lychee が無いときはその時点で残っていたページ。続きの呼び出しで、`pages` のどれも対象に残っていない所見を落とす（ページを挙げた所見が、ページが消えても残ることは無い）。複数ページを挙げた所見は、1 ページでも残っていれば残す。`pages` が空の所見は落とさない
+- **`text`**: 出力の行そのもの（`BROKEN_LINK:` / `NOT_CHECKED:` の後ろ）。文言は所見の構造化の前と変わらない
+
+旧形式（文字列のリスト）のファイルの扱い:
+
+| ファイル | 扱い | 理由 |
+|---|---|---|
+| status の `all-pages-progress.json`・merge の実行ごとの `lychee-progress.json` | 所見が 1 件でも構造でなければ `checked` ごと捨て、最初から調べ直す | 途中の作業でしかなく、`.lycheecache` が効くので調べ直しは安い。読み替えるとページの消えた所見を落とせない |
+| status の `all-pages-result.json` | 読み替える（`lychee` と空白で始まる行を `not_checked`、それ以外を `broken`。`pages` は空） | 完走した結果を捨てると、次の完走まで `--last` が `checked_at=never` と誤って報告する。旧形式の文言の集合は閉じており（新たに書かれることは無い）、この接頭辞で正確に分けられる。結果ファイルは表示するだけで、ページで落とすことは無い |
+| merge の実行ごとの `lychee.json` | 形を変えない | merge は `check_link_batches()` が返した所見の `text` だけを書く。他のツール（markdownlint-cli2）の所見ファイルと同じ文字列のリストで、`read_findings()`・`pr-body` はそれを PR 本文にそのまま載せ、リンク切れと調べられなかったことを分けて扱わないため |
+
+### コマンド
+
+```
+python .wikicommit/scripts/check_external_links.py [--restart] [--batch N] [--budget SEC] [--limit SEC]
+python .wikicommit/scripts/check_external_links.py --last
+```
+
+- **引数なし**（`--links` 付きの status）: 対象ページ（`collect_entity_pages()` ＋ `collect_view_pages()`。`index.md` と `status: removed` を除く）を `--batch`（既定 5）ページずつ lychee に `--cache --no-progress --format json` で渡す。新しいバッチは `--budget`（既定 45）秒までしか始めず、lychee は呼び出し開始から `--limit`（既定 100）秒で打ち切る。少なくとも 1 バッチは必ず走るので、呼び出しのたびに前に進む。終わらなければ `CONTINUE:` を出して返り、次の呼び出しが続きから調べる
+- **`--last`**（`--links` 無しの status）: 最後に完走した結果を読み直すだけで、lychee もネットワークも使わない。途中の実行があれば `IN_PROGRESS:` を添える
+- **`--restart`**: 途中の実行を捨てて最初から調べる。完走した実行の次の呼び出しは、`--restart` が無くても最初から調べる
+
+lychee の作業ディレクトリは `.wikicommit/.cache/lychee/`（`.lycheecache` がそこに置かれ Git に無視される）で、リポジトリの `.lycheeignore` をそこへ写してから呼ぶ（lychee は作業ディレクトリの `.lycheeignore` を読むため）。`.lychee.toml` があれば `--config` で渡す。
+
+### 状態ファイル
+
+| ファイル | 中身 | 寿命 |
+|---|---|---|
+| `.wikicommit/.cache/lychee/all-pages-progress.json` | `total`・調べ終えたページ（`checked`）・所見（`findings`） | 完走すると消す |
+| `.wikicommit/.cache/lychee/all-pages-result.json` | `checked_at`（UTC の ISO 8601）・`pages`・`findings` | 次に完走したときに置き換える |
+
+続きの判定はページのパスで行う。途中でページが増減しても、今あるページのうち調べていないものだけを調べる。
+
+### 出力フォーマット
+
+```
+CONTINUE: 15/120 page(s) checked
+```
+
+```
+BROKEN_LINK: .wikicommit/entity/ja/Person/yamada-taro.md: https://example.com/old (404 Not Found)
+NOT_CHECKED: lychee did not finish within 55 s on .wikicommit/entity/ja/Place/a.md; their links were not checked
+SUMMARY: checked_at=2026-10-07T12:00:00Z pages=120 broken_links=1 not_checked=1
+```
+
+`--last` で一度も完走していなければ `SUMMARY: checked_at=never pages=0 broken_links=0 not_checked=0`。`NOT_CHECKED:` は lychee が無い・時間切れ・起動失敗のときで、そのページのリンクは「切れていない」ではなく「分からない」。所見の行は lychee が `fail_map`（古い版）と `error_map`（新しい版）のどちらで返しても同じ形になる。
+
+### 終了コード
+
+- 常に `0`（warning のみ。lychee の所見は merge でも blocking ではない）
+- `2`: 引数の誤り（`--last` と `--restart` の併用等）
+
+---
+
 ## merge_pages.py / rewrite_merged_links.py
 
 `/wikicommit-generate --regenerate <残すページ> --merge <吸収するページ> [...]` が使う 2 本。設計判断の全体は `docs/DesignDoc-data.md` §4.5.2 の「統合」の節にある。本文の書き直し（Pass 3 / 4）はエージェントが行い、統合に関わる**決定論的な部分**をこの 2 本が持つ。
@@ -2955,7 +3052,7 @@ python .wikicommit/scripts/merge_pages.py check  --into <page> --absorb <page> [
   ```
 
   吸収するページを取り下げる**前に**実行する（`plan` は取り下げ済みのページを拒否する）
-- **`check`** — 統合が最後まで行われたかを確かめる。統合の項目がある・残すページの `aliases` が `merged_aliases` を全部持つ・吸収した各ページとその翻訳が `status: removed` かつ `merged_into` が残すページ・どの live ページも吸収したページへリンクしていない。足りないものを 1 行ずつ出して exit 1、揃っていれば `TOUCHED:` 行（取り下げたページと `relations.yml`）と `OK:` を出す。ドライバーの `merge-absorb` 工程の完了確認（`workflow_checks.py check-merge`）がこれを呼ぶ
+- **`check`** — 統合が最後まで行われたかを確かめる。統合の項目がある・残すページの `aliases` が `merged_aliases` を全部持つ・吸収した各ページとその翻訳が `status: removed` かつ `merged_into` が残すページ・どの live ページも吸収したページへリンクしていない。足りないものを 1 行ずつ出して exit 1、揃っていれば `TOUCHED:` 行（取り下げたページと `relations.yml`）と `OK:` を出す。エンジンの `merge-absorb` 工程の完了確認（`workflow_checks.py check-merge`）がこれを呼ぶ
 
 ### rewrite_merged_links.py
 
@@ -3002,6 +3099,6 @@ python .wikicommit/scripts/rename_page.py apply --page <page> --year YYYY [--bas
   変更が無ければ `UNCHANGED:` を出す
 - **`apply`** — slug が変わらなければ、各言語のページの title を書き換えるだけ。slug が変わるときは統合の部品を使う: `relations.yml` に `relation: same` ＋ `merged_into` ＋ `renamed_at` の項目を追記（`record_relation.append_record()`）→ 各言語で新しい slug のページを書く（翻訳は `translated_from` を新しい原文へ）→ 古いページに `status: removed` / `removed_at` / `removed_reason: merged` / `merged_into: <新しいパス>` → `rewrite_merged_links.py` → ソース管理ファイルの `generated_pages` の古いパスの行を新しいパスに（その行だけ）→ 触れた型ディレクトリの `index.md` を作り直す。追加で出す行は `WROTE:` / `REMOVED:` / `REWRITTEN:` / `SOURCE_FILE:`、`.wikicommit/groups/<Type>.yml` が古い slug を挙げていれば `GROUPS:`（書き換えない）
 
-title を書き換えたページは `review_status: pending` にし `reviewed_by` を消す（翻訳も同じ）。レビュー記録は移さない。`relations.yml` の項目は統合の項目と同じ形なので、`check_review_coverage.py` はリンクを書き換えたページを `STALE_REVIEW:` に数えない。
+title を書き換えたページは `review_status: pending` にし `reviewed_by` を消す（翻訳も同じ）。slug が変わる場合も同じで、title が変わらないページ（既に年を持っていた）は title・`review_status`・`reviewed_by` に触らない（翻訳は `translated_from` だけを書き換える）— slug はファイル名であり、人が読んだ本文ではない。レビュー記録は移さない — `check_review_coverage.py` と `convert_wikilinks.py` が `renamed_at` 付きの項目をたどって古い slug の記録を読む（title が変わっていれば `STALE_REVIEW:` になる）。`relations.yml` の項目は統合の項目と同じ形なので、`check_review_coverage.py` はリンクを書き換えたページを `STALE_REVIEW:` に数えない。
 
 終了コード: `0` = 完了（または変更なし）、`1` = 拒否。

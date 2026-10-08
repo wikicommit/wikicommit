@@ -156,16 +156,21 @@ GUARDED_SKILLS = [
     pytest.param(SKILLS / "wikicommit-fix" / "SKILL.md", id="fix-skill"),
 ]
 
-LIST_COMMAND = "check_retracted_sources.py --list"
+# Since Issue #1211 the guard and the fetch are one command: it checks each
+# entry's management file for `status: retracted` before reading or fetching
+# anything (asserted on its behaviour in test_review_fix_source_fetch.py), so
+# the separate `check_retracted_sources.py --list` pass is no longer a step.
+GUARD_COMMAND = "resolve_source_cache_path.py --obtain-sources"
 
 
 @pytest.mark.parametrize("path", GUARDED_SKILLS)
 def test_both_reference_paths_still_run_the_guard(path):
     text = read(path)
-    assert LIST_COMMAND in text, (
-        f"{path} no longer runs `{LIST_COMMAND}`, so it reads source documents a "
-        "human has withdrawn. Nothing else on this path notices: the page is "
-        "faithful to the withdrawn document, so every automated check passes."
+    assert text.count(GUARD_COMMAND) == 1 and "RETRACTED: [<n>]" in text, (
+        f"{path} no longer gets its sources through `{GUARD_COMMAND}` (which refuses "
+        "withdrawn sources), so it reads source documents a human has withdrawn. "
+        "Nothing else on this path notices: the page is faithful to the withdrawn "
+        "document, so every automated check passes."
     )
 
 
@@ -174,39 +179,36 @@ def test_both_reference_paths_still_run_the_guard(path):
 # loose anchor finds the wrong occurrence and the ordering assertion below
 # stops meaning anything.
 @pytest.mark.parametrize(
-    "path, inherit_anchor, fetch_anchor",
+    "path, inherit_anchor",
     [
         pytest.param(
             SKILLS / "wikicommit-review" / "SKILL.md",
             "read the parent page's `sources` instead",
-            "- For each element of `sources`:",
             id="review-skill",
         ),
         pytest.param(
             SKILLS / "wikicommit-fix" / "SKILL.md",
             "use the parent page's `sources` instead",
-            "For each element of `sources`, get the source document",
             id="fix-skill",
         ),
     ],
 )
-def test_the_guard_runs_before_the_fetch_and_after_sources_is_settled(
-    path, inherit_anchor, fetch_anchor
-):
-    """Both halves of the placement are load-bearing, and both fail quietly.
-
-    Fetching first puts the withdrawn text into context, after which "do not use
-    it" rests on instruction-following rather than on never having read it.
-    Guarding before the `sources` list is settled misses translated pages
+def test_the_guard_runs_after_sources_is_settled(path, inherit_anchor):
+    """Guarding before the `sources` list is settled misses translated pages
     entirely, since those carry no `sources` of their own and inherit the
-    parent's at the step just above.
+    parent's at the step just above. The command is the only way either Skill
+    reaches the guard or the fetch, so it must come after that fallback.
+    (Guard before fetch is the command's own ordering, tested on the script.)
     """
     text = read(path)
-    for anchor in (LIST_COMMAND, inherit_anchor, fetch_anchor):
+    for anchor in (inherit_anchor, GUARD_COMMAND):
         assert text.count(anchor) == 1, f"{path}: {anchor!r} is no longer unique"
-    assert text.index(inherit_anchor) < text.index(LIST_COMMAND) < text.index(fetch_anchor), (
-        f"{path}: the retraction guard must sit after the `translated_from` "
-        "fallback and before the per-element fetch."
+    assert text.index(inherit_anchor) < text.index(GUARD_COMMAND), (
+        f"{path}: the source-fetch command (which runs the retraction guard) must "
+        "be reached after the `translated_from` fallback."
+    )
+    assert "translated_from` parent" in text, (
+        f"{path} no longer says to give the command the parent page for a translation"
     )
 
 

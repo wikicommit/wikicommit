@@ -905,12 +905,9 @@ def test_assets_directly_under_entity_is_still_excluded(tmp_path):
     """The narrowing must not lose the exclusion it replaced: a real attachment
     under `.wikicommit/entity/assets/` is not a page and must not be a referrer.
 
-    The removed page is passed only via --deleted. Listing it in --changed too
-    would make main() skip the whole backlink check for it (a --deleted path
-    that is also --changed is handled by the WikiLink check instead), and the
-    assertion would then hold no matter what the walk collected. The ordinary
-    page linking to the same target is the positive control that proves the
-    backlink walk ran at all.
+    The removed page is passed only via --deleted, the way wikicommit-merge
+    runs the backlink check. The ordinary page linking to the same target is the
+    positive control that proves the backlink walk ran at all.
     """
     write_config(tmp_path)
     write_page(tmp_path, "ja", "Person", "a",
@@ -928,3 +925,70 @@ def test_assets_directly_under_entity_is_still_excluded(tmp_path):
     assert "Person/b.md" in result.stdout
     assert "assets/notes.md" not in result.stdout, result.stdout
     assert "1 warnings" in result.stdout
+
+
+# ── A page in both --changed and --deleted gets both checks (Issue #1257) ──────
+# wikicommit-merge lists every page it marks removed among the changed pages too.
+# The backlink check used to be skipped for such a page, so the "a backlink
+# remains" WARNING never appeared in an ordinary merge.
+
+def test_a_page_in_both_changed_and_deleted_still_gets_the_backlink_check(tmp_path):
+    _removal_fixture(tmp_path)
+    a = ".wikicommit/entity/ja/Person/a.md"
+
+    result = run(["--changed", a, "--deleted", a], cwd=tmp_path)
+
+    assert result.returncode == 0, result.stdout
+    assert "a backlink remains (.wikicommit/entity/ja/Person/b.md)" in result.stdout, result.stdout
+    assert "1 files checked" in result.stdout, "its own links are checked as well"
+
+
+def test_a_removed_pages_link_to_itself_is_not_a_remaining_backlink(tmp_path):
+    _removal_fixture(tmp_path)
+    a = tmp_path / ".wikicommit/entity/ja/Person/a.md"
+    a.write_text(a.read_text(encoding="utf-8").replace("Body text.", "See [[Person/a]]."),
+                 encoding="utf-8")
+
+    result = run(["--deleted", ".wikicommit/entity/ja/Person/a.md"], cwd=tmp_path)
+
+    assert "Person/b.md)" in result.stdout, result.stdout
+    assert "(.wikicommit/entity/ja/Person/a.md)" not in result.stdout, result.stdout
+    assert "1 warnings" in result.stdout
+
+
+def test_a_link_from_a_removed_page_is_not_a_remaining_backlink(tmp_path):
+    """A referrer that is itself removed (in this change or earlier) is not
+    published, so its link is left dangling nowhere — warning about it would
+    leave a finding nobody can clear."""
+    _removal_fixture(tmp_path)
+    c = write_page(tmp_path, "ja", "Person", "c",
+                   extra={"status": "removed", "removed_at": "2026-01-01"})
+    c.write_text(c.read_text(encoding="utf-8").replace("Body text.", "See [[Person/a]]."),
+                 encoding="utf-8")
+
+    result = run(["--deleted", ".wikicommit/entity/ja/Person/a.md"], cwd=tmp_path)
+
+    assert "Person/b.md)" in result.stdout, result.stdout
+    assert "Person/c.md)" not in result.stdout, result.stdout
+    assert "1 warnings" in result.stdout
+
+
+def test_a_backlink_is_counted_against_the_page_it_resolves_to(tmp_path):
+    """Removing a page and its translation: a link from an en page resolves to
+    the en page, so it is reported against the en page only, not once per
+    language."""
+    _removal_fixture(tmp_path)
+    write_page(tmp_path, "en", "Person", "a",
+               extra={"status": "removed", "removed_at": "2026-01-01"})
+    d = write_page(tmp_path, "en", "Person", "d")
+    d.write_text(d.read_text(encoding="utf-8").replace("Body text.", "See [[Person/a]]."),
+                 encoding="utf-8")
+
+    result = run(["--deleted", ".wikicommit/entity/ja/Person/a.md",
+                  ".wikicommit/entity/en/Person/a.md"], cwd=tmp_path)
+
+    assert ("ja/Person/a.md (being changed to status: removed): "
+            "a backlink remains (.wikicommit/entity/ja/Person/b.md)") in result.stdout
+    assert ("en/Person/a.md (being changed to status: removed): "
+            "a backlink remains (.wikicommit/entity/en/Person/d.md)") in result.stdout
+    assert "2 warnings" in result.stdout, result.stdout

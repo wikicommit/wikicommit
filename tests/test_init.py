@@ -203,6 +203,135 @@ def test_update_theme_inserts_field_when_missing_from_legacy_config(tmp_path):
     assert "primary_lang: en" in config  # untouched
 
 
+_LONG_THEME = (
+    "How people participate in work, how work is organized, and how work shapes people's "
+    "lives — broader than occupational safety and health. It covers working time and rest."
+)
+
+_CONFIG_WITH_MULTILINE_THEMES = {
+    # What init wrote before themes were dumped on one line: yaml.dump folds a
+    # double-quoted scalar at width 80.
+    "folded_double_quoted": yaml.dump(_LONG_THEME, default_style='"', allow_unicode=True).strip(),
+    "escaped_newline": yaml.dump("line one\nline two " * 6, default_style='"').strip(),
+    "block_scalar": "|\n  First line of a hand-written theme.\n  Second line.\n",
+    "folded_plain": "a hand-written plain theme that\n  continues on a second line",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_CONFIG_WITH_MULTILINE_THEMES))
+def test_update_theme_replaces_a_theme_that_spans_several_lines(tmp_path, shape):
+    """Replacing only the first line of a multi-line theme left its continuation lines
+    behind and made the whole config.yml unparseable."""
+    run(["--primary-lang", "ja", "--targets", "en"], cwd=tmp_path)
+    config_path = tmp_path / ".wikicommit" / "config.yml"
+    content = config_path.read_text(encoding="utf-8")
+    old_value = _CONFIG_WITH_MULTILINE_THEMES[shape]
+    content = re.sub(r"(?m)^theme:.*$", lambda _m: f"theme: {old_value}", content, count=1)
+    before = yaml.safe_load(content)
+    assert "\n" in old_value and before["theme"]  # the fixture really spans lines
+    config_path.write_text(content, encoding="utf-8")
+
+    result = run(["--update-theme", "short new theme"], cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    after_text = config_path.read_text(encoding="utf-8")
+    after = yaml.safe_load(after_text)
+    assert after["theme"] == "short new theme"
+    assert {k: v for k, v in after.items() if k != "theme"} == {
+        k: v for k, v in before.items() if k != "theme"
+    }
+    # Comments outside the theme value survive (no YAML round-trip).
+    assert [ln for ln in after_text.splitlines() if ln.lstrip().startswith("#")] == [
+        ln for ln in content.splitlines() if ln.lstrip().startswith("#")
+    ]
+
+
+def test_update_theme_fills_an_empty_value(tmp_path):
+    config_dir = tmp_path / ".wikicommit"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yml").write_text(
+        "theme:  # describe the wiki\ntranslation:\n  primary_lang: en\n", encoding="utf-8"
+    )
+
+    result = run(["--update-theme", "Filled theme"], cwd=tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    text = (config_dir / "config.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(text) == {"theme": "Filled theme", "translation": {"primary_lang": "en"}}
+    assert "# describe the wiki" in text
+
+
+def test_update_theme_refuses_an_unparseable_config(tmp_path):
+    config_dir = tmp_path / ".wikicommit"
+    config_dir.mkdir(parents=True)
+    broken = 'theme: "x"\n  \\ dangling continuation\n"\n'
+    (config_dir / "config.yml").write_text(broken, encoding="utf-8")
+
+    result = run(["--update-theme", "New theme"], cwd=tmp_path)
+
+    assert result.returncode == 1
+    assert "ERROR" in result.stderr
+    assert (config_dir / "config.yml").read_text(encoding="utf-8") == broken
+
+
+def test_update_theme_keeps_comments_after_a_block_collection_value(tmp_path):
+    config_dir = tmp_path / ".wikicommit"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yml").write_text(
+        "theme:\n  a: 1\n# about next\nnext: 1\n", encoding="utf-8"
+    )
+
+    assert run(["--update-theme", "New"], cwd=tmp_path).returncode == 0
+
+    text = (config_dir / "config.yml").read_text(encoding="utf-8")
+    assert "# about next" in text
+    assert yaml.safe_load(text) == {"theme": "New", "next": 1}
+
+
+@pytest.mark.parametrize("body", ["- a\n- b\n", "just a string\n"])
+def test_update_theme_refuses_a_non_mapping_config(tmp_path, body):
+    config_dir = tmp_path / ".wikicommit"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yml").write_text(body, encoding="utf-8")
+
+    result = run(["--update-theme", "New"], cwd=tmp_path)
+
+    assert result.returncode == 1
+    assert "not a YAML mapping" in result.stderr
+    assert (config_dir / "config.yml").read_text(encoding="utf-8") == body
+
+
+def test_update_theme_replaces_the_key_safe_load_reads_when_duplicated(tmp_path):
+    config_dir = tmp_path / ".wikicommit"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.yml").write_text("theme: a\ntheme: b\n", encoding="utf-8")
+
+    assert run(["--update-theme", "New"], cwd=tmp_path).returncode == 0
+    text = (config_dir / "config.yml").read_text(encoding="utf-8")
+    assert yaml.safe_load(text)["theme"] == "New"
+
+
+def test_update_theme_writes_a_long_theme_on_one_line(tmp_path):
+    run([], cwd=tmp_path)
+
+    assert run(["--update-theme", _LONG_THEME], cwd=tmp_path).returncode == 0
+
+    text = (tmp_path / ".wikicommit" / "config.yml").read_text(encoding="utf-8")
+    theme_lines = [ln for ln in text.splitlines() if ln.startswith("theme:")]
+    assert len(theme_lines) == 1
+    assert yaml.safe_load(theme_lines[0])["theme"] == _LONG_THEME
+
+
+def test_init_writes_a_long_theme_on_one_line(tmp_path):
+    run(["--theme", _LONG_THEME], cwd=tmp_path)
+
+    text = (tmp_path / ".wikicommit" / "config.yml").read_text(encoding="utf-8")
+    theme_lines = [ln for ln in text.splitlines() if ln.startswith("theme:")]
+    assert len(theme_lines) == 1
+    assert yaml.safe_load(theme_lines[0])["theme"] == _LONG_THEME
+    assert yaml.safe_load(text)["theme"] == _LONG_THEME
+
+
 def test_main_without_quartz_does_not_generate_quartz_files(tmp_path):
     run([], cwd=tmp_path)
 
@@ -1151,6 +1280,150 @@ def test_exclude_living_persons_keeps_the_frontmatter_parseable(tmp_path):
     text = (tmp_path / ENTITY_POLICY).read_text(encoding="utf-8")
     _, front, _ = text.split("---", 2)
     assert yaml.safe_load(front)["wikicommit"]["exclude_living_persons"] is True
+
+
+# ── config.yml / entity-policy.md の改行コードを保つ（Issue #1189）──────────────
+#
+# read_text() / write_text() 経由だと CRLF のファイルが LF に（Windows では LF のファイルが
+# CRLF に）書き換わり、1 つの値を書き換えただけで git diff が全行になる。
+
+
+def _to_crlf(path: Path) -> bytes:
+    lf = path.read_bytes().replace(b"\r\n", b"\n")
+    crlf = lf.replace(b"\n", b"\r\n")
+    path.write_bytes(crlf)
+    return crlf
+
+
+def _changed_lines(before: bytes, after: bytes) -> list[tuple[bytes, bytes]]:
+    b, a = before.split(b"\n"), after.split(b"\n")
+    assert len(b) == len(a), "行数が変わっています"
+    return [(x, y) for x, y in zip(b, a, strict=True) if x != y]
+
+
+def test_update_theme_keeps_a_crlf_config_crlf(tmp_path):
+    repo = _init_repo(tmp_path, "--theme", "Old")
+    config = repo / ".wikicommit" / "config.yml"
+    before = _to_crlf(config)
+
+    assert run(["--update-theme", "New"], cwd=repo).returncode == 0
+
+    after = config.read_bytes()
+    assert after.count(b"\n") == after.count(b"\r\n"), "LF の改行が混ざりました"
+    assert _changed_lines(before, after) == [(b'theme: "Old"\r', b'theme: "New"\r')]
+
+
+def test_update_version_keeps_a_crlf_config_crlf(tmp_path):
+    repo = _init_repo(tmp_path)
+    config = repo / ".wikicommit" / "config.yml"
+    before = _to_crlf(config)
+
+    assert run(["--update-version", "9.9.9"], cwd=repo).returncode == 0
+
+    after = config.read_bytes()
+    assert after.count(b"\n") == after.count(b"\r\n"), "LF の改行が混ざりました"
+    changed = _changed_lines(before, after)
+    assert len(changed) == 1 and changed[0][1] == b'wikicommit_version: "9.9.9"\r'
+
+
+def test_update_version_prepends_with_the_files_own_line_break(tmp_path):
+    repo = _init_repo(tmp_path)
+    config = repo / ".wikicommit" / "config.yml"
+    stripped = b"".join(
+        ln for ln in config.read_bytes().splitlines(keepends=True)
+        if not ln.startswith(b"wikicommit_version")
+    ).replace(b"\n", b"\r\n")
+    config.write_bytes(stripped)
+
+    assert run(["--update-version", "1.2.3"], cwd=repo).returncode == 0
+
+    assert config.read_bytes() == b'wikicommit_version: "1.2.3"\r\n' + stripped
+
+
+def test_add_config_keys_writes_added_lines_with_the_files_line_break(tmp_path):
+    repo = _init_repo(tmp_path)
+    config = repo / ".wikicommit" / "config.yml"
+    without_theme = re.sub(
+        r"(?m)^theme:.*$\n?", "", config.read_text(encoding="utf-8")
+    ).replace("\n", "\r\n").encode("utf-8")
+    config.write_bytes(without_theme)
+
+    assert run(["--add-config-keys", "theme"], cwd=repo).returncode == 0
+
+    after = config.read_bytes()
+    assert after.startswith(without_theme), "既存の行が変わりました"
+    assert after.count(b"\n") == after.count(b"\r\n"), "足した行が LF で書かれました"
+    assert yaml.safe_load(after)["theme"] == ""
+
+
+@pytest.mark.parametrize(
+    "args", [["--update-theme", "New"], ["--update-version", "9.9.9"]]
+)
+def test_an_lf_config_stays_lf(tmp_path, args):
+    """The writers bypass os.linesep, so this holds on Windows too."""
+    repo = _init_repo(tmp_path)
+    config = repo / ".wikicommit" / "config.yml"
+    config.write_bytes(config.read_bytes().replace(b"\r\n", b"\n"))
+
+    assert run(args, cwd=repo).returncode == 0
+
+    assert b"\r" not in config.read_bytes()
+
+
+def test_a_mixed_line_break_config_keeps_its_other_lines(tmp_path):
+    """Normalizing a mixed file would rewrite the lines that were already LF."""
+    repo = _init_repo(tmp_path, "--theme", "Old")
+    config = repo / ".wikicommit" / "config.yml"
+    lines = config.read_bytes().replace(b"\r\n", b"\n").split(b"\n")
+    lines[1] += b"\r"  # one CRLF line, not the theme line
+    assert not lines[1].startswith(b"theme:")
+    before = b"\n".join(lines)
+    config.write_bytes(before)
+
+    assert run(["--update-theme", "New"], cwd=repo).returncode == 0
+
+    assert _changed_lines(before, config.read_bytes()) == [(b'theme: "Old"', b'theme: "New"')]
+
+
+def test_a_mixed_line_break_config_keeps_the_rewritten_lines_own_crlf(tmp_path):
+    """In a mixed file the rewritten line keeps its own `\\r` (the regex must not eat it)."""
+    repo = _init_repo(tmp_path)
+    config = repo / ".wikicommit" / "config.yml"
+    lines = config.read_bytes().replace(b"\r\n", b"\n").split(b"\n")
+    assert lines[0].startswith(b"wikicommit_version")
+    lines[0] += b"\r"  # only the version line is CRLF
+    before = b"\n".join(lines)
+    config.write_bytes(before)
+
+    assert run(["--update-version", "9.9.9"], cwd=repo).returncode == 0
+
+    assert _changed_lines(before, config.read_bytes()) == [
+        (lines[0], b'wikicommit_version: "9.9.9"\r')
+    ]
+
+
+def test_an_undecodable_config_reports_an_error_not_a_traceback(tmp_path):
+    repo = _init_repo(tmp_path)
+    config = repo / ".wikicommit" / "config.yml"
+    config.write_bytes(b'theme: "\xff"\n')
+
+    result = run(["--update-theme", "New"], cwd=repo)
+
+    assert result.returncode == 1
+    assert "ERROR:" in result.stderr and "Traceback" not in result.stderr
+
+
+def test_exclude_living_persons_keeps_a_crlf_policy_crlf(tmp_path):
+    module = _load_init_module()
+    policy = tmp_path / "entity-policy.md"
+    policy.write_bytes(TEMPLATE_ENTITY_POLICY.read_bytes().replace(b"\n", b"\r\n"))
+    before = policy.read_bytes()
+
+    assert module._set_exclude_living_persons(policy) is True
+
+    assert _changed_lines(before, policy.read_bytes()) == [
+        (b"  exclude_living_persons: false\r", b"  exclude_living_persons: true\r")
+    ]
 
 
 # ── GITIGNORE_READY: 基盤コミットの提案が安全かの判定材料（Issue #873）──────────

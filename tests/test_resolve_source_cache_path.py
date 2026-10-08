@@ -1,4 +1,4 @@
-"""Tests for .claude/skills/wikicommit-ask/scripts/resolve_source_cache_path.py
+"""Tests for resolve_source_cache_path.py (.wikicommit/scripts/, Issue #1210)
 
 The reader half of the extraction cache. Issue #470 built it for `type: url`
 sources; Issue #885 widened it to `type: path`, which is the half that matters
@@ -22,12 +22,13 @@ by reading the raw file.
 
 import hashlib
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).parent.parent
-SCRIPT = REPO / ".claude/skills/wikicommit-ask/scripts/resolve_source_cache_path.py"
+SCRIPT = REPO / ".claude/skills/wikicommit-init/scripts/templates/scripts/resolve_source_cache_path.py"
 
 sys.path.insert(0, str(REPO / "tools"))
 from check_skill_md_lines import instruction_files  # noqa: E402
@@ -352,6 +353,97 @@ def test_cli_names_where_the_cache_belongs_when_it_is_missing(tmp_path):
     )
 
 
+# ── OUTSIDE: a `type: path` that resolves outside the repository (Issue #1206) ─
+
+def _outside_secret(tmp_path: Path) -> tuple[Path, Path]:
+    """A repository root and a readable file beside it, outside it."""
+    root = tmp_path / "repo"
+    root.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not for the wiki\n", encoding="utf-8")
+    return root, secret
+
+
+def _assert_outside(got: subprocess.CompletedProcess, identifier: str) -> None:
+    assert got.returncode == 1
+    assert got.stdout.strip() == f"OUTSIDE: {identifier}"
+    # Neither line the ask Skill answers by reading the raw file.
+    assert "UNREGISTERED" not in got.stdout
+    assert "NO_CACHE" not in got.stdout
+
+
+def test_cli_says_outside_for_an_absolute_path(tmp_path):
+    root, secret = _outside_secret(tmp_path)
+    _assert_outside(_run(root, str(secret), "--type", "path"), str(secret))
+
+
+def test_cli_says_outside_for_a_path_that_climbs_out(tmp_path):
+    root, _ = _outside_secret(tmp_path)
+    _assert_outside(_run(root, "../secret.txt", "--type", "path"), "../secret.txt")
+
+
+def test_cli_says_outside_for_a_symlink_pointing_out(tmp_path):
+    root, secret = _outside_secret(tmp_path)
+    (root / "raw").mkdir()
+    (root / "raw" / "link.txt").symlink_to(secret)
+    _assert_outside(_run(root, "raw/link.txt", "--type", "path"), "raw/link.txt")
+
+
+def test_cli_says_outside_even_when_a_management_file_names_the_path(tmp_path):
+    """Checked before the management-file answer, not only on UNREGISTERED: a
+    registered outside path would otherwise come back as NO_CACHE."""
+    root, _ = _outside_secret(tmp_path)
+    _path_source(root, "secret.txt.md", "../secret.txt")
+    _assert_outside(_run(root, "../secret.txt", "--type", "path"), "../secret.txt")
+
+
+def test_cli_says_outside_for_a_nonexistent_outside_path_too(tmp_path):
+    """The answer must not tell whether a file outside the repository exists."""
+    root, _ = _outside_secret(tmp_path)
+    _assert_outside(_run(root, "../no-such-file.txt", "--type", "path"), "../no-such-file.txt")
+
+
+def test_cli_says_outside_for_a_path_with_a_nul_byte(tmp_path):
+    """resolve() raises ValueError on an embedded NUL; fail closed, not crash."""
+    root, _ = _outside_secret(tmp_path)
+    _assert_outside(_run(root, "raw/a\x00b.txt", "--type", "path"), "raw/a\x00b.txt")
+
+
+def test_cli_retraction_is_still_answered_before_outside(tmp_path):
+    """Same order as --obtain: retraction first."""
+    root, _ = _outside_secret(tmp_path)
+    _path_source(root, "secret.txt.md", "../secret.txt", status="retracted")
+    got = _run(root, "../secret.txt", "--type", "path")
+    assert got.returncode == 2
+    assert got.stdout.startswith("RETRACTED: ../secret.txt")
+
+
+def test_cli_a_symlink_pointing_inside_is_not_outside(tmp_path):
+    root, _ = _outside_secret(tmp_path)
+    _write(root, "raw/real.txt")
+    (root / "raw" / "alias.txt").symlink_to(root / "raw" / "real.txt")
+    got = _run(root, "raw/alias.txt", "--type", "path")
+    assert got.returncode == 1
+    assert got.stdout.strip() == "UNREGISTERED: raw/alias.txt"
+
+
+def test_cli_url_identifiers_are_not_judged_as_paths(tmp_path):
+    got = _run(tmp_path, "https://example.com/../../etc/passwd")
+    assert got.stdout.strip().startswith("UNREGISTERED:")
+
+
+def test_the_ask_skill_does_not_read_the_raw_file_on_outside():
+    """Completion criterion 2: the path branch names OUTSIDE and says not to read it."""
+    text = (REPO / ".claude/skills/wikicommit-ask/SKILL.md").read_text(encoding="utf-8")
+    flat = " ".join(text.replace("`", "").split())
+    path_branch = flat.partition("resolve_source_cache_path.py --type path")[2].partition(
+        "resolve_source_cache_path.py --type url"
+    )[0]
+    assert "OUTSIDE:" in path_branch
+    at = path_branch.index("OUTSIDE:")
+    assert "do not Read" in path_branch[at:at + 400]
+
+
 # ── --settle: a fetch made because no cache existed (Issue #1036) ─────────────
 
 _FETCHED = "fetched body\n"
@@ -556,6 +648,116 @@ def test_cli_usage_error_on_empty_stdin(tmp_path):
     assert "Usage:" in got.stderr
 
 
+# ── A non-ASCII line under a locale that is not UTF-8 (Issue #1265) ───────────
+
+_NOT_UTF8 = {"LC_ALL": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}
+
+
+def _run_beside_a_fake_fetcher(root: Path, identifier: str, fetcher: str, *args: str):
+    """Run a copy of the script whose `add_source.py` is `fetcher`, under `LC_ALL=C`
+    with no PYTHONIOENCODING: stdin and stdout would be ASCII without the fix."""
+    scripts = root / ".wikicommit/scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("_frontmatter.py", "_wikilink.py"):
+        (scripts / name).write_text(
+            (REPO / ".wikicommit/scripts" / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    copy = scripts / "resolve_source_cache_path.py"
+    copy.write_text(SCRIPT.read_text(encoding="utf-8"), encoding="utf-8")
+    (scripts / "add_source.py").write_text(fetcher, encoding="utf-8")
+    env = {**os.environ, **_NOT_UTF8}
+    env.pop("PYTHONIOENCODING", None)
+    return subprocess.run(
+        [sys.executable, str(copy), *args],
+        input=(identifier + "\n").encode("utf-8"),
+        capture_output=True, cwd=root, env=env, check=False,
+    )
+
+
+def test_a_non_ascii_line_from_the_fetcher_reaches_stdout_under_a_non_utf8_locale(tmp_path):
+    """The child's line was read as UTF-8 since Issue #1256, but this script's own
+    `print` then raised `UnicodeEncodeError` — after the child had finished."""
+    fetcher = (
+        "import sys\n"
+        "print('ERROR: 記事を取得できません: https://example.com/記事')\n"
+        "sys.exit(1)\n"
+    )
+    got = _run_beside_a_fake_fetcher(
+        tmp_path, "https://example.com/記事", fetcher, "--obtain", "--label", "ask", "--index", "1"
+    )
+    out = got.stdout.decode("utf-8")
+    assert got.returncode == 1, out + got.stderr.decode("utf-8", "replace")
+    assert out.strip() == (
+        "UNAVAILABLE: fetch (ERROR: 記事を取得できません: https://example.com/記事)"
+    )
+
+
+def test_a_non_ascii_cache_path_reaches_stdout_under_a_non_utf8_locale(tmp_path):
+    """A fetched page settled under a management file with a Japanese name: the
+    `READ:` path is read from the disk, and it goes out as the same bytes."""
+    content = "本文\n"
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    mgmt = tmp_path / ".wikicommit/source/url/example.com/記事.md"
+    mgmt.parent.mkdir(parents=True)
+    mgmt.write_text(
+        "---\nsource:\n  type: url\n  url: https://example.com/kiji\n"
+        f"  hash: sha256:{digest}\n---\n",
+        encoding="utf-8",
+    )
+    fetcher = (
+        "import os, sys\n"
+        "out = sys.argv[sys.argv.index('--output') + 1]\n"
+        "os.makedirs(os.path.dirname(out), exist_ok=True)\n"
+        f"open(out, 'w', encoding='utf-8').write({content!r})\n"
+        "print('OK')\n"
+    )
+    got = _run_beside_a_fake_fetcher(
+        tmp_path, "https://example.com/kiji", fetcher,
+        "--obtain", "--label", "ask", "--index", "1", "--page-hash", f"sha256:{digest}",
+    )
+    out = got.stdout.decode("utf-8")
+    assert got.returncode == 0, out + got.stderr.decode("utf-8", "replace")
+    assert out.strip() == "READ: .wikicommit/.cache/ingest-fetch/example.com/記事.md page=match"
+
+
+def test_a_retracted_non_ascii_path_is_found_under_a_non_utf8_locale(tmp_path):
+    """stdin is decoded as file names are (surrogates under `C`), the management
+    file as UTF-8: the two must still match, or the raw file is read past the
+    retraction."""
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw/原稿.txt").write_text("本文\n", encoding="utf-8")
+    mgmt = tmp_path / ".wikicommit/source/path/raw/原稿.txt.md"
+    mgmt.parent.mkdir(parents=True)
+    mgmt.write_text(
+        "---\nsource:\n  type: path\n  path: raw/原稿.txt\nstatus: retracted\n---\n",
+        encoding="utf-8",
+    )
+    got = _run_beside_a_fake_fetcher(
+        tmp_path, "raw/原稿.txt", "", "--type", "path", "--obtain", "--label", "review", "--index", "1"
+    )
+    out = got.stdout.decode("utf-8")
+    assert got.returncode == 2, out + got.stderr.decode("utf-8", "replace")
+    assert out.strip() == "RETRACTED: raw/原稿.txt (.wikicommit/source/path/raw/原稿.txt.md)"
+
+
+def test_a_non_ascii_url_in_a_pages_sources_is_one_line_under_a_non_utf8_locale(tmp_path):
+    """`--obtain-sources` reads the URL from the page as UTF-8 text, which argv
+    cannot carry under `C`: an UNAVAILABLE line, not a traceback."""
+    page = tmp_path / ".wikicommit/entity/ja/Person/x.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\ntitle: x\nsources:\n  - type: url\n    url: https://example.com/記事\n---\n本文\n",
+        encoding="utf-8",
+    )
+    got = _run_beside_a_fake_fetcher(
+        tmp_path, ".wikicommit/entity/ja/Person/x.md", "print('OK')\n",
+        "--obtain-sources", "--label", "review",
+    )
+    out = got.stdout.decode("utf-8")
+    assert got.returncode == 0, out + got.stderr.decode("utf-8", "replace")
+    assert out.splitlines()[0].startswith("UNAVAILABLE: [1] fetch https://example.com/記事 (")
+
+
 # ── Writer and reader stay paired (Issue #553's rule, Issue #885's instance) ──
 
 def test_the_generate_skill_both_writes_and_checks_the_path_cache():
@@ -640,3 +842,65 @@ def test_the_ask_skill_handles_the_retracted_exit_code_on_both_routes():
         )
     assert "retracted" in flat
 
+
+
+# ── --obtain: the CLI lines (Issue #1190; behaviour in test_review_fix_source_fetch.py) ──
+
+def test_obtain_prints_one_read_line_for_a_plain_text_source(tmp_path):
+    _write(tmp_path, "raw/notes.md")
+    page_hash = "sha256:" + hashlib.sha256(b"extracted text\n").hexdigest()
+    got = _run(
+        tmp_path, "raw/notes.md", "--obtain", "--type", "path",
+        "--label", "review", "--index", "1", "--page-hash", page_hash,
+    )
+    assert got.returncode == 0
+    assert got.stdout.strip() == "READ: raw/notes.md page=match"
+
+
+def test_obtain_prints_extract_when_no_cache_covers_the_file(tmp_path):
+    _write(tmp_path, "raw/paper.pdf")
+    got = _run(tmp_path, "raw/paper.pdf", "--obtain", "--type", "path", "--label", "fix", "--index", "2")
+    assert got.returncode == 0
+    assert got.stdout.strip() == "EXTRACT: raw/paper.pdf"
+
+
+def test_obtain_exits_two_on_a_retracted_source(tmp_path):
+    _path_source(tmp_path, "raw/paper.pdf.md", "raw/paper.pdf", status="retracted")
+    got = _run(tmp_path, "raw/paper.pdf", "--obtain", "--type", "path", "--label", "fix", "--index", "1")
+    assert got.returncode == 2
+    assert got.stdout.startswith("RETRACTED: raw/paper.pdf (")
+
+
+def test_obtain_reports_a_missing_file_as_unavailable(tmp_path):
+    got = _run(tmp_path, "raw/gone.pdf", "--obtain", "--type", "path", "--label", "fix", "--index", "1")
+    assert got.returncode == 1
+    assert got.stdout.startswith("UNAVAILABLE: missing (")
+
+
+def test_obtain_rejects_a_label_that_could_leave_the_refetch_directory(tmp_path):
+    got = _run(tmp_path, _URL, "--obtain", "--label", "../x", "--index", "1")
+    assert got.returncode == 1
+    assert "ERROR:" in got.stderr
+
+
+# ── --obtain judges the extension on the symlink's target (Issue #1208) ──
+
+def test_obtain_extracts_a_md_named_symlink_to_a_pdf(tmp_path):
+    """`raw/notes.md` → `docs/scan.pdf` is a PDF: READ would hand its bytes over as
+    text, and naming the link would steer the extraction skill by the wrong
+    extension."""
+    _write(tmp_path, "docs/scan.pdf")
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "notes.md").symlink_to(tmp_path / "docs" / "scan.pdf")
+    got = _run(tmp_path, "raw/notes.md", "--obtain", "--type", "path", "--label", "fix", "--index", "1")
+    assert got.returncode == 0
+    assert got.stdout.strip() == "EXTRACT: docs/scan.pdf"
+
+
+def test_obtain_reads_a_pdf_named_symlink_to_a_text_file(tmp_path):
+    _write(tmp_path, "docs/notes.md")
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "raw" / "scan.pdf").symlink_to(tmp_path / "docs" / "notes.md")
+    got = _run(tmp_path, "raw/scan.pdf", "--obtain", "--type", "path", "--label", "review", "--index", "1")
+    assert got.returncode == 0
+    assert got.stdout.startswith("READ: docs/notes.md page=")

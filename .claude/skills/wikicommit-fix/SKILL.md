@@ -2,6 +2,8 @@
 name: wikicommit-fix
 description: Fix a wiki page based on a GitHub Issue, a page path, or a published page URL, using its sources as ground truth. Use this only when someone explicitly asks to fix or correct a specific wiki page. It rewrites page content, so do not use it to answer a question about a page or to look for problems across the wiki — wikicommit-ask and wikicommit-status do those without writing.
 disable-model-invocation: true
+metadata:
+  requires: "wikicommit-generate"
 ---
 
 # wikicommit-fix
@@ -106,48 +108,24 @@ Matching is deliberately by `<slug>` alone across every `<Type>` directory under
 
 1. Check the target page's frontmatter `sources`.
 2. If `sources` is empty and the page is a translated page with `translated_from`, read the parent page pointed to by `translated_from` and use the parent page's `sources` instead (translated pages inherit source information from the parent page).
-3. **Once the `sources` list is settled, and before fetching anything, drop the entries a human has withdrawn.** Run `python .wikicommit/scripts/check_retracted_sources.py --list` once; every `RETRACTED: <identity> (<management file>)` line names a source whose management file carries `status: retracted`, written by hand to record that someone read that document and judged its content unreliable. Match those identities against this page's `sources[]` by `path`/`url` and **leave the matching entries out of the fetch below**, keeping a note of which ones and of the management file each was named in — Step 4 and Step 6 both need it. Grounding a fix in a document a person withdrew points the opposite way from the withdrawal itself.
-   - **Before the fetch, not after**: fetching costs a round trip and, worse, puts the withdrawn text into context, after which "do not use it" depends on instruction-following.
-   - **After the `sources` list is settled, not before**: a translated page has no `sources` of its own and inherits the parent's at item 2, so a guard applied earlier would let a withdrawn source through on exactly those pages.
-   - If the script or the `--list` flag is not there (an older `.wikicommit/scripts/`), **say so and carry on** — the only loss is this guard, and on a wiki that has retracted nothing it is a no-op either way. Do not stop over it, and do not pass over it in silence.
-4. For each element of `sources`, get the source document according to `source.type`:
-   - `type: path` and `.md` / `.txt` → read the file directly (these are never cached — the raw file is the extracted text)
-   - `type: path` with any other extension, and `type: url` / `type: wikicommit` → **ask for WikiCommit's extraction cache first**, then fall back as described below the list
-   - `type: manual` → no source document. Treat only `sources`' `author` / `created_at` as provenance information, and use the page body itself as the basis for the fix
-
-   **Getting a cached or fetched source**. `wikicommit-generate` keeps the text it extracted from each source, and that is what this step should read: it is the literal text, not a summary, and it is usually the very version the page was written from.
+3. **Once the `sources` list is settled, get every entry's text with one command**, giving it the page whose `sources` you settled on (this page, or its `translated_from` parent):
 
    ```bash
-   python ../wikicommit-ask/scripts/resolve_source_cache_path.py --type <path|url> <<'EOF'
-   <sources[].path or sources[].url>
+   python .wikicommit/scripts/resolve_source_cache_path.py --obtain-sources --label fix <<'EOF'
+   <path of the page whose sources apply>
    EOF
    ```
 
-   `--type path` for a `type: path` entry, `--type url` for `type: url` / `type: wikicommit`. **Exit 0** → read the printed file in full; that is this source's text. **For `type: path`, use it only if the file at `sources[].path` still hashes to that entry's `sources[].hash`** (compute the file's SHA-256 with `sha256sum`, or `python3 -c` + `hashlib` where that is absent): the script reports only that a cache exists, and it holds the extraction of whichever version the management file last recorded — if the file has changed since, treat the cache as absent and take the exit-1 fallback, so the text you read is the file as it is now. **Exit 2** → the source is retracted; the guard above already dropped it, so this should not happen — leave it out if it does. **Exit 1** (no cache — a clean checkout, another machine, or a cleared cache) → fall back:
+   It does everything but extraction and prints one line per entry (`[<n>]` is its position in `sources`); the keyword says what to do:
+   - `READ: [<n>] <file> page=<match|mismatch>` → read `<file>` in full; that is this source's text.
+   - `EXTRACT: [<n>] <path>` → call the extraction skill per the "Prerequisite Skills (Text Extraction)" table in `../wikicommit-generate/references/text-extraction-routing.md`; if it is not installed, guide the user through the install command and stop.
+   - `RETRACTED: [<n>] <identifier> (<management file>)` → a person withdrew it (`status: retracted`); nothing was read. Keep the line — Step 4 and Step 6 both need it: grounding a fix in a document a person withdrew points the opposite way from the withdrawal itself.
+   - `UNAVAILABLE: [<n>] <reason> …` → not obtained. `environment` means no network: **say the reason is the environment**, not the source. After two in a row the remaining URL entries are not fetched (`not fetched: …`). `outside` means a `type: path` value resolving outside the repository: **do not open that path yourself**.
+   - `MANUAL: [<n>]` → `type: manual`; there is no source document: treat only `sources`' `author` / `created_at` as provenance information, and use the page body itself as the basis for the fix.
+   - `CONTINUE: next=<n>` (last line, after `SUMMARY:`) → the time limit ran out before entry `<n>` was fetched. Run the same command again with `--from <n>` added, and repeat until no `CONTINUE:` line comes back; the lines already printed stand. Do not start over without `--from` — that clears the files those lines name.
 
-   - `type: path` → call the corresponding extraction skill per the "Prerequisite Skills (Text Extraction)" table in `../wikicommit-generate/references/text-extraction-routing.md`. If the required skill is not installed, guide the user through the install command and stop.
-   - `type: url` / `type: wikicommit` → fetch it with the same fetcher `wikicommit-generate` uses, never the agent's own web-fetch tool — in Claude Code that tool returns a model-written summary of the page, and checking a page against a summary is not checking it against its source:
-
-     ```bash
-     python ../wikicommit-generate/scripts/add_source.py --fetch-url "$(cat <<'EOF'
-     <source.url>
-     EOF
-     )" --output ".wikicommit/.cache/refetch/fix-<n>.md"
-     ```
-
-     `<n>` is the entry's position in `sources` (1, 2, …), so two URL sources on one page never share an output file. Go on only after the command printed `FETCHED:`; a file left by an earlier run under the same name is not this fetch's result. **`NETWORK_UNAVAILABLE:` (exit 3)** → the request never reached the server; treat the source as not obtained and **say the reason is the environment** (no network), not the source. **`ERROR:` (exit 1)** → treat it as not obtained, like any other fetch failure below. Then **settle the fetch** (the step `wikicommit-ask --include-source` also takes), so a fetch of the version `wikicommit-generate` expects becomes the cache instead of being fetched again next time:
-
-     ```bash
-     python ../wikicommit-ask/scripts/resolve_source_cache_path.py --settle ".wikicommit/.cache/refetch/fix-<n>.md" --page-hash "<sources[].hash>" <<'EOF'
-     <source.url>
-     EOF
-     ```
-
-     `<sources[].hash>` is this entry's hash in the page's `sources` (for a translation page, the parent's). It prints `SETTLED: page=<match|mismatch>, cache=<placed <path>|not-placed (<reason>)>, read=<file>`. **Read the `read=` file in full** — a placed fetch has moved into the cache and the scratch file is gone. If `cache=not-placed`, delete the scratch file once this run is done with it, so no second version of the source is left beside the cache. A `RETRACTED:` line (exit `2`) → leave the source out and delete the scratch file. If `--settle` is reported as an unrecognized argument (an older `wikicommit-ask`; argparse also exits `2`, but prints no `RETRACTED:` line), read the scratch file as it is — only the caching is lost.
-
-   Both the identifier and the URL go through quote-delimited heredocs because `sources[]` values are only format-validated. **Nothing here writes to a management file** — no `--write-hash`, no `status` change; only `wikicommit-generate` moves `source.hash`. `--settle` moves a fetch from `refetch/` into `ingest-fetch/` only when it hashes to the management file's `source.hash`, the value Pass 1 checks before reading the cache — so it can fill an empty slot with the version generate expects, never replace it with another.
-
-5. If no source document could be obtained at all (fetch failure, `sources` is empty and there's no parent page either, or **every remaining entry was withdrawn at item 3**), warn the user and confirm whether to proceed. Since producing a fix proposal without a source raises the risk of hallucination, whether to proceed must always be the user's call. The retracted case needs no branch of its own — what is left is a fix with nothing to ground it, which is what this branch already handles — but say which of the three it was, since the answer changes what the user should do instead (for a withdrawn source, `/wikicommit-generate --regenerate` rebuilds the page from whatever sources remain, and `/wikicommit-remove` takes it down when none do).
+   If the script is missing or rejects `--obtain-sources` (`.wikicommit/scripts/` older than this Skill), stop and tell the user to run `/wikicommit-update` first. **Never use your own web-fetch tool instead** — in Claude Code it returns a model-written summary, and checking a page against a summary is not checking it against its source. When done with the text, `rm -f .wikicommit/.cache/refetch/fix-*.md`.
+4. If no source document could be obtained at all (fetch failure, `sources` is empty and there's no parent page either, or **every entry came back `RETRACTED:` at item 3**), warn the user and confirm whether to proceed. Since producing a fix proposal without a source raises the risk of hallucination, whether to proceed must always be the user's call. The retracted case needs no branch of its own — what is left is a fix with nothing to ground it, which is what this branch already handles — but say which of the three it was, since the answer changes what the user should do instead (for a withdrawn source, `/wikicommit-generate --regenerate` rebuilds the page from whatever sources remain, and `/wikicommit-remove` takes it down when none do).
 
 ### Step 4: Generate a Fix Proposal
 

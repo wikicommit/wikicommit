@@ -255,11 +255,23 @@ def test_each_writing_skill_invokes_the_recorder(skill):
     """
     text = _instructions(skill)
     if skill == "wikicommit-generate":
-        # Since Issue #1085 the driver opens and closes this Skill's record: it
+        # Since Issue #1085 the workflow engine opens and closes this Skill's record: it
         # calls record_run.open_record() at `start`, and the last step's `done`
         # closes it. The closing report must still be a step the run has to reach.
-        assert "driver.py start --workflow" in text, skill
-        assert "driver.py done" in text and "--step completion" in text, skill
+        assert "skill_workflow.py start --workflow" in text, skill
+        assert "skill_workflow.py done" in text and "--step completion" in text, skill
+        return
+    if skill == "wikicommit-merge":
+        # Since Issue #1094 the same holds for merge: the workflow engine opens the record,
+        # and the `report` step's `done` closes it with the PR and Issue counts.
+        assert "skill_workflow.py start --workflow" in text, skill
+        assert "skill_workflow.py done" in text and "--step report" in text, skill
+        return
+    if skill in ("wikicommit-translate", "wikicommit-synthesize"):
+        # Since Issue #1194 translate is driven too, and since Issue #1195
+        # synthesize: the `report` step closes it.
+        assert "skill_workflow.py start --workflow" in text, skill
+        assert "skill_workflow.py done" in text and "--step report" in text, skill
         return
     assert f"record_run.py start --skill {skill}" in text, skill
     assert "record_run.py end" in text, skill
@@ -278,7 +290,7 @@ def test_the_generate_notice_and_its_closing_call_stay_in_the_same_file():
     assert notice.is_file(), "completion-notice.md is gone; see Issue #894"
     body = notice.read_text(encoding="utf-8")
     # Since Issue #1085 the record is closed by reporting the last step to the
-    # driver, and that report is still made from this file.
+    # workflow engine, and that report is still made from this file.
     assert "--step completion" in body, (
         "the call that closes a run normally is no longer in completion-notice.md, "
         "so skipping that file no longer shows up as an unclosed record"
@@ -455,14 +467,18 @@ def test_generate_stamps_every_pass_it_declares():
     generate = SKILLS / "wikicommit-generate"
 
     def stamped(workflow_file: str) -> list[str]:
-        # Since Issue #1085 the driver writes the stamps, from the steps marked
-        # `stamp: true` in the Skill's workflow definition.
+        # Since Issue #1085 the workflow engine writes the stamps, from the steps marked
+        # `stamp:` in the Skill's workflow definition — `true` stamps the step id, a
+        # name stamps that name (Issue #1116: the second loop over the answered
+        # sources stamps the same passes as the first).
         data = yaml.safe_load((generate / workflow_file).read_text(encoding="utf-8"))
         names = []
         for step in data["steps"]:
             for sub in step.get("steps", [step]):
-                if sub.get("stamp"):
-                    names.append(sub["id"])
+                stamp = sub.get("stamp")
+                name = stamp if isinstance(stamp, str) else sub["id"]
+                if stamp and name not in names:
+                    names.append(name)
         return names
 
     assert stamped("workflow.yaml") == list(EXPECTED_PASSES["wikicommit-generate"])

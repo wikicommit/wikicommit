@@ -7,6 +7,7 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
 import yaml
 
 SCRIPT = Path(__file__).parent.parent / ".wikicommit" / "scripts" / "convert_wikilinks.py"
@@ -1368,6 +1369,72 @@ def test_source_page_omits_license_line_when_blank_or_absent(tmp_path):
 
     out = (tmp_path / "content" / "sources" / "url" / "example.com" / "article.md").read_text(encoding="utf-8")
     assert "ライセンス" not in out
+
+
+def _write_lang_source(tmp_path, lang_line: str) -> str:
+    """Write one URL source whose `source:` block carries `lang_line` (or no
+    lang key when empty), run the converter, and return the public page."""
+    lang_yaml = f"  {lang_line}\n" if lang_line else ""
+    write_source(
+        tmp_path, "url/example.com/article.md",
+        "---\n"
+        "source:\n"
+        "  type: url\n"
+        "  url: https://example.com/article\n"
+        "  hash: sha256:abc123\n"
+        f"{lang_yaml}"
+        "status: generated\n"
+        "generated_pages: []\n"
+        "---\n\n## Summary\n\nAn article.\n",
+    )
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0, result.stderr
+    return (tmp_path / "content" / "sources" / "url" / "example.com" / "article.md").read_text(encoding="utf-8")
+
+
+def test_source_page_renders_source_lang_next_to_license(tmp_path):
+    """Issue #1007: the Summary is in primary_lang, so the source's own language
+    is stated as a line beside the license line."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, "lang: ja\n  license: CC-BY-4.0")
+    assert "**Language**: ja" in out
+    assert out.index("**License**: CC-BY-4.0") < out.index("**Language**: ja")
+
+
+def test_source_page_renders_source_lang_even_when_it_equals_primary_lang(tmp_path):
+    """Shown whenever recorded, so the line is a fact on every page rather than
+    a mark singling out non-primary-language sources."""
+    write_config(tmp_path, primary_lang="ja")
+    out = _write_lang_source(tmp_path, "lang: ja")
+    assert "**言語**: ja" in out
+
+
+@pytest.mark.parametrize("lang_line", ["", "lang:", "lang: ''"])
+def test_source_page_omits_lang_line_when_not_recorded(tmp_path, lang_line):
+    """Unlike the overview page's tally, an unrecorded language is omitted:
+    on one page there is no distribution to distort."""
+    write_config(tmp_path)
+    out = _write_lang_source(tmp_path, lang_line)
+    assert "**言語**" not in out
+
+
+def test_source_page_renders_norwegian_lang_read_as_false(tmp_path):
+    """YAML 1.1 reads an unquoted `lang: no` as False; the page must still say no."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, "lang: no")
+    assert "**Language**: no" in out
+
+
+@pytest.mark.parametrize("lang_line", ["lang: [ja, en]", "lang: yes", "lang: on", "lang: 12"])
+def test_source_page_omits_lang_line_when_not_a_string(tmp_path, lang_line):
+    """Issue #1193: a non-string value (a list, True from `yes`/`on`, a number)
+    breaks the one-code rule; str() would print `['ja', 'en']` or `true`, so the
+    page treats it as not recorded."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, lang_line)
+    assert "**Language**" not in out
+    assert "true" not in out
+    assert "['ja'" not in out
 
 
 def test_source_page_url_type_renders_link_and_pending_status(tmp_path):
@@ -2763,6 +2830,47 @@ def test_overview_source_language_table_reads_unquoted_no_as_norwegian(tmp_path)
     assert "false" not in section
 
 
+@pytest.mark.parametrize("lang_line", ["  lang: [ja, en]\n", "  lang: yes\n"])
+def test_overview_source_language_table_counts_non_string_lang_as_not_recorded(tmp_path, lang_line):
+    """Issue #1193: a list or True is not a recorded language; it is counted in
+    the "not recorded" row (the source has run), not as a stringified row."""
+    write_config(tmp_path, primary_lang="en")
+    write_source(
+        tmp_path, "url/example.com/n.md",
+        "---\nsource:\n  type: url\n  url: https://example.com/n\n  hash: sha256:x\n"
+        f"{lang_line}status: generated\nlast_generated_at: '2026-10-01T00:00:00Z'\n"
+        "generated_pages: []\n---\n\n## Summary\n\nS.\n",
+    )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+    out = read_overview(tmp_path)
+    section = out[out.index("### By language"):out.index("### Source type x generated page type")]
+    assert "| Not recorded | 1 |" in section
+    assert "true" not in section
+    assert "['ja'" not in section
+
+
+@pytest.mark.parametrize("lang_line", ["  lang: [ja, en]\n", "  lang: on\n"])
+def test_overview_source_language_table_counts_non_string_lang_without_run_as_unprocessed(tmp_path, lang_line):
+    """Issue #1193: a non-string lang follows the same split as a missing one —
+    a source that has never finished a run is "not processed yet"."""
+    write_config(tmp_path, primary_lang="en")
+    write_source(
+        tmp_path, "url/example.com/n.md",
+        "---\nsource:\n  type: url\n  url: https://example.com/n\n  hash: sha256:x\n"
+        f"{lang_line}status: pending\nlast_generated_at:\n"
+        "generated_pages: []\n---\n\n## Summary\n\nS.\n",
+    )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+    out = read_overview(tmp_path)
+    section = out[out.index("### By language"):out.index("### Source type x generated page type")]
+    assert "| Not processed yet | 1 |" in section
+    assert "| Not recorded |" not in section
+    assert "true" not in section
+    assert "['ja'" not in section
+
+
 def test_overview_source_language_labels_exist_for_every_language():
     """Issue #989: labels are read by bracket access, so a language missing the
     new keys fails the build with KeyError."""
@@ -3200,6 +3308,46 @@ def test_ai_verdict_survives_a_merge_link_rewrite(tmp_path):
 
     published = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
     assert 'ai_review_model: "claude-opus-5[1m]"' in published
+
+
+def _renamed(tmp_path: Path, title: str) -> None:
+    """A page reviewed under its old slug, then renamed the way rename_page.py does:
+    the page is copied to the new slug with `title`, the record stays behind."""
+    write_config(tmp_path, primary_lang="ja")
+    write_wikicommit_page(tmp_path, "ja", "Person", "yamada-taro", PAGE_WITH_STAMPS)
+    record_review(
+        tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
+        model="claude-opus-5[1m]", reviewed_at="2026-09-05",
+    )
+    old = tmp_path / ".wikicommit/entity/ja/Person/yamada-taro.md"
+    write_wikicommit_page(
+        tmp_path, "ja", "Person", "yamada-taro-2025",
+        PAGE_WITH_STAMPS.replace('"山田太郎"', f'"{title}"'),
+    )
+    old.unlink()
+    (tmp_path / ".wikicommit" / "relations.yml").write_text(
+        "- relation: same\n  pages: [Person/yamada-taro, Person/yamada-taro-2025]\n"
+        "  merged_into: Person/yamada-taro-2025\n  renamed_at: '2026-10-07'\n",
+        encoding="utf-8",
+    )
+
+
+def test_ai_verdict_follows_a_slug_only_rename(tmp_path):
+    """Issue #1162: the record stays under the old slug, and the text it judged is
+    unchanged, so the banner agrees with `/wikicommit-status` and still shows it."""
+    _renamed(tmp_path, "山田太郎")
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+    published = (tmp_path / "content/ja/Person/yamada-taro-2025.md").read_text(encoding="utf-8")
+    assert 'ai_review_model: "claude-opus-5[1m]"' in published
+
+
+def test_ai_verdict_is_withheld_after_a_rename_changed_the_title(tmp_path):
+    _renamed(tmp_path, "山田太郎（2025）")
+    result = run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+    published = (tmp_path / "content/ja/Person/yamada-taro-2025.md").read_text(encoding="utf-8")
+    assert "ai_review_model" not in published
 
 
 def test_page_with_no_record_publishes_exactly_as_before(tmp_path):

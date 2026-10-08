@@ -152,7 +152,7 @@ Confirm the following with the user (use the default value if there is no answer
    form above; do not add it to the **Adding to an existing repository** form — `--theme` has no effect
    there: an already-existing `config.yml` is always skipped wholesale under
    `--no-overwrite`, silently discarding whatever the user just answered at the theme prompt. Use
-   `--update-theme` afterward instead — a dedicated flag that rewrites only the `theme:` line of the
+   `--update-theme` afterward instead — a dedicated flag that rewrites only the `theme` value of the
    existing `config.yml`, leaving the rest of the file untouched. Skip it if the user left the theme
    prompt blank — a blank answer means "leave it as is," not "clear it," and `--update-theme` always
    overwrites unconditionally once invoked (that is the point of it being a separate, explicitly-named

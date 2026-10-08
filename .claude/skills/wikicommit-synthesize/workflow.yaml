@@ -1,0 +1,68 @@
+# The steps of /wikicommit-synthesize, in order, for .wikicommit/scripts/skill_workflow.py.
+#
+# One run writes at most one view page, so there is no loop over items: the
+# survey (only without a topic), the choice of grounding pages, the synthesis with
+# its review, the view index and the report. Values one step hands to a later one
+# — the chosen topic and kind, the grounding pages, the page path — go into the
+# run record's lists (`done --add`), not into the agent's memory, so a resumed
+# step reads the same values. Each agent step's completion is checked on disk by
+# scripts/workflow_checks.py: the grounding pages are originals in primary_lang
+# within the cap, and a written page carries derived_from naming exactly those
+# pages at their commits, together with a synthesize-step5.5 review record
+# written in this run.
+
+skill: wikicommit-synthesize
+
+steps:
+  - id: preflight
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", preflight, --run, "{run}"]
+
+  - id: survey
+    type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", needs-survey, --run, "{run}"]
+    instructions: references/survey.md
+    outcomes:
+      chosen: "the person chose a topic; pass --add topic=<topic>, --add kind=<kind> when one goes with it, and --add max_grounding=<N> when the person named a cap"
+      none: "nothing was chosen, or nobody could answer; nothing was written"
+    finishes_on: [none]
+    adds: [topic, kind, max_grounding]
+    non_interactive: "nobody can choose an angle, so report `none`; never pick one yourself"
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-survey, --run, "{run}", --outcome, "{outcome}"]
+
+  - id: ground
+    type: agent
+    instructions: references/ground.md
+    outcomes:
+      grounded: "the grounding pages were chosen and read; pass --add grounding=<path> once for each, in order"
+      nothing: "no page treats the topic as its subject; nothing was written"
+      halted: "the search failed with an ERROR: line; pass --reason"
+    finishes_on: [nothing]
+    halts_on: [halted]
+    adds: [grounding]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-grounding, --run, "{run}", --outcome, "{outcome}"]
+
+  - id: write
+    type: agent
+    instructions: references/write-page.md
+    outcomes:
+      written: "the page passed synthesize-step5.5, was written, and the pass was recorded; pass --add page=<the view page path>"
+      discarded: "the page still failed review after generate.max_retries; nothing was written and the discard was recorded; pass --add page=<the path it would have had>"
+      declined: "the view page already exists and overwriting it was declined; nothing was written; pass --add page=<that path>"
+      halted: "the review could not be run as specified (rules_version mismatch twice); pass --reason"
+    finishes_on: [declined]
+    halts_on: [halted]
+    adds: [page]
+    non_interactive: "an existing view page is not overwritten: report `declined`"
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-page, --run, "{run}", --outcome, "{outcome}"]
+
+  - id: rebuild-index
+    type: script
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", wrote-page, --run, "{run}"]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", rebuild-index, --run, "{run}"]
+
+  - id: report
+    type: agent
+    instructions: references/completion-report.md
+    outcomes:
+      reported: "the completion report was shown; pass --page <the view page> when one was written, and --count synthesized=<0|1> --count failed=<0|1>"

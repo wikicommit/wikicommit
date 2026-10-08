@@ -1,5 +1,5 @@
 ---
-rules_version: 6
+rules_version: 7
 wikicommit:
   # Machine-readable header only. The rules themselves are the prose below.
   # `rules_version` is bumped whenever any rule in this file changes; a review
@@ -210,6 +210,18 @@ still **FAIL** (`type: HALLUCINATION`). Approximate correctness on the broad
 claim does not excuse an inexact specific detail: if the general fact that a
 named person wrote about a topic is true, but the date given for that
 publication is not the date the evidence states, that is a FAIL.
+
+**A declared list in `properties:` — `generate-pass4`, `review-skill`.** A
+`properties:` value that stands for a list the source declares about itself —
+`keywords` above all, which is a paper's own Keywords section (or Index Terms,
+Key words, CCS Concepts) or, for an article, the article's own tag list — is a
+claim that the source declares each entry. An entry the evidence does not
+declare **FAILs** (`type: HALLUCINATION`), even when it is an apt subject term
+the evidence discusses at length, and so does a `keywords` list on a page whose
+evidence declares no such list at all. A site's
+classification of the source (an arXiv subject class such as `cs.SE`) is not a
+declaration by the source. An entry the page left out is not a failure (Part 1,
+rule 2): only what the list says is checked, not what it misses.
 
 ### 3. Naming vs. inventing — `generate-pass4`, `review-skill`, `synthesize-step5.5`
 

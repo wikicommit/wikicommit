@@ -1,19 +1,21 @@
 ---
 name: wikicommit-status
-description: Check the wiki's health — orphan and wanted pages, pages not yet read by a person, expired pages, stale translations, outdated sources, sources that were deferred or failed, types with no schema file, unlinked entity mentions, unused installed types, self-referential tags, and more. Use this whenever someone asks how the wiki is doing, what needs attention, what is left to review, whether anything is stale or broken, or what to work on next — and run it before concluding the wiki is fine, since most of what it reports is invisible from any single page.
+description: Check the wiki's health — orphan and wanted pages, pages not yet read by a person, expired pages, stale translations, outdated sources, sources that were deferred or failed, types with no schema file, unlinked entity mentions, unused installed types, self-referential tags, broken external links, and more. Use this whenever someone asks how the wiki is doing, what needs attention, what is left to review, whether anything is stale or broken, or what to work on next — and run it before concluding the wiki is fine, since most of what it reports is invisible from any single page.
 ---
 
 # wikicommit-status
 
-A health-check skill for the wiki as a whole. Calls the six page-count scripts (`check_orphans.py` / `check_wanted_pages.py` / `check_expires.py` / `check_ingest_freshness.py` / `check_translation_status.py` / `check_derivation_freshness.py`), the three blocking checks `wikicommit-merge` runs only on changed files (`validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py`, run here over every page), plus `check_actions_pr_permission.py` (a single repository-setting check, not a page count), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (two `.wikicommit/schema/` checks, not page counts either — the first for whether a template points at a WikiLink, the second for whether a type file is written in a working shape at all), `check_schema_coverage.py` (types in use with no dedicated schema file), `check_recurring_characters.py` (characters left as plain text in `properties.character`) and `check_unlinked_entity_mentions.py` (a `properties:` value naming a page that exists, written as plain text) and `check_installed_type_usage.py` (installed type files with no pages, and pages sitting on an ancestor of an installed type) and `check_self_referential_tags.py` (tags that only repeat a page's own title or type), aggregates their results, and displays them alongside the number of unprocessed `.wikicommit/source/` files and the number of `.wikicommit/entity/` pages no person has read yet. This skill has no dedicated scripts of its own (only the existing scripts plus directory scanning).
+A health-check skill for the wiki as a whole. Calls the six page-count scripts (`check_orphans.py` / `check_wanted_pages.py` / `check_expires.py` / `check_ingest_freshness.py` / `check_translation_status.py` / `check_derivation_freshness.py`), the three blocking checks `wikicommit-merge` runs only on changed files (`validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py`, run here over every page), plus `check_actions_pr_permission.py` (a single repository-setting check, not a page count), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (two `.wikicommit/schema/` checks, not page counts either — the first for whether a template points at a WikiLink, the second for whether a type file is written in a working shape at all), `check_schema_coverage.py` (types in use with no dedicated schema file), `check_recurring_characters.py` (characters left as plain text in `properties.character`) and `check_unlinked_entity_mentions.py` (a `properties:` value naming a page that exists, written as plain text) and `check_installed_type_usage.py` (installed type files with no pages, and pages sitting on an ancestor of an installed type) and `check_self_referential_tags.py` (tags that only repeat a page's own title or type), and `check_external_links.py` (external links that no longer resolve, across every page — the check `wikicommit-merge` makes only on the pages a batch changes), aggregates their results, and displays them alongside the number of unprocessed `.wikicommit/source/` files and the number of `.wikicommit/entity/` pages no person has read yet. This skill has no dedicated scripts of its own (only the existing scripts plus directory scanning).
 
 ## Usage
 
 ```
-/wikicommit-status
+/wikicommit-status [--links]
 ```
 
-No arguments. Always targets the whole repository.
+Always targets the whole repository.
+
+- `--links` — check every page's external links with lychee now (Step 16.5). Without it, Step 16.5 only reads back the last completed check, without touching the network: checking every link takes minutes on a large wiki, and this skill is also called when someone just wants a quick answer.
 
 ## Processing Flow
 
@@ -269,9 +271,9 @@ Scan `.wikicommit/source/**/*.md` and read each file's frontmatter `status` fiel
 
 From that same scan, also count how many of those `pending` files have **never been processed at all** — no `last_generated_at` (absent or empty). Record their paths, and note how many of those have an empty `source.hash` as well, meaning nothing has even been retrieved for them yet (only `type: url`/`wikicommit` files can be in that state — `add_source.py` hashes a `type: path` file at registration).
 
-**And from the same scan, count separately how many files of any `status` carry a `## Deferred Reason` section.** These are sources a non-interactive run stopped on because the decision was one only a person can make — a low-density extraction that may be a real page or may be an empty shell, or a type candidate that may or may not suit the subject. Report the count, the paths, and the first line of each reason. **This is a column on the same line, not a line of its own**: a deferral leaves `status` untouched, so every deferred source is already inside one of the rows above — and splitting it out into its own report line would say the same number twice. **Which row depends on the status it kept**, so split the figure the same way Step 17 prints it: a deferral at `pending` is a column on `Unprocessed sources`, and one at `outdated` is a column on `Updated sources`. Do not fold the second kind into the `pending` figures — Pass 1 defers a source at either status, and an `outdated` one has been processed before and carries a `last_generated_at`, so it is in neither the `pending` count nor the never-processed subset of it.
+**And from the same scan, count separately how many files of any `status` carry a `## Deferred Reason` section.** These are sources a run set aside because the decision was one only a person can make, and nobody answered (a non-interactive run, or a person who left the question for later) — a low-density extraction that may be a real page or may be an empty shell, or a type candidate that may or may not suit the subject. Report the count, the paths, and the first line of each reason. **This is a column on the same line, not a line of its own**: a deferral leaves `status` untouched, so every deferred source is already inside one of the rows above — and splitting it out into its own report line would say the same number twice. **Which row depends on the status it kept**, so split the figure the same way Step 17 prints it: a deferral at `pending` is a column on `Unprocessed sources`, and one at `outdated` is a column on `Updated sources`. Do not fold the second kind into the `pending` figures — Pass 1 defers a source at either status, and an `outdated` one has been processed before and carries a `last_generated_at`, so it is in neither the `pending` count nor the never-processed subset of it.
 
-The distinction matters because the two look identical from `status` alone and call for opposite responses: a source that has not come up yet needs nothing but another run, while a deferred one will be deferred again by every non-interactive run until a person answers. Re-run `/wikicommit-generate` with someone present and it asks; the source is still in the queue, so nothing else is needed to get it back.
+The distinction matters because the two look identical from `status` alone and call for opposite responses: a source that has not come up yet needs nothing but another run, while a deferred one will be deferred again by every non-interactive run until a person answers. Re-run `/wikicommit-generate` with someone present and it asks once its sources have been through the passes; the source is still in the queue, so nothing else is needed to get it back.
 
 **From the same scan again, count the files carrying a non-empty `ambiguous_entities` list, and name the source and each entity's title and candidate types.** This is the same kind of wait one step finer: the source produced pages, so it is at `status: partial` and not in the `pending` population at all, but one entity inside it is held back until a person confirms its type. Report it as its own figure — it does not overlap the counts above, and rolling it in would hide that. Add the route with it, because it is not the same one: `/wikicommit-reconcile --source <path|url>` puts the source back to `pending`, and the next `/wikicommit-generate` picks it up.
 
@@ -290,6 +292,28 @@ Unlike `failed_pages`, which `wikicommit-merge` raises as a tracking Issue, a ne
 Scan `.wikicommit/entity/**/*.md` **and `.wikicommit/view/**/*.md`** (excluding `index.md` in both) and read each file's frontmatter `review_status` field. Exclude pages with `status: removed` (as with `check_orphans.py` / `check_expires.py`, removed pages are not review targets). Count files with `review_status: pending`, or where the `review_status` field itself is absent (treated as `pending`, same as `validate_frontmatter.py`'s WARNING behavior), and record their paths.
 
 The view tree is included because a view page is written `review_status: pending` like any other generated page, and `wikicommit-merge` Step 9 scans both trees and opens a tracking Issue for it. Counting only the entity tree would report a wiki as fully reviewed while open `wikicommit-review` Issues are outstanding — the exact backlog this tally exists to surface. This differs from `check_orphans.py`'s exclusion of the same tree, which rests on a property of view pages themselves (unlinked at birth) rather than on which fields they carry.
+
+### Step 16.5: Check External Links
+
+`wikicommit-merge` runs lychee only on the pages a batch changes, so a link that breaks after its page was merged is found here and nowhere else.
+
+**Without `--links`**, run once:
+
+```bash
+python .wikicommit/scripts/check_external_links.py --last
+```
+
+It reads back the last completed check (stored under the Git-ignored `.wikicommit/.cache/lychee/`) and never touches the network. `checked_at=never` in its `SUMMARY:` line means no check has completed on this machine. An `IN_PROGRESS:` line means a check was started with `--links` and not finished.
+
+**With `--links`**, run:
+
+```bash
+python .wikicommit/scripts/check_external_links.py
+```
+
+and **while it prints a `CONTINUE:` line, run the same command again** — each call checks a few pages per lychee call and returns within about 100 seconds, inside the shell's time limit (Claude Code's Bash defaults to 120 seconds), and the next call continues from where it stopped. Do not raise the shell timeout or run it in the background instead: the point of the short calls is that nothing depends on the time limit. Tell the user how far it has got (`CONTINUE: <checked>/<total>`) between calls on a large wiki. An unfinished check left by an interrupted session is continued, not restarted; pass `--restart` only when the user asks to start over.
+
+Either way, take `checked_at`, `pages`, `broken_links` and `not_checked` from the final `SUMMARY:` line, and keep the `BROKEN_LINK:` lines (`<page>: <url> (<status>)`) and the `NOT_CHECKED:` lines (lychee is not installed, timed out on a batch, or could not run — those pages' links are unknown, not fine). The script exits 0 in every case.
 
 ### Step 17: Display Results
 
@@ -337,7 +361,10 @@ Reviews on retracted evidence: <N> (check_review_coverage.py)
 Last run:               <when> <skill> ([halted: <reason>, ]<elapsed>, <outcome>) — check_run_records.py
 Runs that did not finish normally: <N> (never closed, or halted — check_run_records.py)
 Runs that skipped a pass: <N> (finished, but a pass left no stamp — check_run_records.py)
+Broken external links:  <N> (last checked <checked_at> over <P> pages; <K> NOT_CHECKED notice(s) — check_external_links.py; /wikicommit-status --links)
 ```
+
+For `Broken external links`, display the `BROKEN_LINK:` lines below the row, then the `NOT_CHECKED:` lines, as they came. `<K>` counts `NOT_CHECKED:` lines, not pages — one line can cover a batch of pages, or every page when lychee is not installed — so do not present it as a page count. When `checked_at=never`, print the row as `Broken external links:  not checked yet (run /wikicommit-status --links)` instead of a 0, which would read as "no broken links". Without `--links`, keep the `last checked <checked_at>` part so the reader can see how old the result is, and add the `IN_PROGRESS:` count when there is one.
 
 For `Blocking errors merge does not re-check`, `<N>` is the number of `ERROR:` lines from the three Step 3 checks together; when it is 1 or more, display those lines below the row as they came — each already names its page and what is wrong.
 
@@ -379,6 +406,7 @@ If every category above is 0 **and** `enabled` is `true` or `n/a`, display "Wiki
   - The five review-coverage rows — they measure how much reviewing has been recorded, there is deliberately no coverage threshold (Step 13), and a wiki predating the record tree would otherwise be barred forever by an absence that means "not recorded", not "not reviewed".
   - `Excluded sources` — every entity being off-subject or outside `entity-policy.md` is a completed, correct outcome of this wiki's policies; a narrow `theme` can leave a standing non-zero count on a healthy wiki.
   - `Entities awaiting a type` — which type fits a subject is a person's call, and the count stands until they make it.
+  - `Broken external links` — lychee's findings were never blocking (`wikicommit-merge` treats them as warnings), a timeout or a 403 depends on the network the check ran from, and the result read back without `--links` can be days old; a dead external site is also not something the wiki can always fix.
 - The `<D> deferred` columns are neither: they add nothing of their own — they are subsets of rows already counted, so a deferral gates the verdict exactly as far as the `pending` or `outdated` row it sits on.
 
 ### Step 18: Cleanup Guidance
@@ -395,4 +423,4 @@ Run /wikicommit-merge to commit it.
 
 - Do not commit or create a PR against `main` or any branch
 - Do not write to `.wikicommit/schema/`
-- No script other than `check_ingest_freshness.py`, and no part of the Step 3 / Step 15–16 scans, has side effects (read-only). The three blocking checks added to Step 3 (`validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py`) are read-only as well; their exit 1 is a finding, not an error of this skill. `check_actions_pr_permission.py` (Step 4), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (Step 5), `check_schema_coverage.py` (Step 6), `check_recurring_characters.py` (Step 7) and `check_unlinked_entity_mentions.py` (Step 8) and `check_installed_type_usage.py` (Step 9) and `check_self_referential_tags.py`, `check_name_collisions.py` and `check_groups.py` (Step 10) and `check_distribution_freshness.py` (Step 11) and `check_retracted_sources.py` (Step 12) and `check_review_coverage.py` (Step 13) and `check_run_records.py` (Step 14) are read-only too — unlike `wikicommit-init`'s Step 3, `check_actions_pr_permission.py` never attempts to enable the GitHub Actions PR permission setting itself, only reports its current state
+- No script other than `check_ingest_freshness.py`, and no part of the Step 3 / Step 15–16 scans, has side effects (read-only). The three blocking checks added to Step 3 (`validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py`) are read-only as well; their exit 1 is a finding, not an error of this skill. `check_actions_pr_permission.py` (Step 4), `check_property_wikilink_reinforcement.py` and `check_schema_files.py` (Step 5), `check_schema_coverage.py` (Step 6), `check_recurring_characters.py` (Step 7) and `check_unlinked_entity_mentions.py` (Step 8) and `check_installed_type_usage.py` (Step 9) and `check_self_referential_tags.py`, `check_name_collisions.py` and `check_groups.py` (Step 10) and `check_distribution_freshness.py` (Step 11) and `check_retracted_sources.py` (Step 12) and `check_review_coverage.py` (Step 13) and `check_run_records.py` (Step 14) are read-only too, and so is `check_external_links.py` (Step 16.5) as far as the repository goes — it writes only its progress, its last result and lychee's `.lycheecache` under the Git-ignored `.wikicommit/.cache/lychee/`, shared with `wikicommit-merge` — unlike `wikicommit-init`'s Step 3, `check_actions_pr_permission.py` never attempts to enable the GitHub Actions PR permission setting itself, only reports its current state

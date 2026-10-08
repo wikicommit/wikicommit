@@ -21,7 +21,7 @@
 | スタイル | markdownlint-cli2 | Phase 2 |
 | 孤立ページ・重複ページ | `check_orphans.py` | Phase 1 |
 
-この 6 本が `wikicommit-merge` の実行する全チェックであり、この順に実行する。
+この 6 本が `wikicommit-merge` の実行する全チェックである。blocking になりうる 4 本（フロントマター・WikiLink・生 HTML・孤立/重複ページ）はエンジンの `script` 工程（`quality-checks`）がこの順に先に実行し、blocking の所見で実行を止める。warning しか出さない lychee と markdownlint-cli2 はその後の `agent` 工程（`link-and-style-checks`）で実行する（Issue #1196。理由は「外部リンク検証」節）。
 
 **鮮度チェックはこの一覧に含まれない** — PR チェックではなく `/wikicommit-status` 側で走る（下記「鮮度チェック」節）。同節が挙げる 3 本は代表例であり、`/wikicommit-status` が実際に呼ぶスクリプトはこれより多い。**全数と各スクリプトの入出力は [DesignDoc-ScriptSpec.md](DesignDoc-ScriptSpec.md) が正本**であり、ここに二重の表を持たない（同じ一覧を 2 か所で保守すると、片方だけが古くなる）。
 
@@ -89,15 +89,25 @@ frontmatter は対象外。コードフェンス・インラインコードで�
 | HTTP 4xx（存在しない） | warning |
 | タイムアウト・接続エラー | warning（ネットワーク環境依存のため） |
 
+**範囲と分担（Issue #1196）**: `/wikicommit-merge` の lychee は**そのバッチで変わったページ**（実行記録の `changed_md`）だけを見る。全ページを毎回見ると merge の時間がページ数に比例して延び、PR 本文の warning の大半がそのバッチで触っていないページのリンク切れになる。lychee は元々 blocking ではないので、merge が全ページを見る必然性は無い。時間が経ってから切れたリンク（既存ページ）は `/wikicommit-status --links` が全ページについて見る（Issue #1182）。
+
+- **実行の形**: lychee はエージェントが直接呼ばず、ラッパー `workflow_checks.py links --run <run>`（merge の Skill ツリー）が数ページずつ `--cache` 付きで実行する（作業ディレクトリを `.wikicommit/.cache/lychee/` にするので `.lycheecache` はそこに置かれ、Git に無視される）。1 回の呼び出しは新しいバッチを 45 秒までしか始めず、lychee を呼び出し開始から 100 秒で打ち切るので、シェルの時間制限（Claude Code の Bash は既定 120 秒）の内側で返る。続きは実行記録の横のファイルに残り、エージェントは `LINKS: done` まで同じコマンドを呼び直す。所見はファイルにまとめられ、PR 本文（`workflow_checks.py pr-body`）がそれを読む
+- **エンジンに「区切って返す」工程を足さない理由**（Issue #1094 の決定と違う形）: 長い工程の使い手が merge の lychee とマージ可能待ちの 2 つしか無く、足すと再開時の「待ちの続き」を全 Skill のリプレイが扱うことになる。呼び直しはラッパーが続きをファイルに持つので同じコマンドを打つだけで済み、完了は確認スクリプトがディスクで決める（`docs/DesignDoc-skills.md` §11.0）
+- **#1182 との順序**: 本変更と #1182 は**同じリリースに入れる**。#1182 が入るまで次のリリースを切らない — 全ページの外部リンク検査がどこにも無い版を配らないため。開発リポジトリの `main` で間が空くのは許す（配布物はリリースでしか利用者に届かない）
+- **全ページは `/wikicommit-status --links`**: `.wikicommit/scripts/check_external_links.py` が entity・view の公開ページ（`index.md` と `status: removed` を除く）を数ページずつ調べる。バッチを回す関数は merge のラッパーと**同じもの**（`check_link_batches()`。ラッパーが import する）で、新しいバッチを 45 秒まで・lychee を呼び出し開始から 100 秒で打ち切る区切り方、作業ディレクトリと `.lycheecache` の置き場（`.wikicommit/.cache/lychee/`）を共有する。続きは `.wikicommit/.cache/lychee/all-pages-progress.json` に残り、エージェントは `CONTINUE:` が出なくなるまで呼び直す。完走した結果は `all-pages-result.json` に残る
+- **既定では走らせない**: status は「すぐ答えが欲しい」ときにも呼ばれ、全ページの検査は大きな Wiki で数分かかる。`--links` を付けない status は `check_external_links.py --last` で最後に完走した結果を**ネットワークに触れずに**読み直し、検査した日時と一緒に `Broken external links` の行に出す（一度も完走していなければ 0 ではなく `not checked yet`）。この行は healthy 判定を止めない — lychee は元々 warning であり、タイムアウトや 403 は検査した場所のネットワークに依存し、読み直した結果は古いことがある
+- **出力の形**: リンク 1 本につき `BROKEN_LINK: <page>: <url> (<status>)`、調べられなかったバッチ（lychee が無い・時間切れ・起動失敗）は `NOT_CHECKED:`。URL 単位で並べてページで集約しない — 直すのはページだが、同じ URL が複数ページで切れていることも行を並べれば見える
+- **キャッシュの寿命**: `max_cache_age` は設定せず lychee の既定（1 日）に任せ、merge と status で共有する。1 日以内に merge が確かめたリンクを status がもう一度取りに行かずに済み、1 日より古い結果は取り直されるので、時間が経ってから切れたリンクを見落とさない。`.wikicommit/.cache/` は init の `.gitignore` が無視するので、`.lycheecache` のために別の行は足さない
+
 lychee 設定（`.lychee.toml`）:
 
 ```toml
-exclude_path = []
-timeout = 10
-max_retries = 2
-# GitHub レート制限を避けるためトークンを設定する（secrets.GITHUB_TOKEN または環境変数 GITHUB_TOKEN）
-github_token = "${GITHUB_TOKEN}"
+timeout = 10          # request timeout (seconds)
+max_retries = 2       # retries (for transient network errors)
+accept = [200, 206, 429]  # 200 OK, 206 Partial, 429 Too Many Requests (rate limiting is treated as a warning)
 ```
+
+テンプレート（`wikicommit-init/scripts/templates/.lychee.toml`）が正本で、上はその設定行だけを抜いたもの。`github_token` は書かない — lychee は環境変数 `GITHUB_TOKEN` を自分で読むので、ファイルに名前を書く必要が無い。`exclude_path` も持たない — どのファイルを調べるかは設定ファイルではなく呼び出し側（merge のラッパー・`check_external_links.py`）がページを引数で渡して決める。
 
 ---
 

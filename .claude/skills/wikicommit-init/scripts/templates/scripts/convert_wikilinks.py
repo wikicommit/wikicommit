@@ -55,6 +55,7 @@ from _wikilink import (
 from _groups import load_group_file
 from check_review_coverage import (
     latest_by_kind,
+    load_page_records,
     load_records,
     matches_recorded_content,
     stale_reasons,
@@ -149,7 +150,10 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
         return None
 
     try:
-        record = standing_verdict(load_records(page_rel))
+        # load_page_records(), as `/wikicommit-status` does, so a renamed page is
+        # judged on the record its old slug left (Issue #1162): shown when only the
+        # slug changed, withheld as stale when the title did.
+        record = standing_verdict(load_page_records(page_rel))
     except OSError as e:
         print(f"WARNING: {src_path}: review records could not be read: {e}")
         return None
@@ -1025,6 +1029,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "概要",
         "no_summary": "（まだ生成されていません）",
         "license": "ライセンス",
+        "lang": "言語",
         "retracted_notice": (
             "**この情報源は取り下げられました。** この Wiki はこの情報源を内容が信用できない"
             "と判断し、以後の取り込み対象から外しています。下記の「生成されたページ」は"
@@ -1052,6 +1057,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Zusammenfassung",
         "no_summary": "(noch nicht generiert)",
         "license": "Lizenz",
+        "lang": "Sprache",
         "retracted_notice": "**Diese Quelle wurde zurückgezogen.** Dieses Wiki hat ihren Inhalt als unzuverlässig eingestuft und übernimmt nichts mehr aus ihr. Die unten unter „Generierte Seiten“ aufgeführten Seiten wurden verfasst, als sie noch verwendet wurde.",
         "retraction_reason": "Grund für die Zurückziehung",
         "no_retraction_reason": "(kein Grund angegeben)",
@@ -1069,6 +1075,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Resumen",
         "no_summary": "(aún no generado)",
         "license": "Licencia",
+        "lang": "Idioma",
         "retracted_notice": "**Esta fuente ha sido retirada.** Esta wiki consideró que su contenido no era fiable y ya no incorpora nada de ella. Las páginas que figuran abajo en «Páginas generadas» se escribieron mientras aún se usaba.",
         "retraction_reason": "Motivo de la retirada",
         "no_retraction_reason": "(no se registró ningún motivo)",
@@ -1086,6 +1093,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Résumé",
         "no_summary": "(pas encore généré)",
         "license": "Licence",
+        "lang": "Langue",
         "retracted_notice": "**Cette source a été retirée.** Ce wiki a jugé son contenu peu fiable et n'en importe plus rien. Les pages éventuellement listées sous « Pages générées » ci-dessous ont été rédigées alors qu'elle était encore utilisée.",
         "retraction_reason": "Motif du retrait",
         "no_retraction_reason": "(aucun motif enregistré)",
@@ -1103,6 +1111,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Riepilogo",
         "no_summary": "(non ancora generato)",
         "license": "Licenza",
+        "lang": "Lingua",
         "retracted_notice": "**Questa fonte è stata ritirata.** Questo wiki ne ha giudicato il contenuto inaffidabile e non la acquisisce più. Le pagine elencate più sotto in “Pagine generate” sono state scritte quando era ancora in uso.",
         "retraction_reason": "Motivo del ritiro",
         "no_retraction_reason": "(nessun motivo registrato)",
@@ -1120,6 +1129,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Podsumowanie",
         "no_summary": "(jeszcze nie wygenerowano)",
         "license": "Licencja",
+        "lang": "Język",
         "retracted_notice": "**To źródło zostało wycofane.** Ta wiki uznała jego treść za niewiarygodną i nie pobiera już z niego treści. Strony wymienione poniżej w sekcji „Wygenerowane strony” zostały napisane, gdy było jeszcze używane.",
         "retraction_reason": "Powód wycofania",
         "no_retraction_reason": "(nie zapisano powodu)",
@@ -1137,6 +1147,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Resumo",
         "no_summary": "(ainda não gerado)",
         "license": "Licença",
+        "lang": "Idioma",
         "retracted_notice": "**Esta fonte foi retirada.** Este wiki julgou seu conteúdo não confiável e deixou de incorporar conteúdo dela. As páginas listadas em “Páginas geradas” abaixo foram escritas enquanto ela ainda estava em uso.",
         "retraction_reason": "Motivo da retirada",
         "no_retraction_reason": "(nenhum motivo registrado)",
@@ -1154,6 +1165,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "Краткое содержание",
         "no_summary": "(ещё не сгенерировано)",
         "license": "Лицензия",
+        "lang": "Язык",
         "retracted_notice": "**Этот источник отозван.** Эта вики сочла его содержание ненадёжным и больше не берёт из него материал. Страницы, перечисленные ниже в разделе «Сгенерированные страницы», были написаны, пока он ещё использовался.",
         "retraction_reason": "Причина отзыва",
         "no_retraction_reason": "(причина не записана)",
@@ -1171,6 +1183,7 @@ SOURCE_PAGE_LABELS = {
         "summary": "摘要",
         "no_summary": "（尚未生成）",
         "license": "许可证",
+        "lang": "语言",
         "retracted_notice": "**此来源已被撤回。** 本 Wiki 判断其内容不可靠，不再从中获取内容。下方“生成的页面”中列出的页面，是在其仍被使用时撰写的。",
         "retraction_reason": "撤回原因",
         "no_retraction_reason": "（未记录原因）",
@@ -1189,6 +1202,7 @@ DEFAULT_SOURCE_PAGE_LABELS = {
     "summary": "Summary",
     "no_summary": "(not yet generated)",
     "license": "License",
+    "lang": "Language",
     "retracted_notice": (
         "**This source has been retracted.** This wiki judged its content unreliable and "
         "no longer ingests from it. Any pages listed under \u201cGenerated pages\u201d below were "
@@ -1359,12 +1373,37 @@ def render_source_label(source: dict) -> str:
     return ""
 
 
+def _normalize_source_lang(source: dict) -> str | None:
+    """Return a source's recorded `source.lang` as a lower-case ISO 639-1 code,
+    or None when it is missing, empty, or not a string.
+
+    Shared by generate_source_pages()'s per-language tally (Issue #989) and the
+    per-source page's language line (Issue #1007) so the two cannot drift.
+    YAML 1.1 reads an unquoted `lang: no` (Norwegian, a valid ISO 639-1 code)
+    as the boolean False; without the special case it would read as "false".
+    Pass 2a writes the code unquoted, so this is reachable (two `www.ssb.no`
+    sources in a pilot wiki carry it).
+
+    Any other non-string value (a list such as `[ja, en]`, `True` from an
+    unquoted `yes`/`on`, a number) breaks the "one code" rule and is treated as
+    not recorded: str() would put `['ja', 'en']` or `true` on a reader-facing
+    page, and the tally counts it under "not recorded" rather than as a row of
+    its own — no value carries a recorded language, and a re-run overwrites it."""
+    raw_lang = source.get("lang")
+    if raw_lang is False:
+        raw_lang = "no"
+    if not isinstance(raw_lang, str):
+        return None
+    return raw_lang.strip().lower() or None
+
+
 def _write_source_page(
     out_path: Path, fm: dict, body: str, source: dict, title: str, entity_dir: Path, mgmt_rel: Path, labels: dict
 ) -> list[str]:
     """Write one content/sources/<mgmt_rel> page mirroring a source
-    management file: its type, original link, registration status, `## Summary`
-    body, and generated_pages[] (as plain Markdown links, not WikiLinks —
+    management file: its type, original link, registration status, license and
+    language lines (each only when recorded), `## Summary` body, and
+    generated_pages[] (as plain Markdown links, not WikiLinks —
     these pages sit outside the WikiLink graph, a known limitation accepted
     in Issue #476).
 
@@ -1398,6 +1437,17 @@ def _write_source_page(
     license_id = source.get("license")
     if isinstance(license_id, str) and license_id.strip():
         lines += [f"**{labels['license']}**: {license_id.strip()}", ""]
+
+    # Issue #1007: the `## Summary` below is written in primary_lang, so without
+    # this a source in another language reads as a primary_lang source. Shown
+    # whenever recorded — including when it equals primary_lang, so the line is
+    # a plain fact on every page rather than a mark singling out "non-primary"
+    # sources. Omitted when not recorded (like license): "not recorded" only
+    # says the source was processed before the field existed, which the
+    # overview page's per-language tally already reports.
+    lang_code = _normalize_source_lang(source)
+    if lang_code:
+        lines += [f"**{labels['lang']}**: {lang_code}", ""]
 
     # Issue #737: a retracted source keeps its public page rather than losing it.
     # "This wiki used this source and then withdrew it" is a record worth
@@ -1681,13 +1731,7 @@ def generate_source_pages(
             # make a wiki of mostly English sources, only a few of them re-read since
             # the field was added, look as if every source were in those few
             # languages.
-            raw_lang = source.get("lang")
-            # YAML 1.1 reads an unquoted `lang: no` (Norwegian, a valid ISO 639-1
-            # code) as the boolean False; without this it would be counted as
-            # "false". Pass 2a writes the code unquoted, so this is reachable.
-            if raw_lang is False:
-                raw_lang = "no"
-            lang_key = (str(raw_lang).strip().lower() or None) if raw_lang is not None else None
+            lang_key = _normalize_source_lang(source)
             # Issue #1135: an empty lang means one of two things. A source that has
             # never finished a run (`add_source.py` writes `last_generated_at:`
             # empty and only a completed run fills it — the same test

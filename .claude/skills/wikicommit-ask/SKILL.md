@@ -7,7 +7,7 @@ description: Answer a question from the wiki's own pages, citing them, with cros
 
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to this Skill's directory — the one holding this `SKILL.md`, which the runtime names when it loads the Skill — not to the repository root, because the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there (`python <this Skill's directory>/scripts/…`). Paths starting with `.wikicommit/` are repository-root paths as before.
 
-A RAG-style skill that answers questions grounded in the content of `.wikicommit/entity/`. Search is delegated to the shared script `.wikicommit/scripts/search_index.py`, and this skill implements `CLAUDE.md`'s cross-lingual search policy (agent-driven query translation: search multiple times, once in the original language and once per language configured in `config.yml`). Besides calling `search_index.py` multiple times, the opt-in `--include-source` path in Step 4.3 uses three more: this skill's own `scripts/resolve_source_cache_path.py` (find a source's cache, and settle a fresh fetch), and, when a URL source has no cache, `../wikicommit-generate/scripts/add_source.py --fetch-url` and `.wikicommit/scripts/check_extraction_quality.py check-fetch-capability` — the same fetcher and the same pre-fetch check `wikicommit-generate` uses, so ask never fetches a source differently from the way the page was made.
+A RAG-style skill that answers questions grounded in the content of `.wikicommit/entity/`. Search is delegated to the shared script `.wikicommit/scripts/search_index.py`, and this skill implements `CLAUDE.md`'s cross-lingual search policy (agent-driven query translation: search multiple times, once in the original language and once per language configured in `config.yml`). Besides calling `search_index.py` multiple times, the opt-in `--include-source` path in Step 4.3 uses three more from `.wikicommit/scripts/`: `resolve_source_cache_path.py` (find a source's cache, and settle a fresh fetch), and, when a URL source has no cache, `add_source.py --fetch-url` and `check_extraction_quality.py check-fetch-capability` — the same fetcher and the same pre-fetch check `wikicommit-generate` uses, so ask never fetches a source differently from the way the page was made.
 
 ## Usage
 
@@ -93,7 +93,7 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
    6. This is an agent-native Skill — do not mechanically read every resolved candidate. Have the LLM judge each resolved candidate's relevance to the question (title and, if needed, a quick skim of its body) and select only the ones that would actually help answer it; discard the rest. This keeps an incidental "affiliated with X" mention from pulling in X's entire unrelated page.
    7. Read the selected candidates in full and add their bodies (excluding frontmatter) to the LLM's context, the same as step 1 above.
 
-3. **Raw source inclusion (opt-in `--include-source`)**: skip this entirely if `--include-source` was not given. Otherwise, for each page in the grounding set assembled so far (every Step 3 hit page, plus every page step 4.2 added via WikiLink hop expansion — treated identically here):
+3. **Raw source inclusion (opt-in `--include-source`)**: skip this entirely if `--include-source` was not given. If `.wikicommit/scripts/resolve_source_cache_path.py` does not exist (`.wikicommit/scripts/` older than this Skill), answer without source text and tell the user that `--include-source` needs `/wikicommit-update`. Otherwise, for each page in the grounding set assembled so far (every Step 3 hit page, plus every page step 4.2 added via WikiLink hop expansion — treated identically here):
 
    1. Resolve the page's `sources` list. Reading the page in step 1 above already returned this page's full file content including frontmatter — step 1 only says to inject the *body* into the LLM's context, it doesn't discard the frontmatter — so re-use that, no new read needed for this branch:
       - If the page has a non-empty `sources` field, use it directly.
@@ -104,12 +104,12 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
       - `type: path` → first ask whether WikiCommit already has this file's extracted text, which is what you actually want for any format that does not read as plain text:
 
         ```bash
-        python scripts/resolve_source_cache_path.py --type path <<'EOF'
+        python .wikicommit/scripts/resolve_source_cache_path.py --type path <<'EOF'
         <sources[].path>
         EOF
         ```
 
-        Pass the path via a quote-delimited heredoc for the same reason the `url` case below does — `sources[].path` is only format-validated, never verified safe as a shell argument. `--type` is a fixed literal you write, so it is exempt. On exit code `0`, Read the printed path and add its content to the LLM's context, labeled with which page it grounds. **On exit code `2` the source is retracted — do not include it, on either route** (see the paragraph after the `manual` case below). On exit code `1` (no cache — a `.md`/`.txt` source, which is deliberately never cached, or a clean checkout / another machine), Read the file at `sources[].path` (repo-root-relative) instead and add its full content the same way, labeled the same way (e.g. "Raw source for `.wikicommit/entity/ja/Person/character-a.md`: `raw/novel.txt`"). If that file no longer exists at that path, skip it silently — that drift is `validate_frontmatter.py`'s concern, not this skill's.
+        Pass the path via a quote-delimited heredoc for the same reason the `url` case below does — `sources[].path` is only format-validated, never verified safe as a shell argument. `--type` is a fixed literal you write, so it is exempt. On exit code `0`, Read the printed path and add its content to the LLM's context, labeled with which page it grounds. **On exit code `2` the source is retracted — do not include it, on either route** (see the paragraph after the `manual` case below). **On an `OUTSIDE: <path>` line (exit code `1`), the path resolves outside the repository — an absolute path, a `..` that climbs out, or a symlink pointing out — so do not Read it, by `sources[].path` or any other spelling, and do not include anything for this entry**; record it as unavailable for Step 6 note 3 with that reason. A page should never carry such a path (`validate_frontmatter.py` rejects it), but a page committed by hand can, and reading it would put a file from outside the wiki into the context. On exit code `1` with an `UNREGISTERED:` or `NO_CACHE:` line (no cache — a `.md`/`.txt` source, which is deliberately never cached, or a clean checkout / another machine), Read the file at `sources[].path` (repo-root-relative) instead and add its full content the same way, labeled the same way (e.g. "Raw source for `.wikicommit/entity/ja/Person/character-a.md`: `raw/novel.txt`"). If that file no longer exists at that path, skip it silently — that drift is `validate_frontmatter.py`'s concern, not this skill's.
 
         The cache is why the fallback matters less than it used to: reading a binary/non-plain-text file directly renders those formats (`.docx`/`.pptx`/`.xlsx`/`.epub`/scanned images — all valid `type: path` sources per `wikicommit-generate`'s extraction routing table) as garbled or unusable text, and `wikicommit-ask` does not invoke that routing table's dedicated extraction Skills here. When the cache is present those formats now arrive as the text `wikicommit-generate` actually extracted; when it is absent they remain a known limitation of `--include-source`, not something this step handles.
 
@@ -117,7 +117,7 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
       - `type: url` / `type: wikicommit` → run:
 
         ```bash
-        python scripts/resolve_source_cache_path.py --type url <<'EOF'
+        python .wikicommit/scripts/resolve_source_cache_path.py --type url <<'EOF'
         <sources[].url>
         EOF
         ```
@@ -137,7 +137,7 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
         2. **Fetch into a scratch file** with the same fetcher `wikicommit-generate` uses — never the agent's own web-fetch tool, which can return a model-written summary:
 
            ```bash
-           python ../wikicommit-generate/scripts/add_source.py --fetch-url "$(cat <<'EOF'
+           python .wikicommit/scripts/add_source.py --fetch-url "$(cat <<'EOF'
            <sources[].url>
            EOF
            )" --output ".wikicommit/.cache/ask-fetch/<n>.md"
@@ -147,7 +147,7 @@ Collect the `MATCH:` lines (`path` / `title` / `type` / `lang` / `review_status`
         3. **Settle the fetch** — compare it against the page and the management file, and move it into the cache only where that is safe:
 
            ```bash
-           python scripts/resolve_source_cache_path.py --settle ".wikicommit/.cache/ask-fetch/<n>.md" --page-hash "<sources[].hash>" <<'EOF'
+           python .wikicommit/scripts/resolve_source_cache_path.py --settle ".wikicommit/.cache/ask-fetch/<n>.md" --page-hash "<sources[].hash>" <<'EOF'
            <sources[].url>
            EOF
            ```
@@ -193,7 +193,7 @@ Before the answer body, insert zero or more of the following notes, each on its 
    ⚠️ This answer includes content read directly from the original source document(s) of the following page(s), which have not gone through the wiki page generation/review process: .wikicommit/entity/ja/Person/character-a.md
    ```
 
-3. If `--include-source` was given but step 4.3 recorded at least one `type: url`/`wikicommit` source as unavailable, prepend a note naming the skipped source(s) and **why**. Keep the two reasons apart, because they call for different actions: a failed fetch is about that source, while no network or a missing package is about this environment and every source would have failed the same way:
+3. If `--include-source` was given but step 4.3 recorded at least one source as unavailable (a `type: url`/`wikicommit` fetch, or a `type: path` answered with `OUTSIDE:`), prepend a note naming the skipped source(s) and **why**. Keep the two reasons apart, because they call for different actions: a failed fetch is about that source, while no network or a missing package is about this environment and every source would have failed the same way:
 
    ```
    ⚠️ Could not include the original source for the following URL(s) because fetching it failed: https://example.com/article
@@ -201,6 +201,12 @@ Before the answer body, insert zero or more of the following notes, each on its 
    ```
 
    Name the missing package instead of "no network access" when the pre-fetch check stopped it.
+
+   A `type: path` source answered with `OUTSIDE:` in step 4.3 goes in this note too, with its own reason — it is about that page's frontmatter, not the environment:
+
+   ```
+   ⚠️ Could not include the original source for the following path(s) because it points outside the repository: ../secret.txt
+   ```
 
 4. If `--include-source` was given and step 4.3 fetched at least one source whose text does not match the page's recorded hash (`page=mismatch`), prepend a note naming it, saying which of the two cases from step 4.3 applies:
 

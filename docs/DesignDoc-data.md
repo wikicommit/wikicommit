@@ -127,7 +127,7 @@ init は既存の README.md を編集しない。**GitHub が表示する位置�
 - `.wikicommit/scripts/_wikilink.py` の `normalize_entity_prefix()` / `resolve_stored_entity_path()`（`validate_frontmatter.py`・`check_translation_status.py`・`check_derivation_freshness.py` が使用）
 - `convert_wikilinks.py` の `normalize_wiki_rel()`（`generated_pages[]` 用）
 - `WikiCommitSources.tsx`・`WikiCommitBanner.tsx` の `entityPathToRelativePath()`（パッケージが独立ビルドのため各自に複製）。旧プレフィックスに加えて `custom/` のフラット化も吸収する — 突き合わせ先の `relativePath` は `content/` 相対で `custom/` を含まず、直さないと custom 型の翻訳ページの sources 継承・原文リンク・`derived_from[].path` 解決が黙って効かなくなる
-- `.claude/skills/wikicommit-remove/scripts/remove_page.py` の `normalize_entity_prefix()`（Skill スクリプトを自己完結に保つ慣行による複製）
+- `remove_page.py`（`.wikicommit/scripts/`）— `_wikilink.py` の `normalize_entity_prefix()` を import して使う
 - `review-issue-close-sync.yml` のマーカー解決ロジック、`wikicommit-merge` / `wikicommit-review` SKILL.md のトラッキング Issue マーカー照合手順
 
 新しい消費箇所を追加する際はこの一覧に加える。
@@ -241,7 +241,7 @@ Schema.org 標準型を足す提案は 3 経路にあり、**判定の厳しさ�
 |---|---|---|
 | `wikicommit-init` の obvious-type judgment（`theme` が非空のとき） | `theme` の 1 文のみ・ソース登録前 | 最も厳格 — `theme` 文から自信を持って断定できる型だけを提案する（例: 「AI 駆動開発ツールのナレッジベース」なら `schema:SoftwareApplication`） |
 | `wikicommit-collect` の Type Proposal | 候補タイトル・検索要約 | 候補提示が元々対話的 |
-| `wikicommit-generate` Pass 2b | ソース文書全文 | 主経路・最高精度（§5.4。非対話実行では候補をすべて保留にする） |
+| `wikicommit-generate` Pass 2b | ソース文書全文 | 主経路・最高精度（§5.4。候補はすべて保留にし、繰り返しの後にまとめて尋ねる。非対話実行では尋ねない） |
 
 - 3 経路とも型の追加には人間の回答を要し、`.wikicommit/schema/` に既にある型は提案しない（同一のスキップ判定なので互いに排他的な設計は要らない）。init の提案は Pass 2b と同じく `check_schema_org_type.py` による検証・Enter ベース承認・追加のみ可の書き込み例外を使う。漏れたケースの安全網は `wikicommit-schema-propose`（事後検出）
 - **分かれているのは判定だけで、書き込み手順は 1 本である**。`.wikicommit/schema-authoring.md`（`update: overwrite`）が手順を持ち、各経路はそれを読んで自分の `provenance` を渡す。**譲れない 3 点**（property を `check_schema_org_type.py` で検証する・`granularity` に `Boundary —` を 1 本入れる・`provenance` は自分の値を刻む）は各サイトに 1 行ずつ残す。ファイルが無い場合は**その候補だけを却下して報告し、実行は止めない**（`docs/DesignDoc-skills.md` §11.5）
@@ -496,7 +496,7 @@ wikicommit:
 #### 配布と取り込み
 
 - `_root_outputs.py` に 1 行で載り、init の配布・`git add` 案内・再実行での保護（`update: review`）が揃う（`source-policy.md` と同じ）
-- `wikicommit-merge` Step 2 / Step 5 に取り込む。人間が手編集した内容がコミットされないと意味がないため（`source-policy.md` が専用の pathspec を持つのと同じ理由）。`<policy files>` 変数が 2 ファイルを 1 変数で扱う — ステージの仕方が同一であり、下流で区別する必要が無いため。`source-policy.md` と同様、この `.md` は Wiki ページではないため `<changed .md files>` に入れてはならない（`validate_frontmatter.py` 等が落ちる）
+- `wikicommit-merge` Step 2 / Step 5 に取り込む。人間が手編集した内容がコミットされないと意味がないため（`source-policy.md` が専用の pathspec を持つのと同じ理由）。`policy_files` 一覧（実行記録）が 2 ファイルを 1 つの一覧で扱う — ステージの仕方が同一であり、下流で区別する必要が無いため。`source-policy.md` と同様、この `.md` は Wiki ページではないため `changed_md` 一覧に入れてはならない（`validate_frontmatter.py` 等が落ちる）
 
 ---
 
@@ -557,6 +557,8 @@ properties:
 ```
 
 `properties:` に何を入れるか／入れないか: `tags`/`wikidata`/`sameAs`/`aliases` は語彙としては Schema.org 寄りだが、`wikicommit-jsonld` プラグインが型に関わらず一律で読む「WikiCommit 全ページ共通の識別子フィールド」であり、型ごとに変わる `properties:` 側とは性質が異なるためトップレベルに残す。翻訳ページの `translated_from`/`source_commit`/`translated_at`/`translated_by`/`translated_with`/`translator_notes`、合成ページの `derived_from`、削除ページの `status`/`removed_at`/`removed_reason`/`merged_into` も同じ理由でトップレベルに残す。`properties:` に書けるのは、情報源が単一の事実として明示している、短く構造化された値（日付・固有名詞・URL・他エンティティへの参照）に限る。複数文にまたがる説明・文脈・因果関係・複数事実の統合が必要な内容は、対応する property 名が Schema.org 上に存在していても本文に書く（`properties.description` 自体も 2〜3 文の要約に収め、詳細な経緯は本文見出しに譲る。`.claude/skills/wikicommit-generate/SKILL.md` Pass 3 参照）。
+
+**ソースが自分で宣言しているリストに当たるキーは、その宣言を写す**（例: ScholarlyArticle の `keywords` ＝ 論文の Keywords 節〈`Index Terms`・`Key words`・`CCS Concepts` を含む〉）。宣言の全項目を同じ順・同じ表記で書き、生成側が語を選び直したり足したりしない。宣言が無ければキーごと省く。項目はソースの言語のまま写す（ページ本文は `primary_lang` で書くが、論文名と同じく訳さない）。`action: update`（`--regenerate` を含む）でも「このソースが触れていないキーは既存の値を残す」規則の対象外で、ページの全ソースから作り直し、どれも宣言していなければ既存の値を消す（残すと除きたい主題語がそのまま残り、Pass 4 で落ちる）。内容から選んだ主題語は `tags:` に書く（JSON-LD の `keywords` は `tags` から作られ、`properties.keywords` は公開ページで書誌情報と並んで表示されるだけなので、読み手はそこに書かれた語を論文自身のものと受け取る）。arXiv の分野分類のようにサイトが付けた分類は宣言ではない。リスト値の欄は「内容から代表的な語を選ぶ」作業として受け取られやすく、上の一般規則だけでは止まらなかったため、型に依存しない形で `references/pass3-generate.md` の「`properties:` vs. body placement」の直後に書き、型テンプレート（`ScholarlyArticle.md` の `granularity`）にも 1 行置く（§5.2「型間の優先関係は `granularity` に書く」末尾の対照と同じく、型テンプレートだけでは従われない）。Pass 4 も照合する — 宣言に無い項目・宣言の無いソースに対する `keywords` は `HALLUCINATION`、宣言の項目を落としたことは欠陥にしない（`review-rules.md` Part 2 の 2）。
 
 **ページ本文に H1 を置かない**: Wiki ページの本文（frontmatter 以降）は段落または `##` 見出しから始め、`# <タイトル>` という H1 行を置かない。タイトルは frontmatter の `title` が持ち、Quartz の既定レイアウトが `ArticleTitle` として描画するため、本文の H1 は見出しを二重にする。`.wikicommit/schema/` の全型テンプレート（`default.md` 含む）の本文部が H1 を持たないことがこの慣習の実体であり、テンプレート本文を経由せずに本文を組み立てる `wikicommit-synthesize` と、`wikicommit-generate` Pass 3 は禁止を明記している（指示を消すだけでは LLM が H1 を書き戻す余地が残る）。各型テンプレートの本文冒頭に注記を書く形は採らない — テンプレート本文は生成ページの雛形としてそのままコピーされるため、注記が生成ページへ漏れる。`tests/test_schema_template_no_h1.py` が全型テンプレートに H1 が無いことを検証する。
 
@@ -743,11 +745,12 @@ failed_pages: []
 
 ## Deferred Reason
 
-（非対話実行が人間にしか下せない判断に当たって保留したときのみ存在。
+（人間にしか下せない判断に当たって保留し、その実行の中で答えが得られなかったときのみ存在。
 `wikicommit-generate` が書き、そのソースが他のどの結末に到達した時点でも削除する
 ——`## Failure Reason` と同じ一時セクションであり、同じく `primary_lang` に関わらず英語で書く）
 なぜ止まったかを 1〜数文で記録する。**`status` は書き換えない**（`pending` / `outdated` のまま）ため、
-ソースはキューに残り、次の対話実行がそのまま拾って人間に尋ねる。
+ソースはキューに残り、人がいる次の実行がそのまま拾って、繰り返しの後に人間に尋ねる。
+実行の途中で書かれ、同じ実行の最後の質問で答えが得られれば、その後の処理で消える。
 例: "LOW_DENSITY: ... (natural-language character ratio: 0.11, threshold: 0.3) —
 non-prose breakdown: links 12%, numbers/tables 71%, other markup 17%."
 
@@ -811,13 +814,21 @@ confirmed with the publisher that the page was never corrected."
 
 #### `source.lang`
 
-`wikicommit-generate` の Pass 2a が抽出テキストを全文読む際に、**主として書かれている言語を ISO 639-1 で 1 つ**答え、その場で書く。`add_source.py` は登録時に空の `lang:` を置く。消費者は俯瞰ページの言語別集計（`docs/DesignDoc-publish.md` §8.8.1）で、ホスト数と違い言語数は有界なので切り詰めを生き延びる集約になる。
+`wikicommit-generate` の Pass 2a が抽出テキストを全文読む際に、**主として書かれている言語を ISO 639-1 で 1 つ**答え、その場で書く。`add_source.py` は登録時に空の `lang:` を置く。消費者は 2 つ — 俯瞰ページの言語別集計（`docs/DesignDoc-publish.md` §8.8.1。ホスト数と違い言語数は有界なので切り詰めを生き延びる集約になる）と、公開ソースページ（`content/sources/`）の 1 行である。
 
 - **欠如は「まだ記録されていない」だけを意味する**。`mul` や「判定不能」の値は置かない（置けば欠如の意味が割れる）。「まだ処理していない」と「記録が始まる前に処理された」の区別は値ではなく `last_generated_at` の有無で付け、俯瞰ページは両者を別の行に出す。未記録は隠さず 1 行として出す
 - LLM の判断でよい — ライセンスと違い言語はテキストそのものの性質で、いま読んだテキストが証拠になる。`<html lang>`・`Content-Language` 等の決定論的な経路は採らない（自己申告でよく誤り、`type: path` と PDF には無く、値の出所が 2 つになる）
 - 厳密には「抽出テキストの言語」である（`source.hash` が持つのと同じ曖昧さ）
 - **書き込み点は Pass 2a** で、Pass 4 に到達しない経路（保留・失敗）でも分かった言語を失わない。Pass 1 で保留したソースは言語が分からないまま残る。Completion Notice の言語不一致の通知はその場の通知として別に残す
 - ページの `sources[]` へは転記しない。値はコードのまま表示し、言語名へローカライズしない。`/wikicommit-status` の所見にはしない（多言語であることは欠陥ではない）
+- **公開ソースページは `license` 行の隣に `Language: <code>` の 1 行を出す**（`convert_wikilinks.py` の `_write_source_page()`）。`## Summary` は `primary_lang` で書かれるため、これが無いと `primary_lang` と違う言語のソースが `primary_lang` のソースに見える。ホスト名からは言語を導けないので「URL を見れば分かる」は理由にならない
+  - **記録があれば `primary_lang` と同じ言語でも常に出す**。違うときだけ出すと行の存在そのものが「この出典は要注意」という印になり、「`primary_lang` でない ＝ 劣る」と読まれる。全ページに同じ形で出せば行は事実として読まれる
+  - **未記録なら行を省く**（`license` と同じ）。**俯瞰ページが未記録を 1 行として出すのと判断が違う** — 俯瞰側が未記録を出すのは分布を誤らせないためで、1 ページ単位には誤らせる分布が無い。「未記録」はソースの性質ではなく「記録が始まる前に処理された」というパイプラインの経緯しか述べず、遡及付与しないので古い Wiki では大半のページに並んで雑音になる。経緯を知りたい読者には俯瞰ページの「未記録」行がある
+  - YAML 1.1 で `False` と読まれる `lang: no`（ノルウェー語）の正規化は `_normalize_source_lang()` 1 か所に置き、集計とページの両方がそれを通る
+- **文字列でない値（`False` を除く）は未記録として扱う** — リスト（`[ja, en]`）・YAML 1.1 で `True` と読まれる `yes` / `on`・数値は「1 つのコード」の規則に反しており、言語を記録していない。公開ソースページでは行を省き、俯瞰ページの集計では値を持たない管理ファイルと同じ規則（`last_generated_at` の有無。`status: excluded` は日付が無くても「未記録」）で「未処理」か「未記録」に数える。判定は `_normalize_source_lang()` の 1 か所で、集計とページは食い違わない
+  - **文字列化して出さない** — `['ja', 'en']` や `true` が読者向けのページと集計の行に載る
+  - **「不正な値」の行を別に立てない** — 欠如の意味を割らないのと同じ理由で、値の種類を増やさない。この値は LLM が規則を破ったときにしか生じず、Pass 2a の再実行（`/wikicommit-reconcile`・強制リチェック）が上書きする
+  - **書き込み点に検査を足さない** — Pass 2a の指示はすでに「ISO 639-1 のコードを 1 つだけ」と言っており、書き込みはスクリプトを通らない。読む側が未記録として扱う以上、不正な値が残っても読者には何も出ず、検査を足しても既存の管理ファイルに残る値には効かない
 - 遡及付与しない。`status: generated` のソースは収集されないので、`/wikicommit-generate <url>` の強制リチェックか `/wikicommit-reconcile` を経るまで空のまま残る
 
 #### `retracted` — 登録済みソースを取り下げる
@@ -859,7 +870,9 @@ confirmed with the publisher that the page was never corrected."
 
 #### 保留 — `status` に値を足さずに表現する
 
-非対話実行が「人間が見れば答えが変わりうる判断」に当たったとき、**そのソースについて何も進めない**。`status` は `pending` / `outdated` のまま据え置き、理由を `## Deferred Reason` に書いて次のソースへ進む。次の対話実行が既存の収集条件でそのまま拾って人に尋ねる。
+「人間が見れば答えが変わりうる判断」に当たったとき、**対話・非対話を問わず、そのソースについて何も進めない**。`status` は `pending` / `outdated` のまま据え置き、理由を `## Deferred Reason` に書いて次のソースへ進む。ソースごとの繰り返しが終わった後、人がいればその実行の中で保留分をまとめて尋ね、答えが得られたソースだけを Pass 1〜4 にもう一度通す（答えは実行記録の一覧に置き、同じ実行の中で使い切る。仕組みは `docs/DesignDoc-skills.md` §11.5「保留した質問は繰り返しの後にまとめて尋ねる」）。人がいない実行・答えなかった保留は、次の人がいる実行が既存の収集条件でそのまま拾って尋ねる。
+
+- **答えを管理ファイルに書かない** — 答えはその実行の中で使い切るので、新しいフィールドは要らない。実行をまたいで答えを持ち越す形を採ると、ガード A の「続行する」を記録する場所が要り、次の実行で同じ警告にまた当たって保留になる
 
 - **新しい `status` 値（`deferred` 等）は足さない** — `status` の消費者（Pass 1 の収集条件・`add_source.py` の分岐・`check_ingest_freshness.py` の `CHECKABLE_STATUSES`・`wikicommit-status` の集計・`reconcile_ingest_status.py`）すべてに分岐が増える。進めないことがそのまま表現になる
 - **例外**: 強制リチェック（`RECHECK:`）で到達した場合は `status` が `generated` / `failed` / `excluded` のままでどの収集条件にも拾われないので、`pending` に戻す（`/wikicommit-reconcile` と同じ requeue）
@@ -1133,11 +1146,12 @@ WikiCommit はソースごとにページを作り、既存ページとの照合
 | 規則の置き場所 | 新しい版を作るときは Pass 2c（`references/pass2c-entities.md`）、既存のページを直すときは `rename_page.py` | 規則は型をまたぐ。インストール済みの型テンプレートは init 後に編集しない |
 | 修飾の無い既存ページ | **改名する**（系列ページへ転用しない） | 系列をページにしないため、転用先が無い |
 | 改名の仕組み | **統合の部品を使う**。新しい slug のページを全言語で書き、古いページを `removed_reason: merged` ＋ `merged_into` で下ろし、`relations.yml` に `relation: same` ＋ `merged_into` ＋ `renamed_at` の項目を追記し、`rewrite_merged_links.py` でリンクを書き換える。ソース管理ファイルの `generated_pages` も新しいパスに向け、型の index を作り直す | 改名は「古い識別子を新しい識別子に畳む」統合の特殊な場合であり、リンクの書き換え・翻訳の追随・書き換えたページの AI レビュー記録を失効と数えない扱い（上記「統合」）がそのまま当てはまる。`removed_reason` に値を足すと、それを読む全経路（検証・削除・公開）に分岐が要る |
-| 改名したページのレビュー状態 | **`pending` に戻す**（`reviewed_by` も消す。翻訳も同じ） | title は内容であり、人の確認は読んだ時点の title に掛かっている（`reset_review_on_content_change.py` と同じ原則） |
+| 改名したページのレビュー状態 | **title を書き換えたページは `pending` に戻す**（`reviewed_by` も消す。翻訳も同じ）。slug だけが変わり title が変わらないページは触らない（翻訳は `translated_from` だけを書き換える） | title は内容であり、人の確認は読んだ時点の title に掛かっている（`reset_review_on_content_change.py` と同じ原則）。slug はファイル名であり、人が読んだ本文ではない |
 | slug が既に年を持つページ | title だけを修飾する。`--base-title` で年を足す前の名前を言語ごとに指定できる | 後から作られた版は slug に年を持ち、title に報告書番号を持つことがある。版ごとに違う語を落として名前を揃えるため |
+| 改名したページの AI レビュー記録 | **古い slug の記録を新しいページの記録として読む**。記録は古いパスの下に残す（記録は判定したページのパスを本文に持ち、ファイルは不変であるため移さない）。`check_review_coverage.py` と公開時の `convert_wikilinks.py` は、`relations.yml` の `renamed_at` 付きの項目をたどって（改名の連鎖も含めて）古い slug の記録ディレクトリも読む。title が変わっていれば記録時の本文と一致しないので `STALE_REVIEW:`（理由に改名前の slug を添える）になり、公開側には表示しない。slug だけが変わった（title は既に年を持っていた）なら、原文ページの判定はそのまま立つ。翻訳ページは `translated_from` が新しいパスに変わるので判定は失効し（`STALE_REVIEW:`）、翻訳としても陳腐化と報告される（`check_translation_status.py` の `STALE:`）— `/wikicommit-translate` で更新する。`/wikicommit-review` を新しいページに回せば、新しい記録が standing になって消える | 改名で変わったのは slug と title だけで本文は変わらず、Pass 4 の出典照合の結果は失われていない。記録を読まないと、改名したページは `UNREVIEWED:` に出て「出典照合を一度も受けていない」ように見え、`RISKY:` の手がかり（attempts・findings）も消える。一方 title は内容なので判定は失効として扱う（レビュー状態を `pending` に戻すのと同じ原則）。翻訳ページの判定を改名の連鎖越しに生かす（`translated_from` のパスも戻して比べる）ことはしない — slug が変われば翻訳はどのみち陳腐化と報告され、訳し直しで判定も書き直されるので、生かしても「AI レビューは立っているが翻訳は古い」という食い違った表示になるだけである。改名後に `/wikicommit-review` を回すよう案内するだけにする案は、案内を読まなかった Wiki で同じ見え方が残るため採らない。統合（`renamed_at` の無い項目）はたどらない — 残すページは再生成され、Pass 4 が新しい記録を書く |
 | Pass 2c で新しい版を作るとき | 新しい版を年で修飾し、ソースが逐語で使う修飾の無い系列名を `aliases` に残す。既存のページは改名しない | 修飾の無い既存ページと別名が一致して名前の衝突に挙がり、`/wikicommit-relate` で人が `series` と決めるまで残る。生成時に既存ページを改名すると、人の判断なしにページの名前が変わる |
 
-**既知の限界**: 古い slug の URL は消える（統合と同じ）。レビュー記録は古いパスの下に残る — 記録は判定したページのパスを本文に持ち、ファイルは不変であるため移さない。改名したページの翻訳は原文が変わったので `STALE` として報告される。`.wikicommit/groups/<Type>.yml` が古い slug を挙げていれば `rename_page.py` は `GROUPS:` 行で知らせるだけで書き換えない（グループファイルは `/wikicommit-organize` と人が書くもの）。同じ年に 2 つの版があれば年では区別できず、人が名前を決める。
+**既知の限界**: 古い slug の URL は消える（統合と同じ）。改名したページの翻訳は原文が変わったので `STALE` として報告される。`.wikicommit/groups/<Type>.yml` が古い slug を挙げていれば `rename_page.py` は `GROUPS:` 行で知らせるだけで書き換えない（グループファイルは `/wikicommit-organize` と人が書くもの）。同じ年に 2 つの版があれば年では区別できず、人が名前を決める。
 
 #### 残した論点
 
@@ -1602,7 +1616,7 @@ properties:
 |---|---|---|
 | `default` | `wikicommit-init` の base_types 展開 | なし（無条件展開） |
 | `init-theme` | `wikicommit-init` の theme 駆動型提案 | Enter ベース承認あり |
-| `generate-interactive` | `wikicommit-generate` Pass 2b、対話実行 | Enter ベース承認あり |
+| `generate-interactive` | `wikicommit-generate` Pass 2b、人の承認（ソースごとの繰り返しの後の質問） | Enter ベース承認あり |
 | `generate-auto` | `wikicommit-generate` Pass 2b、非対話自動承認。**今後は書かれない**（既存ファイルのために enum に残す。§5.4） | なし |
 | `collect` | `wikicommit-collect` の Type Proposal ステップ | Enter ベース承認あり（常に対話実行） |
 | `schema-propose` | `wikicommit-schema-propose` | PR レビュー必須（auto-merge しない） |
@@ -1733,7 +1747,7 @@ LLM が文書内容を見て最適な型を選択
 上のフローは `.wikicommit/schema/` に**既に置かれているファイル**の中から選ぶだけで、Schema.org 語彙全体を探索しない。インストール済みの型で「一応表現できてしまう」場合は `ambiguous` にもならない。この穴は `wikicommit-generate` の Pass 2b（型の要否判断）がその場で塞ぐ: サマリを見てインストール済み外の型が明確に良いと判断すれば、`check_schema_org_type.py` で型・プロパティの実在を検証したうえで Enter ベースの承認（既定 N）を求め、承認されれば `.wikicommit/schema/<Type>.md` を新規作成し（追加のみ可・既存ファイル編集不可の書き込み例外）、続く Pass 2c がその型を直接使う。新しいスキーマファイルは他の変更と同じバッチで `wikicommit-merge` がマージする（既存スキーマファイルの変更は `wikicommit-schema-propose` の非 auto-merge な PR 経由のみ）。
 
 - **候補を別セッションへ引き継ぐ形（警告フィールドに記録して後で拾う）は採らない** — `check_schema_coverage.py` は専用スキーマファイルの無い `type:` しか見ないので、既にインストール済みの型で生成されたページは後から検出できず、情報が構造的に失われる。却下した候補もどこにも永続化しない
-- **非対話実行では候補をすべて保留にする**（§4.3「保留」。`status` を動かさず、`## Deferred Reason` に候補の型名と理由を書いて次のソースへ）。閾値を超えた候補を無人で自動承認する形は採らない — 自動マージされる PR は事実上読まれず、型ファイルは Skill が編集できず再分類の Skill も無いので自動承認は取り返しがつかない一方、保留の代償はそのソースが次の対話実行まで待つだけである。候補を出すかどうかの閾値は対話・非対話で共通
+- **候補はその場では尋ねず、すべて保留にする**（§4.3「保留」。`status` を動かさず、`## Deferred Reason` に候補の型名と理由を書いて次のソースへ）。人がいれば、ソースごとの繰り返しの後に型ごとに 1 回尋ね、承認・却下を受けたソースを同じ実行の中でもう一度処理する。非対話実行では尋ねない。閾値を超えた候補を無人で自動承認する形は採らない — 自動マージされる PR は事実上読まれず、型ファイルは Skill が編集できず再分類の Skill も無いので自動承認は取り返しがつかない一方、保留の代償はそのソースが次の対話実行まで待つだけである。候補を出すかどうかの閾値は対話・非対話で共通
 - `provenance: generate-auto` は今後書かれないが、既存リポジトリに残るので enum から消さない（`check_schema_files.py` の `BAD_PROVENANCE`・`.wikicommit/schema-authoring.md` の `applies_to`・`wikicommit-merge` Step 8 の型確認行・`wikicommit-review` は引き続き受け付ける）
 - `wikicommit-schema-propose` は `check_schema_coverage.py` による**事後検出**の安全網として残る
 

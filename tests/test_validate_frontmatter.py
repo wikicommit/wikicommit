@@ -896,6 +896,67 @@ def test_sources_file_nonexistent_path(tmp_path):
     assert "file does not exist" in result.stdout
 
 
+@pytest.mark.parametrize("outside", ["ABSOLUTE", "../outside.pdf", "raw/../../outside.pdf", "LINK"])
+def test_sources_path_outside_the_repository(tmp_path, outside):
+    """A `sources[].path` that resolves outside the repository is an error, and
+    the error does not say whether the outside file exists."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    setup_schemas(repo)
+    target = tmp_path / "outside.pdf"
+    target.write_text("secret", encoding="utf-8")
+    if outside == "ABSOLUTE":
+        outside = str(target)
+    elif outside == "LINK":
+        (repo / "raw").mkdir()
+        (repo / "raw" / "link.pdf").symlink_to(target)
+        outside = "raw/link.pdf"
+    page = write_page(
+        repo, "ja", "Person", "yamada",
+        textwrap.dedent(f"""\
+            title: "Yamada"
+            lang: ja
+            type: "schema:Person"
+            review_status: pending
+            sources:
+              - type: path
+                path: "{outside}"
+                hash: sha256:abc123
+            """),
+    )
+
+    result = run([str(page)], cwd=repo)
+    assert result.returncode == 1
+    assert "resolves outside the repository" in result.stdout
+    assert "file does not exist" not in result.stdout
+
+
+def test_sources_path_symlink_inside_the_repository_is_accepted(tmp_path):
+    setup_schemas(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "paper.pdf").write_text("dummy", encoding="utf-8")
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "raw" / "paper.pdf").symlink_to(tmp_path / "docs" / "paper.pdf")
+    page = write_page(
+        tmp_path, "ja", "Person", "yamada",
+        textwrap.dedent("""\
+            title: "Yamada"
+            lang: ja
+            type: "schema:Person"
+            review_status: pending
+            sources:
+              - type: path
+                path: raw/paper.pdf
+                hash: sha256:abc123
+            """),
+    )
+
+    result = run([str(page)], cwd=tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "outside the repository" not in result.stdout
+    assert "file does not exist" not in result.stdout
+
+
 def test_sources_invalid_type(tmp_path):
     setup_schemas(tmp_path)
     page = write_page(

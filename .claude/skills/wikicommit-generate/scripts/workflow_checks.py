@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""workflow_checks.py — the wikicommit-generate knowledge `driver.py` does not have.
+"""workflow_checks.py — the wikicommit-generate knowledge `skill_workflow.py` does not have.
 
-`driver.py` knows how to walk a workflow and nothing about this Skill. What a
+`skill_workflow.py` knows how to walk a workflow and nothing about this Skill. What a
 step's completion looks like on disk — which frontmatter field a pass writes,
 which section a deferral leaves, where a review record lands — lives here, next
 to `workflow.yaml`, so the engine stays usable by another Skill.
@@ -19,43 +19,49 @@ they catch is the step that was forgotten, not one that was faked.
 """
 
 import argparse
-import subprocess
+import re
 import sys
 from pathlib import Path
 
-import yaml
+# Run directly (as `references/*.md` tell the agent to) rather than through the engine,
+# nothing passes PYTHONIOENCODING=utf-8: on a cp1252 terminal or pipe an `ITEM:` holding
+# a Japanese path raised UnicodeEncodeError at `print`. So the streams are set to UTF-8
+# here, before the import below can print, and not in the shared module, which an older
+# `.wikicommit/scripts/` does not have. The same streams and error handlers as
+# skill_workflow.use_utf8_streams(); only when run, not when a test imports the module.
+if __name__ == "__main__":
+    for _stream, _errors in ((sys.stdin, "replace"), (sys.stdout, "strict"),
+                             (sys.stderr, "backslashreplace")):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors=_errors)
+        except (AttributeError, ValueError, OSError):
+            pass
+
+# The helpers every Skill's checks read the same way live in
+# `.wikicommit/scripts/_workflow_checks.py` (Issue #1219). A wiki whose scripts predate
+# it has none until `/wikicommit-update` is merged.
+# Exit 2, not 1, whatever is missing: a `when:` condition exiting 1 would read as
+# "skip this step", while 2 stops the engine. Only a module of `.wikicommit/scripts/`
+# is fixed by `/wikicommit-update`; a missing PyYAML is not, so it gets its own
+# pointer. This bootstrap cannot live in the module it loads, so each Skill carries it;
+# tests/test_workflow_checks_shared.py holds the four copies to one shape.
+sys.path.insert(0, str(Path.cwd() / ".wikicommit" / "scripts"))
+try:
+    from _workflow_checks import (
+        cmd_over_cap, cmd_select, listed, norm, read_markdown, read_run, review_record_dir, run,
+    )
+except ImportError as e:
+    if isinstance(e, ModuleNotFoundError) and e.name == "yaml":
+        print(f"PyYAML is not installed ({e}); install it (pip install pyyaml) and run again")
+    else:
+        print(".wikicommit/scripts/ is missing a module this Skill needs or is older than "
+              f"this Skill ({e}); run /wikicommit-update first")
+    sys.exit(2)
 
 SOURCE_DIR = Path(".wikicommit/source")
-REVIEW_DIR = Path(".wikicommit/review")
-BATCH_CAP = 5
 
 COLLECTED_STATUSES = ("pending", "outdated")
 FINAL_STATUSES = ("generated", "partial", "excluded", "failed")
-
-
-def read_markdown(path: Path) -> tuple[dict, str]:
-    """Frontmatter and body. A file with no readable frontmatter gives `{}`."""
-    try:
-        text = path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return {}, ""
-    if not text.startswith("---"):
-        return {}, text
-    _, _, rest = text.partition("---\n")
-    front, sep, body = rest.partition("\n---")
-    if not sep:
-        return {}, text
-    try:
-        data = yaml.safe_load(front)
-    except yaml.YAMLError:
-        return {}, body
-    return (data if isinstance(data, dict) else {}), body
-
-
-def read_run(run: str) -> tuple[dict, dict]:
-    record, _ = read_markdown(Path(run))
-    state = record.get("driver") if isinstance(record.get("driver"), dict) else {}
-    return record, state
 
 
 def run_arguments(record: dict) -> list[str]:
@@ -63,15 +69,56 @@ def run_arguments(record: dict) -> list[str]:
     return [str(a) for a in args] if isinstance(args, list) else []
 
 
-def answer_of(state: dict, step: str) -> str:
-    for entry in state.get("log", []):
-        if isinstance(entry, dict) and entry.get("step") == step and entry.get("answer"):
-            return str(entry["answer"])
-    return ""
-
-
 def has_section(body: str, heading: str) -> bool:
     return any(line.strip() == heading for line in body.splitlines())
+
+
+def section_text(body: str, heading: str) -> str:
+    """The text under `heading` up to the next `## ` heading, stripped ("" if absent)."""
+    lines, inside = [], False
+    for line in body.splitlines():
+        if line.strip() == heading:
+            inside = True
+            continue
+        if inside and line.startswith("## "):
+            break
+        if inside:
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
+# The first-loop steps whose deferral is a question for a person, and the reason
+# line that marks guard A's (Pass 1 also defers on NETWORK_UNAVAILABLE, which
+# waits for a network, not a person).
+QUESTION_STEPS = ("pass1-extract", "pass2b-type")
+LOW_DENSITY = "LOW_DENSITY:"
+NETWORK_UNAVAILABLE = "NETWORK_UNAVAILABLE:"
+# A type candidate as Pass 2b writes it into its `## Deferred Reason`.
+TYPE_NAME = re.compile(r"schema:[A-Za-z][A-Za-z0-9_]*")
+
+
+def _deferral_reason(path: str) -> str:
+    _, body = read_markdown(Path(path))
+    return section_text(body, "## Deferred Reason")
+
+
+def deferred_questions(state: dict) -> dict[str, str]:
+    """{management file: the step that deferred it} for every source this run set
+    aside for a person's answer, in the order they were deferred."""
+    found: dict[str, str] = {}
+    log = state.get("log")
+    for entry in log if isinstance(log, list) else []:
+        if not (isinstance(entry, dict) and entry.get("outcome") == "deferred"
+                and entry.get("step") in QUESTION_STEPS and entry.get("item")):
+            continue
+        item = str(entry["item"])
+        reason = _deferral_reason(item)
+        if not reason:
+            continue
+        if entry["step"] == "pass1-extract" and not reason.startswith(LOW_DENSITY):
+            continue
+        found.setdefault(norm(item), str(entry["step"]))
+    return found
 
 
 # --- conditions ---------------------------------------------------------------
@@ -95,16 +142,13 @@ def cmd_has_source_argument(args) -> int:
     return 1
 
 
-def cmd_over_cap(args) -> int:
-    _, state = read_run(args.run)
-    items = state.get("lists", {}).get(args.list, [])
-    if len(items) > BATCH_CAP:
-        return 0
-    print(f"{len(items)} item(s); no more than {BATCH_CAP}, so nothing to ask")
-    return 1
-
-
 # --- preflight ----------------------------------------------------------------
+
+
+# Scripts this Skill calls from `.wikicommit/scripts/` that used to live in a Skill's own
+# `scripts/` (Issue #1210). A wiki whose `.wikicommit/scripts/` predates the move has none
+# of them until `/wikicommit-update` is merged, and Step 0 would fail on the first command.
+MOVED_SCRIPTS = ("add_source.py", "resolve_source_cache_path.py", "remove_page.py")
 
 
 def cmd_preflight(args) -> int:
@@ -115,6 +159,12 @@ def cmd_preflight(args) -> int:
     if not Path(".wikicommit/review-rules.md").is_file():
         print(".wikicommit/review-rules.md does not exist; run /wikicommit-init "
               "--no-overwrite to install it (Pass 4 cannot review without it)")
+        return 1
+    missing = [name for name in MOVED_SCRIPTS
+               if not (Path(".wikicommit/scripts") / name).is_file()]
+    if missing:
+        print(f".wikicommit/scripts/{missing[0]} does not exist (.wikicommit/scripts/ is older "
+              "than this Skill); run /wikicommit-update first")
         return 1
     return 0
 
@@ -127,17 +177,12 @@ def cmd_freshness(args) -> int:
     is the bug it is looking for. No Skill tree copy means nothing to compare
     against, so it says nothing.
     """
-    import subprocess
-
     here = Path(__file__).resolve().parent
     checker = (here.parent.parent / "wikicommit-init" / "scripts" / "templates"
                / "scripts" / "check_distribution_freshness.py")
     if not checker.is_file():
         return 0
-    result = subprocess.run(
-        [sys.executable, str(checker), "--only", ".wikicommit/scripts"],
-        capture_output=True, text=True, check=False,
-    )
+    result = run([sys.executable, str(checker), "--only", ".wikicommit/scripts"])
     for line in result.stdout.splitlines():
         if line.startswith(("OUTDATED:", "MISSING:", "ORPHAN:", "WARNING:")):
             print(line)
@@ -185,18 +230,81 @@ def cmd_collect(args) -> int:
     return 0
 
 
-def cmd_select(args) -> int:
-    """Apply the batch-cap answer to the collected list."""
+def cmd_collect_questions(args) -> int:
+    """The sources this run deferred for a person's answer (the end-of-loop question)."""
     _, state = read_run(args.run)
-    items = list(state.get("lists", {}).get(args.list, []))
-    if answer_of(state, args.answer_step) == "first-five":
-        items = items[:BATCH_CAP]
-    for item in items:
-        print(f"ITEM: {item}")
+    for path in deferred_questions(state):
+        print(f"ITEM: {path}")
     return 0
 
 
+def cmd_has_list(args) -> int:
+    _, state = read_run(args.run)
+    if listed(state, args.list):
+        return 0
+    print(f"the run's {args.list} list is empty")
+    return 1
+
+
 # --- step checks --------------------------------------------------------------
+
+
+def cmd_check_answers(args) -> int:
+    """The answers handed back from `ask-deferred` fit the questions that were asked."""
+    _, state = read_run(args.run)
+    questions = deferred_questions(state)
+    reprocess = [norm(p) for p in listed(state, "reprocess")]
+    keep = [norm(p) for p in listed(state, "continue-low-density")]
+    fail = [norm(p) for p in listed(state, "fail-low-density")]
+    approved = listed(state, "approved-types")
+    declined = listed(state, "declined-types")
+    if args.answer == "later":
+        if any((reprocess, keep, fail, approved, declined)):
+            print("`later` leaves every deferral queued; pass no --add with it")
+            return 1
+        return 0
+    problems = []
+    if not reprocess:
+        problems.append("name each source whose questions were all answered with "
+                        "--add reprocess=<management file>")
+    low_density = [p for p, step in questions.items() if step == "pass1-extract"]
+    for path in reprocess:
+        if path not in questions:
+            problems.append(f"{path} was not deferred for a question in this run")
+        elif path in low_density and path not in keep + fail:
+            problems.append(f"{path} is a low-density question with no answer; add it to "
+                            "continue-low-density or fail-low-density")
+    for path in keep + fail:
+        if path not in low_density:
+            problems.append(f"{path} was not deferred by the low-density check in this run")
+        elif path not in reprocess:
+            problems.append(f"{path} has a low-density answer but is not in reprocess")
+    both = sorted(set(keep) & set(fail))
+    if both:
+        problems.append("both continued and failed: " + ", ".join(both))
+    both = sorted(set(approved) & set(declined))
+    if both:
+        problems.append("both approved and declined: " + ", ".join(both))
+    twice = sorted({p for p in reprocess if reprocess.count(p) > 1})
+    if twice:
+        problems.append("named more than once in reprocess: " + ", ".join(twice))
+    # Matched as whole names, not substrings: Pass 2b looks its candidate up in
+    # these lists by name, so `schema:Government` would never match a deferral on
+    # `schema:GovernmentService` and the source would only be deferred again.
+    candidates = {p: set(TYPE_NAME.findall(_deferral_reason(p)))
+                  for p, step in questions.items() if step == "pass2b-type"}
+    proposed = set().union(*candidates.values()) if candidates else set()
+    for name in approved + declined:
+        if name not in proposed:
+            problems.append(f"{name} is not a type candidate any source deferred on in this run")
+    answered_types = set(approved) | set(declined)
+    for path in reprocess:
+        if path in candidates and not candidates[path] & answered_types:
+            problems.append(f"{path} is in reprocess but none of its type candidates was answered")
+    if problems:
+        print("; ".join(problems))
+        return 1
+    return 0
 
 
 def cmd_check_register(args) -> int:
@@ -224,6 +332,20 @@ def cmd_check_pass1(args) -> int:
     if not front:
         print(f"{path}: cannot read the management file")
         return 1
+    # A low-density answer from the end-of-loop question has to be carried out,
+    # not met with the same deferral again.
+    if args.run:
+        _, state = read_run(args.run)
+        item = norm(args.item)
+        if item in map(norm, listed(state, "fail-low-density")) and args.outcome != "failed":
+            print(f"{path}: the person chose not to continue with this source; "
+                  "mark it failed (outcome `failed`)")
+            return 1
+        if (item in map(norm, listed(state, "continue-low-density")) and args.outcome == "deferred"
+                and section_text(body, "## Deferred Reason").startswith(LOW_DENSITY)):
+            print(f"{path}: the person chose to continue with this source; "
+                  "treat the density check as passed")
+            return 1
     if args.outcome == "extracted":
         tokens = front.get("extracted_tokens")
         if not isinstance(tokens, int) or tokens <= 0:
@@ -239,6 +361,13 @@ def cmd_check_pass1(args) -> int:
     elif args.outcome == "deferred":
         if not has_section(body, "## Deferred Reason"):
             print(f"{path}: `deferred` needs a ## Deferred Reason section")
+            return 1
+        # The end-of-loop question finds a low-density deferral by this prefix, so a
+        # reason written any other way would be left queued without being asked.
+        if not section_text(body, "## Deferred Reason").startswith(
+                (LOW_DENSITY, NETWORK_UNAVAILABLE)):
+            print(f"{path}: ## Deferred Reason must start with the script's "
+                  f"`{LOW_DENSITY}` or `{NETWORK_UNAVAILABLE}` line, verbatim")
             return 1
     print(f"TOUCHED: {path}")
     return 0
@@ -273,11 +402,6 @@ def cmd_check_pass2c(args) -> int:
             print(f"{path}: a deferred source must stay queued; set status: pending (it is {front.get('status')!r})")
             return 1
     return 0
-
-
-def review_record_dir(page: str) -> Path:
-    rel = Path(page).relative_to(".wikicommit")
-    return REVIEW_DIR / rel.with_suffix("")
 
 
 def cmd_check_pass4(args) -> int:
@@ -364,7 +488,7 @@ def cmd_check_merge(args) -> int:
     command = [sys.executable, ".wikicommit/scripts/merge_pages.py", "check", "--into", keep]
     for page in absorb:
         command += ["--absorb", page]
-    result = subprocess.run(command, capture_output=True, text=True)
+    result = run(command)
     print(result.stdout, end="")
     return 0 if result.returncode == 0 else 1
 
@@ -375,7 +499,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add(name, func, run=True, item=False, outcome=False, **extra):
         p = sub.add_parser(name)
-        if run:
+        if run == "optional":
+            p.add_argument("--run", default="")
+        elif run:
             p.add_argument("--run", required=True)
         if item:
             p.add_argument("--item", required=True)
@@ -392,7 +518,10 @@ def build_parser() -> argparse.ArgumentParser:
     add("collect", cmd_collect)
     add("select", cmd_select, list="candidates", answer_step="batch-cap")
     add("check-register", cmd_check_register, outcome=True)
-    add("check-pass1", cmd_check_pass1, run=False, item=True, outcome=True)
+    add("collect-questions", cmd_collect_questions)
+    add("has-list", cmd_has_list, list="")
+    add("check-answers", cmd_check_answers, answer="")
+    add("check-pass1", cmd_check_pass1, run="optional", item=True, outcome=True)
     add("check-pass2b", cmd_check_pass2b, run=False, item=True, outcome=True)
     add("check-pass2c", cmd_check_pass2c, run=False, item=True, outcome=True)
     add("check-pass4", cmd_check_pass4, run=False, item=True)

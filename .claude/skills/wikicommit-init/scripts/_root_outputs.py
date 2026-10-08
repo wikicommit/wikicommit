@@ -579,8 +579,8 @@ def _ignore_patterns(path: Path) -> list[str]:
     The same reduction `check_distribution_freshness.py`'s `_meaningful_lines()` applies
     to this file, for the same reason: `.gitignore` is appended to rather than replaced,
     so the question that can be asked of it is containment, not equality. That copy stays
-    where it is — it lives under `.wikicommit/scripts/`, and a Skill-side script importing
-    from there is the cross-tree dependency `add_source.py` deliberately does not have.
+    where it is — it lives under `.wikicommit/scripts/`, which `wikicommit-init` creates and
+    so cannot import from.
     Order is kept here (a set is enough for the other caller) so a report can name what is
     missing in the order the template writes it.
     """

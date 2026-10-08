@@ -560,9 +560,10 @@ def cmd_checkpoint(args) -> int:
 def open_record(skill: str, model: str, run_args: list[str], extra: dict | None = None) -> Path:
     """Create a new run record and return its path.
 
-    Shared by `start` and by `driver.py start`, so a run opened through the driver
-    has exactly the shape `check_run_records.py` already reads. `extra` adds keys
-    (the driver's own state) after the standard ones.
+    Shared by `start` and by `skill_workflow.py start`, so a run opened through the
+    Skill workflow engine has exactly the shape `check_run_records.py` already
+    reads. `extra` adds keys (the engine's own state, under `workflow:`) after the
+    standard ones.
     """
     directory = RUN_DIR
     directory.mkdir(parents=True, exist_ok=True)

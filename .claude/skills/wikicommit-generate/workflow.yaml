@@ -1,15 +1,24 @@
-# The steps of /wikicommit-generate, in order, for .wikicommit/scripts/driver.py.
+# The steps of /wikicommit-generate, in order, for .wikicommit/scripts/skill_workflow.py.
 #
-# The driver returns one step at a time and decides on disk whether it is done
+# The workflow engine returns one step at a time and decides on disk whether it is done
 # (`check:`), so the order below is the order a run takes whether or not anyone
 # remembers it. What each agent step *does* is in its instructions file; what it
 # *leaves on disk* is checked by scripts/workflow_checks.py.
 #
 # Questions a pass asks inside its own instructions (Step 0's policy conflict,
-# guard A's low-density warning, Pass 2b's [y/N], a retry beyond max_retries)
-# stay in those files. What they do when nobody can answer is stated here under
-# `non_interactive`, and the driver hands that rule to the agent with the step,
-# so the rule is fixed by this file rather than re-derived per prompt.
+# a retry beyond max_retries) stay in those files. What they do when nobody can
+# answer is stated here under `non_interactive`, and the workflow engine hands that
+# rule to the agent with the step, so the rule is fixed by this file rather than
+# re-derived per prompt.
+#
+# Guard A's low-density warning and Pass 2b's type candidates are not asked inside
+# the loop at all: the source is set aside (deferred) whether or not anyone is
+# there, `ask-deferred` puts every such question to the person once the loop is
+# over, and `per-answered-source` takes the answered sources through the passes
+# again in the same run. With nobody to ask, `ask-deferred` answers `later` and the
+# deferrals stay queued, exactly as before. The answers reach the second loop as
+# run lists, handed to the passes with the step (`show_lists`), so nothing about
+# them is written to a management file.
 
 skill: wikicommit-generate
 record_sources: sources
@@ -63,7 +72,8 @@ steps:
   - id: per-source
     for_each: sources
     steps:
-      - id: pass1-extract
+      - &pass1
+        id: pass1-extract
         type: agent
         instructions: references/pass1-extract.md
         also_read: references/text-extraction-routing.md
@@ -76,10 +86,11 @@ steps:
           halted: "the run must stop (missing package, network unavailable); pass --reason"
         ends_item_on: [failed, deferred, unchanged]
         halts_on: [halted]
-        non_interactive: "a LOW_DENSITY source is deferred, not failed"
-        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass1, --item, "{item}", --outcome, "{outcome}"]
+        show_lists: [continue-low-density, fail-low-density]
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass1, --item, "{item}", --outcome, "{outcome}", --run, "{run}"]
 
-      - id: pass2b-type
+      - &pass2b
+        id: pass2b-type
         type: agent
         instructions: references/pass2b-type.md
         stamp: true
@@ -87,10 +98,11 @@ steps:
           ok: "no type was needed, or a type was approved and its file written (pass --touched for it)"
           deferred: "a type candidate is waiting on a person; ## Deferred Reason written (the rest of this source is skipped)"
         ends_item_on: [deferred]
-        non_interactive: "every type candidate defers the source; no type is ever approved"
+        show_lists: [approved-types, declined-types]
         check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass2b, --item, "{item}", --outcome, "{outcome}"]
 
-      - id: pass2c-entities
+      - &pass2c
+        id: pass2c-entities
         type: agent
         instructions: references/pass2c-entities.md
         stamp: true
@@ -103,7 +115,8 @@ steps:
         check_on_halt: true   # `halted` writes a deferral first; hold it to the same check
         check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass2c, --item, "{item}", --outcome, "{outcome}"]
 
-      - id: pass3-generate
+      - &pass3
+        id: pass3-generate
         type: agent
         instructions: references/pass3-generate.md
         stamp: true
@@ -111,7 +124,8 @@ steps:
           ok: "pages were generated in memory for Pass 4 (nothing is written to disk yet)"
           nothing: "no entity had action create or update"
 
-      - id: pass4-review
+      - &pass4
+        id: pass4-review
         type: agent
         instructions: references/pass4-review.md
         stamp: true
@@ -121,6 +135,59 @@ steps:
         halts_on: [halted]
         non_interactive: "a page still failing after max_retries goes to failed_pages; retries are never extended"
         check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass4, --item, "{item}"]
+
+  - id: collect-questions
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", collect-questions, --run, "{run}"]
+    produces: questions
+
+  - id: ask-deferred
+    type: human
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, questions]
+    ask: >-
+      Some sources were set aside in this run because they need a person's answer;
+      `lists.questions` in this step names them. For each, read its management file's
+      `## Deferred Reason` and its `source.url` or `source.path`, and put every question
+      to the person in one go. For a `LOW_DENSITY:` source, show that line verbatim,
+      including its `non-prose breakdown:`, and ask whether to continue with the source.
+      For a type candidate, ask once per type, not once per source: name the type, the
+      entities it was proposed for and every source that proposed it, say why it fits
+      better than the installed types, and ask whether to add it (`[y/N]`; a blank answer
+      is N). Then answer `answered` with `--add continue-low-density=<management file>`
+      or `--add fail-low-density=<management file>` for each low-density answer,
+      `--add approved-types=<schema:Type>` or `--add declined-types=<schema:Type>` for
+      each type answer, and `--add reprocess=<management file>` for every source whose
+      questions were all answered. If the person wants to leave them for later, answer
+      `later` with no `--add`.
+    choices:
+      answered: "the person answered; the sources named in reprocess go through the passes again in this run"
+      later: "nothing was answered; every deferral stays queued"
+    non_interactive: later
+    show_lists: [questions]
+    adds: [reprocess, continue-low-density, fail-low-density, approved-types, declined-types]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-answers, --run, "{run}", --answer, "{outcome}"]
+
+  # The answered sources, through the same passes once more. A question these
+  # passes reach that was not answered above defers the source again and it stays
+  # queued: there is no second round of questions, so the run always ends.
+  - id: per-answered-source
+    for_each: reprocess
+    steps:
+      - <<: *pass1
+        id: reprocess-pass1-extract
+        stamp: pass1-extract
+      - <<: *pass2b
+        id: reprocess-pass2b-type
+        stamp: pass2b-type
+      - <<: *pass2c
+        id: reprocess-pass2c-entities
+        stamp: pass2c-entities
+      - <<: *pass3
+        id: reprocess-pass3-generate
+        stamp: pass3-generate
+      - <<: *pass4
+        id: reprocess-pass4-review
+        stamp: pass4-review
 
   - id: rebuild-index
     type: script

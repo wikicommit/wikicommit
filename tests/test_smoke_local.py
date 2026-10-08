@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).parent.parent
 INSTALL_SH = REPO_ROOT / "install.sh"
 INIT_PY = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts" / "init.py"
 PRINT_NEXT_STEPS_PY = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts" / "print_next_steps.py"
-ADD_SOURCE_PY = REPO_ROOT / ".claude" / "skills" / "wikicommit-generate" / "scripts" / "add_source.py"
+ADD_SOURCE_PY = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts" / "templates" / "scripts" / "add_source.py"
 
 # tests/test_check_translation_status.py と同じ理由: 開発者/CI ランナーの
 # グローバル・システム git 設定（gpgsign・hooksPath 等）から使い捨てリポジトリを隔離する。

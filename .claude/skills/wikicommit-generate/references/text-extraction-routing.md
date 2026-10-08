@@ -3,7 +3,10 @@
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to the Skill's directory (the parent of this `references/` directory), not to the repository root — the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there. Paths starting with `.wikicommit/` are repository-root paths as before.
 
 Which tool extracts which file type, and what to install when one is missing. Pass 1
-is the only reader — nothing else in this Skill dispatches on a file extension.
+is the only reader — nothing else in this Skill dispatches on a file extension. For a
+`type: path` source the extension is that of the file the path resolves to (a symlink is
+followed), which `add_source.py --check-path-cache` prints as `RAW:` or `extract=` — never
+the extension of `source.path` itself.
 
 **Read this when Pass 1 is about to extract its first source**, not before. The rule at
 the top of the table applies whatever brought you here: a missing skill stops the run
@@ -20,7 +23,7 @@ If a required skill is not installed, **stop processing and display the install 
 | `.xlsx` | Anthropic official `xlsx` (preferred), falls back to the `markitdown` CLI automatically if unavailable | `npx skills add https://github.com/anthropics/skills --skill xlsx` — same fallback pattern as `.docx` above (`pip install markitdown` if not yet installed) |
 | `.epub` | `ebook-extractor` (no `markitdown` fallback — see note above) | `npx skills add https://github.com/anthropics/skills --skill ebook-extractor` |
 | Image files | `ocr-and-documents` (no `markitdown` fallback — see note above) | `npx skills add https://github.com/NousResearch/skills --skill ocr-and-documents` |
-| URL (web page or direct file link, e.g. PDF) | `markitdown` (Python package, not a Claude Skill), invoked via `add_source.py --fetch-url` rather than the CLI directly — it sends a User-Agent that sites rejecting the default one accept, while keeping `markitdown`'s charset detection from the HTTP response (see Pass 1) | `pip install 'markitdown[pdf]'` — run via `python scripts/add_source.py --fetch-url <url> --output <path>` (see `references/pass1-extract.md`) |
+| URL (web page or direct file link, e.g. PDF) | `markitdown` (Python package, not a Claude Skill), invoked via `add_source.py --fetch-url` rather than the CLI directly — it sends a User-Agent that sites rejecting the default one accept, while keeping `markitdown`'s charset detection from the HTTP response (see Pass 1) | `pip install 'markitdown[pdf]'` — run via `python .wikicommit/scripts/add_source.py --fetch-url <url> --output <path>` (see `references/pass1-extract.md`) |
 | URL (YouTube video) | `markitdown` **plus** `youtube-transcript-api` — without the second package `markitdown` extracts only the title, keywords, runtime and description and drops the transcript, with no error or warning, so the video's actual content never reaches Pass 2. Only `https://www.youtube.com/watch?v=<id>` links (and the `youtu.be/<id>` / `m.youtube.com` forms that redirect to them) are recognized as videos at all — a `/shorts/<id>`, `/playlist`, channel, or `music.youtube.com` URL is not, and extracts to navigation boilerplate; register the `watch?v=<id>` equivalent instead | `pip install youtube-transcript-api` (in addition to `markitdown` above). Pass 1 checks for this before fetching and stops with this command if it is missing |
 | Other (unmatched file extensions) | `markitdown` (fallback; same package as above) | `pip install 'markitdown[pdf]'` — run via CLI: `PYTHONIOENCODING=utf-8 markitdown <path>` |
 

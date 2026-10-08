@@ -2,6 +2,8 @@
 name: wikicommit-update
 description: Bring an initialized wiki repository in step with the installed WikiCommit distribution — refresh WikiCommit's own payload, show what changed in files you may have edited, restamp the synced version, verify, and open a PR for review. Use this only when someone explicitly asks to update or sync the repository with a newer WikiCommit. It overwrites WikiCommit's files and opens a PR, so do not use it to check whether the repository is out of date — wikicommit-status reports that without writing.
 disable-model-invocation: true
+metadata:
+  requires: "wikicommit-init"
 ---
 
 # wikicommit-update
@@ -106,6 +108,10 @@ Each `ORPHAN:` line from Step 2 is a file that exists here with no counterpart i
 **Never delete one without asking.** Show the list, and for each say what it is and what would break. Delete only what the user confirms, one by one — not as a batch, and not by default. An orphan is harmless where it sits; deleting one that something still calls is not.
 
 If the user is unsure about a file, leave it. It can go in the next update.
+
+Known renames, so you can say what an orphan is without guessing:
+
+- **`ORPHAN: .wikicommit/scripts/driver.py`** — the Skill workflow engine, renamed to `skill_workflow.py` (same commands: `start`, `next`, `done`, `status`, `check-merge`, `abandon`). After this update no distributed Skill calls the old name: `wikicommit-generate`, `wikicommit-merge`, `wikicommit-translate` and `wikicommit-synthesize` all call `skill_workflow.py`, and a run started under the old name is resumed by `skill_workflow.py next <run>` (the new engine still reads the old record's `driver:` key). The one thing that can still call it is the user's own configuration: before asking, search the repository outside `.wikicommit/` for `driver.py` (`git grep -n 'driver\.py' -- ':!.wikicommit'`), and also read `.claude/settings.local.json` if it exists — it is not tracked, so `git grep` does not see it — typically a Stop hook running `driver.py status --stop-hook`. If one is found, tell the user that its command should name `skill_workflow.py` instead, and that keeping `driver.py` does not keep the hook working: the old script looks for the `driver:` key only, so it no longer sees any run opened or advanced after this update and silently lets every stop through; once the file is gone the hook fails outright. The edit is theirs to make or approve. With nothing found, deleting it breaks nothing — still ask, as for any orphan.
 
 ### Step 5: Show What Changed in Files You May Have Edited
 

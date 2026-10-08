@@ -402,7 +402,8 @@ def _origin_repo_slug(repo_root: Path) -> str | None:
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            cwd=repo_root, capture_output=True, text=True, timeout=10,
+            cwd=repo_root, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=10,
         )
     except (OSError, subprocess.SubprocessError):
         return None

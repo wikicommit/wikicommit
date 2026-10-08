@@ -141,6 +141,68 @@ def test_expanded_templates_are_not_charged_to_the_skill(tmp_path):
     assert "WARNING" not in result.stdout
 
 
+def _surface(stdout: str, skill: str) -> int:
+    line = next(ln for ln in stdout.splitlines() if f"/{skill}:" in ln)
+    return int(line.split("surface ")[1].split(" B")[0])
+
+
+def test_a_shared_file_is_charged_to_every_skill_that_names_it(tmp_path):
+    """A `shared/` procedure is read by several Skills (as `wikicommit-review` and
+    `wikicommit-fix` both read `../wikicommit-ask/shared/source-fetch.md` until
+    Issue #1211 made it a script mode; the fixture keeps that shape).
+    Moving prose into a sibling Skill's directory must not make a reader look
+    lighter than it runs, so each reader pays for it."""
+    shared = write_md(tmp_path, "wikicommit-ask", "shared/source-fetch.md", 300)
+    write_skill_md(tmp_path, "wikicommit-ask", 10)
+    for name in ("wikicommit-review", "wikicommit-fix"):
+        path = write_skill_md(tmp_path, name, 10)
+        path.write_text(
+            path.read_text(encoding="utf-8") + "Follow `../wikicommit-ask/shared/source-fetch.md`.\n",
+            encoding="utf-8",
+        )
+    shared_size = len(shared.read_bytes())
+
+    out = run(["--limit=1"], cwd=tmp_path).stdout
+    for name in ("wikicommit-review", "wikicommit-fix"):
+        body = tmp_path / ".claude" / "skills" / name / "SKILL.md"
+        assert _surface(out, name) == len(body.read_bytes()) + shared_size
+    assert "SKILL.md + ../wikicommit-ask/shared/source-fetch.md" in out
+
+
+def test_a_shared_file_is_not_charged_to_an_owner_that_never_reads_it(tmp_path):
+    """The owner is only where the file lives; it does not read the procedure."""
+    body = write_skill_md(tmp_path, "wikicommit-ask", 10)
+    write_md(tmp_path, "wikicommit-ask", "shared/source-fetch.md", 300)
+
+    out = run(["--limit=1"], cwd=tmp_path).stdout
+    assert _surface(out, "wikicommit-ask") == len(body.read_bytes())
+
+
+def test_an_owner_that_names_its_shared_file_is_charged_for_it(tmp_path):
+    body = write_skill_md(tmp_path, "wikicommit-ask", 10)
+    body.write_text(body.read_text(encoding="utf-8") + "Read `shared/x.md`.\n", encoding="utf-8")
+    shared = write_md(tmp_path, "wikicommit-ask", "shared/x.md", 300)
+
+    out = run(["--limit=1"], cwd=tmp_path).stdout
+    assert _surface(out, "wikicommit-ask") == len(body.read_bytes()) + len(shared.read_bytes())
+
+
+def test_an_owner_naming_a_siblings_shared_file_of_the_same_name_is_not_charged_for_its_own(tmp_path):
+    """`../other/shared/x.md` ends in `shared/x.md`; that must not charge the
+    owner for its own, unread `shared/x.md`."""
+    write_md(tmp_path, "wikicommit-other", "shared/x.md", 300)
+    write_skill_md(tmp_path, "wikicommit-other", 10)
+    body = write_skill_md(tmp_path, "wikicommit-ask", 10)
+    body.write_text(
+        body.read_text(encoding="utf-8") + "Read `../wikicommit-other/shared/x.md`.\n", encoding="utf-8"
+    )
+    write_md(tmp_path, "wikicommit-ask", "shared/x.md", 300)
+    other = tmp_path / ".claude" / "skills" / "wikicommit-other" / "shared" / "x.md"
+
+    out = run(["--limit=1"], cwd=tmp_path).stdout
+    assert _surface(out, "wikicommit-ask") == len(body.read_bytes()) + len(other.read_bytes())
+
+
 def test_the_default_surface_limit_is_40000(tmp_path):
     path = write_md(tmp_path, "wikicommit-merge", "SKILL.md", 5000)  # ~9 bytes/line
     assert len(path.read_bytes()) > 40_000

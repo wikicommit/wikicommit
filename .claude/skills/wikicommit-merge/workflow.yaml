@@ -1,0 +1,162 @@
+# The steps of /wikicommit-merge, in order, for .wikicommit/scripts/skill_workflow.py.
+#
+# Unlike /wikicommit-generate, this Skill is not a loop over items: it is one line
+# of Git operations, a wait on GitHub, one question to a person, and two kinds of
+# tracking Issue filed after the merge. Every step that needs nothing but a command
+# is a `script` step the workflow engine runs; every step that needs judgment, a shell the
+# agent drives, or a wait longer than a single command should block on is an
+# `agent` step whose completion a check confirms. What each agent step does is in
+# its instructions file; what it leaves behind is checked by scripts/workflow_checks.py.
+
+skill: wikicommit-merge
+
+steps:
+  - id: freshness
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", freshness]
+
+  - id: default-branch
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", default-branch]
+    produces: default_branch
+
+  - id: detect
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", detect]
+    produces: changes
+    finish_if_empty: "No changes to merge"
+
+  - id: open-runs
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", open-runs, --run, "{run}"]
+
+  # Step 2: classify the changes. One script step per list, so each lands in the
+  # run record under its own name and the `commit` step reads it from there.
+  - id: classify-pages
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, pages]
+    produces: changed_md
+
+  - id: classify-removing
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, removing]
+    produces: removing
+
+  - id: classify-sources
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, sources]
+    produces: new_sources
+
+  - id: classify-schema
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, schema]
+    produces: new_schema
+
+  - id: classify-vocab
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, vocab]
+    produces: new_vocab
+
+  - id: classify-policy
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, policy]
+    produces: policy_files
+
+  - id: classify-relations
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, relations]
+    produces: relations_file
+
+  # Step 3, the fast checks: a blocking finding exits 1, which halts the run with
+  # that finding as its reason, before anything is branched or committed.
+  - id: quality-checks
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", checks, --run, "{run}"]
+
+  # Step 3, lychee and markdownlint-cli2: never blocking, and an agent step because
+  # neither fits one synchronous call. lychee over many pages outlasts the agent's
+  # shell time limit, so a wrapper checks a few pages per call and is called again
+  # until it is done; markdownlint goes through `npx`, which Python cannot start on
+  # Windows without a shell. With no changed page (a run that only carries assets,
+  # policy files or records) there is nothing for either to read, so the step is
+  # skipped rather than handed to the agent only to be reported straight back.
+  - id: link-and-style-checks
+    type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, changed_md]
+    instructions: references/quality-checks.md
+    outcomes:
+      checked: "lychee printed `LINKS: done` and markdownlint-cli2's output was recorded"
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-slow-checks, --run, "{run}"]
+
+  - id: collect-warnings
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", warnings, --run, "{run}"]
+    produces: warnings
+
+  - id: proceed-with-warnings
+    type: human
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, warnings]
+    ask: >-
+      The quality checks found no blocking error but printed warnings. Show the user
+      the warnings — `workflow_checks.py pr-body --run <run>` prints them as the PR
+      body will carry them — and ask whether to go on and merge with them, or stop
+      here and leave the working tree as it is.
+    show_lists: [warnings]
+    choices:
+      proceed: "branch, commit, open the PR and merge, with the warnings written into the PR body"
+      stop: "stop now; nothing is branched or committed"
+    non_interactive: proceed
+    finishes_on: [stop]
+
+  - id: commit
+    type: agent
+    instructions: references/commit.md
+    show_lists: [new_sources, new_schema, new_vocab, policy_files, relations_file]
+    outcomes:
+      committed: "a wikicommit/merge-* branch holds one commit carrying every change detect found"
+      halted: "the branch or the commit could not be made; pass --reason"
+    halts_on: [halted]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-commit, --run, "{run}"]
+
+  - id: open-pr
+    type: agent
+    instructions: references/open-pr.md
+    outcomes:
+      opened: "the branch was pushed and the PR opened; pass --add pr=<PR number>"
+      halted: "the push or the PR creation failed; pass --reason"
+    halts_on: [halted]
+    adds: [pr]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pr, --run, "{run}"]
+
+  - id: merge-pr
+    type: agent
+    instructions: references/merge-pr.md
+    outcomes:
+      merged: "the PR was squash-merged and the default branch checked out and pulled"
+      failed: "the PR was closed, conflicted, blocked, or never became mergeable; the cleanup was shown; pass --reason"
+    halts_on: [failed]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-merged, --run, "{run}"]
+
+  # No completion check on the two Issue steps, deliberately: a page whose Issue
+  # could not be created is skipped and reported, and the next run's full scan of
+  # the default branch picks it up. A check that every pending page has an open
+  # Issue would turn a tolerated API failure into a stuck run. Resuming re-runs the
+  # step, which is safe because each Issue is matched by its marker before it is
+  # created.
+  - id: tracking-issues
+    type: agent
+    instructions: references/tracking-issues.md
+    outcomes:
+      filed: "every pending page has an open tracking Issue, a new one or an existing one, or was reported as skipped"
+
+  - id: failure-issues
+    type: agent
+    instructions: references/failure-issues.md
+    outcomes:
+      filed: "every failed source has an open generation-failure Issue, a new one or an existing one, or was reported as skipped"
+
+  - id: report
+    type: agent
+    instructions: references/completion-report.md
+    outcomes:
+      reported: "the completion report was shown; pass --count pr=<N> --count tracking_issues=<N> --count failure_issues=<N>"

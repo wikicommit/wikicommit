@@ -72,6 +72,18 @@ def _sha256_of_file(file_path: Path) -> str:
     return h.hexdigest()
 
 
+def _resolves_inside(path: Path, repo_root: Path) -> bool:
+    """Whether `path`, symlinks followed, lies under `repo_root` — the same
+    test `add_source.py` applies at registration and `validate_frontmatter.py`
+    applies to `sources[].path`. A hand-written management file can still name
+    `../../secret` or an absolute path; this keeps the check from opening (and,
+    through its WARNING, revealing the existence of) a file outside the repo."""
+    try:
+        return path.resolve().is_relative_to(repo_root.resolve())
+    except (OSError, RuntimeError):
+        return False
+
+
 def collect_mgmt_files(args: list[str]) -> list[Path]:
     if args:
         return [Path(p) for p in args]
@@ -108,6 +120,15 @@ def main() -> int:
 
         # Normalize Windows-style backslashes for cross-platform compatibility
         source_path = Path(str(source_path_raw).replace("\\", "/"))
+        # Before the existence check, so the warning never tells a file outside
+        # the repository apart from a missing one.
+        if not _resolves_inside(Path.cwd() / source_path, Path.cwd()):
+            print(
+                f"WARNING: {mgmt_file}: source.path resolves outside the repository: "
+                f"{source_path_raw} — not checked",
+                file=sys.stderr,
+            )
+            continue
         if not source_path.exists():
             print(
                 f"WARNING: {mgmt_file}: source file not found: {source_path}",

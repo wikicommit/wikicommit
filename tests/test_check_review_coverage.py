@@ -717,3 +717,138 @@ def test_an_unreadable_relations_file_falls_back_to_plain_comparison(tmp_path):
     result = run(tmp_path)
     assert result.returncode == 0
     assert "STALE_REVIEW: " + PAGE_REL in result.stdout
+
+
+# A rename carries the old slug's records with it (Issue #1162). `rename_page.py`
+# leaves them under the old path; the renamed page reads them through the
+# `renamed_at` item in `relations.yml`, rather than reading as never reviewed.
+
+RENAME = SCRIPTS / "rename_page.py"
+RENAMED_REL = ".wikicommit/entity/ja/Person/yamada-taro-2025.md"
+
+
+def rename(root: Path, page: str = PAGE_REL, year: str = "2025") -> None:
+    (root / ".wikicommit/config.yml").write_text(
+        "translation:\n  primary_lang: ja\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        [sys.executable, str(RENAME), "apply", "--page", page, "--year", year,
+         "--today", "2026-10-07"],
+        capture_output=True, text=True, cwd=root, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_renamed_page_reads_the_old_slugs_record_and_is_stale(tmp_path):
+    """The title changed, so the verdict does not stand — but it is not lost either."""
+    write_page(tmp_path)
+    ai(tmp_path, attempts="2")
+    rename(tmp_path)
+    out = run(tmp_path).stdout
+    assert "UNREVIEWED: " + RENAMED_REL not in out
+    assert "SUMMARY: pages=1, ai_reviewed=1," in out
+    assert "RISKY: " + RENAMED_REL + " (attempts=2, findings=0)" in out
+    assert (
+        f"STALE_REVIEW: {RENAMED_REL} (page content changed since"
+    ) in out
+    assert "the review was of Person/yamada-taro, before the rename)" in out
+
+
+def test_a_slug_only_rename_keeps_the_verdict(tmp_path):
+    """The title already carried the year, so the reviewed text is unchanged."""
+    write_page(tmp_path)
+    page = tmp_path / PAGE_REL
+    page.write_text(page.read_text(encoding="utf-8").replace('"T"', '"T（2025）"'),
+                    encoding="utf-8")
+    ai(tmp_path)
+    rename(tmp_path)
+    out = run(tmp_path).stdout
+    assert "SUMMARY: pages=1, ai_reviewed=1," in out
+    assert "STALE_REVIEW:" not in out
+    assert "UNREVIEWED:" not in out
+
+
+def test_a_slug_only_rename_keeps_the_original_but_not_the_translation(tmp_path):
+    """Issue #1246: the translation's `translated_from` is content, so its check
+    goes stale (the translation is reported STALE as well and is redone with
+    /wikicommit-translate). With no title change, neither page's
+    `review_status` is touched."""
+    page = write_page(tmp_path)
+    page.write_text(
+        page.read_text(encoding="utf-8")
+        .replace('"T"', '"T（2025）"')
+        .replace("review_status: pending", "review_status: reviewed\nreviewed_by: [alice]"),
+        encoding="utf-8",
+    )
+    ai(tmp_path)
+    translation = write_translation(tmp_path)
+    translation.write_text(
+        translation.read_text(encoding="utf-8")
+        .replace('"Taro Yamada"', '"Taro Yamada (2025)"')
+        .replace("review_status: pending", "review_status: reviewed\nreviewed_by: [bob]"),
+        encoding="utf-8",
+    )
+    translate_check(tmp_path)
+    rename(tmp_path)
+    renamed_translation = ".wikicommit/entity/en/Person/yamada-taro-2025.md"
+    out = run(tmp_path).stdout
+    assert "STALE_REVIEW: " + RENAMED_REL not in out
+    assert f"STALE_REVIEW: {renamed_translation} (page content changed" in out
+    original = (tmp_path / RENAMED_REL).read_text(encoding="utf-8")
+    assert "review_status: reviewed" in original
+    assert "reviewed_by: [alice]" in original
+    assert 'title: "T（2025）"' in original
+    renamed = (tmp_path / renamed_translation).read_text(encoding="utf-8")
+    assert "review_status: reviewed" in renamed
+    assert "reviewed_by: [bob]" in renamed
+    assert f"translated_from: {RENAMED_REL}" in renamed
+
+
+def test_a_review_after_the_rename_clears_the_stale_line(tmp_path):
+    write_page(tmp_path)
+    ai(tmp_path)
+    rename(tmp_path)
+    ai(tmp_path, RENAMED_REL)
+    out = run(tmp_path).stdout
+    assert "STALE_REVIEW:" not in out
+    assert "SUMMARY: pages=1, ai_reviewed=1," in out
+
+
+def test_a_page_renamed_twice_reads_both_old_slugs(tmp_path):
+    write_page(tmp_path)
+    ai(tmp_path)
+    relations = tmp_path / ".wikicommit/relations.yml"
+    relations.write_text(
+        "- relation: same\n  pages: [Person/a, Person/b]\n  merged_into: Person/b\n"
+        "  renamed_at: '2026-10-01'\n"
+        "- relation: same\n  pages: [Person/b, Person/yamada-taro]\n"
+        "  merged_into: Person/yamada-taro\n  renamed_at: '2026-10-02'\n",
+        encoding="utf-8",
+    )
+    old = tmp_path / ".wikicommit/review/entity/ja/Person/yamada-taro"
+    oldest = tmp_path / ".wikicommit/review/entity/ja/Person/a"
+    oldest.parent.mkdir(parents=True, exist_ok=True)
+    old.rename(oldest)
+    out = run(tmp_path).stdout
+    assert "UNREVIEWED:" not in out
+    assert "SUMMARY: pages=1, ai_reviewed=1," in out
+
+
+def test_a_plain_merge_does_not_lend_the_absorbed_pages_records(tmp_path):
+    """The kept page of a merge was regenerated; Pass 4 records it anew."""
+    write_page(tmp_path, ".wikicommit/entity/ja/Person/old-name.md")
+    ai(tmp_path, ".wikicommit/entity/ja/Person/old-name.md")
+    merge(tmp_path, "Person/old-name", "Person/new-name")
+    out = run(tmp_path).stdout
+    assert "UNREVIEWED: .wikicommit/entity/ja/Person/new-name.md" in out
+
+
+def test_a_rename_does_not_carry_a_human_sign_off(tmp_path):
+    """The rename withdraws the person's sign-off (`review_status: pending`), so
+    only the machine's check is inherited."""
+    write_page(tmp_path)
+    ai(tmp_path)
+    human(tmp_path)
+    rename(tmp_path)
+    out = run(tmp_path).stdout
+    assert "SUMMARY: pages=1, ai_reviewed=1, human_reviewed=0" in out

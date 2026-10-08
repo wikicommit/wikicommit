@@ -2,6 +2,8 @@
 name: wikicommit-collect
 description: Discover candidate sources (local files and web pages) related to the configured wiki theme, and register only the ones a person approves. Use this only when someone explicitly asks to find or collect new sources for the wiki. It registers sources in the repository, so do not use it to look something up or to answer a question — wikicommit-search and wikicommit-ask read the wiki without writing.
 disable-model-invocation: true
+metadata:
+  requires: "wikicommit-generate wikicommit-init"
 ---
 
 # wikicommit-collect
@@ -32,7 +34,7 @@ With no guidance, the run begins by surveying the wiki — what it already holds
 
 ### Step 1: Check `theme`
 
-Read `.wikicommit/config.yml` and get the `theme` field.
+Read `.wikicommit/config.yml` and get the `theme` field. If `.wikicommit/scripts/add_source.py` does not exist (`.wikicommit/scripts/` older than this Skill), stop and tell the user to run `/wikicommit-update` first.
 
 - If the `theme` field is absent, or its value is an empty string:
 
@@ -42,7 +44,7 @@ Read `.wikicommit/config.yml` and get the `theme` field.
 
   Display this and stop (do not search for candidates).
 
-  > Where `theme` is missing or blank, re-run `/wikicommit-init` and answer the theme prompt with non-blank text: it updates just the `theme:` line of the existing `.wikicommit/config.yml` (via `init.py --update-theme`), even under `--no-overwrite`. Editing `theme: "<free text>"` in `.wikicommit/config.yml` directly also works.
+  > Where `theme` is missing or blank, re-run `/wikicommit-init` and answer the theme prompt with non-blank text: it updates just the `theme` value of the existing `.wikicommit/config.yml` (via `init.py --update-theme`), even under `--no-overwrite`. Editing `theme: "<free text>"` in `.wikicommit/config.yml` directly also works.
 
 - If `theme` is set, proceed to step 2, using its content as the relevance criterion for steps 4–6.
 
@@ -211,7 +213,7 @@ A standing index is not mined in full on every run. An awesome list holds hundre
 For each index page, fetch it the same way Pass 1 does — it carries the User-Agent Wikimedia hosts require, and this reads the page without registering anything. `--fetch-url` requires `--output` and writes exactly what `markitdown` produced there, so give it a scratch path under the gitignored cache (a path of your own, not one of Pass 1's `ingest-fetch/` scratch paths — those are derived from a management file, and an index page has none). Quote the URL: it is free text from the command line or a search result, and an unquoted `&` would be read by the shell.
 
 ```bash
-python ../wikicommit-generate/scripts/add_source.py --fetch-url "<index URL>" \
+python .wikicommit/scripts/add_source.py --fetch-url "<index URL>" \
   --output ".wikicommit/.cache/collect-index/<host>-<slug>.md"
 ```
 
@@ -250,7 +252,7 @@ Merge the local and web candidates and present them as a numbered list, ordered 
 **Known license**: for each `[Web]` candidate, look up the license registration would record on it, and show it. This is the same deterministic table `add_source.py` consults at registration time, queried one step earlier so it informs the approval this Skill requires rather than arriving after the source is already in:
 
 ```bash
-python ../wikicommit-generate/scripts/add_source.py \
+python .wikicommit/scripts/add_source.py \
   --license-for-url "$(cat <<'EOF'
 <candidate URL>
 EOF

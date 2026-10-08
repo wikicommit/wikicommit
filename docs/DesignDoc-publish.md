@@ -677,6 +677,7 @@ root index は「人が読んで確認」に加えて「出典と照合」（Pas
   - 判定は `reconcile_ingest_status.py` と 5 件ガードの選定順序が「一度でも完走したか」の目印に使っているのと同じ値で、決定論的に分かれる。
   - `lang` を持つソースは `last_generated_at` が空でも（Pass 2a の後で保留されたもの）言語の行に数える。
   - `status: excluded` は `last_generated_at` が空でも「未記録」に数える — Pass 4 の `excluded` 分岐は完走した実行の末尾で書かれるが `last_generated_at` を書かないため、日付が無いことが未完走を意味しない。
+  - 文字列でない `lang`（リスト・`yes` / `on` が読まれた `True`・数値。`False` は `no` に戻す）は値を持たないものとして同じ規則で分ける（`docs/DesignDoc-data.md` §4.3）。
   - Pass 1 で失敗したソースは「未処理」に入る（`status` 別の表が `failed` を別に数えているので、言語の表で細かく分けない）。
 
 #### ハブ行のソース件数と、同じソースに立つハブ
@@ -1022,7 +1023,11 @@ The lists below cover the N pages in `ja`; the site also has pages in `en`.
 
 **`robots.txt` は WikiCommit も Quartz も書かない**。GitHub Pages のプロジェクトページ（`<owner>.github.io/<repo>`）では `robots.txt` はホストの直下（`<owner>.github.io/robots.txt`）にしか置けず、リポジトリ側からは制御できない。
 
-**未確認のこと**: Pages 上で実際に `/llms.txt` が取れること、GitMCP などのサービスがこのファイルを読んで答えられることは、実際の公開サイトで確かめていない。`Assets` emitter がこのファイルを名前を変えずにコピーすることは Quartz のソース（`slugifyFilePath` は `.md`・`.html` 以外の拡張子を残し、`.txt` を扱うページ型は無い）から判断した。
+**実サイトで確かめたこと**: Pages のプロジェクトページで `/llms.txt` が取れ、名前は変わらず、並べたリンクはすべて公開ページに届く。GitMCP の Pages 指定（`<owner>.gitmcp.io/<repo>`）は、ホスト直下ではなくサブパスの `llms.txt` を読む。GitMCP 自身の検索は一覧に載っている語にも当たらないことがあり、その場合は `llms.txt` の本文をそのまま返す — 経路として効くのは検索ではなく一覧である。
+
+**既知の不足**: 上の表の「信頼度」の行は、各ページの上部の状態をリンクを辿った AI が読むことを前提にしている。しかし `pending` のページのバナーは状態を文字で書かない（§8.4。`reviewed` のページに「読んだ」行が足されることで区別する）ため、ページを読んだだけの AI は `pending` を言い当てられるとは限らない。`llms.txt` の冒頭の「Each page states its review status at the top」も、`pending` の側ではこの区別に依っている。
+
+**未確認のこと**: `/wikicommit-ask` と同じ問いで答えを比べることはしていない（ask 自体の検証と合わせて扱う）。
 
 ---
 

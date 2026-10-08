@@ -7,11 +7,11 @@
 
 Git ベースの知識管理プラットフォーム。ソースドキュメントから LLM が Wiki ページを生成し、自動・人間によるレビューを経て静的 Wiki として公開します。SKILL.md 群として実装されており、Claude Code などユーザー自身が契約している LLM 環境上でそのまま動作します。
 
-**目的は、AI が使える、出所の追える知識基盤を作り、その知識を人が興味に応じて読める形で公開することです。** 各ページは登録したソースから作られ、どの文書のどの版から作ったかを記録し、機械がその文書と照合します。照合の結果はページごとに記録され、公開ページにも表示されます。人は、その中から興味のあるページを読みます。出所を追えることが要るのは公開するからです — ページを読む人は作った人ではなく、判断の材料はページに付いた記録です。
+**目的は、AI が使える、出所の追える知識基盤を作り、その知識を人が興味に応じて読める形で公開することです。** 各ページは登録したソースから作られ、どの文書のどの版から作ったかを記録し、機械がその文書と照合します。照合の結果はページごとに記録され、公開ページにも表示されます。人は、その中から興味のあるページを読みます。出所を追えることが要るのは、読む人が内容を知らないからです — 公開した Wiki を読む人は作った人ではなく、自分の勉強のために作った場合も、読むのはまだ知らないテーマです。どちらの読者もページの誤りや、どこまでがソースの記述かに自分では気づけず、判断の材料はページに付いた記録です。
 
 **Wiki は、その両方を満たす形として選んでいます。** 機械は型・リンク・出典を構造として読み、人はリンクをたどって読みます。各ページは 1 つの主題について書かれ、[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)（Open Knowledge Format）v0.1 が唯一必須とする Schema.org の `type` を持つので、Wiki の知識は WikiCommit にしか読めない形式に閉じ込められず、ページを 1 枚ずつ照合できます。ページを LLM が書くのは、散らばったソースから型付きのページを作り、更新し続ける作業を人の手に残さないためです。
 
-WikiCommit は *LLM wiki* — LLM が資料を読み、そこから Wiki を書いて育てていく考え方（[Andrej Karpathy の LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)）— の一実装として始まりました。加えているのは、どのページも元になった文書と照合すること、その判定をページ 1 枚ごとに記録すること、そしてすべての変更が PR を通ることです。
+ひとことで言えば、調べたいテーマについて、1 人で、AI と一緒に、出典を追える小さな Wikipedia を作り、読んで学ぶためのものです（公開もできます）。**作り方**は *LLM wiki* — LLM が資料を読み、そこから Wiki を書いて育てていく考え方（[Andrej Karpathy の LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)）— から来ており、WikiCommit はその一実装として始まりました。**作るものの形**は Wikipedia から来ています — 1 主題 1 記事・検証可能性・独自研究をしないこと。多くの LLM wiki の実装が「wiki」と呼ぶ、相互にリンクした個人のメモとは別のものです。LLM wiki の考え方に加えているのは、どのページも元になった文書と照合すること、その判定をページ 1 枚ごとに記録すること、そしてすべての変更が PR を通ることです。
 
 > **Status**: パイロットリポジトリでの実運用検証を進めており、破壊的変更が入ることがあります。
 
@@ -201,11 +201,12 @@ WikiCommit は LLM 推論を提供しません — ユーザーが自身の Clau
 # --copy を付けることを推奨します（理由は下の注記を参照）
 npx skills add wikicommit/wikicommit --copy
 
-# 個別 Skill のみインストールする場合
-npx skills add wikicommit/wikicommit --skill wikicommit-generate --copy
+# 一部の Skill だけをインストールする場合は、それが依存する Skill も並べる
+# （下の「一部の Skill だけを入れる場合」を参照）
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-init --copy
 
 # 複数 Skill をまとめて指定する場合（--skill を繰り返す）
-npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge --copy
+npx skills add wikicommit/wikicommit --skill wikicommit-generate --skill wikicommit-merge --skill wikicommit-init --copy
 
 # 全 Skill を確認なしで一括インストールする場合（迷ったらこれで問題ありません）
 # 注意: --copy と素の --all を組み合わせないこと。--all は --skill '*' --agent '*' -y の
@@ -236,6 +237,26 @@ bash /tmp/wikicommit/install.sh
 > **devcontainer / GitHub Codespaces を使う場合**: ホスト側で先にインストールするのではなく、**コンテナに入ってから**
 > インストールしてください。シンボリックリンクが越えられない境界そのものが無くなります。`--copy` を付ける場合でも、
 > CLI 側の既定が将来変わりうるため、この手順を守っておくことを推奨します。
+
+### 一部の Skill だけを入れる場合
+
+Skill の中には別の Skill のディレクトリにあるファイルを読むものがあり、片方だけを入れると一部が黙って効かなくなります
+（例: `wikicommit-init` を入れずに `wikicommit-generate` だけを入れると、型を追加するときの予備と、
+`.wikicommit/scripts/` がインストールした版と揃っているかの検出が効きません）。`--skill` で指定するときも、
+対話式のピッカーで選ぶときも、選んだ各 Skill について右の列の Skill もすべて一緒に入れてください。右の列は依存を辿りきった結果です
+（`wikicommit-generate` を要する Skill は、`wikicommit-generate` が要するものも要します）。各 Skill は直接の依存を
+`SKILL.md` の frontmatter の `metadata.requires` に宣言しており、この表はその宣言と照合されています。
+表に無い Skill は他の Skill を要しません。
+
+| Skill | 一緒に入れる Skill |
+|---|---|
+| `wikicommit-generate` | `wikicommit-init` |
+| `wikicommit-merge` | `wikicommit-init` |
+| `wikicommit-schema-propose` | `wikicommit-init` |
+| `wikicommit-update` | `wikicommit-init` |
+| `wikicommit-collect` | `wikicommit-generate` `wikicommit-init` |
+| `wikicommit-review` | `wikicommit-generate` `wikicommit-init` |
+| `wikicommit-fix` | `wikicommit-generate` `wikicommit-init` |
 
 インストール後、Wiki を初期化するリポジトリで実行：
 

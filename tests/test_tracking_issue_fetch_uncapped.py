@@ -45,7 +45,7 @@ def test_no_distributed_skill_lists_issues_by_label_with_gh_issue_list():
 
 @pytest.mark.parametrize("skill,query", FETCH_SITES)
 def test_each_fetch_site_uses_the_paginated_rest_list(skill, query):
-    text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
+    text = "\n".join(p.read_text(encoding="utf-8") for p in instruction_files(SKILLS / skill))
     assert f'gh api "repos/{{owner}}/{{repo}}/issues?{query}"' in text
     start = text.index(query)
     assert "--paginate" in text[start:start + 200], f"{skill}: the {query} fetch lost --paginate"

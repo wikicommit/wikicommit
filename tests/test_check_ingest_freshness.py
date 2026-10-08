@@ -194,3 +194,68 @@ def test_retracted_status_is_never_rewritten_to_outdated(tmp_path):
     # Not counted as ok either — it is not checked at all.
     assert "SUMMARY: outdated=0, ok=0" in result.stdout
     assert "status: retracted" in mgmt_file.read_text(encoding="utf-8")
+
+
+# ── source.path resolving outside the repository (Issue #1207) ──────────────
+
+def _outside_cases(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
+    """A repo under tmp_path/repo, a secret file beside it, and the three ways a
+    hand-written management file can point at it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"secret")
+    (repo / "link").symlink_to(secret)
+    return repo, secret, {
+        "dotdot": "../secret.txt",
+        "absolute": str(secret),
+        "symlink": "link",
+    }
+
+
+def test_outside_source_path_is_not_hashed_or_rewritten(tmp_path):
+    repo, secret, cases = _outside_cases(tmp_path)
+    for name, source_path in cases.items():
+        # A mismatched hash: if the file were hashed, this would be OUTDATED.
+        mgmt = write_ingest_file(repo, f"{name}.md", source_path, "0" * 64, "generated")
+        result = run([str(mgmt.relative_to(repo))], cwd=repo)
+        assert result.returncode == 0
+        assert "OUTDATED:" not in result.stdout, name
+        assert "resolves outside the repository" in result.stderr, name
+        assert "SUMMARY: outdated=0, ok=0" in result.stdout, name
+        assert "status: generated" in mgmt.read_text(encoding="utf-8"), name
+
+
+def test_outside_source_path_does_not_reveal_whether_the_file_exists(tmp_path):
+    repo, secret, _cases = _outside_cases(tmp_path)
+    present = write_ingest_file(repo, "present.md", "../secret.txt", "0" * 64, "generated")
+    absent = write_ingest_file(repo, "absent.md", "../no-such-file.txt", "0" * 64, "generated")
+
+    r_present = run([str(present.relative_to(repo))], cwd=repo)
+    r_absent = run([str(absent.relative_to(repo))], cwd=repo)
+    assert "not found" not in r_absent.stderr
+    assert r_present.stdout == r_absent.stdout
+    assert r_present.stderr.replace("present", "X").replace("secret.txt", "Y") == \
+        r_absent.stderr.replace("absent", "X").replace("no-such-file.txt", "Y")
+
+
+def test_outside_source_path_never_opens_the_file(tmp_path, monkeypatch):
+    """In-process: the existence check and the hash are both unreachable."""
+    import importlib.util
+
+    repo, _secret, cases = _outside_cases(tmp_path)
+    for name, source_path in cases.items():
+        write_ingest_file(repo, f"{name}.md", source_path, "0" * 64, "generated")
+
+    monkeypatch.syspath_prepend(str(TEMPLATE_SCRIPT.parent))
+    spec = importlib.util.spec_from_file_location("check_ingest_freshness_1207", TEMPLATE_SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("an outside source.path was hashed")
+
+    monkeypatch.setattr(mod, "_sha256_of_file", _boom)
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(sys, "argv", ["check_ingest_freshness.py"])
+    assert mod.main() == 0

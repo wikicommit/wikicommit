@@ -1,4 +1,4 @@
-# The steps of /wikicommit-generate --regenerate, for .wikicommit/scripts/driver.py.
+# The steps of /wikicommit-generate --regenerate, for .wikicommit/scripts/skill_workflow.py.
 #
 # Page-driven rather than source-driven: the items are pages, Pass 2 does not run,
 # and no management file is written. references/regenerate.md holds the mode's

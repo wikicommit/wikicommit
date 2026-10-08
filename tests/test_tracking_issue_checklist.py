@@ -32,12 +32,20 @@ put that check on the page itself, which is why it lands in this order).
 """
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 SKILLS = Path(__file__).parent.parent / ".claude" / "skills"
-MERGE_SKILL = (SKILLS / "wikicommit-merge" / "SKILL.md").read_text(encoding="utf-8")
+sys.path.insert(0, str(SKILLS.parent.parent / "tools"))
+from check_skill_md_lines import instruction_files  # noqa: E402
+
+# SKILL.md and the step files its workflow engine hands out (Issue #1094); the tracking
+# Issue templates live in references/tracking-issues.md.
+MERGE_SKILL = "\n".join(
+    p.read_text(encoding="utf-8") for p in instruction_files(SKILLS / "wikicommit-merge")
+)
 REVIEW_SKILL = (SKILLS / "wikicommit-review" / "SKILL.md").read_text(encoding="utf-8")
 
 # Issue #740 replaced the checkbox list with a request for one line plus
@@ -641,7 +649,10 @@ def test_the_review_skill_states_the_same_two_claims():
 
 def _step9_how_to_proceed() -> str:
     """Step 9's generation-failure template's `## How to Proceed` block."""
-    step9 = MERGE_SKILL[MERGE_SKILL.index("### Step 9"):MERGE_SKILL.index("### Step 10")]
+    step9 = (SKILLS / "wikicommit-merge" / "references" / "failure-issues.md").read_text(
+        encoding="utf-8"
+    )
+    step9 = step9[step9.index("### Step 9"):]
     return step9[step9.index("## How to Proceed"):]
 
 

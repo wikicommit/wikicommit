@@ -6,7 +6,7 @@ pass_token: "4c7e1b93"
 
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to the Skill's directory (the parent of this `references/` directory), not to the repository root — the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there. Paths starting with `.wikicommit/` are repository-root paths as before.
 
-The driver hands you this file as the `merge-absorb` step, and only when the run merges pages (`/wikicommit-generate --regenerate <kept page> --merge <absorbed page> [...]`) and the kept page has passed Pass 4 and been written. `references/regenerate.md` says how the kept page was rebuilt; this file finishes the merge. **When it is done, report it to the driver** with `--token 4c7e1b93` (this file's `pass_token`) and the outcome `absorbed`, or `halted` with `--reason` when a step below fails. The driver then runs `merge_pages.py check`, which refuses the step until every part below is on disk.
+The workflow engine hands you this file as the `merge-absorb` step, and only when the run merges pages (`/wikicommit-generate --regenerate <kept page> --merge <absorbed page> [...]`) and the kept page has passed Pass 4 and been written. `references/regenerate.md` says how the kept page was rebuilt; this file finishes the merge. **When it is done, report it to the workflow engine** with `--token 4c7e1b93` (this file's `pass_token`) and the outcome `absorbed`, or `halted` with `--reason` when a step below fails. The workflow engine then runs `merge_pages.py check`, which refuses the step until every part below is on disk.
 
 Work in this order — the record first, because `merge_pages.py` reads the absorbed pages, and it refuses pages already taken down.
 
@@ -21,7 +21,7 @@ Work in this order — the record first, because `merge_pages.py` reads the abso
 2. **Take each absorbed page down**, with its translations:
 
    ```bash
-   python ../wikicommit-remove/scripts/remove_page.py <absorbed page> --reason merged --merged-into <kept page>
+   python .wikicommit/scripts/remove_page.py <absorbed page> --reason merged --merged-into <kept page>
    ```
 
    One call per absorbed page. The script finds the page's translations by `translated_from` and gives them the same `status: removed` and `merged_into`, and removes their lines from the type indexes.

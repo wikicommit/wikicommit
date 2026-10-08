@@ -29,12 +29,25 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).parent.parent
+
+
+def _merge_instructions() -> str:
+    """`wikicommit-merge`'s SKILL.md and the step files its workflow engine hands out."""
+    sys.path.insert(0, str(REPO / "tools"))
+    from check_skill_md_lines import instruction_files
+
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in instruction_files(REPO / ".claude/skills/wikicommit-merge")
+    )
 SCRIPTS = REPO / ".wikicommit" / "scripts"
 TEMPLATE_GUIDES = REPO / ".claude/skills/wikicommit-init/scripts/templates/guides"
 
-sys.path.insert(0, str(SCRIPTS))
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 from _wikilink import collect_entity_pages, collect_view_pages  # noqa: E402
+from _merge_checks import merge_page_pathspecs  # noqa: E402
 
 
 def _wiki(tmp_path: Path) -> Path:
@@ -142,19 +155,16 @@ def test_convert_wikilinks_does_not_publish_guides(tmp_path):
 
 
 def test_merge_skill_keeps_lychee_scoped_to_a_path():
-    """A bare `lychee --config .lychee.toml` would crawl the guides' external links."""
-    skill = (REPO / ".claude/skills/wikicommit-merge/SKILL.md").read_text(encoding="utf-8")
+    """A bare `lychee --config .lychee.toml` would crawl the guides' external links.
+    lychee is run by `workflow_checks.py links` over the changed pages only (Issue
+    #1196), whose pathspecs do not reach `.wikicommit/guides/`."""
+    skill = _merge_instructions()
+    assert "workflow_checks.py links --run" in skill
     for line in skill.splitlines():
-        if "lychee" not in line or "--config" not in line:
-            continue
-        after = line.split("--config", 1)[1]
-        assert ".wikicommit/" in after, f"lychee invoked without a path argument: {line}"
-        break
-    else:
-        # Without this, rewording or removing the invocation makes the loop body never
-        # run and the test pass having checked nothing — the same for/else guard
-        # test_review_record_tree.py uses on the very same line.
-        raise AssertionError("no lychee invocation found in wikicommit-merge SKILL.md")
+        assert not line.strip().startswith("lychee "), f"lychee invoked directly: {line}"
+    PAGE_PATHSPECS = merge_page_pathspecs()
+
+    assert not any("guides" in spec for spec in PAGE_PATHSPECS)
 
 
 def test_preview_step_no_longer_says_there_is_nothing_to_clean_up():

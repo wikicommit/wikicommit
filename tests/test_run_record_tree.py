@@ -20,11 +20,24 @@ from pathlib import Path
 from _publication import is_development_repository
 
 REPO = Path(__file__).parent.parent
+
+
+def _merge_instructions() -> str:
+    """`wikicommit-merge`'s SKILL.md and the step files its workflow engine hands out."""
+    sys.path.insert(0, str(REPO / "tools"))
+    from check_skill_md_lines import instruction_files
+
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in instruction_files(REPO / ".claude/skills/wikicommit-merge")
+    )
 SCRIPTS = REPO / ".wikicommit" / "scripts"
 
-sys.path.insert(0, str(SCRIPTS))
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 from _wikilink import collect_entity_pages, collect_view_pages  # noqa: E402
+from _merge_checks import merge_page_pathspecs  # noqa: E402
 
 
 def _wiki(tmp_path: Path) -> Path:
@@ -145,20 +158,19 @@ def test_the_tree_is_ignored_by_git_in_both_gitignores():
 def test_merge_does_not_stage_the_run_tree():
     """The inverse of the review records, on purpose. Committing these would put
     a file in every run's PR and make retention inexpressible."""
-    skill = (REPO / ".claude/skills/wikicommit-merge/SKILL.md").read_text(encoding="utf-8")
+    skill = _merge_instructions()
     add_line = next(line for line in skill.splitlines() if line.startswith("git add -- "))
     assert ".wikicommit/run/" not in add_line, add_line
     assert '".wikicommit/run/**/*.md"' not in skill, "run records must not be detected as changes"
 
 
 def test_lychee_would_not_reach_a_recorded_argument():
-    """A record's `args` can hold a URL. lychee keeps an explicit path argument
-    for the review tree already; this asserts the run tree is outside it too."""
-    skill = (REPO / ".claude/skills/wikicommit-merge/SKILL.md").read_text(encoding="utf-8")
+    """A record's `args` can hold a URL. lychee is run by `workflow_checks.py links`
+    over the changed pages only (Issue #1196), which never include the run tree."""
+    skill = _merge_instructions()
+    assert "workflow_checks.py links --run" in skill
     for line in skill.splitlines():
-        if "lychee" in line and "--config" in line and line.strip().startswith("lychee"):
-            assert ".wikicommit/run" not in line, line
-            assert ".wikicommit/entity/" in line, line
-            break
-    else:
-        raise AssertionError("no lychee invocation found in wikicommit-merge SKILL.md")
+        assert not line.strip().startswith("lychee "), line
+    PAGE_PATHSPECS = merge_page_pathspecs()
+
+    assert not any(".wikicommit/run" in spec for spec in PAGE_PATHSPECS)

@@ -6,19 +6,11 @@ pass_token: "5e9b2d84"
 
 > **Paths in this file.** `references/…`, `scripts/…` and `../<other-skill>/…` are relative to the Skill's directory (the parent of this `references/` directory), not to the repository root — the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Commands still run from the repository root, so spell the path out from there. Paths starting with `.wikicommit/` are repository-root paths as before.
 
-**When this pass is done, report it to the driver** — run the `then` line the driver gave you for `pass2b-type`, with `--token 5e9b2d84` (this file's `pass_token`; the driver opens this file itself to compare, so a pass carried out without reading it is refused rather than recorded) and the outcome `ok` or `deferred`; name a schema file this pass wrote with `--touched`. The driver checks the result on disk before it moves on, and records the pass on the run record — a pass that never reaches `done` shows up as not run.
+**When this pass is done, report it to the workflow engine** — run the `then` line the workflow engine gave you for `pass2b-type`, with `--token 5e9b2d84` (this file's `pass_token`; the workflow engine opens this file itself to compare, so a pass carried out without reading it is refused rather than recorded) and the outcome `ok` or `deferred`; name a schema file this pass wrote with `--touched`. The workflow engine checks the result on disk before it moves on, and records the pass on the run record — a pass that never reaches `done` shows up as not run.
 
 Before extracting entities, decide whether the source content calls for a Schema.org type that isn't already in `installed schema/`. This runs **once per source** (not once per entity) and is grounded in the Pass 2a summary. The evidence is the actual source content rather than a single free-text `theme` sentence, so this judgment is comparatively high-confidence.
 
 1. Load the Schema.org type names (this also builds the shared vocabulary cache lazily on first use): `python .wikicommit/scripts/check_schema_org_type.py --list-type-names`. Run this once per `/wikicommit-generate` invocation (not once per source). This prints the 933 type names without their descriptions -- stage one of type recall; step 2 below picks candidates from it and reads only those descriptions. Non-zero exit (vocabulary fetch failed) → skip Pass 2b entirely for every source this run and proceed straight to Pass 2c with only `installed schema/` types available; do not block or fail the run over this.
-
-   **Also determine, once per invocation (not once per candidate)**: is this run interactive
-   (a live human can actually answer an Enter prompt right now) or non-interactive/subagent-driven (no
-   real answer will ever arrive)? If Pass 1's low-density check already made this determination earlier in
-   this run, reuse that answer rather than re-judging it. Make it once here, at the top of Pass 2b, and
-   hold it constant for every candidate across every source in this run — interactivity is a property of
-   the run, and re-deriving it per candidate risks the judgment flipping mid-run and the Completion Notice
-   misrepresenting what actually happened. Step 3 below branches on this stored determination.
 2. Using the `--list-type-names` output and the Pass 2a summary, judge whether one or more Schema.org standard types — beyond what's already in `installed schema/` — would fit this source's content meaningfully better than any installed type (not merely "also plausible": a clearer semantic fit, where more of the source's concrete details map onto that type's actual properties). Skip any candidate type that already has a file in `.wikicommit/schema/`, including one just added by an earlier source **in this same run** (scan the directory on disk, same reasoning as the existing-pages scan in Pass 2c, `references/pass2c-entities.md`) — never propose a type twice. Zero candidates is an expected common outcome, not a fallback; do not force a candidate to justify running this step. **This includes the source document itself** when Pass 2a flagged it as a source-entity candidate: judge a type for it the same way as for any other candidate (e.g. `schema:Report` for a whitepaper, `schema:Legislation` for a piece of legislation — not `schema:ScholarlyArticle`/`NewsArticle`/`BlogPosting`/`ShortStory`/`Book`, which already ship in `installed schema/` by default and so are resolved directly in Pass 2c without ever reaching this step). Note that the source management file's `schema:` hint (the Pass 2c context list, `references/pass2c-entities.md`) describes the source's primary discussed *subject* (e.g. `schema:Person` for a biography) — it is not evidence about what the source *document itself* is, so it does not carry over to this judgment; treat the source-entity's type purely on its own content-fit merits, independent of whatever hint applies to the entities discussed within the source.
 
    **Named-entity pattern**: apply extra scrutiny when a candidate entity is a concrete, named subject — a specific software product, research dataset/benchmark, creative work, standard, etc. — rather than an abstract term, concept, or methodology. `DefinedTerm` is broad enough to technically represent almost anything with a name, which can make it look like a safe default and suppress a proposal that would otherwise pass the bar above. For this pattern specifically, the fact that `DefinedTerm` could technically represent the entity is **not** by itself a reason to skip proposing a more specific standard type (e.g. `SoftwareApplication` for a named software product, `Dataset` for a named benchmark). This does not relax the threshold for abstract terms/concepts/methodologies (e.g. a named approach like "vibe coding" with no more specific standard type) — those should still default to zero candidates.
@@ -38,54 +30,63 @@ Before extracting entities, decide whether the source content calls for a Schema
    ```
 
    Each candidate name goes through its own quote-delimited heredoc, for the same reason the `--property` values in `.wikicommit/schema-authoring.md` do — these are names this step itself just proposed, not values an earlier script already verified. Names alone are enough to bring a type to mind, but not always enough to be sure what it means — read the descriptions of the handful you picked and drop any whose actual definition does not fit. A name that comes back as `ERROR:` was invented rather than recalled; drop it. Call this again if you want to look at more names.
-3. For each candidate, branch on the interactive/non-interactive determination made once, for the whole
-   run, in step 1 above:
+3. **Do not ask here**, whether or not someone is present. The question is put to the person once the
+   loop over the sources is over (the workflow engine's `ask-deferred` step), once per type for every
+   source that proposed it, so a batch does not stop on it and nobody has to wait by it. Whether anyone
+   can answer is not yours to judge: the run was started with or without `--non-interactive`, and that
+   alone decides whether the question is asked. For each candidate, branch on the `lists` the workflow
+   engine handed you with this step — they hold the person's answers when this source comes round a
+   second time in the same run:
 
-   - **Interactive**: present the candidate and ask for approval, Enter-based (default to **N** on a
-     blank Enter) — the step 2 threshold above is the only bar a human-reviewed candidate has to clear:
-
-     ```
-     This source's content suggests schema:GovernmentService might fit better than any installed
-     schema/ type for the following entities: "児童手当の申請手続き" (a government benefit application
-     procedure — schema:GovernmentService's jurisdiction/availableChannel/hoursAvailable properties
-     fit this content more directly than schema:HowTo's generic step list).
-
-     Add this type now? [y/N]
-     ```
-
-     If declined (the user typed N or left it blank), record it as **explicitly declined**.
-
-   - **Non-interactive/subagent-driven**: no human will ever see the prompt above. Do not show it, do
-     not answer it yourself, and do not record the candidate as declined — **defer this source**, whatever
-     the candidate. There is no second, stricter bar that lets a candidate through without a human: an
-     approved type file cannot be edited by any Skill afterwards (step 4 only ever *adds* a file), no Skill
-     can reclassify the pages written under it, and `provenance` is a permanent stamp — so a wrong approval
-     is the one outcome here that cannot be taken back, while a deferral only makes this source wait for
-     the next interactive run. Declining is no better: Pass 2c would then run with only the installed types
-     available, the entity would be written under an ancestor type, and again there is no Skill that can
-     reclassify a page afterwards. The judgment "is this type right for this subject" is one a human seeing
-     the source would answer. **Deferring is not persisting the candidate**: nothing about it is written
-     down beyond the reason below. The source simply does not advance, so the next interactive run reads
-     the same source, reaches the same candidate, and shows the prompt.
+   - **The candidate is in `approved-types`**: the person approved it. Go on to step 4 and write the
+     file. A later source that proposed the same type finds the file already on disk (step 2) and uses it.
+   - **The candidate is in `declined-types`**: the person answered N. Record it as **explicitly
+     declined**, and carry on with the installed types.
+   - **Otherwise** (the first time round, or a candidate the person was not asked about): no human has
+     seen it yet. Do not answer it yourself, and do not record the candidate as declined — **defer this
+     source**, whatever the candidate. There is no second, stricter bar that lets a candidate through
+     without a human: an approved type file cannot be edited by any Skill afterwards (step 4 only ever
+     *adds* a file), no Skill can reclassify the pages written under it, and `provenance` is a permanent
+     stamp — so a wrong approval is the one outcome here that cannot be taken back, while a deferral only
+     makes this source wait for the question. Declining is no better: Pass 2c would then run with only
+     the installed types available, the entity would be written under an ancestor type, and again there
+     is no Skill that can reclassify a page afterwards. The judgment "is this type right for this subject"
+     is one a human seeing the source would answer. **Deferring is not persisting the candidate**: nothing
+     about it is written down beyond the reason below. The source simply does not advance; the question at
+     the end of the loop, or the next run if nobody answers it, reaches the same candidate again.
 
      Concretely, exactly as guard A defers in Pass 1 (`references/pass1-extract.md`): leave `status`
      as it is when it is one the collection step picks up, and on a forced recheck — where it is still
      `generated`/`failed`/`excluded` and nothing would collect it — set it to `pending` instead, for the
-     reason given there. Write the candidate type name and the motivating entities into a
-     **`## Deferred Reason`** section of this source's management file (English, deleted as soon as the
-     source reaches any other outcome), roll the source up in the Completion Notice, and skip to the next
-     source. `source.hash` and `extracted_tokens` are already written by the time Pass 2b runs; leave them.
+     reason given there. Write into a **`## Deferred Reason`** section of this source's management file
+     (English, deleted as soon as the source reaches any other outcome) what the person will be shown:
+     the candidate type name as `schema:<Type>`, the motivating entities, and why it fits better than the
+     installed types — the reasoning the prompt below would have given. Roll the source up in the
+     Completion Notice, and skip to the next source. `source.hash` and `extracted_tokens` are already
+     written by the time Pass 2b runs; leave them.
 
-   Whichever of the two outcomes applies (explicitly declined, or deferred for want of a human), append
+   The question the person is shown at the end of the loop reads like this (default **N** on a blank
+   answer) — the step 2 threshold above is the only bar a human-reviewed candidate has to clear:
+
+   ```
+   This source's content suggests schema:GovernmentService might fit better than any installed
+   schema/ type for the following entities: "児童手当の申請手続き" (a government benefit application
+   procedure — schema:GovernmentService's jurisdiction/availableChannel/hoursAvailable properties
+   fit this content more directly than schema:HowTo's generic step list).
+
+   Add this type now? [y/N]
+   ```
+
+   Whichever outcome applies (approved, explicitly declined, or deferred for want of an answer), append
    the candidate — its type name, the motivating entities/reasoning, this source's source management file
    path, and which outcome it was — to a running list so it can be rolled up in the Completion Notice
    (`references/completion-notice.md`). Record the actual outcome rather than assuming one: the Completion
    Notice must describe accurately what happened in *this* run, and an interactive session where the user
-   typed N themselves is not a deferral — a human answered, and that answer stands. This is
+   answered N themselves is not a deferral — a human answered, and that answer stands. This is
    conversation-only bookkeeping, not a file write — it does not conflict with step 5's "no persistence"
    rule below.
 
-4. **For each approved candidate, read `.wikicommit/schema-authoring.md` and follow it** to verify the type, pick and verify its properties, and write `.wikicommit/schema/<Type>.md`. That file holds the whole procedure — property selection and verification, the file format, how to write `granularity`, and the add-only restriction — because four paths write type files and only the judgment differs between them. Pass the value it asks for: **`provenance` is `generate-interactive`** — only a human answering the Enter prompt in step 3 approves a candidate, so this is the only value this path writes. (`generate-auto` is still a valid value in repositories whose type files were written before non-interactive runs stopped approving types; never write it now.)
+4. **For each approved candidate, read `.wikicommit/schema-authoring.md` and follow it** to verify the type, pick and verify its properties, and write `.wikicommit/schema/<Type>.md`. That file holds the whole procedure — property selection and verification, the file format, how to write `granularity`, and the add-only restriction — because four paths write type files and only the judgment differs between them. Pass the value it asks for: **`provenance` is `generate-interactive`** — only a person answering the question in step 3 approves a candidate, so this is the only value this path writes. (`generate-auto` is still a valid value in repositories whose type files were written before non-interactive runs stopped approving types; never write it now.)
 
    Three things this step is accountable for even if that Read is skipped, so that the fallback is thin guidance rather than none: **every property goes through `check_schema_org_type.py` before it enters `properties:`**, **one `granularity` rule starts with `Boundary —`** (em dash, not a colon), and **`provenance` carries this path's own value** rather than the `default` that `Person.md` shows.
 

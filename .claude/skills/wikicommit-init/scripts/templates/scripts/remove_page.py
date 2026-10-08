@@ -24,53 +24,27 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
+sys.path.insert(0, str(Path(__file__).parent))
+from _frontmatter import parse_frontmatter as _parse_frontmatter  # noqa: E402
+from _wikilink import (  # noqa: E402
+    normalize_entity_prefix,
+    parse_view_path,
+    parse_wiki_path,
+)
 
 FRONTMATTER_RE = re.compile(r"^(---\r?\n)(.*?)((?:\r?\n)?---\r?\n?)", re.DOTALL)
 VALID_REASONS = ("obsolete", "merged", "gdpr")
 
-LEGACY_ENTITY_PREFIX = ".wikicommit/wiki/"
-ENTITY_PREFIX = ".wikicommit/entity/"
-
-
-def normalize_entity_prefix(raw_path: str) -> str:
-    """Rewrite a stored page path's pre-Issue-#477 `.wikicommit/wiki/`
-    prefix to the current `.wikicommit/entity/` one, for comparing a
-    translation page's `translated_from` against a freshly-computed
-    `.wikicommit/entity/...` path regardless of which prefix the stored
-    value happens to use (old and new forms are allowed to coexist rather than
-    being auto-migrated). Mirrors .wikicommit/scripts/_wikilink.py's
-    helper of the same name — duplicated here rather than imported, as a
-    convention that keeps this Skill script self-contained.
-
-    This used to claim the duplication was forced: that the script runs as a
-    subprocess and cannot assume .wikicommit/scripts/ resolves relative to its
-    caller's cwd. That does not hold (Issue #947). Every SKILL.md invokes this
-    file as `python .claude/skills/wikicommit-remove/scripts/remove_page.py`,
-    a repo-root-relative path — so the same assumption about cwd is already
-    being made one word earlier on the same command line, and a cwd that broke
-    the import would stop the command before Python started. A sibling Skill
-    script, wikicommit-ask's resolve_source_cache_path.py, does import from
-    .wikicommit/scripts/ via sys.path. Whether to switch this one over is a
-    separate decision from correcting why it reads the way it does."""
-    if raw_path.startswith(LEGACY_ENTITY_PREFIX):
-        return ENTITY_PREFIX + raw_path[len(LEGACY_ENTITY_PREFIX):]
-    return raw_path
-
 
 def parse_frontmatter(path: Path) -> dict:
-    """ページの frontmatter を dict として返す。パース不能なら {} を返す。"""
-    try:
-        content = path.read_text(encoding="utf-8-sig")
-    except OSError:
-        return {}
-    m = FRONTMATTER_RE.match(content)
-    if not m:
-        return {}
-    try:
-        return yaml.safe_load(m.group(2)) or {}
-    except yaml.YAMLError:
-        return {}
+    """ページの frontmatter を dict として返す。読めない・パース不能なら {} を返す。
+
+    読み取りは共有の `_frontmatter.py` に任せる。このスクリプトは `.wikicommit/scripts/` に
+    あり、同じディレクトリの共有モジュールを import できる（Issue #1210 で Skill 内から
+    移した。それまでは自己完結の慣行で写しを持っていた）。
+    """
+    fm, _err = _parse_frontmatter(path)
+    return fm or {}
 
 
 def _upsert_field(yaml_block: str, key: str, value: str) -> str:
@@ -119,46 +93,6 @@ def removed_fields(today: str, reason: str, merged_into: str | None) -> list[tup
     if merged_into:
         fields.append(("merged_into", merged_into))
     return fields
-
-
-def parse_wiki_path(path: Path, entity_dir: Path) -> tuple[str, str, str] | None:
-    """.wikicommit/entity/<lang>/<Type>/<slug>.md から (lang, type, slug) を導出する。
-
-    Type はカスタム型で "/" を含みうる（例: custom/Decision）。
-    """
-    try:
-        rel = path.resolve().relative_to(entity_dir.resolve())
-    except (ValueError, OSError, RuntimeError):
-        return None
-    parts = rel.parts
-    if len(parts) < 3:
-        return None
-    lang = parts[0]
-    type_name = "/".join(parts[1:-1])
-    slug = parts[-1].removesuffix(".md")
-    return lang, type_name, slug
-
-
-# view ツリー（Issue #675）。`.wikicommit/scripts/_wikilink.py` の同名の定数・関数の複製で、
-# normalize_entity_prefix() と同じく「この Skill スクリプトを自己完結に保つ」という慣行による。
-# かつてここには cwd から `.wikicommit/scripts/` が解決できるとは限らないためと書いていたが、
-# その理由は成立しない（Issue #947。normalize_entity_prefix() の docstring 参照）。
-VIEW_TYPE_SEGMENT = "View"
-
-
-def parse_view_path(path: Path, view_dir: Path) -> tuple[str, str, str] | None:
-    """`.wikicommit/view/<lang>/<slug>.md` から (lang, "View", slug) を導出する。
-
-    view ページは Type ディレクトリを持たないため、2 セグメント以外は None を返す。
-    """
-    try:
-        rel = path.resolve().relative_to(view_dir.resolve())
-    except (ValueError, OSError, RuntimeError):
-        return None
-    parts = rel.parts
-    if len(parts) != 2 or not parts[1].endswith(".md"):
-        return None
-    return parts[0], VIEW_TYPE_SEGMENT, parts[1].removesuffix(".md")
 
 
 def find_view_translation_pages(view_dir: Path, target_rel: str, exclude: Path) -> list[Path]:

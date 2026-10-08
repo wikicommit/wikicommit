@@ -28,11 +28,24 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).parent.parent
+
+
+def _merge_instructions() -> str:
+    """`wikicommit-merge`'s SKILL.md and the step files its workflow engine hands out."""
+    sys.path.insert(0, str(REPO / "tools"))
+    from check_skill_md_lines import instruction_files
+
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in instruction_files(REPO / ".claude/skills/wikicommit-merge")
+    )
 SCRIPTS = REPO / ".wikicommit" / "scripts"
 
-sys.path.insert(0, str(SCRIPTS))
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 from _wikilink import collect_entity_pages, collect_view_pages  # noqa: E402
+from _merge_checks import merge_page_pathspecs  # noqa: E402
 
 
 def _wiki(tmp_path: Path) -> Path:
@@ -141,22 +154,22 @@ def test_convert_wikilinks_does_not_publish_records(tmp_path):
 
 
 def test_lychee_stays_scoped_in_the_merge_skill():
-    """An unscoped run would re-fetch every recorded source_file URL on every merge."""
-    skill = (REPO / ".claude/skills/wikicommit-merge/SKILL.md").read_text(encoding="utf-8")
+    """An unscoped run would re-fetch every recorded source_file URL on every merge.
+
+    lychee is run by `workflow_checks.py links` over the changed pages only (Issue
+    #1196; `tests/test_merge_workflow.py` checks the arguments it gets). What is
+    asserted here is that no instruction runs lychee directly instead.
+    """
+    skill = _merge_instructions()
+    assert "workflow_checks.py links --run" in skill
     for line in skill.splitlines():
-        if "lychee" in line and "--config" in line and line.strip().startswith("lychee"):
-            assert ".wikicommit/entity/" in line, (
-                "lychee must keep an explicit path argument; without one it would walk "
-                "the review records and re-fetch their source_file URLs. Line: " + line
-            )
-            break
-    else:
-        raise AssertionError("no lychee invocation found in wikicommit-merge SKILL.md")
+        assert not line.strip().startswith("lychee "), (
+            "lychee must go through the wrapper, which passes the changed pages only: " + line)
 
 
 def test_merge_stages_the_record_tree():
     """Records that are never committed are indistinguishable from reviews that never ran."""
-    skill = (REPO / ".claude/skills/wikicommit-merge/SKILL.md").read_text(encoding="utf-8")
+    skill = _merge_instructions()
     assert '".wikicommit/review/**/*.md"' in skill, "review records are not detected as changes"
     assert "git add -- " in skill
     add_line = next(line for line in skill.splitlines() if line.startswith("git add -- "))
@@ -165,9 +178,8 @@ def test_merge_stages_the_record_tree():
 
 def test_records_are_not_wiki_pages_in_the_changed_md_list():
     """They would fail every per-file quality check if they were."""
-    skill = (REPO / ".claude/skills/wikicommit-merge/SKILL.md").read_text(encoding="utf-8")
-    marker = "1. Obtain **`<changed .md files>`**:"
-    body = skill[skill.index(marker): skill.index(marker) + 400]
-    assert ".wikicommit/review/" not in body, (
-        "review records must not enter <changed .md files>"
+    PAGE_PATHSPECS = merge_page_pathspecs()
+
+    assert not any(".wikicommit/review/" in spec for spec in PAGE_PATHSPECS), (
+        "review records must not enter the changed_md list"
     )

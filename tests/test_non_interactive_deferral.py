@@ -196,7 +196,7 @@ def test_merge_raises_a_tracking_issue_for_a_pass_1_failure():
     """`failed_pages` is written by Pass 4, so keying only on it missed every failure
     that happened before a page was attempted — while `wikicommit-status` excluded
     those same sources *because* this Issue was supposed to exist."""
-    merge = (SKILLS / "wikicommit-merge" / "SKILL.md").read_text(encoding="utf-8")
+    merge = _instructions("wikicommit-merge")
     assert "elif fm.get('status') == 'failed':" in merge, (
         "Step 9's scan is back to `failed_pages` alone, so a source that failed in "
         "Pass 1 raises no tracking Issue and is excluded from wikicommit-status too"

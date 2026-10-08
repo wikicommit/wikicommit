@@ -33,8 +33,10 @@ If the target page doesn't exist, or already has `status: removed`, this is dete
 
 ### Step 2: Run `remove_page.py`
 
+If `.wikicommit/scripts/remove_page.py` does not exist (`.wikicommit/scripts/` older than this Skill), stop and tell the user to run `/wikicommit-update` first.
+
 ```bash
-python scripts/remove_page.py <page> --reason <reason> [--merged-into <path>]
+python .wikicommit/scripts/remove_page.py <page> --reason <reason> [--merged-into <path>]
 ```
 
 - When `--reason merged`, always add `--merged-into <path of the merge target page>`.

@@ -2,7 +2,7 @@
 
 ## Contents
 
-- Report `completion` to the driver **first** — that is what closes the run record
+- Report `completion` to the workflow engine **first** — that is what closes the run record
 - The notice itself: the counts, then the conditional blocks — `ambiguous` entities, `exclude` decisions with their reasons, name matches left for a person, `failed_pages`, types added by Pass 2b, deferred sources, types declined, source-language mismatches, extraction warnings, ShareAlike sources, and the checkpoint roll-up
 
 What to report when a run ends, and how. Most of it is conditional branches, and none of it
@@ -16,7 +16,7 @@ mismatches, extraction warnings) are built as the passes run, by instructions in
 
 ## Read this before closing the run record
 
-**What closes the run record is reporting this step to the driver, and this step is the last one** — deliberately.
+**What closes the run record is reporting this step to the workflow engine, and this step is the last one** — deliberately.
 Forgetting to read this file would otherwise cost a report and nothing else, and nothing
 would say so; as it is, a run that never reaches `completion` stays open, and
 `/wikicommit-status` reports that as `INCOMPLETE_RUN:` while `/wikicommit-merge` refuses
@@ -24,15 +24,15 @@ the files it touched.
 
 Display a summary of the results (pages succeeded / skipped / failed / excluded).
 
-**Report `completion` to the driver first**, so the timings and counts the record holds are this run's:
+**Report `completion` to the workflow engine first**, so the timings and counts the record holds are this run's:
 
 ```bash
-python .wikicommit/scripts/driver.py done <the run path> --step completion --outcome reported \
+python .wikicommit/scripts/skill_workflow.py done <the run path> --step completion --outcome reported \
     --page <each page written> \
     --count generated=<N> --count failed=<N> --count excluded=<N>
 ```
 
-The driver fills in the sources itself (it handed them to you) and closes the record.
+The workflow engine fills in the sources itself (it handed them to you) and closes the record.
 
 Then report the run record's path, elapsed time and the passes it stamped in the notice — that duration exists nowhere else, and **the record is not committed**, so this run's own output is the only place a reader sees any of it. In unattended cloud runs the record dies with the VM, so this line is the only way the stamps reach a PR body.
 
@@ -190,7 +190,7 @@ a subdirectory: the path is derived straight from `type:`, so .wikicommit/schema
 found for schema:Book.
 ```
 
-If Pass 2b added one or more new `.wikicommit/schema/<Type>.md` files during this run, list them too, since they are new local files the user has not yet seen committed anywhere. Only an interactive run adds one — a human answered the Pass 2b prompt (`references/pass2b-type.md` step 3); a non-interactive run defers the source instead, and that belongs in the deferral block below:
+If Pass 2b added one or more new `.wikicommit/schema/<Type>.md` files during this run, list them too, since they are new local files the user has not yet seen committed anywhere. Only a person's answer adds one — a human approved it at the question asked at the end of the loop (`references/pass2b-type.md` step 3); a candidate nobody answered leaves the source deferred, and that belongs in the deferral block below. Because the question comes after every source has been through the passes once, **sources this run finished before the answer were written without the new type**; if any of them should use it, `/wikicommit-reconcile --source <path|url>` puts that source back in the queue:
 
 ```
 The following Schema.org type(s) were added to .wikicommit/schema/ during this run:
@@ -238,20 +238,22 @@ undocumented type less likely to be chosen from here on. No Skill can write the 
 
 Report this whenever it applies: unlike the type file itself, the gap leaves no other trace.
 
-**If any source was deferred, list every one.** A deferral is what this Skill does in a
-non-interactive run when it reaches a judgment only a person can make: it stops that source, changes
-nothing about it, and leaves it in the queue. Four things produce one — guard A's `LOW_DENSITY:` in Pass 1,
-a fetch that returned `NETWORK_UNAVAILABLE:` (this one also happens in an interactive run,
-and what it waits for is a network rather than a person), a Pass 2b type candidate — any candidate, since a
-non-interactive run never adds a type without a person — and an `action: update` page one of whose existing
-sources could not be fetched (end of Pass 2c; this one also happens in an interactive run, and what it waits
-for is a machine that can fetch that source, or a person retracting it). All four write a
-`## Deferred Reason` section to the source's management file, so unlike everything else in this notice
-the record outlives the run; report it here anyway, because this is where someone reading the run learns
-there is anything to go back for.
+**If any source is still deferred, list every one** — every source this run handed you whose
+management file still carries a `## Deferred Reason` now. A source set aside earlier in the run and then
+answered about in `ask-deferred` has moved on, and does not belong here. A deferral is what this Skill does
+when it reaches a judgment only a person can make and no answer came: it stops that source, changes
+nothing about it, and leaves it in the queue. Four things produce one — guard A's `LOW_DENSITY:` in Pass 1
+and a Pass 2b type candidate, both of which wait for the question asked at the end of the loop and stay
+deferred when nobody answers it (a `--non-interactive` run, or a person who answered `later`); a fetch that
+returned `NETWORK_UNAVAILABLE:` (what it waits for is a network rather than a person); and an `action:
+update` page one of whose existing sources could not be fetched (end of Pass 2c; what it waits for is a
+machine that can fetch that source, or a person retracting it). All four write a `## Deferred Reason`
+section to the source's management file, so unlike everything else in this notice the record outlives the
+run; report it here anyway, because this is where someone reading the run learns there is anything to go
+back for.
 
 ```
-The following source(s) were deferred — a person needs to look at them, and this run had nobody to ask:
+The following source(s) were deferred — a person needs to look at them, and nobody answered in this run:
 - .wikicommit/source/url/example.com/statistics-2026.md — the extracted text scored 0.11 on the
   natural-language ratio (non-prose breakdown: links 12%, numbers/tables 71%, other markup 17%). That
   shape fits a statistics table as well as it fits an empty JS shell, and the two cannot be told apart
@@ -268,7 +270,7 @@ The following source(s) were deferred — a person needs to look at them, and th
 
 Nothing about these sources was decided: their status is unchanged and they are still queued — behind
 sources this run has not tried yet, so a repeated unattended run does not spend its whole quota on them.
-Re-run /wikicommit-generate with someone present and each one asks its question. /wikicommit-status
+Re-run /wikicommit-generate with someone present and the questions are asked at the end. /wikicommit-status
 counts them between runs.
 ```
 
@@ -278,8 +280,8 @@ to "fix" it by deleting and re-adding the management file, which discards the ex
 answers nothing.
 
 If Pass 2b step 3's running list has one or more declined type candidates, list them too. There is
-only one way a candidate lands here — **a human answered N**. A candidate reached in a non-interactive run
-is not declined; it defers the source, and belongs in the deferral block above instead. By this point in the run, Pass 4 (step 5) has already finished for every source and its own
+only one way a candidate lands here — **a human answered N**. A candidate nobody answered is not
+declined; it defers the source, and belongs in the deferral block above instead. By this point in the run, Pass 4 (step 5) has already finished for every source and its own
 `failed_pages` list (below) is fully known — cross-check against it so this block is accurate about what
 actually happened to each motivating entity: a declined type's motivating entities are not guaranteed to
 have become real pages; one may have separately hit `failed_pages` for an unrelated reason (a

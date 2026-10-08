@@ -8,12 +8,12 @@ pyyaml で frontmatter ブロック全体を再シリアライズすると、イ
 このパターンはもともと以下の3箇所に独立実装として重複していた（Issue #371）:
   - `.claude/skills/wikicommit-review/SKILL.md` Step 5（review_status を無条件で reviewed に上書き）
   - `.github/workflows/review-issue-close-sync.yml`（review_status が pending の場合のみ reviewed に上書き）
-  - `.claude/skills/wikicommit-remove/scripts/remove_page.py`（status/removed_at 等、複数フィールドを追加）
+  - `remove_page.py`（status/removed_at 等、複数フィールドを追加。当時は wikicommit-remove の Skill 内）
 
 本スクリプトは前者2つを置き換える共有実装として `.wikicommit/scripts/` に切り出した
 （`_frontmatter.py` / `_wikilink.py` と同じ「一つの実装を全呼び出し元が import/呼び出しする」
-方針）。`remove_page.py` は Skill 固有スクリプトのまま据え置き、対応スコープ外とする
-（Issue #371 完了条件を参照）。
+方針）。`remove_page.py` は対応スコープ外とした（Issue #371 完了条件を参照）。同スクリプトは
+Issue #1210 で `.wikicommit/scripts/` に移ったが、複数フィールドを 1 回で書く処理は自前のまま持つ。
 
 Usage:
     python .wikicommit/scripts/set_frontmatter_field.py <page> \\

@@ -51,6 +51,22 @@ means the verdict still stands. Partial replacements are not tried, so a page
 that linked to both the kept and the absorbed page before the merge still
 reports `STALE_REVIEW:`.
 
+A rename carries the old slug's records with it (Issue #1162). `rename_page.py`
+leaves the records under the old path — they are immutable and name the page
+they judged — and records the rename in `relations.yml` as a merge item with
+`renamed_at`. The AI records of every earlier slug down that chain are read as
+the renamed page's own (`load_page_records()`; a human sign-off does not carry
+over), so the page does not read as never
+reviewed when Pass 4's check of its unchanged text still exists. The title did
+change, so the verdict is measured like any other and normally comes out as
+`STALE_REVIEW:` — the line names the old slug, and `/wikicommit-review` on the
+new page clears it. A rename that changed only the slug leaves the original
+page's text as the review judged it, and its verdict stands. A translation's
+does not: its `translated_from` now names the new path, so it reads as
+`STALE_REVIEW:`, and `check_translation_status.py` reports the translation as
+`STALE:` as well — `/wikicommit-translate` redoes it (Issue #1246). Only renames are followed: a merge
+regenerates the kept page, and Pass 4 writes a new record for it.
+
 ## Which records each line reads
 
 Every per-page line and every count reads the *standing* record: the newest one
@@ -312,17 +328,25 @@ def collect_retracted_identities(source_dir: Path = SOURCE_DIR) -> set[str]:
 
 
 @lru_cache(maxsize=4)
-def _merge_pairs_cached(path: str, mtime_ns: int) -> tuple[tuple[str, str], ...]:
+def _relation_items(path: str, mtime_ns: int) -> tuple[dict, ...]:
+    """The mapping items of `relations.yml`, read once per file version.
+
+    Shared by `merge_pairs()` and `rename_predecessors()`, which both read the
+    same file on every page. An unreadable or malformed file gives no items.
+    """
     try:
         data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError):
         return ()
     if not isinstance(data, list):
         return ()
+    return tuple(item for item in data if isinstance(item, dict))
+
+
+@lru_cache(maxsize=4)
+def _merge_pairs_cached(path: str, mtime_ns: int) -> tuple[tuple[str, str], ...]:
     direct: dict[str, set[str]] = {}
-    for item in data:
-        if not isinstance(item, dict):
-            continue
+    for item in _relation_items(path, mtime_ns):
         into = item.get("merged_into")
         pages = item.get("pages")
         if not isinstance(into, str) or not isinstance(pages, list):
@@ -361,6 +385,87 @@ def merge_pairs(relations_file: Path = RELATIONS_FILE) -> tuple[tuple[str, str],
     except OSError:
         return ()
     return _merge_pairs_cached(str(relations_file), mtime_ns)
+
+
+@lru_cache(maxsize=4)
+def _rename_predecessors_cached(path: str, mtime_ns: int) -> dict[str, tuple[str, ...]]:
+    direct: dict[str, list[str]] = {}
+    for item in _relation_items(path, mtime_ns):
+        if not item.get("renamed_at"):
+            continue
+        into = item.get("merged_into")
+        pages = item.get("pages")
+        if not isinstance(into, str) or not isinstance(pages, list):
+            continue
+        for old in pages:
+            if isinstance(old, str) and old != into and old not in direct.setdefault(into, []):
+                direct[into].append(old)
+    # A page renamed twice (A to B, later B to C) reads both A's and B's records.
+    result: dict[str, tuple[str, ...]] = {}
+    for new in direct:
+        seen = {new}
+        order: list[str] = []
+        frontier = list(direct[new])
+        while frontier:
+            old = frontier.pop(0)
+            if old in seen:
+                continue
+            seen.add(old)
+            order.append(old)
+            frontier.extend(direct.get(old, ()))
+        result[new] = tuple(order)
+    return result
+
+
+def rename_predecessors(relations_file: Path = RELATIONS_FILE) -> dict[str, tuple[str, ...]]:
+    """Type/slug -> every earlier Type/slug it was renamed from, nearest first.
+
+    Read from the items `rename_page.py apply` appends (`relation: same` with
+    `merged_into` and `renamed_at`). A plain merge item has no `renamed_at` and is
+    not followed: the kept page was regenerated, so Pass 4 recorded it anew.
+    """
+    try:
+        mtime_ns = relations_file.stat().st_mtime_ns
+    except OSError:
+        return {}
+    return _rename_predecessors_cached(str(relations_file), mtime_ns)
+
+
+def load_page_records(page_rel: str) -> list[dict]:
+    """`load_records()` plus the records left under the slugs the page was renamed from.
+
+    The records stay where they were written (they name the page they judged), so
+    a renamed page would otherwise have none and read as `UNREVIEWED:` although
+    Pass 4 checked its text (Issue #1162). Each inherited record carries
+    `_renamed_from` (the old Type/slug) so a staleness line can say why the text
+    differs. Only `kind: ai` records are inherited: the rename withdraws a
+    person's sign-off. Only entity pages are renamed; a view page reads its own
+    directory.
+    """
+    records = load_records(page_rel)
+    prefix = ENTITY_DIR.as_posix() + "/"
+    if not page_rel.startswith(prefix):
+        return records
+    parts = page_rel[len(prefix):].split("/")
+    if len(parts) != 3 or not parts[2].endswith(".md"):
+        return records
+    lang, type_name, slug = parts[0], parts[1], parts[2][: -len(".md")]
+    olds = rename_predecessors().get(f"{type_name}/{slug}")
+    if not olds:
+        return records
+    inherited: list[dict] = []
+    # Oldest slug first, so a tie in `record_sort_key()` keeps the earlier record earlier.
+    for old in reversed(olds):
+        for record in load_records(f"{prefix}{lang}/{old}.md"):
+            # Only the machine's checks carry over. A human record is a person's
+            # sign-off on the text they read under the old title, which
+            # `rename_page.py` withdraws (`review_status: pending`); inheriting it
+            # would count the renamed page as human-reviewed.
+            if record.get("kind") != "ai":
+                continue
+            record["_renamed_from"] = old
+            inherited.append(record)
+    return sorted(inherited + records, key=lambda r: record_sort_key(Path(r["_file"])))
 
 
 def _undo_rewrite(text: str, old: str, new: str) -> str:
@@ -411,7 +516,13 @@ def stale_reasons(page: Path, fm: dict, record: dict) -> list[str]:
         except (RecordError, OSError):
             changed = False
         if changed:
-            reasons.append(f"page content changed since {record.get('reviewed_at', 'the review')}")
+            reason = f"page content changed since {record.get('reviewed_at', 'the review')}"
+            renamed_from = record.get("_renamed_from")
+            if renamed_from:
+                # The usual cause is the rename's own title change; say so, so the
+                # line is not read as an edit someone has to go and find.
+                reason += f"; the review was of {renamed_from}, before the rename"
+            reasons.append(reason)
 
     reviewed = source_versions(record.get("reviewed_sources") or [])
     current = source_versions(page_source_entries(fm))
@@ -600,7 +711,7 @@ def main() -> int:
             continue
         total += 1
         page_rel = page.as_posix()
-        records = load_records(page_rel)
+        records = load_page_records(page_rel)
 
         # The one deliberate exception to the standing rule (Issue #760, kept out
         # of scope by Issue #766): a running tally over the whole history, so a

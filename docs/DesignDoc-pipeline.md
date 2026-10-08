@@ -42,7 +42,7 @@
   ↓
 処理対象の管理ファイルに対してページ生成を実行（§11.6 多段生成アルゴリズム）
   ※ 対象は status が pending / outdated、および partial かつ failed_pages が非空のもの
-  ※ 非対話実行が保留したソースは status を書き換えないので、この条件にそのまま残る
+  ※ 保留したソース（誰も答えなかった質問・ネットワーク待ち）は status を書き換えないので、この条件にそのまま残る
   ↓（管理ファイルごとに順次処理）
 source.type に基づいてソースを取得
   ├─ type: path → 抽出キャッシュ（.wikicommit/.cache/extract-path/）が
@@ -54,7 +54,7 @@ source.type に基づいてソースを取得
   ↓ 抽出 Skill でテキスト変換
   ↓ 失敗（空・読み取り不能・既知JS-shellドメインでブロック） → そのソースをスキップ（エラーをコンソールに出力）
   ↓ 取得が接続段階で失敗（NETWORK_UNAVAILABLE。名前解決・接続拒否・プロキシ拒否） → status を変えず保留（## Deferred Reason）。連続 2 件で処理全体を停止（環境の問題であってソースの問題ではない）
-  ↓ 低情報密度チェック（ガードA）→ 低密度なら人間に続行可否を確認（非対話実行時はそのソースを保留）
+  ↓ 低情報密度チェック（ガードA）→ 低密度ならそのソースを保留（対話・非対話を問わない。続行可否はソースごとの繰り返しの後にまとめて尋ねる）
 LLM への入力:
   - 抽出テキスト
   - .wikicommit/schema/ 型候補リスト
@@ -98,7 +98,7 @@ exclude したエンティティの理由と coverage_gap_note は ## Generation
 
 **`action: update` の既存ソースが取得できない場合はそのソースを保留する**。Pass 2c の末尾で `action: update` のページが持つ既存ソースの本文を揃え（`references/regenerate.md` step 1 の取得の箇条。hash 不一致は止めない）、1 件でも `ERROR:` で取れなければそのソースでは何も書かない。強制リチェック由来のソースは `status: pending` に戻す。判断の全体は `docs/DesignDoc-skills.md` §11.5。
 
-**非対話実行の保留は `status` に値を足さずに表現する**。ガード A の `LOW_DENSITY:` と Pass 2b の候補は、非対話実行では `status` を書き換えず `## Deferred Reason` を書いて次のソースへ進む。上の収集条件にそのまま残る（`docs/DesignDoc-data.md` §4.3）。
+**保留は `status` に値を足さずに表現する**。ガード A の `LOW_DENSITY:` と Pass 2b の候補は、対話・非対話を問わず `status` を書き換えず `## Deferred Reason` を書いて次のソースへ進む。ソースごとの繰り返しが終わった後、人がいれば保留分をまとめて尋ね、答えたソースだけを同じ実行の中で Pass 1〜4 にもう一度通す（`docs/DesignDoc-skills.md` §11.5「保留した質問は繰り返しの後にまとめて尋ねる」）。人がいない・答えなかった保留は上の収集条件にそのまま残る（`docs/DesignDoc-data.md` §4.3）。
 
 **`ambiguous` は収集条件に乗せない**。`status: partial` かつ `failed_pages` が空のソースは読み直しても同じ `ambiguous: true` を返すだけであり、`ambiguous_entities` に記録して `/wikicommit-reconcile` で解除する。
 
@@ -112,7 +112,7 @@ exclude したエンティティの理由と coverage_gap_note は ## Generation
   |---|---|---|
   | B `check-domain` | 静的取得で空シェルを返すことが確認済みのドメイン（＋ `source-policy.md` の `exclude_domains`） | そのソースを `status: failed` |
   | C `check-fetch-capability` | 完全な取得に追加パッケージが要るホストで、それが未導入 | **処理全体を停止**して `pip install` を案内（`status: failed` にしない） |
-  | A `check-density` | 抽出テキストの自然文の割合が低い（ヒューリスティック） | 対話実行は人に続行可否を確認、非対話実行は保留 |
+  | A `check-density` | 抽出テキストの自然文の割合が低い（ヒューリスティック） | 保留し、繰り返しの後にまとめて続行可否を尋ねる（非対話実行では尋ねずキューに残す） |
 
   取得後に YouTube の抽出結果が `### Video Metadata` の形をしていなければ `status: failed`。導入済みで字幕が無い動画は Completion Notice にロールアップする
 - **partial extraction（取得は成功し本文も本物だが一部が欠ける）はガードではなく登録時の通知で扱う**。GitHub の Issue / PR URL（本文は取れるがコメントが落ちる）がこれに当たり、`add_source.py` が登録時に一度だけ知らせる。ブロックしない — 本文だけで十分なソースが実在するため。**3 つのガードのどれかを調整して届かせようとしないこと**（A は欠落が自然文なら区別できず、B は空シェルの定義に反し、C はパッケージを入れれば完全に取れることを前提にしている）。新しい例が出たら、その欠落が取得前に URL の形だけから決定論的に分かるかを確かめ、分かるなら通知に 1 行足す。`gh` 経由の取得経路は作らない（認証・hash の意味・覆る議論という未解決の論点を持つ）
@@ -123,7 +123,7 @@ exclude したエンティティの理由と coverage_gap_note は ## Generation
   | `type: url` / `wikicommit` | `.wikicommit/.cache/ingest-fetch/` | `.wikicommit/source/url/` | 落として付け直す |
   | `type: path` | `.wikicommit/.cache/extract-path/` | `.wikicommit/source/path/` | **そのまま残す**（`paper.pdf` と `paper.docx` を別キャッシュにするため） |
 
-  統合しない（衝突しうる・URL キャッシュの一斉失効に見合わない）。`type: path` の `source.hash` は**生ファイル**のハッシュなので、有効性は生ファイル側で判定し（`add_source.py --check-path-cache`。read-only）、**キャッシュを `--write-hash` に渡してはならない**。`.md` / `.txt` はキャッシュしない。読み手は `resolve_source_cache_path.py --type path` に一本化する。抽出ツールの版が変わってもキャッシュは失効せず、`.gitignore` 配下なのでマシンごとである
+  統合しない（衝突しうる・URL キャッシュの一斉失効に見合わない）。`type: path` の `source.hash` は**生ファイル**のハッシュなので、有効性は生ファイル側で判定し（`add_source.py --check-path-cache`。read-only）、**キャッシュを `--write-hash` に渡してはならない**。`.md` / `.txt` はキャッシュしない。**生で読むか抽出するか（とどの抽出 Skill か）は `source.path` のシンボリックリンクを辿った解決先の拡張子で決め、その判定はエージェントではなくスクリプトが行う** — `--check-path-cache` が `.md` / `.txt` なら `RAW: <解決先>`、それ以外で無効なら `CACHE_STALE: <キャッシュ> extract=<解決先>` を印字し、review / fix の `resolve_source_cache_path.py --obtain` も同じ集合・同じ解決先で `READ:` / `EXTRACT:` を分ける（リンク名で判定すると、PDF を指す `.md` 名のリンクで生成は PDF のバイトを読み照合は抽出テキストを読む — 別のテキストになる）。キャッシュの位置はリンク名でも解決先でもなく管理ファイルから決まるので、generate が書いた抽出結果に review / fix が当たる。読み手は `resolve_source_cache_path.py --type path` に一本化する。抽出ツールの版が変わってもキャッシュは失効せず、`.gitignore` 配下なのでマシンごとである
 
 #### 再生成モード（`--regenerate`）
 
@@ -138,7 +138,7 @@ exclude したエンティティの理由と coverage_gap_note は ## Generation
 /wikicommit-generate --regenerate <page-path> --merge <page-path> [...]   # 「同一」のページの統合
 ```
 
-**統合（`--merge`）**: `/wikicommit-relate` で「同一」と記録したページを 1 ページに畳む。残すページを全ページのソースで作り直し（Pass 4 は和集合の全ソースに照合する）、PASS して書き出した後にだけドライバーの `merge-absorb` 工程（`references/merge.md`）が統合の記録・吸収したページの取り下げ・リンクの書き換えを行う。設計は `docs/DesignDoc-data.md` §4.5.2 の「統合」の節、スクリプトは `docs/DesignDoc-ScriptSpec.md` の `merge_pages.py` / `rewrite_merged_links.py`。
+**統合（`--merge`）**: `/wikicommit-relate` で「同一」と記録したページを 1 ページに畳む。残すページを全ページのソースで作り直し（Pass 4 は和集合の全ソースに照合する）、PASS して書き出した後にだけエンジンの `merge-absorb` 工程（`references/merge.md`）が統合の記録・吸収したページの取り下げ・リンクの書き換えを行う。設計は `docs/DesignDoc-data.md` §4.5.2 の「統合」の節、スクリプトは `docs/DesignDoc-ScriptSpec.md` の `merge_pages.py` / `rewrite_merged_links.py`。
 
 ```
 対象ページを選別（下記「対象外」に該当するものを除外し、除外理由を都度報告）
@@ -256,6 +256,8 @@ PR 作成（本文に warning の件数と先頭数件を書く） → `mergeSta
   ↓（GitHub Actions により自動実行）
 main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Quartz v5 ビルド → GitHub Pages 公開（§8 参照）
 ```
+
+**工程の順序はエンジンが持つ**（`.claude/skills/wikicommit-merge/workflow.yaml`。仕組みは `docs/DesignDoc-skills.md` §11.0）。上の流れのうち、版ずれの確認・デフォルトブランチの解決・変更の検出・開いた実行の検出はエンジンが自分で実行する `script` 工程、品質チェック・コミット・PR 作成・マージ待ち・2 種類の Issue 作成・完了報告はエージェントが手順ファイル（`references/`）を読んで行う `agent` 工程、warning の続行確認は `human` 工程である。コミット・PR・マージの各工程は、ディスク（ブランチ・未コミットの残り）・remote（ブランチの push）・GitHub（PR が `MERGED`）を見る確認が通るまで完了にならない。デフォルトブランチ・warning・PR 番号は実行記録に置くので、途中で止まった merge は `skill_workflow.py next` で同じ工程から再開でき、再開した工程は同じ PR を見る。
 
 **非対話実行は warning で止まらない — 記録して続行する**。warning は §7 の分類で例外なく「常にマージ可」であり、Step 3 の確認が担うのは人に見せることだけである。無人実行では作業ツリー自体が永続しないので、中断すると `generate` の出力が失われる。PR 本文にはツールごとの件数＋先頭 3〜5 件＋`(+N more)` を書き（全件逐語にしない）、本文は対話実行でも同一にする。**blocking（`ERROR:` / `DUPLICATE:`）は対話・非対話を問わず中断する**（ブランチを作る前に止まるので作業ツリーは残る）。
 
@@ -438,8 +440,8 @@ main マージをトリガーに `.github/workflows/deploy.yml` が起動し、Q
   [2] sources チェック（なければ type: manual の設定を促す）
   [3] 整合性チェック（sources: がある場合、hash と sources.path の実ファイルを比較し不一致を指摘）
   [4] sources を取得し、独立した事実確認を実施 → 所見を提示し人間に明示確認を求める
-      - 取得はまず抽出キャッシュ（resolve_source_cache_path.py）、無ければ type: path は抽出 Skill・
-        URL は add_source.py --fetch-url。エージェントの Web 取得ツールは使わず、管理ファイルにも書き込まない
+      - 取得は resolve_source_cache_path.py --obtain-sources（全エントリを 1 コマンドで。取り下げ済みは読まない。まず抽出キャッシュ、無ければ type: path は抽出 Skill・
+        URL は add_source.py --fetch-url）。エージェントの Web 取得ツールは使わず、管理ファイルにも書き込まない
       - 照合に使った URL の版の hash がページの sources[].hash と違えば、所見ではなくレビュー記録の本文に 1 行残す
       - 全文再掲はソースが取得できない場合や人間が希望した場合のみのフォールバック
   [5] 対応するレビュー追跡 Issue の有無を確認（経路B は通常無い）→ 無ければ review_status: reviewed をローカルに書き込む
@@ -539,7 +541,7 @@ Phase 3 では人間が対話的に呼び出す `/wikicommit-translate` Skill �
 
 ```
 /wikicommit-translate <page> [--lang <target>]   # 1ページ単体翻訳
-/wikicommit-translate                            # 引数なし: 一括モード
+/wikicommit-translate [--lang <target>]          # ページなし: 一括モード（--lang はその言語の組に絞る）
 ```
 
 ```
@@ -555,10 +557,11 @@ LLM が翻訳を生成（Phase 4 版と同じ入出力仕様。対応表は「�
 ```
 
 ```
-[一括モード（引数なし）]
+[一括モード（ページ引数なし）]
 python .wikicommit/scripts/check_translation_status.py を実行
   ↓
 UNTRANSLATED 件数 + STALE 件数（(原文ページ, target言語) の組の合算）を算出
+  （--lang があればその言語の組だけに絞る）
   ↓
 作業リストを DefinedTerm 型のペアが先頭に来るよう並べ替える（群内はパス昇順）
   ↓ 5件超過（wikicommit-generate / wikicommit-collect と同じ閾値）
@@ -567,7 +570,9 @@ UNTRANSLATED 件数 + STALE 件数（(原文ページ, target言語) の組の�
 確認なしで全件を1ページ単体モードと同じ処理で順次実行
 ```
 
-`--lang` 未指定時、`config.yml` の `translation.targets` が空配列の場合はエラー終了し、「対象言語がありません。`--lang <lang>` を指定するか `config.yml` の `targets` を設定してください」と案内する。
+`--lang` 未指定時、`config.yml` の `translation.targets` が空配列の場合はエラー終了し、「対象言語がありません。`--lang <lang>` を指定するか `config.yml` の `targets` を設定してください」と案内する。ページなしで `--lang` が `targets` に無く、その言語の翻訳もまだ無い言語を指すときも preflight で止め、「その言語は `targets` に無いので一括モードでは対象が見つからない。ページを指定するか `targets` に加える」と案内する — `check_translation_status.py` は UNTRANSLATED を `targets` の言語についてしか報告せず、STALE は既にある翻訳についてしか報告しないため、絞った結果は必ず空になり、黙って「0 件」で終えると `--lang` が効かなかったことが分からない。`targets` に無くても翻訳が既にある言語（単体モードで作った・`targets` から外した）は止めない — その STALE は報告されるので、絞り込みで更新できる。ページなしの `--lang` は拒否せず絞り込みとして扱う（「英訳だけ溜まっているものを片付けたい」という使い方をそのまま叶える）。
+
+**工程の順序はエンジンが持つ**（`.claude/skills/wikicommit-translate/workflow.yaml`。仕組みは `docs/DesignDoc-skills.md` §11.0）。設定・`review-rules.md`・引数の検査、組の収集と並べ替え、`index.md` の再構築はエンジンが自分で実行する `script` 工程、5 件超の確認は一括モードのときだけの `human` 工程（非対話の既定は先頭 5 件）、1 組の翻訳・照合・記録・書き出しはエージェントが `references/translate-page.md` を読んで行う組ごとの `agent` 工程である。組の工程は、翻訳ページ（`translated_from`・`lang`・`source_commit`・`review_status: pending`）と、その実行の中で書かれた `translate-check` の記録がディスクに揃うまで完了にならない（discard した組は `result: discarded` の記録だけ）。「その実行の中で」は実行記録の `started_at` と記録のファイル名の時刻で判定するので、`started_at` が読めない実行記録では記録を全件受け入れるのではなく組のチェックを失敗させる（受け入れると以前の実行の pass 記録で組が通る。synthesize の `check-page` も同じ向き）。組の一覧と各組の結果は実行記録に置くので、途中で止まった一括翻訳は `skill_workflow.py next` で次の組から再開できる。
 
 出力はローカル書き出しのみ。コミット・PR 作成は行わず、ユーザーが別途 `/wikicommit-merge` を呼ぶ（`wikicommit-generate` / `wikicommit-review` と同じ「対話実行・ローカル書き出しのみ」パターン）。
 
