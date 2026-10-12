@@ -283,6 +283,8 @@
 
 ### 11.4 将来のマルチエージェント対応
 
+> **実機確認の記録（Issue #732）**: Codex は 2026-09-27〜29 に `wikicommit/world-of-work-wiki` で、0.8.0 を Codex 単独で入れ（`.agents/skills/` のみ）、init → generate × 3 → collect → merge を通した（PR #1。11 ページ。記録は `dev/pilot-world-of-work-wiki.md` §20.1・§22）。Copilot の VS Code エージェントモードは 2026-10-12 に `joyk0117/roudoku-stories-wiki` で、0.10.0 を `--agent claude-code` のみで入れ（`.claude/skills/` のみ）、init → generate → merge を通した（PR #1・#4。YouTube 7 件から 11 ページ・Pass 4 の記録 20 件。PR #4 は Skill が PR を作ったが、squash merge は実行者が手で行った可能性がある — main のコミットでは PR ブランチにあった `Co-Authored-By: Claude` が消えている）。モデルは Auto で、init の `Generated-By` は `github-copilot-auto`、PR #1 は `gpt-5.4`（`Co-Authored-By: Codex` が付いた）、Pass 4 の記録はすべて `claude-sonnet-5.5` だった。どちらも、自律起動の抑止（Codex の `agents/openai.yaml`・Copilot の `disable-model-invocation`）は試しておらず、Copilot の二重発見も `.claude/skills/` だけの配置だったため観測していない。結果の詳細は Issue #732 のコメントにある。
+
 #### GitHub Copilot の 3 つの実行面
 
 > **GitHub Copilot は実行面が 3 つあり、前提がそれぞれ違う（Issue #1022）**: 以前この表は Copilot を 1 行で扱い、Issue #732 は「Codex と同じ `.agents/skills/` を読むので同じ結果になる」前提を置いていた。公式ドキュメント（2026-09-24 確認。実機ではない）によれば Copilot は **Codex とほぼ正反対の性質**を持つ — `.claude/skills/` も読み（固定パス〈Issue #1021〉で壊れない）、明示起動は `/<skill>`（`$` の読み替え〈Issue #1015〉が要らない）、VS Code は `disable-model-invocation` を尊重する（自律起動の抑止〈Issue #1014〉が既存の仕組みで効く）。**したがって Codex の結果は流用できず、面ごとに扱いを決めた**:

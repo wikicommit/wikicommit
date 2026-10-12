@@ -142,7 +142,7 @@ flowchart LR
 - Node.js 20+（`markdownlint-cli2` 用）
 - [lychee](https://github.com/lycheeverse/lychee)（外部リンク検証用。未インストール時は `/wikicommit-init` が自動インストールを試みる）
 
-> Skills は [agentskills.io](https://agentskills.io) 標準準拠の SKILL.md 群のため、Codex など他の対応コーディングエージェントでも原理的には動作するはずですが、現時点で動作検証を行っているのは Claude Code のみです。
+> Skills は [agentskills.io](https://agentskills.io) 標準準拠の SKILL.md 群です。WikiCommit を開発・テストしている環境は Claude Code で、Codex と GitHub Copilot（VS Code のエージェントモード）でもそれぞれ新しい Wiki を `init` から `generate`・`merge` まで実機で作りました — 何を確かめ何を確かめていないかは[対応エージェント](#対応エージェント)を参照してください。
 >
 > **Codex では、書き込み系 Skill の自律起動を止める仕組みが違います。** 11 本（`collect`・`fix`・`init`・`organize`・`reconcile`・`relate`・`remove`・`review`・`schema-propose`・`synthesize`・`update`）が持つ `disable-model-invocation: true` は Claude Code の設定で Codex は読まず、`.claude/settings.json` の `skillOverrides` も Claude Code しか読みません。Codex 向けには、その 11 本それぞれに `policy.allow_implicit_invocation: false` を書いた `agents/openai.yaml` を同梱し、description にも「明示的に頼まれたときだけ使う」と書いています。ただし Codex がこの設定を実際に守るかは、Codex 本体ではまだ確認していません。確認できるまでは、これらの Skill は名前で呼び出し（`$wikicommit-…`）、`wikicommit-merge` を走らせる前に残った変更を確認してください。
 >
@@ -152,21 +152,21 @@ flowchart LR
 > - **`.git`** — `workspace-write` のまま `.git` だけを書き込み可能にする設定は、上記のドキュメントからは見つけられていません。残る手段は、Codex が git コマンドの承認を求めたときに都度許可するか、サンドボックスを外すモードで実行するかです。後者はサンドボックスが与える安全性を下げるため、推奨ではなく事実として挙げるに留めます。
 > - **非対話実行（`codex exec`）** — `--ask-for-approval never` では承認が必要なコマンドはプロンプトなしで実行されないため、上の 2 つは実行前に設定で開けておく必要があります。
 >
-> これらの設定は Codex のドキュメントの記述であり、WikiCommit 側では Codex 本体での動作をまだ確認していません。確認でき次第この節を更新します。
+> これらの設定は Codex のドキュメントの記述です。WikiCommit は Codex で init から merge まで動きましたが（URL ソースの取得と `gh` が通ったので、ネットワークは開いていました）、その実行でどの設定を使ったかは記録していません。
 
 ### 対応エージェント
 
 | エージェント | 状況 |
 | --- | --- |
 | Claude Code | **検証済み** — WikiCommit の開発・テストに使っている環境です。 |
-| Codex | **動作する見込み・Codex 本体では未検証** — Skills は agentskills.io 標準に準拠しています。Codex に要る設定は上の注記を参照してください。 |
-| GitHub Copilot — VS Code のエージェントモード | **対象・実機での検証待ち。** ドキュメントによれば `.claude/skills/` を読み、Skill を `/wikicommit-…` で起動し、`disable-model-invocation` を尊重するため、上の Codex の注意点はいずれも当てはまらない見込みです。 |
+| Codex | **実機確認済み**（WikiCommit 0.8.0）: Codex 単独のインストール（`.agents/skills/` のみ）で `$wikicommit-init` → `$wikicommit-generate` → `$wikicommit-collect` → `$wikicommit-merge` を行い、新しい公開 Wiki を作りました。未確認: Codex が `agents/openai.yaml` を守るか（上記）。Codex に要る設定は上の注記を参照してください。 |
+| GitHub Copilot — VS Code のエージェントモード | **実機確認済み**（WikiCommit 0.10.0）: `--agent claude-code` のみのインストール（`.claude/skills/` のみ）で `/wikicommit-init` → `/wikicommit-generate` → `/wikicommit-merge` を行い、新しい Wiki を作りました。未確認: ドキュメントのとおり `disable-model-invocation` を尊重するか、下記の二重発見。モデルを **Auto** にすると 1 回の実行の中でもリクエストごとにモデルが変わりうるため、同じ Wiki のコミットとレビュー記録に別々のモデル名が並ぶことがあります。 |
 | GitHub Copilot CLI | **未検証。** シェルコマンドのたびに承認を求め、Skill の 1 回の実行は数十回のスクリプト呼び出しを行うため、承認の回数は多くなります。それを省く `allowed-tools` は、意図して Skill に書いていません（下記）。 |
 | GitHub Copilot クラウドエージェント | **非対応。** 自分で開く 1 本の PR の中で作業するため、`/wikicommit-merge` はその PR の中から別の PR を作ってマージすることになります。既定のファイアウォールは URL ソースの取得を遮断し、セッションは 59 分が上限です。対応には設定ではなく merge の手順の置き換えが要ります。 |
 
 > **Copilot CLI で承認を減らすかは利用者の判断です。** Copilot CLI は起動時に `copilot --allow-tool='shell(python)'` でコマンドを事前承認でき、WikiCommit のスクリプト呼び出しはこれで通ります。ただし絞れるのはコマンド名までなので `python -c "…"` も承認なしで走り、実質的には、外部ページの本文を読む（`/wikicommit-generate <url>`・`/wikicommit-collect`）セッションに任意のコード実行を許すことになります。Skills 側がこの許可を代わりに出すことはしていません。`--deny-tool='shell(git push)'` を併せると push は止まりますが、`/wikicommit-merge` は PR ブランチを `git push` で送るため、マージの経路ごと止まります。
 >
-> **Copilot だけで使う場合** は `--agent claude-code` のみでインストールしてください。Copilot は `.claude/skills/` と `.agents/skills/` の両方を読むため、両方に Skill が置かれるインストール（Claude Code と Codex を併用する `--copy` インストール、または `--copy` なしで 2 つ以上のエージェントに入れた場合 — 実体が `.agents/skills/` に置かれ `.claude/skills/` からシンボリックリンクされる）では同じ Skill が 2 つずつ見える可能性があります。同名の Skill が 2 つあるとき Copilot がどう扱うかは文書に無く、まだ確認していません。
+> **Copilot だけで使う場合** は `--agent claude-code` のみでインストールしてください。Copilot は `.claude/skills/` と `.agents/skills/` の両方を読むため、両方に Skill が置かれるインストール（Claude Code と Codex を併用する `--copy` インストール、または `--copy` なしで 2 つ以上のエージェントに入れた場合 — 実体が `.agents/skills/` に置かれ `.claude/skills/` からシンボリックリンクされる）では同じ Skill が 2 つずつ見える可能性があります。同名の Skill が 2 つあるとき Copilot がどう扱うかは文書に無く、まだ確認していません。上の実機確認は `--agent claude-code` のみの配置で行いました。
 
 ### コンテキスト長
 

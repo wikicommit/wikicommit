@@ -562,7 +562,7 @@ WikiCommit ソース登録 + Wiki ページ生成 Skill。Git 操作は行わな
 
 #### Skill ツリーの位置を仮定してよい箇所・してはならない箇所
 
-**Skill は `.claude/skills/` にあるとは限らない。** Claude Code はそこを読むが、Codex は `.agents/skills/` を読み、`npx skills add --agent codex` 単独では `.claude/skills/` は作られない（Copilot は公式ドキュメント上 `.github/skills/`・`.claude/skills/`・`.agents/skills/` のいずれも読むので、`.claude/skills/` に実体を置く限り当たらない見込みが高い — 実機では未確認）。上の図が `.claude/skills/` で描かれているのは開発リポジトリの配置であって、配布先の前提ではない。
+**Skill は `.claude/skills/` にあるとは限らない。** Claude Code はそこを読むが、Codex は `.agents/skills/` を読み、`npx skills add --agent codex` 単独では `.claude/skills/` は作られない（Copilot は公式ドキュメント上 `.github/skills/`・`.claude/skills/`・`.agents/skills/` のいずれも読むので、`.claude/skills/` に実体を置く限り当たらない — VS Code エージェントモードでは `.claude/skills/` だけの配置で動くことを実機で確かめた）。上の図が `.claude/skills/` で描かれているのは開発リポジトリの配置であって、配布先の前提ではない。
 
 | 誰が | Skill の場所を | 書き方 |
 |---|---|---|
@@ -603,27 +603,30 @@ Skill が別の Skill のファイルを読む・実行する関係を、Skill �
 
 ### 11.4 将来のマルチエージェント対応
 
-MVP では Claude Code のみを対応対象とする。`.wikicommit/schema/` は将来の全エージェントで共通利用できるように維持し、他エージェントへの対応時はそのエージェントが要求する配置場所に薄い連携ファイルを追加する。
+MVP の開発・テスト環境は Claude Code である（Codex と Copilot の VS Code エージェントモードは、下表のとおり実機で通しの動作までを確かめている）。`.wikicommit/schema/` は将来の全エージェントで共通利用できるように維持し、他エージェントへの対応時はそのエージェントが要求する配置場所に薄い連携ファイルを追加する。
 
 | エージェント | エントリポイント |
 |---|---|
 | Claude Code | Skill 定義（`.wikicommit/schema/` を参照） |
-| GitHub Copilot — VS Code エージェントモード | Skill 定義（`.claude/skills/`・`.agents/skills/`・`.github/skills/` のいずれも読む）。**対象・実機検証待ち** |
+| Codex | Skill 定義（`.agents/skills/` を読む）。**実機確認済み**（WikiCommit 0.8.0・Codex 単独の配置で init → generate → collect → merge）。自律起動の抑止（`agents/openai.yaml`）は未確認 |
+| GitHub Copilot — VS Code エージェントモード | Skill 定義（`.claude/skills/`・`.agents/skills/`・`.github/skills/` のいずれも読む）。**実機確認済み**（WikiCommit 0.10.0・`--agent claude-code` のみの配置で init → generate → merge）。`disable-model-invocation` の尊重と二重発見は未確認 |
 | GitHub Copilot CLI | 同上。**未検証**。配布 Skill は `allowed-tools` を書かない（§11.1「Copilot CLI のシェル承認は配布物に書かない」） |
 | GitHub Copilot クラウドエージェント | 同上だが**非対応**（構造的に WikiCommit の Git フローと衝突する） |
 | その他 | エージェント固有の設定ファイル → `.wikicommit/schema/` を参照 |
 
 #### GitHub Copilot の 3 つの実行面
 
-Copilot は **Codex とほぼ正反対の性質**を持つ（公式ドキュメント〈2026-09-24 確認〉による。実機ではない）— `.claude/skills/` も読み（固定パスで壊れない）、明示起動は `/<skill>`（`$` の読み替えが要らない）、VS Code は `disable-model-invocation` を尊重する（自律起動の抑止が既存の仕組みで効く）。**したがって Codex の結果は流用できず、面ごとに扱いを決めている**:
+Copilot は **Codex とほぼ正反対の性質**を持つ（公式ドキュメント〈2026-09-24 確認〉による）— `.claude/skills/` も読み（固定パスで壊れない）、明示起動は `/<skill>`（`$` の読み替えが要らない）、VS Code は `disable-model-invocation` を尊重する（自律起動の抑止が既存の仕組みで効く）。VS Code では前 2 つを実機で確かめた（`.claude/skills/` だけの配置で `/wikicommit-*` を起動し init → generate → merge が通った）。3 つ目は未確認である。**したがって Codex の結果は流用できず、面ごとに扱いを決めている**:
 
 | 面 | 扱い | 理由 |
 |---|---|---|
-| VS Code エージェントモード | **対象にし、実機で検証する** | Codex で起きた 3 つの問題がいずれも発生しない見込みで、検証が最も安い |
+| VS Code エージェントモード | **対象。実機で init → generate → merge を確認済み** | Codex で起きた 3 つの問題がいずれも発生しない見込みで、検証が最も安い |
 | Copilot CLI | **README に「未検証」と書く** | 配布物には `allowed-tools: shell` を書かない（§11.1「Copilot CLI のシェル承認は配布物に書かない」）ので、試してもシェルコマンドごとの承認の往復が多いという既知の結果しか得られない |
 | クラウドエージェント | **非対応とし、README に理由を書く** | 実機を見なくても構造的に衝突する — 自分で開く 1 本の PR の中で作業するため `/wikicommit-merge` が PR の中で別の PR を作ってマージすることになり、既定のファイアウォールで URL ソースも取得できない、セッションは 59 分が上限 |
 
-**Copilot にしか無い問題 — 二重発見**: `.claude/skills/` と `.agents/skills/` の両方に Skill が置かれるインストール（`--agent claude-code --agent codex --copy`、および `--copy` なしで 2 つ以上のエージェントに入れた場合 — 実体が `.agents/skills/` に置かれ `.claude/skills/` はそこへのシンボリックリンクになる。§11.1）では、両方を読む Copilot に同名の Skill が 2 つずつ見える可能性がある。同名の扱いは文書に無い。VS Code で (1) `--agent claude-code --copy` のみ、(2) 両エージェント向け、の 2 通りを試して確かめる。README は当面「Copilot 単独なら `--agent claude-code` のみ」と案内する。**実機での確認は未了**であり、結果が出たらこの節と README を更新する。
+**Copilot にしか無い問題 — 二重発見**: `.claude/skills/` と `.agents/skills/` の両方に Skill が置かれるインストール（`--agent claude-code --agent codex --copy`、および `--copy` なしで 2 つ以上のエージェントに入れた場合 — 実体が `.agents/skills/` に置かれ `.claude/skills/` はそこへのシンボリックリンクになる。§11.1）では、両方を読む Copilot に同名の Skill が 2 つずつ見える可能性がある。同名の扱いは文書に無い。VS Code で (1) `--agent claude-code --copy` のみ、(2) 両エージェント向け、の 2 通りを試して確かめる。README は当面「Copilot 単独なら `--agent claude-code` のみ」と案内する。実機で確かめたのは (1) の配置で動くことまでで、**(2) の二重発見は未確認**であり、結果が出たらこの節と README を更新する。
+
+**モデル選択が Auto のときの記録**: Copilot の Auto はリクエストごとにモデルを選ぶので、1 回の実行の中でもモデルが変わる。モデル ID を書く記録（コミットの `Generated-By`・レビュー記録の `model`）は書いた時点のモデルを記すため、1 つの Wiki に複数のモデルが並び、`Generated-By` にはモデル ID でない値（`github-copilot-auto`）が入りうる。`Co-Authored-By` はモデルのベンダーで決まる（`docs/DesignDoc-pipeline.md` §6.7 の配布物の規約）ので、同じ Copilot の実行でも `Codex` と書かれたり `Claude` と書かれたりし、VS Code が自動で足す `Co-authored-by: Copilot` と並ぶ。
 
 #### 指示文の語彙 — ツール名と起動記法
 
@@ -636,7 +639,7 @@ Copilot は **Codex とほぼ正反対の性質**を持つ（公式ドキュメ�
 | `/wikicommit-*`（指示文内の相互参照） | エージェント | **据え置く**。Skill 名として読めれば足り、全箇所を 2 表記にすると指示面積だけが増える |
 | `/wikicommit-*`（利用者に届く出力） | 人 | **1 度だけ `$` の表記を併記する**。対象は `print_next_steps.py` の「次のステップ」案内と、`wikicommit-merge` Step 8 / Step 9 が GitHub に書き出す Issue 本文 — 後者は Claude Code のセッションを持たない読者が読む |
 
-冒頭に読み替え表を置くことはしない（SKILL.md は起動のたび全文が載るため全 Skill 分の指示面積が増え、`references/` に置けば読まれる保証が無く、読み替えが起きたかは出力に現れない）。ツール名を役割で書く代償は Claude Code 側でどのツールを使うかの指示が緩むことだが、`Read tool` が担っていた含意は「全文を読め」（途中で切らない）であり、それは「in full」として書く。Codex での実機確認は未了である。
+冒頭に読み替え表を置くことはしない（SKILL.md は起動のたび全文が載るため全 Skill 分の指示面積が増え、`references/` に置けば読まれる保証が無く、読み替えが起きたかは出力に現れない）。ツール名を役割で書く代償は Claude Code 側でどのツールを使うかの指示が緩むことだが、`Read tool` が担っていた含意は「全文を読め」（途中で切らない）であり、それは「in full」として書く。役割で書いた指示文のまま、Codex（`$wikicommit-*`）と Copilot の VS Code エージェントモード（`/wikicommit-*`）で init → generate → merge が通ることは実機で確かめた。
 
 ### 11.5 スクリプト委譲パターン
 

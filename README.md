@@ -152,7 +152,7 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 - Node.js 20+ (for `markdownlint-cli2`)
 - [lychee](https://github.com/lycheeverse/lychee) (for external link validation; if not installed, `/wikicommit-init` makes a best-effort attempt to auto-install it)
 
-> Because the Skills are a set of SKILL.md files compliant with the [agentskills.io](https://agentskills.io) standard, they should in principle work with other compatible coding agents such as Codex, but Claude Code is currently the only environment we've verified.
+> The Skills are a set of SKILL.md files compliant with the [agentskills.io](https://agentskills.io) standard. Claude Code is the environment WikiCommit is developed and tested on; Codex and GitHub Copilot (VS Code agent mode) have each built a new wiki hands-on, from `init` through `generate` to `merge` — see [Supported agents](#supported-agents) for what was and was not checked.
 >
 > **Under Codex, keeping a writing Skill from starting on its own rests on different mechanisms.** Eleven Skills (`collect`, `fix`, `init`, `organize`, `reconcile`, `relate`, `remove`, `review`, `schema-propose`, `synthesize`, `update`) carry `disable-model-invocation: true`, a Claude Code setting that Codex ignores, and `.claude/settings.json`'s `skillOverrides` is likewise read only by Claude Code. For Codex each of those eleven also ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`, and its description says to use it only when explicitly asked. Whether Codex actually honors that setting has not been verified on Codex itself yet; until it has, invoke those Skills by name (`$wikicommit-…`) and review what they leave before running `wikicommit-merge`.
 >
@@ -162,21 +162,21 @@ Merging to `main` triggers a static wiki build via Quartz v5 and automatic deplo
 > - **`.git`** — we have not found a setting in that documentation that makes `.git` alone writable while staying in `workspace-write`. What remains is to approve the git commands when Codex prompts for them, or to run in a mode that lifts the sandbox; the latter lowers the safety the sandbox provides, so it is listed here as a fact, not a recommendation.
 > - **Non-interactive runs (`codex exec`)** — with `--ask-for-approval never`, a command that needs approval is not run and no prompt appears, so both of the above have to be opened in the configuration before the run.
 >
-> These settings are quoted from Codex's documentation; WikiCommit has not verified them on Codex itself yet, and this section will be updated once it has.
+> These settings are quoted from Codex's documentation. WikiCommit has run end to end on Codex (fetching URL sources and `gh` both worked, so the network was open), but which of these settings that run used was not recorded.
 
 ### Supported agents
 
 | Agent | Status |
 |---|---|
 | Claude Code | **Verified** — the environment WikiCommit is developed and tested on. |
-| Codex | **Expected to work, not yet verified on Codex itself** — the Skills follow the agentskills.io standard; see the notes above for the settings Codex needs. |
-| GitHub Copilot — VS Code agent mode | **Targeted, hands-on verification pending.** According to its documentation it reads `.claude/skills/`, invokes Skills as `/wikicommit-…`, and honors `disable-model-invocation`, so none of the Codex caveats above should apply. |
+| Codex | **Verified hands-on** (WikiCommit 0.8.0): with the Skills installed for Codex alone (`.agents/skills/` only), `$wikicommit-init` → `$wikicommit-generate` → `$wikicommit-collect` → `$wikicommit-merge` built a new public wiki. Not yet checked: whether Codex honors `agents/openai.yaml` (see above). See the notes above for the settings Codex needs. |
+| GitHub Copilot — VS Code agent mode | **Verified hands-on** (WikiCommit 0.10.0): with the Skills installed for `--agent claude-code` only (`.claude/skills/` only), `/wikicommit-init` → `/wikicommit-generate` → `/wikicommit-merge` built a new wiki. Not yet checked: whether it honors `disable-model-invocation` as its documentation says, and the duplicate-Skill case below. With the model set to **Auto**, the model can change between requests within one run, so commits and review records in the same wiki may name different models. |
 | GitHub Copilot CLI | **Not verified.** It asks for approval before every shell command, and a Skill run makes dozens of script calls, so expect many prompts. The Skills deliberately do not declare `allowed-tools` to lift them (see below). |
 | GitHub Copilot cloud agent | **Not supported.** It works inside a single PR it opens itself, so `/wikicommit-merge` would have to open and merge a second PR from inside that one; its default firewall blocks fetching URL sources; and a session is capped at 59 minutes. Supporting it needs a different merge step, not a setting. |
 
 > **Fewer prompts in Copilot CLI is your call, not the Skills'.** Copilot CLI can pre-approve a command at launch with `copilot --allow-tool='shell(python)'`, which covers the WikiCommit scripts. It narrows only to the command name, so it also lets `python -c "…"` run unasked — in practice, permission to run arbitrary code while the session reads the text of external pages (`/wikicommit-generate <url>`, `/wikicommit-collect`). The Skills do not ship that permission for you. Adding `--deny-tool='shell(git push)'` stops pushes, but `/wikicommit-merge` pushes its PR branch with `git push`, so it stops merging as well.
 >
-> **Installing for Copilot alone?** Install for `--agent claude-code` only. Copilot reads both `.claude/skills/` and `.agents/skills/`, so an install that leaves Skills in both — a `--copy` install for Claude Code and Codex together, or any install to two or more agents without `--copy`, which puts the real files in `.agents/skills/` and symlinks them from `.claude/skills/` — may show each Skill twice; what Copilot does with two Skills of the same name is not documented and has not been checked yet.
+> **Installing for Copilot alone?** Install for `--agent claude-code` only. Copilot reads both `.claude/skills/` and `.agents/skills/`, so an install that leaves Skills in both — a `--copy` install for Claude Code and Codex together, or any install to two or more agents without `--copy`, which puts the real files in `.agents/skills/` and symlinks them from `.claude/skills/` — may show each Skill twice; what Copilot does with two Skills of the same name is not documented and has not been checked yet. The hands-on run above used the `--agent claude-code`-only layout.
 
 ### Context window
 
