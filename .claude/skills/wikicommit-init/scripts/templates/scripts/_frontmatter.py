@@ -1,32 +1,28 @@
-"""Shared YAML frontmatter parsing for convert_wikilinks.py, check_wikilinks.py,
-check_orphans.py, check_translation_status.py, validate_frontmatter.py
-(Issue #212), and check_expires.py, check_ingest_freshness.py, search_index.py
-(Issue #231).
+"""Shared YAML frontmatter parsing for the scripts that read a page's
+frontmatter (convert_wikilinks.py, check_wikilinks.py, validate_frontmatter.py,
+search_index.py and the others that import it).
 
-Previously each script carried its own copy of the `---\\n...\\n---` extraction,
-which had drifted apart in ways that were real bugs rather than harmless style
-differences:
-- BOM handling: some scripts read with `utf-8-sig`, others with plain `utf-8`,
-  so a BOM-prefixed page (as some Windows editors write) silently failed
-  frontmatter detection in half the scripts.
+Separate copies of the `---\\n...\\n---` extraction drift apart in ways that
+are real bugs rather than harmless style differences:
+- BOM handling: a script reading with plain `utf-8` rather than `utf-8-sig`
+  silently fails frontmatter detection on a BOM-prefixed page (as some Windows
+  editors write).
 - Non-dict YAML: `yaml.safe_load(...) or {}` returns the parsed value
   unchanged when it is a non-empty non-mapping (e.g. a page whose frontmatter
   is a YAML list), so callers that then do `fm.get(...)` on it crash instead
   of reporting a clean error.
-- Empty-block detection: a regex-based `^---\\n(.*?)\\n---\\n?` extraction (used
-  by 4 of the 5 scripts pre-consolidation) never matches a truly empty block
-  (`---\\n---\\n`, i.e. zero content lines between the delimiters), because
-  there is no second `\\n` separating the two `---` lines for `(.*?)` to sit
-  between. That's harmless in the 4 scripts that treated "no match" as "no
-  frontmatter" (both give back `{}` anyway), but validate_frontmatter.py's
-  own pre-consolidation implementation used a line-scan instead and handled
-  this case correctly, distinguishing it from a genuinely unterminated block.
-  This module keeps that line-scan approach so the stricter validate_frontmatter.py
-  contract (unterminated block *is* a reportable error) stays correct.
+- Empty-block detection: a regex-based `^---\\n(.*?)\\n---\\n?` extraction
+  never matches a truly empty block (`---\\n---\\n`, i.e. zero content lines
+  between the delimiters), because there is no second `\\n` separating the two
+  `---` lines for `(.*?)` to sit between. That is harmless where "no match"
+  means "no frontmatter" (both give back `{}` anyway), but not for
+  validate_frontmatter.py, which reports an unterminated block as an error.
+  This module uses a line-scan, which tells an empty block from a genuinely
+  unterminated one, so that stricter contract stays correct.
 
-Consolidating here follows the same precedent as _wikilink.py (Issue #114):
-one implementation that every script imports, instead of divergent copies
-that can only be kept in sync by discipline.
+So, as with _wikilink.py, there is one implementation that every script
+imports, instead of divergent copies that can only be kept in sync by
+discipline.
 """
 
 from functools import lru_cache
@@ -35,9 +31,10 @@ from pathlib import Path
 import yaml
 
 
-def _split_frontmatter(content: str) -> tuple[dict | None, str, str]:
-    """Core line-scan shared by parse_frontmatter_text() and
-    parse_frontmatter_and_body_text(). The third element is `content` with
+def _split_frontmatter(content: str, loader: type = yaml.SafeLoader) -> tuple[dict | None, str, str]:
+    """Core line-scan shared by parse_frontmatter_text(),
+    parse_frontmatter_and_body_text() and parse_frontmatter_untyped_text()
+    (which passes `loader`). The third element is `content` with
     any frontmatter block stripped off (best-effort: it falls back to the
     original `content` when there is no block at all, or when a missing
     terminator means the body boundary can't be located)."""
@@ -57,7 +54,7 @@ def _split_frontmatter(content: str) -> tuple[dict | None, str, str]:
     body = "\n".join(lines[end_idx + 1:])
 
     try:
-        fm = yaml.safe_load("\n".join(lines[1:end_idx]))
+        fm = yaml.load("\n".join(lines[1:end_idx]), Loader=loader)
     except yaml.YAMLError as e:
         return None, f"frontmatter is not valid YAML: {e}", body
 
@@ -90,6 +87,16 @@ def parse_frontmatter_and_body_text(content: str) -> tuple[dict | None, str, str
     return _split_frontmatter(content)
 
 
+def parse_frontmatter_untyped_text(content: str) -> tuple[dict | None, str]:
+    """Like parse_frontmatter_text(), but read with yaml.BaseLoader, which
+    resolves no scalar to a bool, number or date: every scalar is the string as
+    written. For a caller that has to tell apart spellings safe_load folds into
+    one value (convert_wikilinks.py's `source.lang`, where YAML 1.1 reads `no`,
+    `off` and `false` all as False)."""
+    fm, err, _ = _split_frontmatter(content, yaml.BaseLoader)
+    return fm, err
+
+
 def parse_frontmatter(path: Path) -> tuple[dict | None, str]:
     """Read path and parse its YAML frontmatter block. See parse_frontmatter_text()."""
     try:
@@ -107,9 +114,9 @@ def parse_frontmatter_cached(path: Path) -> tuple[dict | None, str]:
     check_wikilinks.py and convert_wikilinks.py both call this once per
     WikiLink *occurrence* (via is_removed() / get_lang()), and many links
     across many files can point at the same target page, so without caching
-    a popular page gets re-read and re-parsed once per occurrence (Issue
-    #232). Consolidated here (Issue #266) after the two scripts had grown
-    independent copies of the same `@lru_cache` wrapper.
+    a popular page gets re-read and re-parsed once per occurrence. It lives
+    here so the two scripts share one `@lru_cache` wrapper rather than each
+    keeping its own copy.
 
     Caches only the (dict, error) parse result, not anything a caller does
     with `err` — check_wikilinks.py prints a WARNING built from it on every

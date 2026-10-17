@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""The one list of what a freshly initialized repository has to commit (Issue #642).
+"""The one list of what a freshly initialized repository has to commit.
 
 `init.py` writes these files and `print_next_steps.py` tells the user to
-`git add` them. Those were two independently hand-maintained lists (three,
-counting the prose in SKILL.md), and the failure mode is not hypothetical:
-`install-local-plugins.cjs` was added to `init.py` alone (Issue #434) and left
-out of the guidance, so every repository initialized with `--quartz
---quartz-pages` failed its first GitHub Pages build with a `postinstall`
-MODULE_NOT_FOUND (Issue #556 — reproduced in two pilots). Issue #556 added a
-test that *detects* that drift; this module removes the second list instead, so
-adding a root-level output is one edit rather than two or three.
+`git add` them. Both read this one list, so adding a root-level output is one
+edit: with two hand-maintained lists, a file added to `init.py` alone is left out
+of the guidance and never committed — for a file the Pages build needs, that
+fails the first GitHub Pages build of every repository initialized with
+`--quartz --quartz-pages`.
 
 Three kinds of entry do not fit "init.py writes it, the user commits it", and
 each needs to stay expressible here rather than being special-cased at the call
@@ -24,16 +21,15 @@ site:
     down with it, so it is appended only when the caller says it was created.
   - `package-lock.json` is a side effect of `npm install` (origin `npm`), and is
     deliberately *not* in the `git add` line for that same abort-on-missing
-    reason — `print_next_steps.py` guides it as its own command (Issue #556).
+    reason — `print_next_steps.py` guides it as its own command.
     `in_git_add=False` records that this is a decision, not an omission.
 
-Since Issue #842 the printed default is `git add -A`, so neither of the last two
-cases can take the foundational commit down any more: a file that is not there is
-simply not staged. Both mechanisms stay, because the rendered list did not go away
-— it is printed underneath as the fallback for a repository that WikiCommit was
-added to rather than made for, and it is a list of individual pathspecs there, with
-the same abort-on-missing behaviour. `in_git_add=False` is kept for the second
-reason above as well: it is the record that the omission was decided.
+The printed default is `git add -A`, under which neither of the last two cases can
+take the foundational commit down: a file that is not there is simply not staged.
+Both mechanisms are still needed, because the rendered list is printed underneath
+as the fallback for a repository that WikiCommit was added to rather than made for,
+and it is a list of individual pathspecs there, with the same abort-on-missing
+behaviour. `in_git_add=False` also stays the record that the omission was decided.
 
 `.claude/` is listed too though `install.sh` (not `init.py`) puts it there: the
 list describes what the first commit must contain, and that is the question the
@@ -55,7 +51,7 @@ ORIGINS = ("init", "install", "submodule", "npm", "skill")
 # wired up there rather than silently falling through to whatever the last branch tests.
 CONDITIONS = ("always", "vocab_cache", "readme_created")
 
-# How an update should treat the path (Issue #712). This is an ownership question, not a
+# How an update should treat the path. This is an ownership question, not a
 # question about file type: `overwrite` is WikiCommit's own payload, which a re-init
 # refreshes because the user never authors it; `review` may carry the user's own edits, so
 # init never touches it and an update flow shows a diff instead; `skip` is not ours to
@@ -78,9 +74,8 @@ UNKNOWN_UPDATE_POLICY = "review"
 # answer for the four paths whose template carries placeholders or a "delete this and write
 # your own" comment, and for .gitignore, which init appends a Quartz section to: those can
 # never byte-match a real repository, so byte comparison would light permanently. A warning
-# that is always on stops being read — the failure this repository has already had to undo
-# once, when Issue #562 demoted the low-density guard for exactly that reason — and a drift
-# report nobody reads defeats the point of having one.
+# that is always on stops being read, and a drift report nobody reads defeats the point of
+# having one.
 #
 # So those paths report only *additive* signals: something the template has that the local
 # copy lacks. Changing a value or rewriting the prose is the user doing their job, and is
@@ -98,12 +93,12 @@ _TEST_ARTIFACT_RE = re.compile(r"\.test\.tsx?$")
 
 
 def is_quartz_plugin_dev_artifact(rel_path: Path) -> bool:
-    """vitest suites/config (#93) and eslint config (#94) are dev-only tooling
-    for the template's own CI and are not needed by the generated site
-    (dist/ is pre-built).
+    """vitest suites/config and eslint config are dev-only tooling for the
+    template's own CI and are not needed by the generated site (dist/ is
+    pre-built).
 
-    It lives here rather than in init.py because both sides of the same fact need it
-    (Issue #712): init.py excludes these from the copy, and the freshness check has to
+    It lives here rather than in init.py because both sides of the same fact need it:
+    init.py excludes these from the copy, and the freshness check has to
     make the same exclusion or it reports every one of them as MISSING on every run.
     Two copies of the rule would drift, and the drift would surface as permanent noise
     in exactly the report this list exists to make trustworthy.
@@ -147,7 +142,7 @@ class RootOutput:
     """One of CONDITIONS: `always`; `vocab_cache` for the path that exists only
     when a type-proposal step created the Schema.org vocabulary cache; or
     `readme_created` for README.md, which init writes only into a repository that
-    had no README at all (Issue #1034). The last one is about staging, not
+    had no README at all. The last one is about staging, not
     existence: a README the repository already had may carry the user's own
     uncommitted edits, so the selective list names it only when this run wrote it."""
 
@@ -155,7 +150,7 @@ class RootOutput:
     """False for a path the guidance covers with its own separate command.
 
     This governs the selective fallback list, not the printed default — that is
-    `git add -A` since Issue #842, which stages such a path whenever it exists.
+    `git add -A`, which stages such a path whenever it exists.
     """
 
     may_be_absent: bool = False
@@ -195,22 +190,22 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
     # The other half of where the Skills live, and the reason both are here rather than
     # covered by `.claude` alone: `npx skills add` targeting two or more agents writes each
     # Skill's real files to `.agents/skills/<name>/` and makes `.claude/skills/<name>` a
-    # relative symlink into it (Issue #555). Committing `.claude` without `.agents` gives
+    # relative symlink into it. Committing `.claude` without `.agents` gives
     # every clone a `.claude/skills/` of links pointing at nothing. `skills-lock.json` records
     # what was installed and does not resolve those links, so it is its own path.
     #
     # Both carry may_be_absent: install.sh produces neither, and a copy placement produces no
     # `.agents`. Neither is init.py's to write, refresh or compare, hence origin=install and
-    # update=skip — the same answer `.claude` gets, for the same reason (Issue #948).
+    # update=skip — the same answer `.claude` gets, for the same reason.
     RootOutput(".agents", ALL, origin="install", update="skip", compare="none", may_be_absent=True),
     RootOutput(
         "skills-lock.json", ALL, origin="install", update="skip", compare="none", may_be_absent=True
     ),
-    # The one part of `.claude/` init.py writes rather than install.sh (Issue #953). It
-    # carries `skillOverrides`, which narrows how Claude sees the three Skills that lost
-    # `disable-model-invocation` in Issue #945 — `name-only` hides the description, so a
-    # passing request cannot trigger them, while a prompt naming `/wikicommit-generate`
-    # still works and unattended runs need no setting flipped.
+    # The one part of `.claude/` init.py writes rather than install.sh. It carries
+    # `skillOverrides`, which narrows how Claude sees the three Skills that do not set
+    # `disable-model-invocation` — `name-only` hides the description, so a passing request
+    # cannot trigger them, while a prompt naming `/wikicommit-generate` still works and
+    # unattended runs need no setting flipped.
     #
     # Not a `template` copy: the file belongs to the user (permissions, env, hooks), so
     # init merges the three keys in rather than writing the file over. `update` is the
@@ -252,7 +247,7 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
     ),
     # Same shape and the same protection as source-policy.md, one axis over: that file
     # says which sources come in, this one says whether an entity may be written about
-    # at all (Issue #667). Hand-edited prose, so a re-run must never overwrite it.
+    # at all. Hand-edited prose, so a re-run must never overwrite it.
     RootOutput(
         ".wikicommit/entity-policy.md",
         ALL,
@@ -260,7 +255,7 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         template="entity-policy.md",
         compare="frontmatter_keys",
     ),
-    # The review discipline, in one place (Issue #752). `overwrite` is deliberate and is
+    # The review discipline, in one place. `overwrite` is deliberate and is
     # the opposite of the two policy files above: those hold the user's own prose, this
     # holds WikiCommit's rules, and letting a repository edit it would let a wiki quietly
     # weaken its own review. check_distribution_freshness.py compares it byte for byte, so
@@ -272,8 +267,8 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         template="review-rules.md",
         update="overwrite",
     ),
-    # How a type file is written, in one place (Issue #886). Four paths add types and each
-    # held the whole procedure; what actually differs between them is the judgment — how
+    # How a type file is written, in one place. Four paths add types; the procedure is
+    # shared, and what actually differs between them is the judgment — how
     # strong the evidence has to be, how approval is obtained, which `provenance` is
     # stamped — and that stays in each Skill. `overwrite` for the same reason as
     # review-rules.md above: this is WikiCommit's procedure, not the user's prose, and a
@@ -285,16 +280,14 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         template="schema-authoring.md",
         update="overwrite",
     ),
-    # Human-facing how-to documents (Issue #846). The shelf these go on did not exist:
-    # the only giscus walkthrough lived at the end of a 600-line agent instruction file
-    # that says of itself "show it when they ask for it", so there was nowhere to point a
-    # person at. `docs/` cannot be that shelf — it never reaches an installed repository,
-    # and §11.9 forbids a distributed file from referencing it — while a tree here is
-    # already under the user's nose while they work, and `overwrite` means an upstream
-    # rewrite reaches every wiki on its next init with check_distribution_freshness.py
-    # reporting the staleness in between. `overwrite` for the same reason as
-    # review-rules.md above: these are WikiCommit's instructions, not the user's prose.
-    # Started with one file, but registered as a tree so the second one changes nothing.
+    # Human-facing how-to documents: somewhere to point a person at, rather than at an
+    # agent instruction file. `docs/` cannot be that shelf — it never reaches an installed
+    # repository, and §11.9 forbids a distributed file from referencing it — while a tree
+    # here is already under the user's nose while they work, and `overwrite` means an
+    # upstream rewrite reaches every wiki on its next init with
+    # check_distribution_freshness.py reporting the staleness in between. `overwrite` for
+    # the same reason as review-rules.md above: these are WikiCommit's instructions, not
+    # the user's prose. Registered as a tree so adding a guide changes nothing here.
     RootOutput(".wikicommit/guides", ALL, origin="init", update="overwrite", compare_template="guides"),
     # Directory trees and created-with-.gitkeep directories.
     RootOutput(".wikicommit/schema", ALL, origin="init", compare_template="schema"),
@@ -306,21 +299,20 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         compare_template="scripts",
     ),
     RootOutput(".wikicommit/entity", ALL, origin="init", update="skip", compare="none"),
-    # Second-order pages, grounded in this wiki's own pages rather than in an
-    # external document (Issue #675).
+    # Second-order pages, grounded in this wiki's own pages rather than in an external document.
     RootOutput(".wikicommit/view", ALL, origin="init", update="skip", compare="none"),
     RootOutput(".wikicommit/source", ALL, origin="init", update="skip", compare="none"),
-    # Immutable per-review records (Issue #750). `skip` for the same reason as the three
+    # Immutable per-review records. `skip` for the same reason as the three
     # trees above: this is the wiki's own accumulated history, not a distribution payload,
     # so an update has nothing here to refresh and nothing to compare against. It is listed
     # rather than left out because the first commit has to contain it — the records are the
     # evidence that a review happened at all, and a run whose records were never committed
     # is indistinguishable from one that never reviewed anything.
     RootOutput(".wikicommit/review", ALL, origin="init", update="skip", compare="none"),
-    # Per-Type page groups (Issue #1035). The user's, written by `/wikicommit-organize` and by
-    # hand, never by init — so origin=skill, update=skip, and no template: an empty receiver
-    # would be distributed with no reader (Issue #553). may_be_absent because most wikis never
-    # create it, and the selective `git add` list must not abort on it.
+    # Per-Type page groups. The user's, written by `/wikicommit-organize` and by hand, never
+    # by init — so origin=skill, update=skip, and no template: an empty receiver would be
+    # distributed with no reader. may_be_absent because most wikis never create it, and the
+    # selective `git add` list must not abort on it.
     RootOutput(
         ".wikicommit/groups", ALL, origin="skill", update="skip", compare="none", may_be_absent=True
     ),
@@ -328,7 +320,7 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
     # regardless of the Quartz choice.
     RootOutput(".lychee.toml", ALL, origin="init", template=".lychee.toml"),
     RootOutput(".markdownlint.json", ALL, origin="init", template=".markdownlint.json"),
-    # pageTitle / footer URL substitution, not a copy (Issue #317 / #557).
+    # pageTitle / footer URL substitution, not a copy.
     RootOutput(
         "quartz.config.yaml",
         QUARTZ,
@@ -359,8 +351,8 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         update="overwrite",
     ),
     # deploy.yml is the one piece that opts the repository into automatic GitHub Pages
-    # publishing on every merge to main, so it is gated behind --quartz-pages alone
-    # (Issue #335); --quartz by itself only sets up local build/preview.
+    # publishing on every merge to main, so it is gated behind --quartz-pages alone;
+    # --quartz by itself only sets up local build/preview.
     RootOutput(
         ".github/workflows/deploy.yml",
         PAGES_ONLY,
@@ -368,9 +360,8 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         template="workflows/deploy.yml",
         update="overwrite",
     ),
-    # Unlike deploy.yml above, this workflow backs the review pipeline (wikicommit-merge
-    # → tracking Issue → Issue close), which does not depend on the Quartz publishing
-    # choice (Issue #313).
+    # Unlike deploy.yml above, this workflow backs the review pipeline (wikicommit-merge →
+    # tracking Issue → Issue close), which does not depend on the Quartz publishing choice.
     RootOutput(
         ".github/workflows/review-issue-close-sync.yml",
         ALL,
@@ -378,9 +369,9 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         template="workflows/review-issue-close-sync.yml",
         update="overwrite",
     ),
-    # wikicommit-banner's "report an issue" link (Issue #245/#313) points at
-    # ?template=report.md, which silently no-ops without this file. Quartz-only because
-    # wikicommit-banner is itself a Quartz plugin (Issue #339).
+    # wikicommit-banner's "report an issue" link points at ?template=report.md, which
+    # silently no-ops without this file. Quartz-only because wikicommit-banner is itself a
+    # Quartz plugin.
     RootOutput(
         ".github/ISSUE_TEMPLATE/report.md",
         QUARTZ,
@@ -417,8 +408,8 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
         update="skip",
         compare="none",
     ),
-    # Issue #1034: written only when the repository has no README anywhere GitHub would
-    # show one, and the user's file from then on — never refreshed, never compared.
+    # Written only when the repository has no README anywhere GitHub would show one, and
+    # the user's file from then on — never refreshed, never compared.
     RootOutput(
         "README.md",
         ALL,
@@ -429,11 +420,10 @@ ROOT_OUTPUTS: tuple[RootOutput, ...] = (
     ),
 )
 
-# The licensing paragraph a README should carry (Issue #645's layer 4). One string, used
-# twice (Issue #1034): init.py writes it into the README it creates, and
-# print_next_steps.py offers it as paste-in wording when the README was already there.
-# Two copies would drift, and the drift would be a README and a suggestion that disagree
-# about what the repository's licensing is.
+# The licensing paragraph a README should carry. One string, used twice: init.py writes it
+# into the README it creates, and print_next_steps.py offers it as paste-in wording when the
+# README was already there. Two copies would drift, and the drift would be a README and a
+# suggestion that disagree about what the repository's licensing is.
 README_LICENSE_TEXT = (
     "Code in this repository and the wiki content it publishes are licensed separately. "
     "Page content is derived from the sources listed on each page; terms differ per source "
@@ -542,8 +532,8 @@ def copy_flags(entry: "RootOutput") -> dict:
 
     `overwrite` refreshes WikiCommit's own payload even under --no-overwrite; everything
     else protects what is already on disk. init.py derives its flags from here so the
-    ownership decision lives in one place instead of being restated at each call site
-    (Issue #712) — the same reason plain_copies() exists.
+    ownership decision lives in one place instead of being restated at each call site —
+    the same reason plain_copies() exists.
     """
     if update_policy(entry) == "overwrite":
         return {"always_overwrite": True}
@@ -630,16 +620,16 @@ def missing_gitignore_patterns(
 ) -> list[str]:
     """Patterns this variant needs that `repo_root/.gitignore` does not have.
 
-    **This is the question, and "did this run write the file" was standing in for it**
-    (Issue #873). `.gitignore` is `update="review"` — `always_skip_existing` — so after the
-    first init every later one logs `SKIPPED: .gitignore (already exists)`, and a condition
-    keyed on that log stops the foundational-commit offer in a repository WikiCommit made
+    **This is the question to ask, rather than "did this run write the file".**
+    `.gitignore` is `update="review"` — `always_skip_existing` — so after the first init
+    every later one logs `SKIPPED: .gitignore (already exists)`, and a condition keyed on
+    that log would stop the foundational-commit offer in a repository WikiCommit made
     itself, where `git add -A` is exactly as safe as it was the first time. The fact worth
     protecting is whether the patterns are *there*, not who put them there.
 
     The same run can also print `SKIPPED: .gitignore (already exists)` and
     `UPDATED: .gitignore (Quartz ignore patterns)` for one path, because the Quartz append
-    does not branch on whether the copy happened — a second way the log was the wrong thing
+    does not branch on whether the copy happened — a second way the log is the wrong thing
     to read.
 
     **An empty result does not widen what `-A` can stage.** A repository WikiCommit was
@@ -649,8 +639,8 @@ def missing_gitignore_patterns(
     who followed the printed guidance and added those patterns by hand, which is the state
     that guidance asks for.
 
-    A repository initialized before a pattern entered the template (e.g. `.wikicommit/run/`,
-    added in Issue #790) comes back non-empty, and **that is correct rather than a false
+    A repository initialized before a pattern entered the template (e.g. `.wikicommit/run/`)
+    comes back non-empty, and **that is correct rather than a false
     positive**: `always_skip_existing` means a re-init does not add it, so `-A` really would
     stage the run records. `check_distribution_freshness.py` reports the same gap as
     `OUTDATED`.

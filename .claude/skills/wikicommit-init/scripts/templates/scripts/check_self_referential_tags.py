@@ -1,17 +1,15 @@
 #!/usr/bin/env python3
-"""Detect tags that only repeat a page's own title or type (Issue #571).
+"""Detect tags that only repeat a page's own title or type.
 
 `tags` exists to group pages across the wiki by something they share — a field,
 a technique, a period. A tag equal to the page's own title carries none of that:
 it groups the page with itself. Neither does one equal to the page's `type`,
 which the `type:` field already says. Both were ruled out in prose when `tags`
-was defined (Issue #275), and both came back: a pilot shipped
-`Place/minuma-tanbo.md` tagged `見沼田んぼ` and `Place/saitama-shintoshin.md`
-tagged `さいたま新都心`, plus five pages tagged with their own category.
+was defined, and both came back in a pilot.
 
 A generation-time rule with nothing checking it is a rule that drifts. This is
 the same "automate the one-off manual audit" role
-check_property_wikilink_reinforcement.py (Issue #539) plays for type templates.
+check_property_wikilink_reinforcement.py plays for type templates.
 
 Matching is **exact after normalization** — NFKC, case-folded, whitespace
 collapsed — and never partial. A tag that merely contains part of the title is

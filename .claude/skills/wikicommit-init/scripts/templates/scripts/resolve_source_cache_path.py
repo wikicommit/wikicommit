@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-resolve_source_cache_path.py — wikicommit-ask の `--include-source`（Issue #470）
+resolve_source_cache_path.py — wikicommit-ask の `--include-source` の
 バックエンドスクリプト。
 
 ソースの識別子（`sources[].url` または `sources[].path`）から、対応する抽出テキスト
@@ -9,25 +9,28 @@ resolve_source_cache_path.py — wikicommit-ask の `--include-source`（Issue #
 **同一性キーは常に管理ファイルの `source.url` / `source.path` であり、識別子から
 ファイル名を再計算しない。** `wikicommit-generate` のキャッシュ置き場は「ソース管理
 ファイルの実際の相対パス」から導出されるのであって、識別子から `url_to_filename()` /
-`mgmt_path_for_file()` で再計算した名前ではない。再計算すると、Issue #191（旧フラット
-命名）・#192（旧パーセントエンコード命名）・#572（クエリを落としていた命名）・#573
-（拡張子を置き換えていた命名）より前に登録された管理ファイル（いずれも自動移行されない）
-で実際のパスと食い違い、実在するキャッシュを「見つからない」と誤判定する。
-`add_source.py` の `find_mgmt_file_for_url()` / `find_mgmt_file_for_path()` が登録側で
-採っているのと同じ実走査による同一性判定である（Issue #572 / #573）。
+`mgmt_path_for_file()` で再計算した名前ではない。再計算すると、旧い命名規則（フラット
+命名・パーセントエンコードのままの命名・クエリを落とした命名・拡張子を置き換えた命名）で
+登録された管理ファイル（いずれも自動移行されない）で実際のパスと食い違い、実在する
+キャッシュを「見つからない」と誤判定する。`add_source.py` の `find_mgmt_file_for_url()` /
+`find_mgmt_file_for_path()` が登録側で採っているのと同じ実走査による同一性判定である。
 
 ## 2 つのソース種別でキャッシュの木が違う
 
 | `--type` | 走査する管理ファイル | キャッシュの木 | 書く主体 |
 |---|---|---|---|
 | `url`    | `.wikicommit/source/url/`  | `.wikicommit/.cache/ingest-fetch/`  | Pass 1 のフェッチ |
-| `path`   | `.wikicommit/source/path/` | `.wikicommit/.cache/extract-path/` | Pass 1 の抽出（Issue #885） |
+| `path`   | `.wikicommit/source/path/` | `.wikicommit/.cache/extract-path/` | Pass 1 の抽出 |
 
-導出規則も対称ではない。`url` 側は管理ファイルの相対パスから拡張子を落として `.md` を
-付け直す（旧来の scratch-path の定義）一方、`path` 側は**末尾の `.md` を落とさずそのまま
-使う** — 管理ファイル名が元の拡張子を保持する形（`raw/paper.pdf.md`。Issue #573）なので、
-そのまま使えば `paper.pdf` と `paper.docx` が同じキャッシュへ解決する衝突が構造的に
-起こらない。`add_source.py` の `extract_cache_path()` と同じ規則である。
+導出規則は両側で同じであり、**管理ファイルの木からの相対パスを、末尾の `.md` も含めて
+そのままキャッシュの木の下に置く**。拡張子は一度も触らない。`path` 側は管理ファイル名が
+元の拡張子を保持する形（`raw/paper.pdf.md`）なので、そのまま使えば
+`paper.pdf` と `paper.docx` が同じキャッシュへ解決する衝突が構造的に起こらない
+（`add_source.py` の `extract_cache_path()` と同じ規則）。`url` 側の `<scratch-path>.md`
+も管理ファイルの相対パスと同じ文字列であり、Pass 1 はそこへ文字列の連結で書く。
+`with_suffix("")` で `.md` を落とすと、`pdf-2606.05608.md` の `.05608` まで拡張子として
+扱われて `pdf-2606.md` になり、接頭辞が同じ別ソース（`pdf-2606.17799.md`）とキャッシュが
+重なる — 別ソースの本文を返し、`--settle` ではその置き場所を上書きする。
 
 Usage:
     echo "<url>"  | python resolve_source_cache_path.py --type url
@@ -35,13 +38,13 @@ Usage:
 
 識別子は stdin から読む（argv ではない — `sources[].url` / `sources[].path` は
 `validate_frontmatter.py` が形式を検証するだけで、シェル引数として安全であることは
-一度も確かめられていない。Issue #375）。`--type` は呼び出し側が
+一度も確かめられていない）。`--type` は呼び出し側が
 書く固定のリテラルなのでこの規則の対象外。
 
 一致する管理ファイルが見つかり、**かつ**キャッシュファイルがディスク上に実在する場合に
 そのパス（リポジトリルート相対）を stdout に印字する。
 
-## exit 1 の 2 つの意味を印字で分ける（Issue #1036）
+## exit 1 の 2 つの意味を印字で分ける
 
 exit 1 は「一致する管理ファイルが無い」と「キャッシュが無い」の 2 つを畳んでいる。
 終了コードは変えず（`wikicommit-review` / `wikicommit-fix` / `wikicommit-relate` は
@@ -54,7 +57,7 @@ exit 1 をどちらでも同じフォールバックで答える）、stdout の
 （置き場所が管理ファイルのパスから導かれる）ことをこの行から知る。
 
 `--type path` では、識別子の解決先（`resolve()` 後）がリポジトリルートの配下に無ければ
-どちらの行でもなく次を印字する（exit 1 のまま。Issue #1206）:
+どちらの行でもなく次を印字する（exit 1 のまま）:
 
     OUTSIDE: <識別子>
 
@@ -66,13 +69,14 @@ exit 1 をどちらでも同じフォールバックで答える）、stdout の
 置くのと同じ理由 — 後に置くと外のパスについて何かが分かる）。取り下げ（exit 2）だけは
 その前に見る（`--obtain` と同じ順序）。
 
-## `--settle` — キャッシュが無かった URL を取得した後の判定（Issue #1036）
+## `--settle` — キャッシュが無かった URL を取得した後の判定
 
 呼び出し元は `wikicommit-ask --include-source` と、`wikicommit-review` / `wikicommit-fix`
-（`.wikicommit/.cache/refetch/` に取得した後。Issue #1137）。
+（`.wikicommit/.cache/refetch/` に取得した後）。
 
-clean checkout ではキャッシュが常に空なので、`--include-source` は URL ソースを毎回
-諦めていた。ask は `add_source.py --fetch-url` で一時ファイルに取得し、本モードに渡す。
+clean checkout ではキャッシュが常に空なので、取得しなければ `--include-source` は URL
+ソースを毎回諦めることになる。ask は `add_source.py --fetch-url` で一時ファイルに取得し、
+本モードに渡す。
 取得した内容のハッシュを**2 つの値と別々に**照合する:
 
 | 照合の相手 | 答える問い |
@@ -90,11 +94,11 @@ clean checkout ではキャッシュが常に空なので、`--include-source` �
 取り下げ済みなら `RETRACTED:` と exit 2（取得前の照会で既に分かるはずだが、
 置く前にもう一度見る）。
 
-## `--obtain` — 1 エントリぶんの本文を得る（Issue #1190）
+## `--obtain` — 1 エントリぶんの本文を得る
 
-呼び出し元は下の `--obtain-sources`（エントリごとにこれを 1 回）。以前は
-キャッシュ照会・`type: path` キャッシュの版の照合・`add_source.py --fetch-url`・`--settle`・
-scratch の扱いを散文で順に指示していたが、どれも決定論的なので 1 コマンドに寄せた。
+呼び出し元は下の `--obtain-sources`（エントリごとにこれを 1 回）。キャッシュ照会・
+`type: path` キャッシュの版の照合・`add_source.py --fetch-url`・`--settle`・scratch の
+扱いはどれも決定論的なので、散文の手順ではなく 1 コマンドに寄せている。
 エージェントに残る判断は「抽出 Skill を呼ぶ」だけである。出力は 1 行:
 
     READ: <読むファイル> page=<match|mismatch>   （exit 0）
@@ -104,16 +108,16 @@ scratch の扱いを散文で順に指示していたが、どれも決定論的
 
 - 取り下げ（`status: retracted`）は何かを読む・取得する前に見る
 - `type: path` の解決先（シンボリックリンクを辿った `resolve()` 後のパス）がリポジトリ
-  ルートの配下に無ければ `UNAVAILABLE: outside`（Issue #1201）。絶対パス・`..` で外へ
+  ルートの配下に無ければ `UNAVAILABLE: outside`。絶対パス・`..` で外へ
   出るパス・外を指すシンボリックリンクがこれに当たる（中を指すシンボリックリンクは
   正当なソースとして読む）。存在の判定（`missing`）より前に置く — 後に置くと、
   リポジトリ外のパスが存在するかどうかが `missing` か否かで分かってしまう
 - `type: path` の `.md` / `.txt` は生ファイルを読む（キャッシュを持たない）。拡張子は
   シンボリックリンクを辿った解決先のもので判定し、`READ:` / `EXTRACT:` が返すパスも解決先
-  にする（Issue #1208。`.md` 名のリンクが PDF を指すとき、リンク名で判定すると PDF の
+  にする（`.md` 名のリンクが PDF を指すとき、リンク名で判定すると PDF の
   バイナリを `READ:` で返し、リンク名を返すと抽出 Skill の選択〈拡張子で引く〉を誤る）。
   generate の Pass 1 も `add_source.py --check-path-cache` の `RAW:` / `extract=` で同じ
-  解決先を見るので、生成と照合は同じテキストを使う（Issue #1216）。それ以外は
+  解決先を見るので、生成と照合は同じテキストを使う。それ以外は
   抽出キャッシュがあり、**かつ生ファイルの現在のハッシュが管理ファイルの `source.hash`
   と一致するときだけ**キャッシュを読む（キャッシュはその版の抽出結果。
   `add_source.py --check-path-cache` と同じ判定）。そうでなければ `EXTRACT:`。
@@ -130,7 +134,7 @@ scratch の扱いを散文で順に指示していたが、どれも決定論的
 `check-fetch-capability`、`NETWORK_UNAVAILABLE` 後に残りを取得しない挙動、`ask-fetch/` の
 通し番号、`type: path` で抽出 Skill を呼ばず生ファイルを読む挙動が ask 固有であるため。
 
-## `--obtain-sources` — ページの `sources` 全件の本文を得る（Issue #1211）
+## `--obtain-sources` — ページの `sources` 全件の本文を得る
 
 呼び出し元は `wikicommit-review` Step 4 / `wikicommit-fix` Step 3。stdin に**どのページの
 `sources` を使うか**（翻訳ページなら親ページ）のパスを渡す — その選択は呼び出し側の Skill が
@@ -147,14 +151,14 @@ scratch の扱いを散文で順に指示していたが、どれも決定論的
 
 `<n>` は `sources` 内の位置（1 始まり）。`READ:` / `EXTRACT:` のパスがシンボリックリンクの
 解決先やキャッシュであって `sources[].path` と一致しなくても、どのエントリかは `<n>` で
-分かるので、元の識別子は併記しない（Issue #1216）。**行のキーワードがそのまま呼び出し側の次の行動に
+分かるので、元の識別子は併記しない。**行のキーワードがそのまま呼び出し側の次の行動に
 対応する**（行に指示文は埋め込まない）。取り下げ済みのエントリは何も読まず・取得せずに
-`RETRACTED:` になるので、以前 review / fix が取得の前に走らせていた
-`check_retracted_sources.py --list` の照合はこのコマンドに含まれる。終了コードは
+`RETRACTED:` になるので、`check_retracted_sources.py --list` の照合はこのコマンドに
+含まれる（review / fix が取得の前に別に走らせる必要は無い）。終了コードは
 `check_retracted_sources.py --list` と同じく一覧なので 0（取り下げ・取得失敗は行で伝える）。
 exit 1 はページがリポジトリ外・読めない・frontmatter が壊れている・`--label` の誤り。
 
-**取得には時間の区切りがある**（Issue #1240）。1 件の取得は `add_source.py` のタイムアウト
+**取得には時間の区切りがある**。1 件の取得は `add_source.py` のタイムアウト
 （接続 15 秒・読み取り 60 秒）で止まるが、件数ぶん積み重なるとエージェントのシェルの制限時間
 （Claude Code の Bash は既定 120 秒）を超え、途中で切られる。`--budget <秒>`（既定 45。
 `check_external_links.py` と同じ）を過ぎたら新しい取得を始めず、まだのエントリの行は出さずに
@@ -182,13 +186,13 @@ exit 1 はページがリポジトリ外・読めない・frontmatter が壊れ�
 分からないため、実行の最後の後始末（`rm -f`）は呼び出し側に残る — 残しても次の実行が最初に
 消すので、溜まるのは 1 実行ぶんまでである。
 
-## 取り下げ済みソース（`status: retracted`）は exit 2 で伝える（Issue #918）
+## 取り下げ済みソース（`status: retracted`）は exit 2 で伝える
 
 管理ファイルの `status` が `retracted` なら、キャッシュの有無を見る前に `RETRACTED:` 行を
 stdout に印字して exit 2 を返す。**これは人間が「このソースの内容は信用できない」と判断した
-印**であり（Issue #737）、取り込み側では再登録も `outdated` への復帰も構造的に止まるのに、
-参照側（`--include-source`）にはガードが 1 つも無かった。機械はソースを疑えない（証拠拘束
-ルール。Issue #442）ので、この値は人間にしか書けず、読む主体が居なければ何も起きない。
+印**であり、取り込み側では再登録も `outdated` への復帰も構造的に止まる。参照側
+（`--include-source`）にも同じガードが要る。機械はソースを疑えない（証拠拘束ルール）ので、
+この値は人間にしか書けず、読む主体が居なければ何も起きない。
 
 **exit 1 に畳めない。** あちらは既に 2 つの意味（一致する管理ファイルが無い／キャッシュが
 実在しない）を畳んでおり、しかも呼び出し側は `type: path` の exit 1 で**生ファイルを直接
@@ -198,7 +202,7 @@ stdout に印字して exit 2 を返す。**これは人間が「このソース
 **`retracted` 以外の `status` は見ない。** `failed` / `excluded` / `partial` / `outdated` は
 いずれも取り込み処理の状態であって、そのソースの**内容**に対する評価ではない。読む価値が
 あるのは `retracted` だけで、他を足すと `status` 全体を解釈する分岐が参照側にもう 1 つ
-生まれる（Issue #553 の「消費者と同時に足す」）。
+生まれる（読む値は消費者と同時に足す）。
 
 **frontmatter が壊れている管理ファイルは、黙って飛ばさず stderr に `WARNING:` を出す。**
 `status: retracted` は人間が手で書く値であり、管理ファイルを検証するものは 1 つも無いので、
@@ -244,7 +248,7 @@ class Retracted:
     happen for a source a person withdrew.
 
     Carries the management file so the caller can point at the
-    `## Retraction Reason` a person wrote there (Issue #737), which is the only
+    `## Retraction Reason` a person wrote there, which is the only
     place the *why* exists.
     """
 
@@ -262,14 +266,14 @@ def _frontmatter_or_none(management_file: Path) -> dict | None:
     `parse_frontmatter` answers unparseable YAML with `(None, error)`, and a
     silent `continue` on that would switch the retraction guard off for exactly
     the files most likely to carry one: `status: retracted` is written by hand
-    (Issue #737) and nothing validates a source management file, so a typo made
+    and nothing validates a source management file, so a typo made
     while writing the retraction leaves the source looking unregistered — which
     is the ordinary miss, and on the `type: path` route the caller answers a
     miss by reading the raw file. Same reason `check_extraction_quality.py`
     warns instead of failing open when `source-policy.md` will not parse.
 
     A file with no frontmatter block at all is not an error and is skipped
-    quietly, the way it always was.
+    quietly.
     """
     fm, err = parse_frontmatter(management_file)
     if fm is None:
@@ -287,8 +291,8 @@ class Located:
 
     `management_file` is None when nothing is registered for the identifier.
     `cache_file` is where the cache *belongs* — it may not exist. Keeping the two
-    apart is what lets the CLI tell an unregistered source from a missing cache
-    (Issue #1036), which exit 1 alone folds together.
+    apart is what lets the CLI tell an unregistered source from a missing cache,
+    which exit 1 alone folds together.
     """
 
     def __init__(
@@ -312,7 +316,7 @@ def _same_identifier(recorded, target: str) -> bool:
     Under a locale that is not UTF-8 those are two spellings of the same bytes —
     surrogates under a POSIX `C` locale — so a registered non-ASCII source would
     otherwise come back UNREGISTERED, and on the `path` route the caller then
-    reads the raw file past a `status: retracted` (Issue #1265).
+    reads the raw file past a `status: retracted`.
     """
     if not isinstance(recorded, str):
         return False
@@ -347,14 +351,24 @@ def _locate(
     return Located()
 
 
+def _mirrored(mgmt_root: Path, cache_root: Path):
+    """The cache path for a management file: its path under `mgmt_root`, whole,
+    under `cache_root`. One rule for both trees (see the module docstring).
+
+    The trailing `.md` is never dropped and re-added: `with_suffix()` would read
+    the last `.` of a dotted name (`pdf-2606.05608.md`) as an extension and two
+    sources sharing a prefix would share a cache.
+    """
+    def cache_for(management_file: Path) -> Path:
+        return cache_root / management_file.relative_to(mgmt_root)
+
+    return cache_for
+
+
 def locate_url(target_url: str, repo_root: Path = Path()) -> Located:
     mgmt_root = repo_root / ".wikicommit" / "source" / "url"
-
-    def cache_for(management_file: Path) -> Path:
-        scratch_path = management_file.relative_to(mgmt_root).with_suffix("")
-        return (repo_root / ".wikicommit" / ".cache" / "ingest-fetch" / scratch_path).with_suffix(".md")
-
-    return _locate(target_url, "url", mgmt_root, cache_for)
+    cache_root = repo_root / ".wikicommit" / ".cache" / "ingest-fetch"
+    return _locate(target_url, "url", mgmt_root, _mirrored(mgmt_root, cache_root))
 
 
 def locate_path(target_path: str, repo_root: Path = Path()) -> Located:
@@ -364,13 +378,8 @@ def locate_path(target_path: str, repo_root: Path = Path()) -> Located:
     同じ 1 つの文字列であり、その間に正規化を挟む主体がいない。
     """
     mgmt_root = repo_root / ".wikicommit" / "source" / "path"
-
-    def cache_for(management_file: Path) -> Path:
-        # 末尾の `.md` を落とさない（上の docstring 参照）。
-        rel = management_file.relative_to(mgmt_root)
-        return repo_root / ".wikicommit" / ".cache" / "extract-path" / rel
-
-    return _locate(target_path, "path", mgmt_root, cache_for)
+    cache_root = repo_root / ".wikicommit" / ".cache" / "extract-path"
+    return _locate(target_path, "path", mgmt_root, _mirrored(mgmt_root, cache_root))
 
 
 def _resolved(located: Located) -> Path | Retracted | None:
@@ -387,9 +396,9 @@ def resolve_url(target_url: str, repo_root: Path = Path()) -> Path | Retracted |
 
 
 def resolve_path(target_path: str, repo_root: Path = Path()) -> Path | Retracted | None:
-    """`type: path` のソースの抽出テキストキャッシュを解決する（Issue #885）。
+    """`type: path` のソースの抽出テキストキャッシュを解決する。
 
-    取り下げ済みの場合は `Retracted` を返す（Issue #918）。ここで返さないと、
+    取り下げ済みの場合は `Retracted` を返す。ここで返さないと、
     キャッシュを持たない取り下げ済みソースが `None`（＝生ファイルを読むフォールバック）
     に落ちて素通りする。
     """
@@ -419,7 +428,7 @@ def _page(got: str, page_hash: str) -> str:
 def settle_fetch(
     target_url: str, fetched: Path, page_hash: str, repo_root: Path = Path()
 ) -> dict:
-    """Decide what a fresh `--include-source` fetch may be used for (Issue #1036).
+    """Decide what a fresh `--include-source` fetch may be used for.
 
     Two comparisons, answering two different questions:
 
@@ -476,14 +485,14 @@ def settle_fetch(
     }
 
 
-# ── --obtain (Issue #1190) ────────────────────────────────────────────────────
+# ── --obtain ──────────────────────────────────────────────────────────────────
 
 # Read raw, never cached: the file is already the extracted text. The same set
 # as `add_source.py`'s `RAW_TEXT_SUFFIXES`, which `--check-path-cache` applies
-# for generate's Pass 1 to the same resolved target (Issue #1216); a test keeps
+# for generate's Pass 1 to the same resolved target; a test keeps
 # the two in step, since the scripts do not import each other.
 _RAW_SUFFIXES = {".md", ".txt"}
-# The fetcher, next to this script in `.wikicommit/scripts/` (Issue #1210).
+# The fetcher, next to this script in `.wikicommit/scripts/`.
 ADD_SOURCE = Path(__file__).resolve().parent / "add_source.py"
 _LABEL = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -500,7 +509,7 @@ def run_fetch(url: str, output: Path, repo_root: Path) -> tuple[int, str]:
     """
     if not ADD_SOURCE.is_file():
         return 1, f"{ADD_SOURCE} not found"
-    # UTF-8 both ways whatever the locale (Issue #1256): the line handed back can
+    # UTF-8 both ways whatever the locale: the line handed back can
     # carry a non-ASCII path or URL, which a cp1252 child could not print and a
     # cp932 parent would misread.
     try:
@@ -512,7 +521,7 @@ def run_fetch(url: str, output: Path, repo_root: Path) -> tuple[int, str]:
     except UnicodeEncodeError as err:
         # A URL from a page's `sources` (`--obtain-sources`) is UTF-8 text, and
         # under a locale that is not UTF-8 argv cannot carry it. One line, not a
-        # traceback: the caller's contract is one line per entry (Issue #1265).
+        # traceback: the caller's contract is one line per entry.
         return 1, f"cannot pass the URL to add_source.py under this locale ({err.reason}); set PYTHONUTF8=1"
     lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
     lines = lines or [line.strip() for line in proc.stderr.splitlines() if line.strip()]
@@ -534,7 +543,7 @@ def _target_inside(path: Path, repo_root: Path) -> Path | None:
     """`path`'s target, symlinks followed, relative to `repo_root`; None if outside.
 
     One resolution serves both the containment check and the target that
-    `--obtain` reads (Issue #1208), so a link swapped between the two cannot
+    `--obtain` reads, so a link swapped between the two cannot
     hand back a path that was never checked.
     """
     try:
@@ -576,7 +585,7 @@ def obtain(
                 "reason": "outside",
                 "message": f"{identifier} resolves outside the repository",
             }
-        # The file the bytes come from, symlinks followed (Issue #1208): a
+        # The file the bytes come from, symlinks followed: a
         # `notes.md` link to `scan.pdf` is a PDF, and the extraction skill is
         # chosen by extension, so both the READ/EXTRACT split and the path
         # handed back use the target, not the link's own name.
@@ -618,7 +627,7 @@ def obtain(
     return {"result": "READ", "file": settled["read"], "page": settled["page"]}
 
 
-# ── --obtain-sources (Issue #1211) ────────────────────────────────────────────
+# ── --obtain-sources ──────────────────────────────────────────────────────────
 
 
 def obtain_sources(
@@ -896,7 +905,7 @@ def main() -> int:
     if located.retracted:
         print(f"RETRACTED: {identifier} ({located.management_file})")
         return 2
-    # Issue #1206: the caller answers UNREGISTERED / NO_CACHE on the `path`
+    # The caller answers UNREGISTERED / NO_CACHE on the `path`
     # route by reading the raw file, so a path that resolves outside the
     # repository must not reach either line. Before both, for the same reason
     # `--obtain` checks it before `missing`.
@@ -916,8 +925,8 @@ def main() -> int:
 def use_utf8_streams() -> None:
     """Write every line as UTF-8 whatever the locale, and read stdin as a file name.
 
-    `run_fetch()` already reads the child's output as UTF-8 (Issue #1256), but a
-    non-ASCII path or URL it hands back (or one from a page's `sources`) raised
+    `run_fetch()` already reads the child's output as UTF-8, but a non-ASCII
+    path or URL it hands back (or one from a page's `sources`) would raise
     `UnicodeEncodeError` at this script's own `print` on a cp1252 terminal or
     pipe, after the child had succeeded. `skill_workflow.py`'s helper of the same
     name, with two differences:

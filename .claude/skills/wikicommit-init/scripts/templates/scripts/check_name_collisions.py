@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""check_name_collisions.py — pages that answer to the same name (Issue #1095).
+"""check_name_collisions.py — pages that answer to the same name.
 
 A concept that two sources call by different names gets two pages, because
-generation matches an existing page by Type and slug (and, since Issue #1096,
-by title and aliases at the moment of writing). What is left over shows up as
-a name collision: one page's title or alias is another page's title or alias.
+generation matches an existing page by Type and slug (and by title and aliases
+at the moment of writing). What is left over shows up as a name collision: one
+page's title or alias is another page's title or alias.
 
 This script lists those collisions — `/wikicommit-status` counts them and
-`/wikicommit-relate` puts each to a person — same concept, one inside the other, related,
-distinct, or editions of one series. It is also
-the first reader of `.wikicommit/relations.yml`: a pair a person has already
-decided about, in any relation, is not raised again. Without that reader a
+`/wikicommit-relate` puts each to a person — same concept, one inside the
+other, related, distinct, or editions of one series. It is also the first
+reader of `.wikicommit/relations.yml`: a pair a person has already decided
+about, in any relation, is not raised again. Without that reader a
 "these are distinct" decision would have nowhere to take effect, and the same
 pair would come back on every run.
 

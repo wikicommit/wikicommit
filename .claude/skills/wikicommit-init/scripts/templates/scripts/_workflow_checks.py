@@ -1,16 +1,14 @@
-"""What every Skill's `workflow_checks.py` reads the same way (Issue #1219).
+"""What every Skill's `workflow_checks.py` reads the same way.
 
 Each Skill that runs on `skill_workflow.py` keeps its own `scripts/workflow_checks.py`
-— the knowledge of what its steps leave on disk. Those used to be written to stand
-alone, so the helpers they share were copied into each one, and the copies had
-started to drift: `read_markdown` returned `(frontmatter, body)` in two Skills and
-the frontmatter alone in a third, and the two `records_since` took different
-arguments and returned different things. Fixing how a run record or a review record
-is read meant finding every copy.
+— the knowledge of what its steps leave on disk. Helpers copied into each one drift
+apart, and fixing how a run record or a review record is read then means finding
+every copy.
 
 The helpers live here, once, and each `workflow_checks.py` imports them from
-`.wikicommit/scripts/` — where every script used by more than one Skill lives. What stays in each Skill is what differs: how its
-arguments are parsed, which paths its steps write, what a finished step looks like.
+`.wikicommit/scripts/` — where every script used by more than one Skill lives. What
+stays in each Skill is what differs: how its arguments are parsed, which paths its
+steps write, what a finished step looks like.
 
 **The run record's state key is read in one place only.** `read_run()` hands the
 record to `skill_workflow.run_state()`, so the key the engine writes under and the old

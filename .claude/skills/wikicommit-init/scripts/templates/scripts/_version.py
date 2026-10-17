@@ -1,5 +1,5 @@
 """WikiCommit's own version string — the one source of truth that reaches an
-installed wiki repository (Issue #577).
+installed wiki repository.
 
 WikiCommit is distributed across three repositories: this development
 repository, the public distribution repository (a single squashed commit per
@@ -57,7 +57,7 @@ Skills read it by running this file directly:
 # and a new `CHANGELOG.md` entry; the CHANGELOG entry is what tells a user
 # which pages are worth regenerating, since the version alone is coarser than
 # the per-type template changes it stands for.
-VERSION = "0.10.0"
+VERSION = "0.11.0"
 
 
 def get_version() -> str:

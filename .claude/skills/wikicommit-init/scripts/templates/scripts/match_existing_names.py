@@ -1,4 +1,4 @@
-"""Does an entity Pass 2c just named already have a page under that name? (Issue #1096)
+"""Does an entity Pass 2c just named already have a page under that name?
 
 Pass 2c sets `action: update` only when an existing page has the same type and
 the same slug. A source that calls a concept by a name an existing page carries

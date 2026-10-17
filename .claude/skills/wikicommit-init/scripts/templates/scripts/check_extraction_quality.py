@@ -9,9 +9,9 @@ JSON/JS state) with none of the page's actual content. This was confirmed for
 https://x.com/karpathy/status/1886192184808149383 in the ai-driven-dev-wiki
 pilot: the management file recorded status: generated with 1060
 extracted_tokens, but the extracted text contained zero occurrences of the
-tweet's own wording — see Issue #425 for the full writeup.
+tweet's own wording.
 
-This script implements the two checks Issue #425 designed for that gap:
+This script implements the three checks below:
 
 (B) check-domain: run *before* attempting extraction, from the URL alone.
     Domains confirmed to sometimes return an empty shell are skipped outright
@@ -21,17 +21,17 @@ This script implements the two checks Issue #425 designed for that gap:
     alone. Some hosts need an optional Python package for markitdown to reach
     the part of the page that actually carries the content — for YouTube, the
     video's transcript comes only from `youtube_transcript_api`, and without it
-    markitdown silently returns just the title/keywords/runtime/description
-    with no error at all (Issue #574). That is a different axis from (A) and
-    (B): the page is neither an empty shell nor low-density prose, it is a
-    genuine partial extraction, so neither of the other two guards can see it.
+    markitdown silently returns just the title/keywords/runtime/description with
+    no error at all. That is a different axis from (A) and (B): the page is
+    neither an empty shell nor low-density prose, it is a genuine partial
+    extraction, so neither of the other two guards can see it.
 (A) check-density: run *after* extraction, on the extracted text. A general,
     domain-agnostic heuristic that estimates what fraction of the text looks
     like natural-language prose versus markup/code/data. Lower precision than
     (B), but catches domains nobody has flagged yet.
 
-The two guards are deliberately *not* equally strong (Issue #562). (B) is a
-deterministic verdict about a domain someone has already confirmed broken, so
+The two guards are deliberately *not* equally strong. (B) is a deterministic
+verdict about a domain someone has already confirmed broken, so
 wikicommit-generate treats its exit 1 as blocking. (A) is a shape heuristic,
 and a link-dense government site or a statistics table has essentially the same
 text shape as a JS shell — the saitama-wiki pilot saw 4 of 8 genuine sources
@@ -65,8 +65,8 @@ from _frontmatter import parse_frontmatter
 # Domains confirmed to sometimes return an empty content shell via static
 # fetch (markitdown/curl) because real content only appears after JS
 # execution. Extend this set only after confirming the empty-shell behavior
-# directly (as Issue #425 did for x.com/twitter.com) — an unconfirmed entry
-# would silently skip extraction for a domain that might actually work fine.
+# directly (as was done for x.com/twitter.com) — an unconfirmed entry would
+# silently skip extraction for a domain that might actually work fine.
 KNOWN_JS_SHELL_DOMAINS = {
     "x.com",
     "twitter.com",
@@ -74,7 +74,7 @@ KNOWN_JS_SHELL_DOMAINS = {
     # hosts, does not redirect to www.youtube.com/watch — so markitdown's
     # YouTubeConverter never accepts it (its accepts() requires the literal
     # "https://www.youtube.com/watch?" prefix on the post-redirect URL) and the
-    # HTML converter runs instead. Confirmed directly (Issue #574): fetching
+    # HTML converter runs instead. Confirmed directly: fetching
     # https://music.youtube.com/watch?v=... yields ~185 characters of
     # "YouTube Music is not optimized for your browser" boilerplate with none
     # of the video's title, description or transcript — and that boilerplate is
@@ -101,15 +101,15 @@ _STRUCTURAL_CHARS = set("{}<>;=")
 # LOW_DENSITY line reports — never to decide whether it is prose.
 _NUMERIC_CHARS = set("0123456789,.%-+/|:")
 
-# Weight applied to a CJK character when measuring text (Issue #562). The
-# ratio below is character-weighted, and a CJK character carries far more
-# content than a Latin one — WikiCommit's own extracted_tokens heuristic
-# assumes ~4 Latin characters per token while a CJK character is roughly one
-# token on its own. Counting both as "1 character" therefore under-measures
-# CJK prose against the same markup, so equivalent Japanese and English prose
-# with the same link density scored far apart. 3 is the conservative end of
-# that 3-4x range. Note this weight can only ever move a text containing CJK:
-# it is a no-op on the ASCII JS/nav-shell fixtures guard A exists to catch.
+# Weight applied to a CJK character when measuring text. The ratio below is
+# character-weighted, and a CJK character carries far more content than a Latin
+# one — WikiCommit's own extracted_tokens heuristic assumes ~4 Latin characters
+# per token while a CJK character is roughly one token on its own. Counting both
+# as "1 character" therefore under-measures CJK prose against the same markup,
+# so equivalent Japanese and English prose with the same link density scored far
+# apart. 3 is the conservative end of that 3-4x range. Note this weight can only
+# ever move a text containing CJK: it is a no-op on the ASCII JS/nav-shell
+# fixtures guard A exists to catch.
 CJK_CHAR_WEIGHT = 3
 
 # Unicode ranges treated as CJK for CJK_CHAR_WEIGHT: CJK symbols/punctuation,
@@ -140,7 +140,7 @@ def _weight(text: str) -> int:
 # never fires in a language with no inter-word spaces: `参照 https://example.com/a、
 # 以下この資料による。` matched as one giant "URL", and since a URL never counts
 # as prose it took the prose with it — the same fusion _tokenize() exists to
-# undo, one layer further in (Issue #562).
+# undo, one layer further in.
 _URL_STOP_RANGES = _CJK_RANGES + ((0xFF01, 0xFF65),)
 
 _URL_STOP_CLASS = "".join(f"\\u{lo:04X}-\\u{hi:04X}" for lo, hi in _URL_STOP_RANGES)
@@ -188,7 +188,7 @@ def _normalize_policy_domain(raw: str) -> str:
 
 
 def policy_exclude_domains(path: Path = SOURCE_POLICY_PATH) -> set[str]:
-    """`wikicommit.exclude_domains` from .wikicommit/source-policy.md (Issue #564).
+    """`wikicommit.exclude_domains` from .wikicommit/source-policy.md.
 
     Where KNOWN_JS_SHELL_DOMAINS holds facts true for every wiki, this holds one
     wiki's own decisions — the two are unioned, never substituted. A repository
@@ -255,8 +255,8 @@ def check_domain(url: str) -> int:
 # missing without it). Without the package markitdown does not fail or warn —
 # it returns the metadata it *can* read and drops the rest, so the pipeline
 # runs to completion and records a page whose source URL never supplied the
-# content it claims to be based on (Issue #574; the same provenance failure
-# Issue #425 identified for x.com, reached by a different route).
+# content it claims to be based on (the same provenance failure as the x.com
+# empty shell, reached by a different route).
 #
 # Hosts are matched exactly against the normalized host (see _domain_of), so
 # every alias a site is reachable under has to be listed. The three hosts below
@@ -319,13 +319,13 @@ def _is_natural_token(token: str) -> bool:
 def _tokenize(text: str) -> list[tuple[str, str]]:
     """Split text into (kind, token) pairs, where kind is "url" or "word".
 
-    URLs are cut out at their own boundaries *before* whitespace splitting
-    (Issue #562). Splitting on whitespace alone is wrong for languages without
-    inter-word spaces: in Japanese, running prose and an adjacent
-    percent-encoded link target fuse into one enormous token, and since a URL
-    never counts as prose, the fused token took the prose down with it. In a
-    space-delimited language the URL is already its own token, so cutting at
-    URL boundaries changes nothing there.
+    URLs are cut out at their own boundaries *before* whitespace splitting.
+    Splitting on whitespace alone is wrong for languages without inter-word
+    spaces: in Japanese, running prose and an adjacent percent-encoded link
+    target fuse into one enormous token, and since a URL never counts as prose,
+    the fused token took the prose down with it. In a space-delimited language
+    the URL is already its own token, so cutting at URL boundaries changes
+    nothing there.
     """
     tokens: list[tuple[str, str]] = []
     pos = 0
@@ -345,22 +345,21 @@ def _density_report(text: str) -> tuple[float, dict[str, int]]:
     text (which has no inter-word spaces and so forms few, long tokens) isn't
     penalized relative to space-delimited languages; CJK characters carry
     CJK_CHAR_WEIGHT each, and URLs are measured percent-decoded, so that the
-    same prose with the same link density scores alike in Japanese and English
-    (Issue #562). The breakdown exists so a
-    human deciding whether to override a LOW_DENSITY result can see at a glance
-    whether the non-prose mass is link targets (a link-dense but genuine page),
-    numbers and table pipes (a statistics document — a known limitation of this
-    heuristic), or actual markup/script boilerplate.
+    same prose with the same link density scores alike in Japanese and English.
+    The breakdown exists so a human deciding whether to override a LOW_DENSITY
+    result can see at a glance whether the non-prose mass is link targets (a
+    link-dense but genuine page), numbers and table pipes (a statistics
+    document — a known limitation of this heuristic), or actual markup/script
+    boilerplate.
     """
     buckets = {"link": 0, "numeric": 0, "other": 0}
     natural_weight = 0
     total_weight = 0
     for kind, token in _tokenize(text):
-        # A URL is measured percent-decoded (Issue #562): `%E3%81%95` is one
-        # character of a page title that the transport encoding inflated to
-        # nine, and counting the inflated form made every link to a Japanese
-        # page look like nine times as much markup as the same link to an
-        # English one.
+        # A URL is measured percent-decoded: `%E3%81%95` is one character of
+        # a page title that the transport encoding inflated to nine, and
+        # counting the inflated form made every link to a Japanese page look
+        # like nine times as much markup as the same link to an English one.
         weight = _weight(unquote(token)) if kind == "url" else _weight(token)
         total_weight += weight
         if kind == "url":

@@ -121,8 +121,9 @@ nested under `properties:`, and a body template.
 
 Use `.wikicommit/schema/default.md` (the frontmatter skeleton) and
 `.wikicommit/schema/Person.md` (a concrete standard type) as the **fixed** style
-references. Do not go looking for a "closest existing type" to copy instead —
-these two, always.
+references for the `wikicommit:` block and the frontmatter. Do not go looking for
+a "closest existing type" to copy instead — these two, always. Their bodies are
+not the reference for the body: write it as "The body" below describes.
 
 ### The `wikicommit:` block
 
@@ -145,8 +146,53 @@ the value to use.
 line and a `properties:` block holding one placeholder per verified property —
 an empty string, or an empty list where the property's shape calls for one.
 
-Then a short body template: a 2–3 paragraph overview placeholder and a
-`## Details`-style section, following `default.md`'s shape.
+### The body: reader questions, not headings
+
+The body is a fenced `text` block, written in English like the rest of the file:
+
+````markdown
+```text
+READER QUESTIONS (<Type>)
+Readers: <who comes to a page of this type, and why>
+1. <the question most of them come with>
+2. ...
+```
+````
+
+Write 4–8 numbered questions, the ones most readers need first. Generation
+reads the block as the questions a page answers: it builds the page's sections
+from the questions the source answers, chooses the headings itself, and reports
+the questions the source does not answer instead of filling them. The block is
+never copied into a page. Do not write `##` headings — a heading in a type file
+fixes a section on every page, and a source that cannot fill it gets padded with
+loosely related material. The one exception is a heading that a script reads by
+name across pages, and a new type has none.
+
+**Write the questions from the readers of this kind of thing, not from the
+evidence in front of you.** Ask what someone who opens a page of this type wants
+to know about its subject. The evidence tells you what kind of subject the type
+covers; it is not the outline. A list modelled on how one source argues gives
+every page of the type that source's structure — a page about a tool built from
+a research paper comes out with "the problem the authors target" and "how others
+classify it" where a reader looked for "what it does" and "how it works". Check
+each question against a page built from a different source: a reader of that
+page would still ask it. This is also why thin evidence (a single sentence
+describing the wiki) is no reason to skip the block.
+
+- **One question per thing a reader wants to know.** A question that a table
+  answers best can say so (`a table when there are several along the same
+  dimensions`).
+- **A question that applies to only some subjects of the type says so in its own
+  words** (`For a practice or method only: …`). Generation skips it, rather than
+  reporting it unanswered, when the subject is not one of them.
+- **No question that only asks for related pages.** Related subjects are linked
+  where they come up in the text.
+
+Like `granularity`, nothing downstream checks the list; the person who reviews
+the change reads it. `.wikicommit/schema/DefinedTerm.md` and
+`.wikicommit/schema/Dataset.md` are examples when their body opens with a
+`READER QUESTIONS` block — a wiki initialized before the block existed may still
+have the older heading form there, and that form is not the one to copy.
 
 ---
 
@@ -161,6 +207,11 @@ Write 1–3 rules in the style of `.wikicommit/schema/Person.md` and
 `.wikicommit/schema/DefinedTerm.md`, grounded in what the evidence in front of
 you actually contained. State when a page of this type should be created, and
 when the subject belongs in someone else's page instead.
+
+Take the style from those two files, not their rules. `Person.md`'s rules about
+works of fiction and living individuals answer questions particular to people;
+a new type carries such a rule only when its own subjects raise the same
+question, and then in its own words.
 
 ### One rule must be a `Boundary` rule
 

@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""Report type schema files that are written in a shape nothing else checks
-(Issue #889).
+"""Report type schema files that are written in a shape nothing else checks.
 
-`wikicommit-generate`'s own instructions say "Nothing validates a schema file",
-and that was accurate. Files under `.wikicommit/schema/` come from three
-origins and CI could only reach one of them:
+Files under `.wikicommit/schema/` come from three origins and CI reaches only
+one of them:
 
     provenance: default                      distributed templates — four
                                              tests/test_schema_template_*.py
                                              files hold these to the conventions
     init-theme / collect /                   written at runtime by a Skill —
-    generate-interactive /                   nothing checked them
+    generate-interactive /                   nothing else checks them
     generate-auto / schema-propose
-    manual                                   written by hand — nothing checked
-                                             them either
+    manual                                   written by hand — nothing else
+                                             checks them either
 
 And a schema file cannot be repaired by any Skill afterwards: the narrow
 exception that lets one be written is add-only, so a file written in a broken
 shape stays broken until a person opens `.wikicommit/schema/` themselves.
 
-Every tool this needs already existed — `check_schema_org_type.py` verifies a
+Every tool this needs lives elsewhere — `check_schema_org_type.py` verifies a
 property against the vocabulary, `_schemaorg_vocab.py` resolves a type's
-ancestry, `provenance_of()` in check_installed_type_usage.py already reads the
-field. What was missing was something that ran them over the files.
+ancestry, `provenance_of()` in check_installed_type_usage.py reads the field.
+This script is what runs them over the files.
 
 ## Findings
 
@@ -42,27 +40,26 @@ fix here is a human editing a file no Skill may touch.
     TRUNCATED_BULLET
                     a `granularity` bullet whose raw line carries an unquoted
                     ` #`, which opens a YAML comment and drops the rest of the
-                    line. This is the failure mode Issue #649 singled out as
-                    the one nothing warns about: the bullet is still a string,
-                    so the parsed value looks fine and the missing half is
-                    simply gone
+                    line. This is the failure mode nothing else warns about: the
+                    bullet is still a string, so the parsed value looks fine and
+                    the missing half is simply gone
     NO_BOUNDARY     no `granularity` bullet begins with `Boundary`
-    BAD_PROVENANCE  a `provenance` value that is not one of the seven
-                    (Issue #519). **A missing value is not reported** — its
-                    absence means "written before that field existed"
+    BAD_PROVENANCE  a `provenance` value that is not one of the seven.
+                    **A missing value is not reported** — its absence means
+                    "written before that field existed"
     NO_BASE         no `wikicommit.base`
     NO_WIKICOMMIT_BLOCK
                     no `wikicommit:` block at all, so none of the fields above
                     can be there to find
     TYPE_PATH_MISMATCH
                     `type:` disagrees with the path the file sits at, the same
-                    check Issue #545 added for pages
+                    check validate_frontmatter.py applies to pages
     UNKNOWN_TYPE    `type:` and the path agree, and neither is in the Schema.org
                     vocabulary — usually a misspelling, and the file resolves to
                     no type at all. Only reported when the two agree: when they
                     do not, TYPE_PATH_MISMATCH has already named the one thing
                     to fix
-    NO_RATIONALE    a custom type with no `wikicommit.rationale` (Issue #548) —
+    NO_RATIONALE    a custom type with no `wikicommit.rationale` —
                     for a type outside the vocabulary that prose is the only
                     durable record of why it exists
     NO_FRONTMATTER / UNPARSEABLE
@@ -72,8 +69,8 @@ fix here is a human editing a file no Skill may touch.
 
 ## What is deliberately not reported
 
-- **A missing `provenance`.** Issue #519 defined its absence as "made before
-  this field existed", so reporting it would light up every older repository
+- **A missing `provenance`.** Its absence is defined as "made before this
+  field existed", so reporting it would light up every older repository
   for a state that is correct.
 - **`default.md`.** It carries no `type:` and no `base:` by design, being the
   fallback rather than a type.
@@ -83,8 +80,7 @@ fix here is a human editing a file no Skill may touch.
   need no vocabulary run for one — NO_BASE and NO_RATIONALE, which ask whether
   the field is there rather than whether its value resolves, still do.
 - **Prose quality in `granularity`.** Whether a rule is *right* is not
-  decidable here (Issue #552 reached the same conclusion and stopped at
-  strengthening the instructions). This looks only at shape.
+  decidable here. This looks only at shape.
 
 Usage:
     python .wikicommit/scripts/check_schema_files.py
@@ -106,7 +102,7 @@ from _schemaorg_vocab import (
     strip_prefix,
 )
 
-# The seven values of Issue #519, one per write site plus the hand-written case.
+# The seven values, one per write site plus the hand-written case.
 KNOWN_PROVENANCE = (
     "default",
     "init-theme",
@@ -133,9 +129,8 @@ def type_name_from_path(path: Path) -> str:
 
     This is the only derivation there is — nothing scans the directory by type
     name — so a file moved into a subdirectory of the maintainer's own invention
-    stops being found at all (Issue #575). Comparing the
-    derived name against the file's own `type:` is what turns that silent
-    failure into a report.
+    stops being found at all. Comparing the derived name against the file's own
+    `type:` is what turns that silent failure into a report.
     """
     return path.relative_to(SCHEMA_DIR).with_suffix("").as_posix()
 
@@ -148,11 +143,11 @@ def granularity_raw_bullets(path: Path) -> list[str]:
     way to notice is to read the line as written, which is why this walks the
     text rather than re-parsing.
 
-    Deliberately simple, per Issue #889's second point. It reads the lines
-    between `granularity:` and the next key at the same or shallower
-    indentation, and takes any that look like a list item. A file whose
-    `granularity` is written in YAML flow style (`granularity: [a, b]`) yields
-    nothing here, and the parsed-value checks still cover it.
+    Deliberately simple. It reads the lines between `granularity:` and the next
+    key at the same or shallower indentation, and takes any that look like a
+    list item. A file whose `granularity` is written in YAML flow style
+    (`granularity: [a, b]`) yields nothing here, and the parsed-value checks
+    still cover it.
 
     Scoped to the frontmatter block first, which is not optional: the closing
     `---` is itself a line beginning with `-`, so the "a line that is not a
@@ -287,10 +282,9 @@ def check_file(path: Path, index: dict | None) -> tuple[list[tuple[str, str]], s
             if not isinstance(entry, str):
                 # A mapping bullet still says what it says — and the bullet that
                 # loses to an unquoted `": "` is very often the Boundary one
-                # (`Boundary with NewsArticle: ...` is the shape three templates
-                # carried before Issue #550 replaced the colon with an em dash).
-                # Reading its key keeps NO_BOUNDARY from claiming, on top of
-                # MAPPING_BULLET, that a bullet plainly present is absent.
+                # (`Boundary with NewsArticle: ...`). Reading its key keeps
+                # NO_BOUNDARY from claiming, on top of MAPPING_BULLET, that a bullet
+                # plainly present is absent.
                 if isinstance(entry, dict) and any(
                     isinstance(key, str) and key.lstrip().startswith("Boundary") for key in entry
                 ):

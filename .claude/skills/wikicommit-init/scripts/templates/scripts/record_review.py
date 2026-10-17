@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""record_review.py — persist one review verdict as an immutable record (Issue #750).
+"""record_review.py — persist one review verdict as an immutable record.
 
 `wikicommit-generate` Pass 4 runs eight distinct checks over every page it
-generates — evidence binding (Issue #442), granular fact verification and
-naming-vs-inventing (Issue #451), secondary citations (Issue #473),
-attribution correctness and unattributed single-source formulations (Issue
-#429), source-vs-source disagreement and one-hop cross-page contradiction
-(Issue #566) — and then throws the verdict away. Pass 4 step 1 says so in as
-many words: the agent-to-agent JSON is "never written to disk or Git".
+generates — evidence binding, granular fact verification and
+naming-vs-inventing, secondary citations, attribution correctness and
+unattributed single-source formulations, source-vs-source disagreement and
+one-hop cross-page contradiction. The JSON those checks return stays between
+agents; this script persists a projection of each verdict (see below).
 
-The consequence is that a page which passed cleanly on the first attempt and a
-page that was caught hallucinating and only passed on the second look are
+Without a record, a page which passed cleanly on the first attempt and a page
+that was caught hallucinating and only passed on the second look are
 byte-identical on disk. The only thing that survives is `failed_pages`, which
 records the reviews that *could not* be salvaged — not the ones that worked.
 
 Four things follow from that, and this script exists to stop all four:
 
-- `## Failure Reason` already admits the gap in its own prescribed wording
+- `## Failure Reason` admits the gap in its own prescribed wording
   ("that detail is agent-to-agent only and is not persisted here").
-- `/wikicommit-fix` silently invalidates the AI review. It rewrites a page's
-  prose and `reset_review_on_content_change.py` sends `review_status` back to
-  `pending` (Issue #724) — but the machine-side verdict, made against the old
-  text, was never recorded, so nothing can notice it has gone stale.
+- `/wikicommit-fix` would silently invalidate the AI review. It rewrites a
+  page's prose and `reset_review_on_content_change.py` sends `review_status`
+  back to `pending` — but unless the machine-side verdict, made against the
+  old text, is recorded, nothing can notice it has gone stale.
 - Risk-based sampling has no input. How many retries a page took and what was
   found in them is precisely the blueprint for deciding which pages a human
-  should read, and it evaporated when the run ended.
+  should read, and unrecorded it evaporates when the run ends.
 - Bias cannot be measured, and measurement cannot be built retroactively: a
   period with no records is permanently blank.
 
@@ -40,7 +39,7 @@ new file into it:
 
 Create-only beats appending to one file per page on four counts. There is no
 read-modify-write, so the round-trip that cost this repository a config file's
-worth of comments (Issue #713) cannot happen here. Git merges are trivial
+worth of comments cannot happen here. Git merges are trivial
 because two branches adding two reviews add two different files. Several
 reviewers over one page — the shape a multi-perspective review takes — is
 expressed by construction. And a human can read and write these, which
@@ -50,7 +49,7 @@ a human has to be able to read the machine's.
 The filename is `<YYYYMMDD>-<HHMMSS>-<kind>.md`, following the existing
 `wikicommit/merge-<YYYYMMDD>-<HHMMSS>` branch convention. **The model ID is
 deliberately not in the filename**: a runtime reports itself as e.g.
-`claude-opus-5[1m]` (Issue #559 saw that exact spelling in real page data) and
+`claude-opus-5[1m]` (that exact spelling has turned up in real page data) and
 square brackets are glob metacharacters.
 
 Records outlive their pages. A deleted page keeps its review history, so this
@@ -61,15 +60,14 @@ most valuable record here, it is the design rather than an edge case.
 ## The frontmatter is the record; the body is for prose
 
 Findings go in frontmatter, not in the body. Putting them in the body would
-force the aggregation script to parse prose, which is the failure mode Issue
-#474 named. The body is for what has no structured home: a human's one-line
-observation, an Issue close comment.
+force the aggregation script to parse prose. The body is for what has no
+structured home: a human's one-line observation, an Issue close comment.
 
 `source_quote` is dropped even when the caller passes it. It is verbatim
 source text, and systematically accumulating excerpts across a whole wiki is a
 different act from quoting one in a page — this project already treats a
-source's terms as a matter of fact rather than assumption (`sources[].license`,
-Issue #558 / #570), and the same reasoning applies to its own records.
+source's terms as a matter of fact rather than assumption (`sources[].license`),
+and the same reasoning applies to its own records.
 `source_file` plus `source_lines` is enough to go back and look. Dropping it
 here rather than in the calling instructions means the guarantee does not
 depend on an agent following prose, and it also removes the only path by which
@@ -92,7 +90,7 @@ reviewer. A view page records its `derived_from` entries in the same slot.
 
 `findings` holds **every round**, flat, each tagged with `round:`. Pass 4
 retries up to `generate.max_retries` and each round can turn up a different
-defect (Issue #571 saw three rounds find three different problems); recording
+defect (three rounds have been seen to find three different problems); recording
 only the last round would give a page that failed once and was fixed an empty
 `findings` list, erasing the one signal most worth having. Flat rather than
 nested because every aggregation — totals, counts by `type`, the highest round
@@ -103,8 +101,7 @@ cannot be recovered from `max(round)` when the final round found nothing.
 
 That JSON stays agent-to-agent, and stays free to gain fields. What is
 persisted is a **projection** of it, and that projection is a compatibility
-surface. Do not read "this format may change freely" onto this file (Issue
-#750).
+surface. Do not read "this format may change freely" onto this file.
 
 Usage:
     python .wikicommit/scripts/record_review.py <page> \\
@@ -205,7 +202,7 @@ def record_dir_for(page_rel: str) -> Path:
     trees stay distinguishable under one root and a page name can never collide with
     a directory of another tree.
 
-    A page still on the pre-Issue-#477 `.wikicommit/wiki/` prefix is filed under
+    A page still on the legacy `.wikicommit/wiki/` prefix is filed under
     `entity/` rather than a third `wiki/` subtree: the record is about the page, and
     a repository that later runs `git mv` should not end up with its history split
     across two directories.
@@ -259,7 +256,7 @@ def page_evidence_entries(fm: dict) -> list[dict]:
 
     `sources[]` for a page generated from documents, `derived_from` for a view
     page, and — for a translation — one entry built from `translated_from` and
-    `source_commit` (Issue #1031): the evidence of a translation check is the
+    `source_commit`: the evidence of a translation check is the
     original page at the commit it was translated from. `translated_from` is a
     single string and `source_commit` its sibling field, so the entry is
     assembled rather than read. An empty `source_commit` (the original was not
@@ -353,7 +350,7 @@ def project_findings(payload: dict) -> list[dict]:
                 continue
             value = issue.get(field)
             # Keep empty strings that carry meaning: synthesize's MISSING_SOURCE
-            # deliberately leaves `source_file` empty (Issue #674), and dropping the
+            # deliberately leaves `source_file` empty, and dropping the
             # key would make that indistinguishable from a caller that forgot it.
             if value is None:
                 continue
@@ -460,15 +457,15 @@ def allocate_record_path(directory: Path, stamp: str, kind: str) -> Path:
     That suffix is why `record_sort_key()` exists: it does not sort lexically after
     the unsuffixed name.
 
-    **The stamp is clamped to the newest record already here (Issue #991.)** Which
+    **The stamp is clamped to the newest record already here.** Which
     record is current is decided by this order — `standing_review()`,
     `standing_verdict()`, `latest_discarded()` and every count in
-    `check_review_coverage.py` read it — and the order came from `datetime.now()`,
+    `check_review_coverage.py` read it — and the stamp comes from `datetime.now()`,
     which is not monotonic. A container whose clock is stepped backwards by its host
     (measured on WSL2: four steps of 0.49-0.58s in 24 seconds) can hand two records
     written in sequence timestamps in the opposite order, and then the *older* record
-    is read as the standing one. Nothing warns: records are immutable by contract
-    (Issue #750), so there is no later moment at which the inversion could be noticed.
+    is read as the standing one. Nothing warns: records are immutable by contract,
+    so there is no later moment at which the inversion could be noticed.
 
     Clamping reuses the mechanism that is already here for the same-second case, so
     the documented filename shape is unchanged, `record_sort_key()` is unchanged, and
@@ -526,7 +523,7 @@ def build_record(args, payload: dict, page_path: Path, page_rel: str) -> tuple[d
     if args.sources_from:
         reviewed_sources = sources_from_management_files(args.sources_from)
     elif args.stage == "translate-check" and args.result == "discarded":
-        # Issue #1031: re-translating a STALE pair that ran out of retries leaves
+        # Re-translating a STALE pair that ran out of retries leaves
         # the *previous* translation on disk, and its source_commit names the
         # original this run did not check against. Reading it would make the
         # record claim a version it never saw, so a discarded translation check
@@ -544,7 +541,7 @@ def build_record(args, payload: dict, page_path: Path, page_rel: str) -> tuple[d
     }
     # Only the field that applies to this kind is written. Shipping the other one
     # empty would leave a key that is permanently empty on every record of that kind —
-    # the shape Issue #553 rules out.
+    # a slot with no reader, which is not shipped.
     if args.kind == "ai":
         record["model"] = args.model
     elif args.reviewer:
@@ -553,7 +550,7 @@ def build_record(args, payload: dict, page_path: Path, page_rel: str) -> tuple[d
     record["reviewed_at"] = args.reviewed_at or datetime.now().strftime("%Y-%m-%d")
     if args.skill_blob:
         # Absent for `stage: issue-close`, where the reviewer is a human and no
-        # SKILL.md governed the judgment (Issue #750 検討事項 5).
+        # SKILL.md governed the judgment.
         record["skill_blob"] = args.skill_blob
     record["wikicommit_version"] = get_version()
     record["page_content_hash"] = content_hash

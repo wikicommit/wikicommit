@@ -6,27 +6,30 @@ Usage:
         [--skip-type-mismatch]
 
 With no arguments, every page under .wikicommit/entity/ is checked, matching
-validate_frontmatter.py, check_raw_html.py and check_orphans.py. It used to
-print "OK: 0 files checked" and exit 0 instead — output a reader cannot tell
-from a clean run of a real check (Issue #571). wikicommit-merge always passes
---changed, so the diff-scoped behaviour it relies on is unaffected.
+validate_frontmatter.py, check_raw_html.py and check_orphans.py, rather than
+printing "OK: 0 files checked" and exiting 0 — output a reader cannot tell from
+a clean run of a real check. wikicommit-merge always passes --changed, so it
+keeps the diff-scoped behaviour it relies on.
 
 --changed checks the links a page makes; --deleted checks the links other
 pages still make to a page being marked removed. They are independent: a page
-in both lists gets both checks (Issue #1257 — the backlink check used to be
-skipped for such a page, and since wikicommit-merge lists every removed page
-in --changed as well, the WARNING the removal flow promises never appeared
-when the change fitted one call). wikicommit-merge now calls the two
+in both lists gets both checks — skipping the backlink check for such a page
+would drop the WARNING the removal flow promises, since wikicommit-merge lists
+every removed page in --changed as well. wikicommit-merge calls the two
 separately: --changed per group of changed pages, --deleted per group of
 removed pages, so each page's findings come from exactly one call.
 
+A `[[...]]` that is not a WikiLink at all — no Type segment, a `#heading`,
+a `Prop::` prefix, an empty display text — is reported as a WARNING for every
+page in --changed. `[[Type/slug|display text]]` is a WikiLink and is
+checked like `[[Type/slug]]`.
+
 --skip-type-mismatch drops the Type-segment ERROR (a link whose slug exists
-under another Type). wikicommit-status passes it, because
-check_wanted_pages.py already reports the same finding as TYPE_MISMATCH: and
-the status report would otherwise list it twice (Issue #976). The flag is a
-script option rather than a filter in the SKILL.md prose so that the dedup
-does not depend on the wording of the message. wikicommit-merge never passes
-it — there the ERROR still blocks.
+under another Type). wikicommit-status passes it, because check_wanted_pages.py
+already reports the same finding as TYPE_MISMATCH: and the status report would
+otherwise list it twice. The flag is a script option rather than a filter in the
+SKILL.md prose so that the dedup does not depend on the wording of the message.
+wikicommit-merge never passes it — there the ERROR still blocks.
 
 Exit code: 0 = no ERROR (WARNINGs OK), 1 = at least one ERROR.
 """
@@ -39,11 +42,11 @@ from pathlib import Path
 from _wikilink import (
     ENTITY_DIR,
     VIEW_DIR,
-    WIKILINK_RE,
     build_slug_type_index,
     collect_entity_pages,
     collect_view_pages,
     extract_wikilinks as extract_wikilinks_from_text,
+    find_malformed_wikilinks,
     is_removed,
     link_target_path,
     load_primary_lang,
@@ -63,9 +66,9 @@ def _emit_annotation(level: str, title: str, message: str, file_path: str | None
 
 
 # load_primary_lang / page_lang / is_removed / link_target_path /
-# type_slug_from_wiki_path all moved to _wikilink.py when build_onehop_context.py
-# needed the same resolution (Issue #947). `get_lang` is kept as a local alias
-# because it is the name this script's own tests call.
+# type_slug_from_wiki_path live in _wikilink.py because build_onehop_context.py
+# needs the same resolution. `get_lang` is kept as a local alias because it is
+# the name this script's own tests call.
 get_lang = page_lang
 
 
@@ -156,7 +159,26 @@ def main() -> int:
             rel_str = str(path)
 
         lang = get_lang(path, primary_lang)
-        wikilinks = extract_wikilinks(path)
+        # Read once: both the WikiLinks and the malformed `[[...]]` come from it.
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            content = ""
+        wikilinks = extract_wikilinks_from_text(content)
+
+        # `[[...]]` that is not a WikiLink at all: no gate below sees it, the
+        # publish step leaves it as written, and nothing else reports it.
+        # A WARNING rather than an ERROR, like the unresolved link below: the
+        # fix is a one-word rewrite the author can make later, and blocking it
+        # would push authors toward plain text instead.
+        for raw in find_malformed_wikilinks(content):
+            msg = (
+                f"{raw} → not a WikiLink (write [[Type/slug]] or [[Type/slug|display text]]); "
+                "no check sees it and it is published as written"
+            )
+            print(f"WARNING: {rel_str}: {msg}")
+            _emit_annotation("warning", "wikilink-malformed", f"{rel_str}: {msg}", rel_str)
+            total_warnings += 1
 
         for type_name, slug in wikilinks:
             lang_path = link_target_path(type_name, slug, lang, entity_dir, view_dir)
@@ -209,10 +231,10 @@ def main() -> int:
                     for d in root.iterdir() if d.is_dir()
                 )
                 if other_types and args.skip_type_mismatch and not exists_elsewhere:
-                    # Reported by check_wanted_pages.py as TYPE_MISMATCH: — the
-                    # caller asked not to hear it twice (Issue #976). Not a
-                    # WARNING either: that would mislabel an existing page as
-                    # missing, which is exactly what this branch exists to avoid.
+                    # Reported by check_wanted_pages.py as TYPE_MISMATCH: — the caller
+                    # asked not to hear it twice. Not a WARNING either: that would
+                    # mislabel an existing page as missing, which is exactly what this
+                    # branch exists to avoid.
                     # Only when <Type>/<slug> has no page in any language: that is
                     # the condition check_wanted_pages.py reports under. If it
                     # exists in some third language (or only as a removed page),
@@ -220,14 +242,14 @@ def main() -> int:
                     # only report left and must not be dropped.
                     pass
                 elif other_types:
-                    # The page exists; only the Type segment is wrong. Issue #340's
-                    # reason for not blocking does not reach this case: the author
-                    # cannot dodge the report by leaving the mention as plain text,
-                    # because the concept demonstrably already has a page. The fix
-                    # is one word, so block and name where the page actually is —
-                    # left as a WARNING it reads exactly like the line below, and
-                    # check_wanted_pages.py would go on to advise creating a
-                    # duplicate of a page that is already there (Issue #563).
+                    # The page exists; only the Type segment is wrong. The reason for
+                    # not blocking a missing page (below) does not reach this case:
+                    # the author cannot dodge the report by leaving the mention as
+                    # plain text, because the concept demonstrably already has a page.
+                    # The fix is one word, so block and name where the page actually
+                    # is — left as a WARNING it reads exactly like the line below, and
+                    # check_wanted_pages.py would go on to advise creating a duplicate
+                    # of a page that is already there.
                     found = ", ".join(f"{t}/{slug}.md" for t in other_types)
                     msg = (
                         f"[[{type_name}/{slug}]] → this page does not exist, but the "
@@ -239,12 +261,12 @@ def main() -> int:
                     )
                     total_errors += 1
                 else:
-                    # Issue #340: downgraded from ERROR to WARNING. Blocking this case
-                    # pushed both LLM and human authors toward leaving not-yet-created
-                    # concepts as plain text instead of WikiLinks, so recurring concepts
-                    # (e.g. benchmark names mentioned across multiple sources) never
-                    # accumulated enough signal to get their own page. check_wanted_pages.py
-                    # now surfaces these as a non-blocking report instead.
+                    # A WARNING, not an ERROR: blocking this case would push both LLM
+                    # and human authors toward leaving not-yet-created concepts as plain
+                    # text instead of WikiLinks, so recurring concepts (e.g. benchmark
+                    # names mentioned across multiple sources) would never accumulate
+                    # enough signal to get their own page. check_wanted_pages.py
+                    # surfaces these as a non-blocking report instead.
                     msg = f"[[{type_name}/{slug}]] → page does not exist"
                     print(f"WARNING: {rel_str}: {msg}")
                     _emit_annotation("warning", "wikilink-missing", f"{rel_str}: {msg}", rel_str)
@@ -254,14 +276,14 @@ def main() -> int:
     backlink_index: dict[str, list[str]] = {}
     if deleted_paths and entity_dir.exists():
         # collect_entity_pages() matches "assets" below entity_dir, not against
-        # the whole path. entity_dir here is absolute (repo_root / ENTITY_DIR),
-        # and the old `"assets" in wiki_page.parts` therefore skipped every page
-        # in a repository that merely lived under a directory named "assets",
-        # leaving this index empty — so the --deleted backlink WARNING, the one
-        # thing the removal flow relies on to spot links left dangling, silently
-        # stopped being emitted (Issue #677). index.md is kept: rebuild_index.py
-        # writes each page's own WikiLink into it, and a link there is a real
-        # remaining reference to a page being removed.
+        # the whole path. entity_dir here is absolute (repo_root / ENTITY_DIR), so
+        # a test like `"assets" in wiki_page.parts` would skip every page in a
+        # repository that merely lives under a directory named "assets", leaving
+        # this index empty — so the --deleted backlink WARNING, the one thing the
+        # removal flow relies on to spot links left dangling, would silently stop
+        # being emitted. index.md is kept: rebuild_index.py writes each page's own
+        # WikiLink into it, and a link there is a real remaining reference to a
+        # page being removed.
         for wiki_page in collect_entity_pages(entity_dir, include_index=True) + collect_view_pages(
             view_dir, include_index=True
         ):
@@ -273,7 +295,7 @@ def main() -> int:
                 ref_str = str(wiki_page.relative_to(repo_root))
             except ValueError:
                 ref_str = str(wiki_page)
-            for wl_type, wl_slug in WIKILINK_RE.findall(content):
+            for wl_type, wl_slug in extract_wikilinks_from_text(content):
                 key = f"{wl_type}/{wl_slug}"
                 refs = backlink_index.setdefault(key, [])
                 if ref_str not in refs:
@@ -281,8 +303,7 @@ def main() -> int:
 
     # ── Check --deleted files for remaining backlinks ──────────────────────
     # A page that is also in --changed is checked here too: its own outgoing links
-    # (above) and the links other pages still make to it are different findings
-    # (Issue #1257).
+    # (above) and the links other pages still make to it are different findings.
     for del_path in deleted_paths:
         try:
             del_rel_str = str(del_path.relative_to(repo_root))

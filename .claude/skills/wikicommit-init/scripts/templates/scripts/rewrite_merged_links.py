@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""rewrite_merged_links.py — point WikiLinks at the page a removed page was merged into (Issue #1119).
+"""rewrite_merged_links.py — point WikiLinks at the page a removed page was merged into.
 
 When pages are merged, the absorbed ones are taken down with
 `removed_reason: merged` and `merged_into: <kept page>`. Every link to them is
@@ -27,7 +27,17 @@ same concept — the claim around it is unchanged). For the same reason
 undoes each merge recorded in `relations.yml` before deciding a page changed.
 
     REWRITTEN: <path> (<N> link(s))
+    SELF_LINK: <path> ([[<Type/slug>]] now links to the page itself)
+    ALSO_LINKED: <path> ([[<Type/slug>]] now stands where different pages were linked)
     SUMMARY: merged=<N>, pages=<N>, links=<N>
+
+The two notes name what a rewrite cannot settle by itself. A page that linked
+to the absorbed page and is the kept page (in practice its translation, which
+predates the merge) now links to itself; a page that linked to both — or to two
+pages merged into the same one — now names the kept page twice, often as two
+items of one list. Removing a link is an edit to the text, not to the link, so
+the script leaves both as they are and says where they are; `ALSO_LINKED:` pages
+are also the ones `check_review_coverage.py` lists under `STALE_REVIEW:`.
 
 `--dry-run` prints the same lines and writes nothing.
 
@@ -48,6 +58,7 @@ from _wikilink import (
     normalize_entity_prefix,
     parse_view_path,
     parse_wiki_path,
+    retarget_wikilink,
 )
 
 
@@ -136,17 +147,29 @@ def main(argv: list[str]) -> int:
             if target is None:
                 return match.group(0)
             count += 1
-            return f"[[{target}]]"
+            # Keep the display text of `[[Type/slug|表示名]]`:
+            # only the target changes, and check_review_coverage.py's
+            # _undo_rewrite() reverses exactly this.
+            return retarget_wikilink(match, target)
 
         new_text = WIKILINK_RE.sub(swap, text)
         if count == 0:
             continue
+        linked_before = {f"{m.group(1)}/{m.group(2)}" for m in WIKILINK_RE.finditer(text)}
+        own = ident_of(page)
+        targets = sorted({mapping[i] for i in linked_before if i in mapping})
         if not args.dry_run:
             with page.open("w", encoding="utf-8", newline="") as f:
                 f.write(new_text)
         rewritten_pages += 1
         rewritten_links += count
         print(f"REWRITTEN: {page.as_posix()} ({count} link(s))")
+        for target in targets:
+            if target == own:
+                print(f"SELF_LINK: {page.as_posix()} ([[{target}]] now links to the page itself)")
+            elif target in linked_before or sum(mapping.get(i) == target for i in linked_before) > 1:
+                print(f"ALSO_LINKED: {page.as_posix()} ([[{target}]] now stands where different "
+                      "pages were linked)")
     print(f"SUMMARY: merged={len(mapping)}, pages={rewritten_pages}, links={rewritten_links}")
     return 0
 

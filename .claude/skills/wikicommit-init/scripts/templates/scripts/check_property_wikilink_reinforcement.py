@@ -1,25 +1,19 @@
 #!/usr/bin/env python3
 """Detect `properties:` keys in a type schema file whose Schema.org
-`rangeIncludes` includes a linkable entity type (Issue #496 — "entity-only"
-or "mixed" range, per check_schema_org_type.py's --show-range classification)
-but that the schema file gives no textual reinforcement toward writing as a
+`rangeIncludes` includes a linkable entity type ("entity-only" or "mixed"
+range, per check_schema_org_type.py's --show-range classification) but that
+the schema file gives no textual reinforcement toward writing as a
 `[[Type/slug]]` WikiLink.
 
-Issue #523 found and fixed one such gap by hand (`publisher` on
-BlogPosting.md/NewsArticle.md carried the same entity-only range as `author`,
-which was reinforced, but had no reinforcement of its own) and then, via
-`/code-review --fix` on that Issue's PR, found four more of the same shape
-across other standard type templates (Organization.md's foundingLocation,
-Person.md's affiliation, Place.md's containedInPlace, Event.md's
-organizer/performer) by repeating the same manual `--show-range` cross-check.
-This script automates that cross-check so the next such gap doesn't require
-another manual audit to surface (Issue #539).
+This automates the manual `--show-range` cross-check of each type template's
+`properties:` against its reinforcement, so such a gap doesn't require a
+manual audit to surface.
 
-"Reinforcement" means either of the two forms Issue #523's fixes used:
+"Reinforcement" means either of two forms:
   - the schema file's `wikicommit.granularity` prose has a bullet that names
     the property (as a whole word) *and* points toward linking it — the rest of
-    the bullet contains `[[` or the substring `link` (Issue #650; see
-    LINK_CUE_RE below for why naming it alone is not enough), e.g.
+    the bullet contains `[[` or the substring `link` (see LINK_CUE_RE below
+    for why naming it alone is not enough), e.g.
     BlogPosting.md's granularity entry "author lists multiple names; link each
     author ... with a WikiLink"; or
   - the `properties:` block's placeholder value for that key already
@@ -29,10 +23,10 @@ another manual audit to surface (Issue #539).
 A property with neither is reported as UNREINFORCED — not blocking (the
 uniform Pass 3 rule in wikicommit-generate/SKILL.md already covers
 unreinforced properties correctly in principle; this is only a nudge toward
-the belt-and-suspenders reinforcement Issue #523 established as the norm for
-this codebase's own type templates), and purely a starting point for human
-judgment: a property may be deliberately left unreinforced if its dominant
-real-world usage in this wiki's content is scalar rather than a link.
+the belt-and-suspenders reinforcement that is the norm for this codebase's own
+type templates), and purely a starting point for human judgment: a property may
+be deliberately left unreinforced if its dominant real-world usage in this
+wiki's content is scalar rather than a link.
 
 Only Schema.org-backed types are in scope. Custom types (`schema:custom/...`)
 have no Schema.org vocabulary entry to classify a range against, and
@@ -65,7 +59,7 @@ def collect_type_schema_files() -> list[Path]:
 
 def granularity_strings(path: Path, wikicommit_block: object) -> list[str]:
     """Return the `wikicommit.granularity` bullets that are usable as prose,
-    warning about every entry that is not (Issue #649).
+    warning about every entry that is not.
 
     An unquoted YAML list item containing a top-level `key: value` shape is
     parsed as a single-key mapping, not as a scalar — so a bullet written as
@@ -107,19 +101,20 @@ def granularity_strings(path: Path, wikicommit_block: object) -> list[str]:
 
 
 # A granularity bullet counts as prose reinforcement only if it also points
-# toward linking (Issue #650). Naming the property alone is not enough: a bullet
-# can name one in order to say the opposite, and mentioning-only matching read
-# those as reinforcement twice in a row — HowTo.md's boundary rule ending in
-# "the service, tool, or concept they operate on" silenced HowTo.tool (Issue
-# #550), and then a bullet added to say `tool`/`supply` are often empty and
-# should be left out silenced both tool and supply (Issue #551). The first was
-# fixed by rewording; the second could not be, because naming those two
-# properties is that bullet's entire purpose.
+# toward linking. Naming the property alone is not enough: a bullet can name
+# one in order to say the opposite, and mentioning-only matching read those as
+# reinforcement twice in a row — HowTo.md's boundary rule ending in
+# "the service, tool, or concept they operate on" silenced HowTo.tool, and then
+# a bullet added to say `tool`/`supply` are often empty and should be left out
+# silenced both tool and supply. The first was fixed by rewording; the second
+# could not be, because naming those two properties is that bullet's entire
+# purpose.
 #
-# Every reinforcement Issue #523 actually wrote satisfies this ("link each
-# author who independently qualifies for their own [[Person/slug]] page with a
-# WikiLink"), and both negative bullets above fail it. `link` is matched as a
-# substring so that "WikiLink", "linked" and "linking" all count.
+# The reinforcements first written into the type templates by hand satisfy
+# this ("link each author who independently qualifies for their own
+# [[Person/slug]] page with a WikiLink"), and both negative bullets above fail
+# it. `link` is matched as a substring so that "WikiLink", "linked" and
+# "linking" all count.
 #
 # The cue is looked for in the bullet with the property's own name removed, so
 # that a property whose *name* contains the substring (schema:originalMediaLink,
@@ -136,14 +131,13 @@ LINK_CUE_RE = re.compile(r"\[\[|link", re.IGNORECASE)
 
 
 def is_reinforced(prop_name: str, prop_value: object, granularity: list[str]) -> bool:
-    """True if prop_name is reinforced via granularity prose (Issue #523's
-    "author lists multiple names; link each author..." pattern — the bullet has
-    to name the property *and*, elsewhere in that same bullet, point toward
-    linking, per LINK_CUE_RE above) or
-    via a `[[...]]` WikiLink placeholder already present in the `properties:`
-    value (Issue #523's "affiliation: [[Organization/slug]]" pattern) —
-    either is sufficient, matching the two independent fixes Issue #523
-    actually applied across different templates."""
+    """True if prop_name is reinforced via granularity prose (the
+    "author lists multiple names; link each author..." pattern — the bullet
+    has to name the property *and*, elsewhere in that same bullet, point
+    toward linking, per LINK_CUE_RE above) or via a `[[...]]` WikiLink
+    placeholder already present in the `properties:` value (the
+    "affiliation: [[Organization/slug]]" pattern) — either is sufficient,
+    since the two are independent fixes, applied across different templates."""
     word = re.compile(rf"\b{re.escape(prop_name)}\b")
     if any(word.search(g) and LINK_CUE_RE.search(word.sub(" ", g)) for g in granularity):
         return True

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { coerceToBool, getVisibleProperties } from "./transformer"
+import { coerceToBool, getVisibleProperties, isEmptyValue } from "./transformer"
 import type { WikiCommitPropertiesOptions } from "./types"
 
 const baseOpts: WikiCommitPropertiesOptions = {
   includeAll: false,
   includedProperties: ["description", "tags", "aliases", "properties"],
   excludedProperties: [],
+  proseProperties: [],
   hidePropertiesView: false,
   delimiters: "---",
   language: "yaml",
@@ -99,11 +100,55 @@ describe("getVisibleProperties (Issue #509 flattening)", () => {
     expect(result.tags).toEqual(["a", "b"])
   })
 
-  it("does not flatten null values", () => {
+  it("does not flatten null values, and leaves them out as empty (Issue #1292)", () => {
     const opts: WikiCommitPropertiesOptions = { ...baseOpts, includeAll: true }
-    const data = { description: null }
+    const data = { description: null, tags: ["a"] }
     const result = getVisibleProperties(data, opts)
-    expect(result.description).toBeNull()
+    expect(result).toEqual({ tags: ["a"] })
+  })
+
+  // Issue #1292: an unknown or inapplicable field is not shown at all —
+  // no blank row, no "—".
+  it("leaves out blank strings, empty lists and lists of blanks, top-level or nested", () => {
+    const data = {
+      aliases: [],
+      properties: {
+        jobTitle: "",
+        birthDate: "  ",
+        affiliation: [""],
+        founder: null,
+        genre: "mystery",
+        latitude: 0,
+        isAccessibleForFree: false,
+      },
+    }
+    const result = getVisibleProperties(data, baseOpts)
+    expect(result).toEqual({ genre: "mystery", latitude: 0, isAccessibleForFree: false })
+  })
+
+  it("leaves proseProperties out of the flattened rows but keeps a top-level field of that name", () => {
+    const opts: WikiCommitPropertiesOptions = {
+      ...baseOpts,
+      proseProperties: ["description", "abstract"],
+    }
+    const data = {
+      description: "top-level",
+      properties: { description: "lead", abstract: "long", author: "[[Person/a]]" },
+    }
+    const result = getVisibleProperties(data, opts)
+    expect(result).toEqual({ description: "top-level", author: "[[Person/a]]" })
+  })
+
+  it("keeps an empty top-level field's key from being taken by a nested one", () => {
+    const data = { tags: [], properties: { tags: ["nested"], genre: "x" } }
+    const result = getVisibleProperties(data, baseOpts)
+    expect(result).toEqual({ genre: "x" })
+  })
+
+  it("drops empty entries from a list that is not wholly empty", () => {
+    const data = { properties: { author: ["[[Person/a]]", "", null] } }
+    const result = getVisibleProperties(data, baseOpts)
+    expect(result).toEqual({ author: ["[[Person/a]]"] })
   })
 
   // Custom types are exempt from the
@@ -160,5 +205,16 @@ describe("coerceToBool (Issue #514, upstream-inherited bug #3)", () => {
     expect(coerceToBool(undefined)).toBeUndefined()
     expect(coerceToBool(null)).toBeUndefined()
     expect(coerceToBool("yes")).toBeUndefined()
+  })
+})
+
+describe("isEmptyValue", () => {
+  it("treats only nothing-to-show values as empty", () => {
+    expect(isEmptyValue(undefined)).toBe(true)
+    expect(isEmptyValue("")).toBe(true)
+    expect(isEmptyValue([null, " "])).toBe(true)
+    expect(isEmptyValue(0)).toBe(false)
+    expect(isEmptyValue(false)).toBe(false)
+    expect(isEmptyValue({})).toBe(false)
   })
 })

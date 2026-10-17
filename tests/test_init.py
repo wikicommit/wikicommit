@@ -1756,6 +1756,16 @@ def test_guidance_drops_the_readme_suggestions_when_init_created_the_readme():
     assert "Decide how this repository is licensed" in created
 
 
+def test_guidance_prints_the_markdown_it_install_only_when_it_is_missing():
+    """Issue #1342: check_raw_html.py fails closed without markdown-it-py, so an init that
+    could not install it must say what to run — and must not repeat it when it could."""
+    missing = _next_steps("--variant", "none")
+    assert "pip install markdown-it-py" in missing
+    installed = _next_steps("--variant", "none", "--markdown-it-installed")
+    assert "pip install markdown-it-py" not in installed
+    assert "✅ markdown-it-py is installed." in installed
+
+
 def test_guidance_keeps_the_readme_suggestions_when_the_readme_was_already_there():
     kept = _next_steps("--variant", "quartz_pages", "--pages-html-url", "https://x/")
     assert "View the wiki" in kept

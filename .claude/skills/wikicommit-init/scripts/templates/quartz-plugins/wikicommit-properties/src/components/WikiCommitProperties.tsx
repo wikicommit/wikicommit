@@ -219,6 +219,29 @@ function renderTagList(tags: string[], ctx: RenderCtx): preact.JSX.Element {
   return <span class="wikicommit-properties-tags">{items}</span>
 }
 
+// The row's label (Issue #1292). The distributed type templates' keys carry a
+// label per locale (`labels` in each locale file); any other key — a custom
+// type's, or one Pass 2b added — is its Schema.org name split into words
+// ("variableMeasured" -> "Variable measured"), in English whatever the page
+// language, since there is no translation to look it up in. A run of
+// capitals stays as it is ("sameAs" -> "Same as", "isbnURL" -> "Isbn URL").
+export function humanizeKey(key: string): string {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[\s_-]+/)
+    .filter((w) => w.length > 0)
+    .map((w) => (w === w.toUpperCase() && w.length > 1 ? w : w.toLowerCase()))
+  if (words.length === 0) return key
+  const first = words[0]!
+  words[0] = first.charAt(0).toUpperCase() + first.slice(1)
+  return words.join(" ")
+}
+
+export function labelFor(key: string, labels: Record<string, string>): string {
+  return Object.prototype.hasOwnProperty.call(labels, key) ? labels[key]! : humanizeKey(key)
+}
+
 export default ((opts?: WikiCommitPropertiesComponentOptions) => {
   const { collapsed = false } = opts ?? {}
 
@@ -246,6 +269,7 @@ export default ((opts?: WikiCommitPropertiesComponentOptions) => {
     const frontmatter = props.fileData?.frontmatter as Record<string, unknown> | undefined
     const t = i18n(resolveLocale(frontmatter?.lang, props.cfg?.locale)).components
       .wikicommitProperties
+    const labels: Record<string, string> = t.labels
     const ctx: RenderCtx = {
       slug: (props.fileData?.slug as string) ?? "",
       resolvedLinks: wcProps.resolvedLinks ?? {},
@@ -255,7 +279,12 @@ export default ((opts?: WikiCommitPropertiesComponentOptions) => {
     const isCollapsed = wcProps.collapseProperties ?? collapsed
     return (
       <details
-        class={classNames(props.displayClass, "wikicommit-properties", "metadata-container")}
+        class={classNames(
+          props.displayClass,
+          "wikicommit-properties",
+          "wikicommit-infobox",
+          "metadata-container",
+        )}
         open={!isCollapsed}
         data-collapsed={isCollapsed}
       >
@@ -267,7 +296,13 @@ export default ((opts?: WikiCommitPropertiesComponentOptions) => {
           <tbody>
             {entries.map(([key, value]) => (
               <tr key={key} class="wikicommit-properties-row metadata-property">
-                <td class="wikicommit-properties-key metadata-property-key">{key}</td>
+                <th
+                  scope="row"
+                  class="wikicommit-properties-key metadata-property-key"
+                  data-key={key}
+                >
+                  {labelFor(key, labels)}
+                </th>
                 <td class="wikicommit-properties-value metadata-property-value">
                   {key === "tags" && Array.isArray(value)
                     ? renderTagList(value as string[], ctx)

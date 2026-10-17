@@ -47,8 +47,8 @@ loses `reviewed_by`): the title is content, and a person's sign-off covers the
 text they read. Its translations are left for `/wikicommit-translate` like any
 other translation of a changed page. Review records stay where they are: a
 record names the page path it judged. `check_review_coverage.py` and the publish
-banner follow the `renamed_at` item back to them (Issue #1162); with the title
-changed, the verdict reads as `STALE_REVIEW:` until the new page is reviewed.
+banner follow the `renamed_at` item back to them; with the title changed, the
+verdict reads as `STALE_REVIEW:` until the new page is reviewed.
 
 Refused (exit 1, nothing written) when the page is missing, removed, a
 translation, a synthesized page or outside `primary_lang`; when the year is not

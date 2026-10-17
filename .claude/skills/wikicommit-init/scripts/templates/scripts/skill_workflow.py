@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""skill_workflow.py — hold the progress of a multi-step Skill run in a script (Issue #1085).
+"""skill_workflow.py — hold the progress of a multi-step Skill run in a script.
 
 The Skill workflow engine: it runs a workflow definition (`<skill>/workflow.yaml`).
-"Skill workflow" keeps it apart from a CI workflow (GitHub Actions) in prose
-(Issue #1203).
+"Skill workflow" keeps it apart from a CI workflow (GitHub Actions) in prose.
 
-A long Skill used to be run from memory: the agent read the whole procedure and
-kept track of where it was. Every failure found in the published pilots had that
-shape — a step at the tail that did not run (#406), a write-back that did not
-happen (#474), a result that was not handed on (#452), a part that was improvised
-because it was only prose (#947). Each was fixed by moving *that one step* into a
-script. This moves the progression itself.
+Without it, a long Skill is run from memory: the agent reads the whole procedure
+and keeps track of where it is. Every failure found in the published pilots had
+that shape — a step at the tail that did not run, a write-back that did not
+happen, a result that was not handed on, a part that was improvised because it
+was only prose. Each was fixed by moving *that one step* into a script. This
+moves the progression itself.
 
 The division of labour:
 
@@ -27,10 +26,11 @@ The division of labour:
   caller cannot point it at a file of its own.
 - **The engine keeps no state in memory.** Everything lives in the run record
   (`record_run.py`), under a `workflow:` key, and the next step is recomputed from
-  the log on every call. A record written before Issue #1203 keeps the state under
-  `driver:`; it is still read, and moved to `workflow:` on the next write, so a run
-  started under the old name can be resumed with `next`. The log *is* the state, so "the log says done but the
-  work was not" cannot arise from the engine's own bookkeeping.
+  the log on every call. A record written before the engine was renamed from
+  driver.py keeps the state under `driver:`; it is still read, and moved to
+  `workflow:` on the next write, so a run started under the old name can be
+  resumed with `next`. The log *is* the state, so "the log says done but the work
+  was not" cannot arise from the engine's own bookkeeping.
 - **The engine writes the log, never the agent.** An instruction to "record this"
   is itself a step that can be forgotten.
 
@@ -139,14 +139,14 @@ STATE_HALTED = "halted"
 STATE_ABANDONED = "abandoned"
 
 # The run record key holding the engine's state. `driver` is the key used before
-# the engine was renamed from driver.py (Issue #1203); it is read, never written.
+# the engine was renamed from driver.py; it is read, never written.
 STATE_KEY = "workflow"
 LEGACY_STATE_KEY = "driver"
 
-# Fields of the state naming the workflow definition file and its hash. They were
-# `workflow` / `workflow_sha256` until Issue #1209: under the `workflow:` key that
-# read `record["workflow"]["workflow"]`, a mapping holding a path of the same name.
-# The old names are read and moved to the new ones on the next write.
+# Fields of the state naming the workflow definition file and its hash. They are
+# not `workflow` / `workflow_sha256`: under the `workflow:` key those would read
+# `record["workflow"]["workflow"]`, a mapping holding a path of the same name.
+# Those old names are read and moved to the new ones on the next write.
 DEFINITION_FIELD = "definition"
 DEFINITION_HASH_FIELD = "definition_sha256"
 LEGACY_DEFINITION_FIELDS = {"workflow": DEFINITION_FIELD, "workflow_sha256": DEFINITION_HASH_FIELD}
@@ -248,10 +248,10 @@ def run_state(record: dict) -> dict | None:
     """The engine's state in a run record, or None for a run it did not open.
 
     `workflow:` is the key; `driver:` is what records written before the rename
-    (Issue #1203) use, read so that a run started then can still be resumed.
-    The definition fields' old names (Issue #1209) are moved to the new ones here,
-    so every reader — `load_run()` and `open_runs()` (status, check-merge, the Stop
-    hook) alike — sees `definition` / `definition_sha256`.
+    use, read so that a run started then can still be resumed. The definition
+    fields' old names are moved to the new ones here, so every reader —
+    `load_run()` and `open_runs()` (status, check-merge, the Stop hook) alike —
+    sees `definition` / `definition_sha256`.
     """
     for key in (STATE_KEY, LEGACY_STATE_KEY):
         state = record.get(key)

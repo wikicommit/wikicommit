@@ -38,8 +38,8 @@ if __name__ == "__main__":
             pass
 
 # The helpers every Skill's checks read the same way live in
-# `.wikicommit/scripts/_workflow_checks.py` (Issue #1219). A wiki whose scripts predate
-# it has none until `/wikicommit-update` is merged; the same goes for
+# `.wikicommit/scripts/_workflow_checks.py`. A wiki whose scripts predate it has
+# none until `/wikicommit-update` is merged; the same goes for
 # `check_external_links.py`, whose batching `links` shares with `/wikicommit-status`.
 # Exit 2, not 1, whatever is missing: a `when:` condition exiting 1 would read as
 # "skip this step", while 2 stops the engine. Only a module of `.wikicommit/scripts/`
@@ -492,7 +492,7 @@ def argv_length(argv: list[str]) -> int:
 
 def path_argvs(prefix: list[str], paths: list[str], limit: int = ARGV_CHARS):
     """`prefix` followed by the paths in groups, each whole command line within
-    `limit` characters (Issue #1263). The prefix — interpreter, script path and any
+    `limit` characters. The prefix — interpreter, script path and any
     flag — is counted against `limit`, not only the paths after it. A single path
     too long to fit still gets a call of its own rather than being dropped."""
     return [[*prefix, *group]
@@ -504,7 +504,7 @@ def wikilink_argvs(prefix: list[str], changed: list[str], removed: list[str],
     """`check_wikilinks.py` calls, each within `limit`: the changed pages' own
     links with `--changed` alone, one call per group of changed pages, and the
     backlinks left to the removed pages with `--deleted` alone, one call per group
-    of removed pages (Issue #1257).
+    of removed pages.
 
     The two checks do not depend on each other, so they are not crossed: a page is
     checked by exactly one call of each kind, and every call reads the wiki once —
@@ -589,10 +589,9 @@ def cmd_links(args) -> int:
     inside `.wikicommit/.cache/lychee/`, so its `--cache` file lands there (ignored
     by Git) and is shared by later merges and by `/wikicommit-status`. The batching
     itself is `check_external_links.check_link_batches()`, which status's check of
-    every page uses too (Issue #1182). It returns structured findings; the run's
-    `lychee.json` keeps their text only, as the other tools' files do, since the PR
-    body lists text and nothing here tells a broken link from an unchecked one
-    (Issue #1243).
+    every page uses too. It returns structured findings; the run's `lychee.json`
+    keeps their text only, as the other tools' files do, since the PR body lists
+    text and nothing here tells a broken link from an unchecked one.
     """
     changed = listed(read_state(args.run), "changed_md")
     checked, findings, remaining = check_link_batches(
@@ -694,6 +693,183 @@ def cmd_pr_body(args) -> int:
     return 0
 
 
+# --- Steps 8 and 9: what still needs an Issue ---------------------------------
+#
+# Both steps scan the whole default branch, not this batch, so a page or source
+# whose Issue could not be filed in an earlier run is picked up by the next one.
+# The scan and the match against open Issues are mechanical, so they run here: a
+# step with nothing to file is skipped by the engine (`has-targets`) and its
+# instructions are never handed over. A lookup that fails never reads as "nothing
+# to file" — the step is handed over all the same, with an empty list and the
+# failure in the notes, so the failure reaches the completion report and nothing is
+# filed blind (filing without the match would duplicate every open Issue).
+
+# kind -> (Issue label, marker prefix, what one target is called, the list name).
+# The names are built from `_W` because a string literal that starts with
+# `wikicommit-<name>` reads as a path to another Skill to the dependency guard.
+_W = "wikicommit"
+TARGET_KINDS = {
+    "review": (f"{_W}-review", f"{_W}-page", "pending page", "review_targets"),
+    "failure": (f"{_W}-generation-failure", f"{_W}-ingest",
+                "failed source", "failure_targets"),
+}
+
+
+def scan_frontmatter(paths) -> tuple[list[tuple[str, dict]], list[str]]:
+    """(path, frontmatter) for each file whose frontmatter parses to a mapping, and
+    one `WARNING:` per file whose frontmatter does not — one malformed file anywhere in the
+    tree must not stop the scan of every other. Parsed by the shared
+    `parse_frontmatter_text`, the same reading every other check gives a page."""
+    found, warnings = [], []
+    for path in paths:
+        try:
+            content = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError) as e:
+            warnings.append(f"WARNING: {path.as_posix()}: could not be read, skipping ({e})")
+            continue
+        front, error = parse_frontmatter_text(content)
+        if front is None:
+            warnings.append(f"WARNING: {path.as_posix()}: frontmatter YAML parse failed, "
+                            f"skipping ({' '.join(error.split())})")
+            continue
+        found.append((path.as_posix(), front))
+    return found, warnings
+
+
+def review_candidates() -> tuple[list[str], list[str]]:
+    """Pages waiting for a read: `review_status: pending` or none at all, leaving
+    out the build-generated `index.md` pages, the attachments under
+    `.wikicommit/entity/assets/`, and pages with `status: removed`. Entity pages
+    first, then view pages, each sorted, so the order is the same on every run."""
+    from _wikilink import collect_entity_pages, collect_view_pages
+
+    found, warnings = scan_frontmatter(collect_entity_pages() + collect_view_pages())
+    return ([path for path, front in found
+             if front.get("status") != "removed"
+             and front.get("review_status", "pending") == "pending"], warnings)
+
+
+def failure_candidates() -> tuple[list[str], list[str]]:
+    """Management files with a non-empty `failed_pages`, or with `status: failed`
+    — a source that failed before any page was attempted has an empty
+    `failed_pages`, and nothing else reports it."""
+    found, warnings = scan_frontmatter(sorted(Path(".wikicommit/source").rglob("*.md")))
+    out = []
+    for path, front in found:
+        failed = front.get("failed_pages") or []
+        if (isinstance(failed, list) and failed) or front.get("status") == "failed":
+            out.append(path)
+    return out, warnings
+
+
+def open_issue_bodies(label: str) -> tuple[list[str] | None, str]:
+    """The bodies of the open Issues with `label`, or (None, why) when they could
+    not be read.
+
+    The REST list with `--paginate`, never a label-filtered `gh issue list`: that
+    goes through the search API, which stops at 1000 results without a word, and a
+    backlog past it would make open Issues invisible. `{owner}/{repo}` is filled in
+    by gh. Each body comes as one JSON string per line, since a body spans lines.
+    """
+    result = run(["gh", "api",
+                  f"repos/{{owner}}/{{repo}}/issues?labels={label}&state=open&per_page=100",
+                  "--paginate", "--jq", ".[] | select(.pull_request | not) | .body | @json"])
+    if result.returncode != 0:
+        why = (result.stderr or result.stdout).strip().splitlines()
+        return None, why[-1] if why else f"gh exited {result.returncode}"
+    bodies = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        try:
+            body = json.loads(line)
+        except ValueError:
+            return None, f"gh printed something that is not an Issue body: {line[:80]}"
+        bodies.append(body if isinstance(body, str) else "")
+    return bodies, ""
+
+
+def open_markers(kind: str, bodies: list[str]) -> set[str]:
+    """Every `<!-- <prefix>: <path> -->` marker of `kind` the bodies carry, so
+    each target is one set lookup rather than a substring search of every body."""
+    pattern = re.compile(rf"<!-- {re.escape(TARGET_KINDS[kind][1])}: .*? -->")
+    return {marker for body in bodies for marker in pattern.findall(body)}
+
+
+def markers(kind: str, path: str) -> tuple[str, ...]:
+    """The markers an open Issue for `path` may carry. A review Issue opened before
+    `.wikicommit/wiki/` was renamed to `.wikicommit/entity/` still names the old
+    prefix: GitHub Issues are not touched by a `git mv`."""
+    prefix = TARGET_KINDS[kind][1]
+    forms = [path]
+    if kind == "review" and path.startswith(".wikicommit/entity/"):
+        forms.append(".wikicommit/wiki/" + path[len(".wikicommit/entity/"):])
+    return tuple(f"<!-- {prefix}: {form} -->" for form in forms)
+
+
+def targets_file(run_path: str, kind: str) -> Path:
+    return findings_dir(run_path) / f"{kind}-targets.json"
+
+
+def cmd_targets(args) -> int:
+    """What still needs an Issue, one `ITEM:` each: the scan's targets that no open
+    Issue's marker names. Never stops the run.
+
+    When the open Issues cannot be read, no `ITEM:` is printed and a `WARNING:`
+    says so: the step is handed over all the same (`has-targets` reads the failure
+    from the file written here), the agent files nothing, and the next merge's scan
+    picks the targets up.
+    """
+    label, _, what, _ = TARGET_KINDS[args.kind]
+    candidates, warnings = (review_candidates if args.kind == "review"
+                            else failure_candidates)()
+    items: list[str] = []
+    error = ""
+    if candidates:
+        bodies, error = open_issue_bodies(label)
+        if bodies is None:
+            warnings.append(
+                f"WARNING: the open `{label}` Issues could not be read ({error}); "
+                f"{len(candidates)} {what}(s) could not be checked against them, so no "
+                "Issue is filed for them in this run — the next /wikicommit-merge picks "
+                "them up")
+        else:
+            found = open_markers(args.kind, bodies)
+            items = [path for path in candidates
+                     if not any(marker in found for marker in markers(args.kind, path))]
+    data = {"kind": args.kind, "candidates": len(candidates), "targets": items,
+            "lookup_error": error, "warnings": warnings}
+    try:
+        directory = findings_dir(args.run)
+        directory.mkdir(parents=True, exist_ok=True)
+        targets_file(args.run, args.kind).write_text(
+            json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError as e:
+        # `has-targets` then finds no file and hands the step over: never a skip.
+        print(f"WARNING: the scan's result could not be kept beside the run ({e})")
+    for line in warnings:
+        print(line)
+    if not error:
+        print(f"{args.kind.upper()}_TARGETS: {len(candidates)} {what}(s), "
+              f"{len(items)} without an open `{label}` Issue")
+    for item in items:
+        print(f"ITEM: {item}")
+    return 0
+
+
+def cmd_target_warnings(args) -> int:
+    """The `WARNING:` lines Steps 8 and 9's scans printed, for the completion report.
+    Prints nothing for a scan whose result is not on this machine."""
+    for kind in TARGET_KINDS:
+        try:
+            data = json.loads(targets_file(args.run, kind).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for line in data.get("warnings", []) if isinstance(data, dict) else []:
+            print(line)
+    return 0
+
+
 # --- conditions ---------------------------------------------------------------
 
 
@@ -701,6 +877,27 @@ def cmd_has_list(args) -> int:
     if listed(read_state(args.run), args.list):
         return 0
     print(f"the run record's {args.list!r} list is empty")
+    return 1
+
+
+def cmd_has_targets(args) -> int:
+    """Hand over Step 8 or 9 unless its scan surely found nothing to file.
+
+    Skipped (exit 1) only when the list is empty **and** the scan's result says the
+    open Issues were read. A failed lookup, or a result that is not on this machine
+    (a run resumed elsewhere, a cleared cache), hands the step over: skipping on a
+    failure would hide it from the report too.
+    """
+    _, _, what, name = TARGET_KINDS[args.kind]
+    if listed(read_state(args.run), name):
+        return 0
+    try:
+        data = json.loads(targets_file(args.run, args.kind).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(data, dict) or data.get("lookup_error"):
+        return 0
+    print(f"no {what} needs an Issue")
     return 1
 
 
@@ -806,6 +1003,12 @@ def build_parser() -> argparse.ArgumentParser:
     add("warnings", cmd_warnings)
     add("pr-body", cmd_pr_body)
     add("has-list", cmd_has_list, list="warnings")
+    for name, func in (("targets", cmd_targets), ("has-targets", cmd_has_targets)):
+        p = sub.add_parser(name)
+        p.add_argument("--run", required=True)
+        p.add_argument("--kind", required=True, choices=sorted(TARGET_KINDS))
+        p.set_defaults(func=func)
+    add("target-warnings", cmd_target_warnings)
     add("check-commit", cmd_check_commit)
     add("check-pr", cmd_check_pr)
     add("check-merged", cmd_check_merged)

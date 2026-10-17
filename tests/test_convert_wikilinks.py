@@ -254,6 +254,40 @@ def test_link_text_escapes_quotes_in_frontmatter_wikilink(tmp_path):
     assert parsed["affiliation"] == '[He said "Hi"](../Organization/companya.md)'
 
 
+# ── `[[Type/slug|表示名]]`: the display text is the link text (Issue #1304) ─────
+
+def test_display_text_replaces_the_title_as_link_text(tmp_path):
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Place", "tokyo", "---\ntitle: Tokyo\n---\n\nBody.\n")
+    write_page(
+        tmp_path, "ja", "Person", "yamada-taro",
+        "---\ntitle: Yamada\n---\n\nSee [[Place/tokyo|東京都]].\n\n| a |\n|---|\n| [[Place/tokyo\\|都]] |\n",
+    )
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    out = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
+    assert "[東京都](../Place/tokyo.md)" in out
+    assert "| [都](../Place/tokyo.md) |" in out
+    assert "[[" not in out
+
+
+def test_unresolved_link_with_display_text_renders_the_display_text(tmp_path):
+    write_config(tmp_path)
+    write_page(
+        tmp_path, "ja", "Person", "yamada-taro",
+        "---\ntitle: Yamada\n---\n\nSee [[Organization/unknown|未知の組織]].\n",
+    )
+
+    result = run(["--source", "entity/", "--output", "content/"], cwd=tmp_path)
+    assert result.returncode == 0
+
+    out = (tmp_path / "content" / "ja" / "Person" / "yamada-taro.md").read_text(encoding="utf-8")
+    assert "See 未知の組織." in out
+    assert "[[" not in out
+
+
 # ── Unresolved link rendered as plain text (no raw [[...]] leaks to readers) ─────
 # Issue #431: an unresolved WikiLink used to be left as the raw `m.group(0)` match
 # (the literal `[[Type/slug]]` bracket syntax), which meant readers of the published
@@ -1425,11 +1459,41 @@ def test_source_page_renders_norwegian_lang_read_as_false(tmp_path):
     assert "**Language**: no" in out
 
 
-@pytest.mark.parametrize("lang_line", ["lang: [ja, en]", "lang: yes", "lang: on", "lang: 12"])
+@pytest.mark.parametrize("lang_line", ["lang: NO", "lang: No"])
+def test_source_page_renders_capitalized_norwegian_lang_read_as_false(tmp_path, lang_line):
+    """Issue #1248: YAML 1.1 also reads `No` / `NO` as False; the written text
+    is still the Norwegian code, lower-cased like any other code."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, lang_line)
+    assert "**Language**: no" in out
+
+
+def test_source_page_renders_quoted_norwegian_lang(tmp_path):
+    """Issue #1248: Pass 2a now writes the code quoted; a quoted `'no'` is a
+    plain string and needs no special case."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, "lang: 'no'")
+    assert "**Language**: no" in out
+
+
+@pytest.mark.parametrize(
+    "lang_line",
+    [
+        "lang: [ja, en]",
+        "lang: yes",
+        "lang: on",
+        "lang: 12",
+        "lang: off",
+        "lang: false",
+        "lang: Off",
+        "lang: FALSE",
+    ],
+)
 def test_source_page_omits_lang_line_when_not_a_string(tmp_path, lang_line):
     """Issue #1193: a non-string value (a list, True from `yes`/`on`, a number)
     breaks the one-code rule; str() would print `['ja', 'en']` or `true`, so the
-    page treats it as not recorded."""
+    page treats it as not recorded. Issue #1248: so does False read from
+    `off` / `false` — only a written `no` is Norwegian."""
     write_config(tmp_path, primary_lang="en")
     out = _write_lang_source(tmp_path, lang_line)
     assert "**Language**" not in out
@@ -2830,7 +2894,9 @@ def test_overview_source_language_table_reads_unquoted_no_as_norwegian(tmp_path)
     assert "false" not in section
 
 
-@pytest.mark.parametrize("lang_line", ["  lang: [ja, en]\n", "  lang: yes\n"])
+@pytest.mark.parametrize(
+    "lang_line", ["  lang: [ja, en]\n", "  lang: yes\n", "  lang: off\n", "  lang: false\n"]
+)
 def test_overview_source_language_table_counts_non_string_lang_as_not_recorded(tmp_path, lang_line):
     """Issue #1193: a list or True is not a recorded language; it is counted in
     the "not recorded" row (the source has run), not as a stringified row."""
@@ -2848,6 +2914,7 @@ def test_overview_source_language_table_counts_non_string_lang_as_not_recorded(t
     assert "| Not recorded | 1 |" in section
     assert "true" not in section
     assert "['ja'" not in section
+    assert "| `no` |" not in section
 
 
 @pytest.mark.parametrize("lang_line", ["  lang: [ja, en]\n", "  lang: on\n"])
@@ -3990,6 +4057,11 @@ def test_llms_txt_has_title_summary_and_link_lines(tmp_path):
     # Only primary_lang pages are listed; other languages are named once.
     assert "Yamada]" not in text
     assert "`en`" in text
+    # Issue #1183: the preface says what a missing "read" line means, since the
+    # pending banner never states its status in words (Issue #774).
+    assert "but has no such line has not been read by a person yet" in text
+    assert "`pending`" in text
+    assert "states its review status" not in text
 
 
 def test_llms_txt_ranks_key_pages_by_inbound_links_and_caps_the_list(tmp_path):

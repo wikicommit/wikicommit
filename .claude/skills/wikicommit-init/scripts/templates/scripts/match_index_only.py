@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Match URLs against `index_only:` in .wikicommit/source-policy.md (Issue #1032).
+"""Match URLs against `index_only:` in .wikicommit/source-policy.md.
 
 `index_only:` names what this wiki reads for the sources it cites and never
-registers (Issue #570). An entry takes one of two shapes, and the shape is the
+registers. An entry takes one of two shapes, and the shape is the
 meaning:
 
     - en.wikipedia.org                          # a domain: that whole host
@@ -12,12 +12,10 @@ What separates them is whether the entry pins down a single URL to fetch. A page
 does, so /wikicommit-collect can go and mine it on its own initiative; a domain
 does not, so it can only be matched when a search result happens to land on it.
 
-Until Issue #1032 the matching was done in prose, in two SKILL.md files
-(wikicommit-collect step 5 and wikicommit-generate step 0), and the rule threw the
-path away, so every entry meant a whole host. With two shapes to tell apart, two
-copies of the rule in prose would drift apart independently — this is the shape
-Issue #474 named (a deterministic operation expressed as an instruction), so the
-rule lives here once and both Skills call it.
+Two Skills need the matching (wikicommit-collect step 5 and wikicommit-generate
+step 0). With two shapes to tell apart, two copies of the rule in prose would
+drift apart independently — a deterministic operation expressed as an
+instruction — so the rule lives here once and both Skills call it.
 
 Normalization:
 
@@ -33,9 +31,7 @@ Normalization:
   every page on that path.
 
 An entry is a page when, after normalization, anything remains beyond the host
-(a path other than `/`, or a query). Before Issue #1032 such an entry meant the
-whole host; it now means that one page. No public pilot had one (checked
-2026-09-25), and CHANGELOG.md says so for anyone who did.
+(a path other than `/`, or a query).
 
 Reads only. A policy file that exists but cannot be parsed is reported on stderr
 and treated as having no entries, the same way check_extraction_quality.py

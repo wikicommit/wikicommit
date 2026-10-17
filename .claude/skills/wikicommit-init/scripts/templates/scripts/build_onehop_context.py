@@ -8,23 +8,19 @@ Prints one `PAGE:` line per neighbouring page, outbound first, then a single
 `SUMMARY:` line. Exit code is always 0 — an empty neighbourhood is a normal
 result (a genuinely new, isolated page), not a failure.
 
-Why this is a script at all (Issue #947). Pass 4's check 8 needs "the existing
-pages this page links to, plus the pages that link to it", and
-`references/pass4-review.md` used to describe how to find them in prose — with
-a concrete recipe for the inbound half and nothing at all for the outbound
-half. In one pilot run that gap was filled by a throwaway regex,
+Why this is a script at all. Pass 4's check 8 needs "the existing pages this
+page links to, plus the pages that link to it". Left to a recipe in prose, an
+agent can fill a gap in it with a throwaway regex such as
 `\\[\\[([A-Za-z0-9_/]+)\\]\\]`, whose character class has no `-`. WikiCommit
-slugs are English kebab-case by Issue #193's rule, so that pattern never
-reached the closing `]]` for `vibe-coding` or `spec-driven-development` and
-matched none of them. Nothing raised an error: the set simply came back
-smaller, and the output looked right. Recomputing it afterwards changed the
-context for 24 of 27 pages.
+slugs are English kebab-case, so that pattern never reaches the closing `]]`
+for `vibe-coding` or `spec-driven-development` and matches none of them.
+Nothing raises an error: the set simply comes back smaller, and the output
+looks right.
 
-`WIKILINK_RE` in `_wikilink.py` has always had this right — it gives the Type
-segment and the slug segment separate character classes, and says why in a
-comment — and four scripts already extract links with it. Issue #474's rule
-applies exactly: an operation that is fully deterministic should not be
-re-derived from prose on each run.
+`WIKILINK_RE` in `_wikilink.py` gets this right — it gives the Type segment and
+the slug segment separate character classes, and says why in a comment — and
+the other scripts that extract links use it. An operation that is fully
+deterministic should not be re-derived from prose on each run.
 
 Delegating the whole assembly, rather than only the extraction, also makes the
 three skip rules and the cap deterministic. Each of those narrows the set too,
@@ -50,9 +46,9 @@ from _wikilink import (
     resolve_wikilink,
 )
 
-# The same order of magnitude wikicommit-ask uses for its own one-hop expansion
-# (Issue #459). Applied after the outbound-first dedup, so a page reachable both
-# ways spends one slot rather than two.
+# The same order of magnitude wikicommit-ask uses for its own one-hop expansion.
+# Applied after the outbound-first dedup, so a page reachable both ways spends
+# one slot rather than two.
 MAX_PAGES = 5
 
 
@@ -85,9 +81,10 @@ def outbound_targets(
     """Existing pages this page links to, in order of appearance, deduplicated.
 
     Resolution follows the cross-language fallback (own language, then
-    `primary_lang`), which is what `resolve_wikilink()` implements. A link that resolves nowhere is dropped
-    without comment: pointing at a page nobody has written yet is normal and
-    non-blocking (Issue #340), and `check_wanted_pages.py` is what reports it.
+    `primary_lang`), which is what `resolve_wikilink()` implements. A link that
+    resolves nowhere is dropped without comment: pointing at a page nobody has
+    written yet is normal and non-blocking, and `check_wanted_pages.py` is what
+    reports it.
     """
     targets: list[Path] = []
     seen: set[Path] = set()
@@ -138,8 +135,8 @@ def translates(page: Path, page_under_review: str) -> bool:
     """Whether `page`'s `translated_from` names the page under review.
 
     Compared through `normalize_entity_prefix()` because a translation written
-    before Issue #477's `.wikicommit/wiki/` → `entity/` rename still carries the
-    old prefix verbatim (the two forms are allowed to coexist rather than being
+    before the `.wikicommit/wiki/` → `entity/` rename still carries the old
+    prefix verbatim (the two forms are allowed to coexist rather than being
     auto-migrated). A raw string comparison would let such a page through as a
     neighbour, and a disagreement with one's own translation is translation
     staleness — which `check_translation_status.py` already reports as `STALE`.

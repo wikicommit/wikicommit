@@ -717,10 +717,12 @@ def test_double_slash_malformed_wikilink_reported_as_missing(tmp_path):
 
     result = run(["--changed", str(source)], cwd=tmp_path)
     # The malformed link must not be silently accepted as a valid reference
-    # to Person/foo.md; WIKILINK_RE simply does not match it, so no
-    # ERROR/WARNING is raised for it and it is not counted as a checked link.
-    assert "[[Person//foo]]" not in result.stdout
-    assert "errors, 0 warnings" in result.stdout
+    # to Person/foo.md; WIKILINK_RE does not match it, so it is never
+    # resolved — and since Issue #1304 it is reported as not a WikiLink.
+    assert result.returncode == 0
+    assert "WARNING" in result.stdout
+    assert "[[Person//foo]] → not a WikiLink" in result.stdout
+    assert "0 errors, 1 warnings" in result.stdout
 
 
 def test_hyphenated_custom_type_wikilink_reported_as_missing(tmp_path):
@@ -754,9 +756,10 @@ def test_hyphenated_custom_type_wikilink_reported_as_missing(tmp_path):
 
     result = run(["--changed", str(source)], cwd=tmp_path)
     # The malformed (hyphenated) link is not matched by WIKILINK_RE at all,
-    # so it is neither reported nor counted as a checked link.
-    assert "[[custom/Multi-Word/foo]]" not in result.stdout
-    assert "errors, 0 warnings" in result.stdout
+    # so it is never resolved; since Issue #1304 it is reported as not a WikiLink.
+    assert result.returncode == 0
+    assert "[[custom/Multi-Word/foo]] → not a WikiLink" in result.stdout
+    assert "0 errors, 1 warnings" in result.stdout
 
 
 def test_multiple_missing_links(tmp_path):
@@ -992,3 +995,67 @@ def test_a_backlink_is_counted_against_the_page_it_resolves_to(tmp_path):
     assert ("en/Person/a.md (being changed to status: removed): "
             "a backlink remains (.wikicommit/entity/en/Person/d.md)") in result.stdout
     assert "2 warnings" in result.stdout, result.stdout
+
+
+# ── Display text and malformed `[[...]]` (Issue #1304) ─────────────────────────
+
+def test_link_with_display_text_to_removed_page_is_error(tmp_path):
+    """`[[Type/slug|表示名]]` is a WikiLink: the removed-page ERROR reaches it."""
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Place", "tokyo",
+               extra={"status": "removed", "removed_at": "2026-01-01"})
+    page = _link_page(tmp_path, "[[Place/tokyo|東京]]")
+
+    result = run(["--changed", str(page)], cwd=tmp_path)
+    assert result.returncode == 1
+    assert "[[Place/tokyo]] → links to a page with status: removed" in result.stdout
+    assert "not a WikiLink" not in result.stdout
+
+
+def test_link_with_display_text_to_existing_page_is_clean(tmp_path):
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Place", "tokyo")
+    page = _link_page(tmp_path, "[[Place/tokyo|東京都]] and [[Place/tokyo\\|東京]]")
+
+    result = run(["--changed", str(page)], cwd=tmp_path)
+    assert result.returncode == 0
+    assert "0 errors, 0 warnings" in result.stdout, result.stdout
+
+
+def test_display_text_link_counts_as_backlink_for_deleted_page(tmp_path):
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Place", "tokyo")
+    _link_page(tmp_path, "[[Place/tokyo|東京]]")
+
+    result = run(["--deleted", ".wikicommit/entity/ja/Place/tokyo.md"], cwd=tmp_path)
+    assert "a backlink remains (.wikicommit/entity/ja/GovernmentService/ward-office.md)" in result.stdout
+
+
+def test_malformed_brackets_are_warnings_and_code_is_skipped(tmp_path):
+    write_config(tmp_path)
+    write_page(tmp_path, "ja", "Place", "tokyo")
+    page = _link_page(
+        tmp_path,
+        "[[tokyo]], [[Place/tokyo#history]], [[Place/tokyo|]] and `[[not-checked]]`",
+    )
+    page.write_text(
+        page.read_text(encoding="utf-8") + "\n```\n[[also-not-checked]]\n```\n",
+        encoding="utf-8",
+    )
+
+    result = run(["--changed", str(page)], cwd=tmp_path)
+    assert result.returncode == 0
+    for raw in ("[[tokyo]]", "[[Place/tokyo#history]]", "[[Place/tokyo|]]"):
+        assert f"{raw} → not a WikiLink" in result.stdout, result.stdout
+    assert "not-checked" not in result.stdout
+    assert "0 errors, 3 warnings" in result.stdout
+
+
+def test_whole_wiki_mode_reports_malformed_brackets(tmp_path):
+    """wikicommit-status runs the script with no arguments."""
+    write_config(tmp_path)
+    _link_page(tmp_path, "[[Prop::Place/tokyo]]")
+
+    result = run([], cwd=tmp_path)
+    assert "[[Prop::Place/tokyo]] → not a WikiLink" in result.stdout
+    assert result.returncode == 0

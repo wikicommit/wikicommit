@@ -20,16 +20,22 @@ tags: []
 properties:
   description: ""
   foundingDate: ""
-  foundingLocation: "[[Place/slug]]"
   founder: "[[Person/slug]]"
   url: ""
-  numberOfEmployees: ""
 ---
 
-(2-3 paragraph overview of the organization)
-
-## History
-(founding background, major milestones)
-
-## Activities & Products
-(core business, notable projects, products or services)
+```text
+READER QUESTIONS (Organization)
+Readers: someone who met the name — as a vendor, an authority, a publisher, an employer —
+and wants to know what the organization is and what it does that matters here.
+1. What is it — what kind of organization (a company, a public body, a research group, a
+   community, a society), and what it exists to do?
+2. What does it do that matters to this wiki's subject — its products, services, powers,
+   projects, or publications (a table when there are several along the same dimensions)?
+3. How did it come about and how has it changed — founding, renamings, mergers, and the
+   milestones the source gives?
+4. How is it set up — its parent body, its main subdivisions, and, for a public body, the
+   law or decision that created it and what that lets it do?
+5. How do others describe it — reception, criticism, standing in its field — as distinct
+   from what it says about itself?
+```

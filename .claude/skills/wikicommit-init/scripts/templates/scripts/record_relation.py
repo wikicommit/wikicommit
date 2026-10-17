@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""record_relation.py — append one relation a person decided between pages (Issue #1095).
+"""record_relation.py — append one relation a person decided between pages.
 
 `/wikicommit-relate` asks a person how two or more pages relate and records
 the answer in one file, `.wikicommit/relations.yml`, as one more item of a

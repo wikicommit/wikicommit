@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""check_external_links.py — 全ページの外部リンク切れを lychee で調べる（Issue #1182）。
+"""check_external_links.py — 全ページの外部リンク切れを lychee で調べる。
 
-`/wikicommit-merge` の lychee はそのバッチで変わったページだけを見る（Issue #1196）。
+`/wikicommit-merge` の lychee はそのバッチで変わったページだけを見る。
 書かれた後で切れたリンク（既存ページ）はこのスクリプトが見つけ、`/wikicommit-status`
 が報告する。
 
@@ -15,8 +15,7 @@ lychee は呼び出し開始から `--limit` 秒で打ち切る。続きは
 バッチを回す部分（`check_link_batches()`）は `wikicommit-merge` の
 `workflow_checks.py links` と共有する。所見は `{"kind": "broken"|"not_checked",
 "pages": [...], "text": "..."}` の形で持ち、リンク切れか調べられなかったかは `kind`
-で、消えたページの所見を落とすかは `pages` で決める（文言の書き出しには頼らない。
-Issue #1243）。
+で、消えたページの所見を落とすかは `pages` で決める（文言の書き出しには頼らない）。
 
 Usage:
     python .wikicommit/scripts/check_external_links.py [--restart]
@@ -62,9 +61,9 @@ def finding(kind: str, pages: list[str], text: str) -> dict:
 def parse_findings(values) -> list[dict] | None:
     """`values` as findings, or None when any entry is not one.
 
-    Files written before the findings had a structure hold plain strings (Issue
-    #1243). A progress file holding them is discarded, so the check starts over;
-    a result file holding them is read by `read_legacy_findings()`."""
+    Files written before the findings had a structure hold plain strings. A
+    progress file holding them is discarded, so the check starts over; a result
+    file holding them is read by `read_legacy_findings()`."""
     if not isinstance(values, list):
         return None
     out: list[dict] = []
@@ -78,12 +77,13 @@ def parse_findings(values) -> list[dict] | None:
 
 
 def read_legacy_findings(values: list) -> list[dict]:
-    """A result file written before Issue #1243: plain strings, where every line
-    that could not be checked began with `lychee ` and every broken link with its
-    page. That set of lines is closed — no new file is written this way — so the
-    prefix reads them exactly. The pages are not recovered: the result is only
-    printed, never pruned. An entry that is a finding is kept as one, and one that
-    is neither a string nor a finding is skipped rather than printed as its repr."""
+    """A result file written before the findings had a structure: plain strings,
+    where every line that could not be checked began with `lychee ` and every
+    broken link with its page. That set of lines is closed — no new file is
+    written this way — so the prefix reads them exactly. The pages are not
+    recovered: the result is only printed, never pruned. An entry that is a
+    finding is kept as one, and one that is neither a string nor a finding is
+    skipped rather than printed as its repr."""
     out: list[dict] = []
     for v in values:
         if isinstance(v, str):
@@ -148,8 +148,8 @@ def check_link_batches(pages: list[str], progress_file: Path, *, batch: int,
     The findings are `finding()` dicts. A finding whose pages are none of `pages`
     any more (deleted or removed between calls) is dropped, as the page's checked
     mark is; one naming several pages stays while any of them is still wanted. A
-    progress file whose findings are not all such dicts (one written before Issue
-    #1243) is discarded and the check starts over.
+    progress file whose findings are not all such dicts (one written before the
+    findings had a structure) is discarded and the check starts over.
     """
     try:
         progress = json.loads(progress_file.read_text(encoding="utf-8"))
@@ -270,8 +270,8 @@ def cmd_last() -> int:
     progress = read_json(PROGRESS_FILE)
     if progress is not None:
         total = progress.get("total")
-        # A progress file the next call discards (findings not structured, Issue
-        # #1243) continues nothing, so it reports no page as checked.
+        # A progress file the next call discards (findings not structured)
+        # continues nothing, so it reports no page as checked.
         checked = progress.get("checked", [])
         done = (len(checked) if isinstance(checked, list)
                 and parse_findings(progress.get("findings", [])) is not None else 0)

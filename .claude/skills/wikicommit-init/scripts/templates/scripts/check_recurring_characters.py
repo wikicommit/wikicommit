@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Detect named characters listed as plain text in properties.character (Issue #560).
+"""Detect named characters listed as plain text in properties.character.
 
 `ShortStory.md` / `Book.md` tell Pass 3 to WikiLink a character who qualifies for
 a `[[Person/slug]]` page of their own and to list the rest as plain text. Nothing
 ever revisits that call. A character the wiki never promoted stays a bare string
 in every work that features them, and no existing check sees it:
 check_wanted_pages.py only reads `[[Type/slug]]` WikiLinks, so a plain-text name
-is not even counted as wanted (the Issue #318 limitation, applied to
+is not even counted as wanted (its documented limitation, applied to
 `properties:` values), and check_orphans.py is about backlinks to pages that do
 exist. `wikicommit/decameron-wiki` went on reporting a clean bill of health while
 Calandrino — the lead of four separate tales — appeared as the plain string
@@ -18,9 +18,9 @@ give: this person exists beyond any one plot. Promote them, or decide once that
 they stay plain text.
 
 A name that *does* already have a Person page is a different finding — nothing
-needs writing, the value should simply be a WikiLink (Issue #496) — and belongs
-to check_unlinked_entity_mentions.py, which reports it across every
-entity-ranged `properties:` key rather than `character` alone (Issue #561).
+needs writing, the value should simply be a WikiLink — and belongs to
+check_unlinked_entity_mentions.py, which reports it across every entity-ranged
+`properties:` key rather than `character` alone.
 Page existence is still read here, but only to keep such a name out of the
 promotion list.
 
@@ -41,7 +41,7 @@ Known limitations, all deliberate:
     written yet does not count toward the threshold, so one linked work plus one
     plain-text work reports nothing. Connecting the two would mean deriving a
     slug from a plain-text name, which the slug rules (English identifiers,
-    translated or transliterated by kind — Issue #193) do not make reversible.
+    translated or transliterated by kind) do not make reversible.
     The dangling link itself is check_wanted_pages.py's finding; once the Person
     page exists, the plain-text work surfaces in
     check_unlinked_entity_mentions.py.
@@ -90,7 +90,7 @@ def person_page_names(frontmatter: dict) -> list[str]:
     form of the name: `Person/ser-ciappelletto`, titled "Ser Ciappelletto",
     against works listing the plain string "Ciappelletto". Acting on that line
     writes a second page for a person who already has one — the same wrong move
-    check_wanted_pages.py's TYPE_MISMATCH split exists to prevent (Issue #563),
+    check_wanted_pages.py's TYPE_MISMATCH split exists to prevent,
     and one check_orphans.py's duplicate detection would not catch either, since
     the two pages differ in title. `aliases` is the frontmatter field already
     reserved for exactly these alternate spellings, so it answers the name too.

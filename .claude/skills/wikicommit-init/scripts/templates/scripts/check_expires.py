@@ -17,8 +17,8 @@ from _wikilink import ENTITY_DIR, VIEW_DIR, collect_entity_pages, collect_view_p
 
 
 def collect_pages() -> list[Path]:
-    # View pages carry expires_at on the same terms as any other page
-    # (Issue #675), so freshness is checked across both trees.
+    # View pages carry expires_at on the same terms as any other page, so
+    # freshness is checked across both trees.
     return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 

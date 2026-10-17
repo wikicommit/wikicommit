@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""Return the prose policy a policy file actually states (Issue #844).
+"""Return the prose policy a policy file actually states.
 
 `.wikicommit/source-policy.md` and `.wikicommit/entity-policy.md` ship with their
 whole body written as a commented-out worked example. The design says a body that
-is empty, or still that example, states no policy — but until now the deciding was
-done by a sentence repeated in four places across two SKILL.md files, each telling
-an LLM to judge whether the body it had just read was "still the shipped comment".
-
-That is the shape Issue #474 named: an operation that is entirely deterministic,
-expressed as an instruction. The shipped text is right here on disk, so nothing
-has to be judged. And the failure it invites is one-sided — every line of both
-examples argues for *excluding* something, so a misread only ever suppresses pages
-that should have been written, which is the direction one pilot already went in
-far enough to end up with no `Person` pages at all.
+is empty, or still that example, states no policy. Deciding that is entirely
+deterministic, so it is done here rather than by an LLM judging whether the body
+it has just read is "still the shipped comment": the shipped text is right here on
+disk, so nothing has to be judged. And the failure such judging invites is
+one-sided — every line of both examples argues for *excluding* something, so a
+misread only ever suppresses pages that should have been written.
 
 The rule this applies is simpler than "is this the shipped example", and does not
 depend on which version shipped it:
@@ -64,7 +60,7 @@ def strip_frontmatter(text: str) -> str:
     r"""Drop a leading YAML frontmatter block, if there is one.
 
     Delegated to _frontmatter.py rather than done with a `\A---\n.*?\n---` regex
-    here, for the reason that module's docstring gives (Issue #212): that regex
+    here, for the reason that module's docstring gives: that regex
     never matches a block with zero content lines (`---\n---\n`), because there is
     no newline between the two delimiters for `.*?` to sit on. A policy file whose
     keys have all been deleted would then keep its `---` lines in the body, and a

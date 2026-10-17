@@ -34,7 +34,7 @@ VALID_REMOVED_REASONS = {"obsolete", "merged", "gdpr"}
 VALID_SOURCE_TYPES = {"path", "url", "wikicommit", "manual"}
 
 # Top-level fields with a defined structural/bookkeeping/common-identifier
-# role in the frontmatter split (Issue #495).
+# role in the frontmatter split.
 # Never treated as a possible misplaced Schema.org property by
 # validate_schema_properties()'s flat-field scan below.
 COMMON_TOP_LEVEL_FIELDS = {
@@ -65,7 +65,7 @@ def resolve_type_schema(type_value: str, schema_dir: Path) -> tuple[dict, str]:
     got there) `.wikicommit/schema/<name>.md` on disk produces no warning
     here at all. validate_schema_properties() below runs an independent,
     *Schema.org-vocabulary-existence* check for the same `type:` value
-    (Issue #512) specifically to catch that gap — the two checks can
+    specifically to catch that gap — the two checks can
     legitimately disagree (e.g. fire together: no local file *and* not in
     the vocabulary, for the common case of a plain typo with nothing built
     for it yet) since they're checking different things.
@@ -151,7 +151,7 @@ def validate_source_item(src: object, idx: int, repo_root: Path) -> list[tuple[s
         elif not DATE_RE.match(str(src["created_at"])):
             errors.append((f"sources[{idx}].created_at", "must be in `YYYY-MM-DD` format"))
 
-    # license は全 source.type 共通の任意フィールド（Issue #558）。値の中身は
+    # license は全 source.type 共通の任意フィールド。値の中身は
     # 検証しない — WikiCommit はライセンスの当否を判断せず、記録する場所を
     # 用意して記録された内容を表示するだけ。
     # 空文字列だけは弾く（「不明」はフィールドを書かないことで表す。空文字列を
@@ -185,14 +185,14 @@ def _cached_vocab_index() -> tuple[dict | None, str]:
 
 
 def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """The machine-checkable half of the frontmatter split introduced by
-    Issue #495 (`properties:` nests Schema.org-vocabulary-backed fields;
+    """The machine-checkable half of the frontmatter split
+    (`properties:` nests Schema.org-vocabulary-backed fields;
     everything else — structural fields, WikiCommit bookkeeping, common
     cross-type identifiers — stays flat at the top level). Three checks, all
     keyed off the same
     type/vocabulary resolution so a page pays for it at most once:
 
-    1. `type:` itself resolves to a real Schema.org type (Issue #512) — a
+    1. `type:` itself resolves to a real Schema.org type — a
        non-`custom/` type absent from the vocabulary is reported as an ERROR
        and short-circuits checks 2–3 below (there's no ancestry chain to
        walk for a type that doesn't exist, so neither can be evaluated).
@@ -204,7 +204,7 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
     3. No top-level frontmatter key (outside COMMON_TOP_LEVEL_FIELDS) is
        itself a Schema.org property that belongs to this type — catching a
        property left flat instead of nested under `properties:` (e.g. an
-       LLM or hand-edit reverting to the pre-Issue-#495 shape), which
+       LLM or hand-edit reverting to the flat pre-split shape), which
        otherwise passes silently: nothing else in this file inspects
        "extra" top-level keys it doesn't recognize.
 
@@ -249,7 +249,7 @@ def validate_schema_properties(fm: dict, type_value: object) -> tuple[list[tuple
         # A non-custom `type:` with no Schema.org vocabulary entry is a typo
         # or a non-standard-naming ad-hoc type, not a legitimate installed
         # type resolve_type_schema() just hasn't seen a local schema file
-        # for yet (Issue #512) — that local-file case is resolve_type_schema()'s
+        # for yet — that local-file case is resolve_type_schema()'s
         # own, separate WARNING. Without this check, a typo'd/non-existent
         # type that happens to have *some* `.wikicommit/schema/<name>.md`
         # file on disk (however it got there) passes silently, with its
@@ -290,19 +290,17 @@ def validate_type_matches_path(
     `custom/` sub-path for custom types (`schema:custom/Decision` lives in
     `.wikicommit/entity/<lang>/custom/Decision/`, not `.../Decision/`).
 
-    Nothing enforced this before Issue #545, so `/wikicommit-synthesize`
-    non-deterministically wrote custom-type pages to either location: the
-    frontmatter said `schema:custom/Practice` while the file sat in
+    Without this check a custom-type page can sit in either location: the
+    frontmatter says `schema:custom/Practice` while the file sits in
     `<lang>/Practice/`. That mismatch makes the WikiLink matching the page's
-    own `type:` (`[[custom/Practice/<slug>]]`) unresolvable, and none of the
-    existing gates caught it — `validate_frontmatter.py` never compared path
-    against `type:`, `check_wikilinks.py` only sees links that already exist,
-    and `check_schema_coverage.py` only asks whether the `type:` value has a
+    own `type:` (`[[custom/Practice/<slug>]]`) unresolvable, and no other gate
+    catches it — `check_wikilinks.py` only sees links that already exist, and
+    `check_schema_coverage.py` only asks whether the `type:` value has a
     schema file (it does).
 
     Skipped — not reported — for any file that does not resolve to the
     `<lang>/<Type>/<slug>.md` shape under `.wikicommit/entity/` (a page kept
-    directly under `entity/`, or one still under the pre-Issue #477
+    directly under `entity/`, or one still under the legacy
     `.wikicommit/wiki/` prefix): those predate this layout and the
     old/new-coexistence policy applies. Also skipped when `type:` is absent
     or lacks the `schema:` prefix, both of which are already reported
@@ -330,14 +328,14 @@ def validate_type_matches_path(
     ]
 
 
-# Required fields for a view page (Issue #675). Not read from
+# Required fields for a view page. Not read from
 # .wikicommit/schema/default.md, whose list ends in `type` and `sources` —
 # the two fields a view page is defined by *not* having.
 VIEW_REQUIRED_FIELDS = ("title", "lang", "derived_from")
 
 
 def is_view_page(path: Path, repo_root: Path) -> bool:
-    """Whether `path` is in the view tree (Issue #675).
+    """Whether `path` is in the view tree.
 
     Membership is by location, not by frontmatter: `derived_from` alone does
     not make a page a view page, because a synthesized page written before the
@@ -354,7 +352,7 @@ def is_view_page(path: Path, repo_root: Path) -> bool:
 
 
 def validate_view_page(path: Path, fm: dict, repo_root: Path) -> list[tuple[str, str]]:
-    """View-page-only rules (Issue #675): the shape of the path, the two fields
+    """View-page-only rules: the shape of the path, the two fields
     a view page must not carry, and `kind`.
 
     `derived_from` itself is validated by the shared branch further down —
@@ -410,7 +408,7 @@ def validate_file(
     type_value = fm.get("type")
     type_schema: dict = {}
     if is_view:
-        # A view page carries no `type:` at all (Issue #675), so there is no
+        # A view page carries no `type:` at all, so there is no
         # schema to resolve and no path/type agreement to check. Its own rules
         # are applied below.
         if type_value is not None:
@@ -494,15 +492,15 @@ def validate_file(
     if "generated_at" in fm and not DATE_RE.match(str(fm["generated_at"])):
         errors.append(("generated_at", "must be in `YYYY-MM-DD` format"))
 
-    # An `expires_at` on or before `generated_at` (Issue #1130). The field is a
+    # An `expires_at` on or before `generated_at`. The field is a
     # schedule — "re-read this page after this day" — and a date that had
     # already passed when the page was written schedules nothing: it puts the
     # page on check_expires.py's EXPIRED list the moment it is generated, where
     # re-reading fixes nothing. The usual cause is a deadline from the
     # document's own history (a date by which third parties had to respond),
     # not a date the page's content goes stale. This is decided without
-    # judgment, so it is checked here rather than written into an instruction
-    # (Issue #474). WARNING, not ERROR: hand-written and older pages can carry
+    # judgment, so it is checked here rather than written into an instruction.
+    # WARNING, not ERROR: hand-written and older pages can carry
     # such a date, and that is no reason to block a merge. Both values are
     # compared as `YYYY-MM-DD` strings, which order the same way as dates; a
     # malformed value is already an ERROR above and is not compared.
@@ -525,7 +523,7 @@ def validate_file(
     if "generated_by" in fm and not str(fm["generated_by"]).strip():
         errors.append(("generated_by", "must not be an empty string"))
 
-    # WikiCommit's own version at generation time (Issue #577). Optional: its
+    # WikiCommit's own version at generation time. Optional: its
     # absence means "generated before this field existed", and existing pages
     # are not back-filled. Only the same emptiness check `generated_by` gets —
     # the value is not matched against a semver pattern, for the same reason
@@ -534,7 +532,7 @@ def validate_file(
     if "generated_with" in fm and not str(fm["generated_with"]).strip():
         errors.append(("generated_with", "must not be an empty string"))
 
-    # The GitHub login of whoever closed the review tracking Issue (Issue #663).
+    # The GitHub login of whoever closed the review tracking Issue.
     # Written by review-issue-close-sync.yml in the same commit that flips
     # review_status, so the published banner can say whose judgment `reviewed`
     # represents. Optional in both directions: pages reviewed before this field
@@ -565,7 +563,7 @@ def validate_file(
         elif str(source_commit) != "" and not COMMIT_HASH_RE.match(str(source_commit)):
             # Empty string is allowed: wikicommit-translate writes it when the source
             # page has no commits yet (not yet merged). check_translation_status.py
-            # already treats this as STALE by design (Issue #409).
+            # already treats this as STALE by design.
             errors.append(
                 ("source_commit", "must be a 40-character git commit hash (lowercase hex), or an empty string when the source page is not yet committed")
             )
@@ -576,7 +574,7 @@ def validate_file(
         if "translated_by" in fm and not str(fm["translated_by"]).strip():
             errors.append(("translated_by", "must not be an empty string"))
 
-        # Translation-page counterpart of generated_with (Issue #577).
+        # Translation-page counterpart of generated_with.
         if "translated_with" in fm and not str(fm["translated_with"]).strip():
             errors.append(("translated_with", "must not be an empty string"))
 
@@ -606,7 +604,7 @@ def validate_file(
                 elif str(entry_commit) != "" and not COMMIT_HASH_RE.match(str(entry_commit)):
                     # Empty string is allowed: wikicommit-synthesize writes it when a
                     # grounding page has no commits yet, same convention as
-                    # translated_from/source_commit above (Issue #409).
+                    # translated_from/source_commit above.
                     # check_derivation_freshness.py already treats this as STALE.
                     errors.append(
                         (
@@ -658,7 +656,7 @@ def main() -> int:
     if len(sys.argv) > 1:
         target_files: list[Path] = [Path(a) for a in sys.argv[1:]]
     else:
-        # Both trees: entity pages and view pages (Issue #675) are validated by
+        # Both trees: entity pages and view pages are validated by
         # the same command, under different rules chosen per file.
         target_files = sorted(entity_dir.rglob("*.md")) if entity_dir.exists() else []
         view_dir = repo_root / VIEW_DIR

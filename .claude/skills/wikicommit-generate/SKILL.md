@@ -14,7 +14,7 @@ Registers a source and generates wiki pages (local writes only) in one run. Perf
 ## Usage
 
 ```
-/wikicommit-generate <path|url> [--include <glob>]   # register a source + generate pages in one run
+/wikicommit-generate <path|url> [--include <glob>] [--license <id>]   # register a source + generate pages in one run
 /wikicommit-generate                                  # process every management file still queued (asks first if more than 5)
 
 /wikicommit-generate --regenerate <page-path>         # rebuild one existing page under the current generation rules
@@ -22,6 +22,8 @@ Registers a source and generates wiki pages (local writes only) in one run. Perf
 /wikicommit-generate --regenerate --all               # rebuild every eligible page (asks first if more than 5)
 /wikicommit-generate --regenerate <page> --merge <page> [...]  # merge pages a person decided are the same into the first
 ```
+
+`--license <id>` records the source's license (free text: an SPDX identifier such as `CC-BY-4.0` where one exists, otherwise a short phrase) on the management file Step 0 creates, so the pages this run writes carry it in `sources[].license`. With `--include`, every newly registered file gets the same value. It is accepted only together with a source argument: the queue run and `--regenerate` register nothing, so there is nowhere to pass it — if it comes without a source or with `--regenerate`, say so and do not start the run.
 
 ## Prerequisite Skills (Text Extraction) — see `references/text-extraction-routing.md`
 
@@ -61,6 +63,7 @@ Then **loop**:
 1. Read the JSON it printed. **Keep the `run` path** — every later call names it.
 2. If `notes` is present, report every line of it to the user. The version-skew check (`OUTDATED:`, `MISSING:`, `ORPHAN:`, `WARNING:` about `.wikicommit/scripts/`) and the end-of-run scripts speak through it; a skew warning does not stop the run.
 3. If `step` is `null`, the run is over — `finished` (say `finished_because` if present), or halted (say `halted_reason`). Stop.
+   A run that halts inside its first loop never reaches `ask-deferred`, so before stopping run `python <this Skill's directory>/scripts/workflow_checks.py halted-questions --run <run>` and, if it prints any `ITEM:`, list each source with its `REASON:` line as questions this run set aside and did not ask (it prints nothing when the run had already asked them): they stay queued, and a later run asks them only if it picks those sources again and gets to the end of its loop.
    The first steps are checks the workflow engine runs itself, **at the start of the run, before anything is fetched**: if `.wikicommit/config.yml` does not exist it halts and you tell the user to run `/wikicommit-init` first; if `.wikicommit/review-rules.md` does not exist it halts and you tell the user to run `/wikicommit-init --no-overwrite` to install it. Pass 4 refuses to review without that file, so checking at the start avoids a batch of fetching and generation that could never be reviewed — and a looser review that never read those rules would look completely normal while Pass 4 still wrote a record asserting a review happened. Neither halt touches `failed_pages` or any management file's `status`: it is an installation problem, not a defect in a page.
 4. If `blocked` is true, the completion check for this step has failed repeatedly: stop and report the last `reason` to the user. Do not work around a check.
 5. A `human` step: ask the user `ask`, offering `choices`, and pass the answer back with the `then` command.

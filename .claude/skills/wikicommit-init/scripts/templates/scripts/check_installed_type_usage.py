@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Report installed schema types that pages are not actually using (Issue #565).
+"""Report installed schema types that pages are not actually using.
 
 check_schema_coverage.py finds the opposite shape — a `type:` in use with no
-schema file behind it. Nothing looked for a schema file with no pages in front
-of it, and that turns out to be the more common failure. `wikicommit/saitama-city-wiki`
-had `Park.md` and `Museum.md` installed and approved by a human, and generated
-seven parks and two museums as plain `Place` — in the same batch that added the
-type files. Every gate passed: `check_schema_coverage.py` reported zero, because
-`Place` does have a schema file.
+schema file behind it. Nothing else looks for a schema file with no pages in
+front of it, and that turns out to be the more common failure.
+`wikicommit/saitama-city-wiki` had `Park.md` and `Museum.md` installed and
+approved by a human, and generated seven parks and two museums as plain `Place`
+— in the same batch that added the type files. Every gate passed:
+`check_schema_coverage.py` reported zero, because `Place` does have a schema
+file.
 
 The cause is structural rather than a slip. `Park` and `Museum` are descendants
 of `Place` in Schema.org, so writing a park as a `Place` is not an error, only
 coarser — and an ancestor type is always available, always familiar, and always
-technically correct. Issue #447 found the same force acting on `DefinedTerm` and
-addressed it where types are *proposed*; this is the same force acting where an
+technically correct. The same force acts on `DefinedTerm` where types are
+*proposed*, and is addressed there; this is the same force acting where an
 already-installed type is *chosen*.
 
 Two findings, deliberately different in strength:
@@ -23,7 +24,7 @@ Two findings, deliberately different in strength:
                      `provenance: default` types are exempt — they ship with
                      every wiki whether or not its subject calls for them, so
                      zero pages says nothing about them. A file with no
-                     `provenance` at all predates that field (Issue #519), so
+                     `provenance` at all predates that field, so
                      config.yml's `schema.base_types` stands in for it.
   ANCESTOR_FALLBACK  pages sit on a type whose descendant is also installed.
                      Suggestive, never conclusive: a wiki with `Park.md` still
@@ -89,9 +90,9 @@ def configured_base_types(path: Path = CONFIG_PATH) -> set[str]:
     """`schema.base_types` from config.yml — the types init installs unconditionally.
 
     Only consulted for a schema file with no `provenance` field at all. That
-    absence means "written before Issue #519 added the field", not "not a base
-    type", so reading it as anything but exempt would flag every base type of
-    every wiki initialized before then — the whole shipped set, on any wiki whose
+    absence means "written before the field existed", not "not a base type",
+    so reading it as anything but exempt would flag every base type of every
+    wiki initialized before then — the whole shipped set, on any wiki whose
     subject does not happen to use all of it. config.yml records exactly which
     types init put there, which is the fact `provenance: default` would have
     carried, so it answers the question the missing field cannot.

@@ -1,27 +1,19 @@
 #!/usr/bin/env python3
-"""Convert [[Type/slug]] WikiLinks to relative Markdown links for the Quartz build.
+"""Build the Quartz content/ tree from the wiki, turning WikiLinks into relative links.
 
 Usage:
     python .wikicommit/scripts/convert_wikilinks.py \
         --source .wikicommit/entity/ \
         --output content/ \
-        [--primary-lang ja]
+        [--view-source .wikicommit/view/] [--primary-lang ja]
 
-Mirrors every .md file under --source into --output, rewriting [[Type/slug]]
-WikiLinks into relative Markdown links ([Type/slug](../Type/slug.md)). Links
-that cannot be resolved are left untouched and reported as warnings.
-
-Also generates a build-time-only, language-independent content/sources/
-tree mirroring .wikicommit/source/ 1:1 — one page per source management
-file, plus a content/sources/index.md landing page (Issue #476, replacing
-the old per-language content/<lang>/sources.md aggregation keyed off each
-page's own `sources` frontmatter — see generate_source_pages()). Like
-generate_root_index()'s content/index.md, none of this is LLM-authored wiki
-content and all of it is excluded from the review_status /
-validate_frontmatter.py quality gate contract.
+Output: one progress line per file written, `WARNING:` lines, then `SUMMARY:`.
 
 Exit code: always 0 (unresolved links are warnings only; check_wikilinks.py
-is responsible for blocking on broken links during the quality gate).
+blocks broken links during the quality gate).
+
+Specification: the `convert_wikilinks.py` section of the WikiCommit script
+specification (ScriptSpec).
 """
 
 import argparse
@@ -36,7 +28,7 @@ from urllib.parse import quote, urlsplit
 
 import yaml
 
-from _frontmatter import parse_frontmatter_and_body_text, parse_frontmatter_cached
+from _frontmatter import parse_frontmatter_and_body_text, parse_frontmatter_cached, parse_frontmatter_untyped_text
 from _wikilink import (
     VIEW_DIR,
     VIEW_TYPE_SEGMENT,
@@ -46,12 +38,12 @@ from _wikilink import (
     other_types_for_slug,
     parse_view_path,
     parse_wiki_path,
+    wikilink_display,
 )
-# Issue #751: the AI review record is a second input tree for this build. Both
-# helpers are imported rather than reimplemented — check_review_coverage.py
-# answers "is this verdict still valid?" for the operator and this script asks
-# the same question for the reader, and two copies of that judgement would
-# drift into a banner that contradicts `/wikicommit-status`.
+# The AI review record is a second input tree for this build. Both helpers are
+# imported rather than reimplemented — check_review_coverage.py asks "is this
+# verdict still valid?" for the operator and this script asks it for the
+# reader; two copies would drift into a banner that contradicts `/wikicommit-status`.
 from _groups import load_group_file
 from check_review_coverage import (
     latest_by_kind,
@@ -66,21 +58,16 @@ from record_review import ACCEPTED_PREFIXES, REVIEW_DIR, RecordError
 # The finding types `.wikicommit/review-rules.md` defines, in the order the
 # overview lists them. Anything else a record carries — a missing `type`, or a
 # value outside this set — is counted under OTHER_FINDING_TYPE rather than
-# guessed into one of these (Issue #1063).
+# guessed into one of these.
 FINDING_TYPES = ("HALLUCINATION", "CONTRADICTION", "MISSING_SOURCE")
 OTHER_FINDING_TYPE = "OTHER"
 
 
-# The page trees this script reserves directly under `content/` (Issue #957).
-#
-# Both are build-generated: `sources/` mirrors `.wikicommit/source/` (Issue #476)
-# and `overview/` is the survey page (Issue #585). Neither is an entity path, so
-# both publishing plugins have to know them by name — the graph to keep
-# `overview/` out of the language facet, the explorer to keep both out of the
-# Type folders. Issue #585 registered `overview` with neither, and the symptom in
-# each case was silent: a fake language in one control bar, a stray folder in the
-# other. `tests/test_publish_reserved_trees.py` now asserts that every name here
-# appears in all three plugin sources.
+# The page trees this script reserves directly under `content/`. Neither is an
+# entity path, so the publishing plugins have to know them by name — the graph
+# to keep `overview/` out of the language facet, the explorer to keep both out of
+# the Type folders. `tests/test_publish_reserved_trees.py` asserts that every
+# name here appears in all three plugin sources.
 #
 # Deliberately not listed: `tags/` is written by Quartz, not by this script (the
 # explorer drops it through `filterFn`, not `sortTier`), and `assets/` holds no
@@ -90,14 +77,13 @@ OVERVIEW_DIR_NAME = "overview"
 RESERVED_PUBLISH_TREES = (SOURCES_DIR_NAME, OVERVIEW_DIR_NAME)
 
 
-# Stamped onto the published copy of a page, never onto the page itself
-# (Issue #751). Naming them apart from `reviewed_by` is deliberate: that field
-# is the human who closed the tracking Issue (Issue #663), and a reader must
-# not read one as the other.
+# Stamped onto the published copy of a page, never onto the page itself.
+# Named apart from `reviewed_by` on purpose: that field is the human who closed
+# the tracking Issue, and a reader must not read one as the other.
 AI_REVIEW_MODEL_FIELD = "ai_review_model"
 AI_REVIEW_AT_FIELD = "ai_review_at"
-# Written only for a translation checked against its original page (Issue
-# #1031), so every other page publishes byte-for-byte as before.
+# Written only for a translation checked against its original page, so every
+# other page publishes byte-for-byte as before.
 AI_REVIEW_STAGE_FIELD = "ai_review_stage"
 TRANSLATE_CHECK_STAGE = "translate-check"
 
@@ -108,34 +94,18 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     Returns `{"model", "reviewed_at", "findings"}` for the newest `kind: ai`
     record whose `page_content_hash` still matches the page on disk.
 
-    Four ways this returns None, and all four must publish the page exactly as
-    it published before this feature existed:
+    Returns None — and the page publishes exactly as it would without a
+    record — when there is no record, when the standing verdict is not a pass,
+    when it is stale (the page was rewritten, or a source it was judged against
+    changed or left the page), or when the record or the page's frontmatter
+    cannot be read: a build must not fail over an annotation.
 
-    - **No record.** The page predates Issue #750; a record cannot be made
-      retroactively, so the blank is permanent and honest.
-    - **The verdict is not a pass.** See below.
-    - **The verdict is stale.** `/wikicommit-fix` rewrote the page after the
-      review, or a source it was judged against changed or left the page, so
-      the verdict was made against material that is no longer there. This is
-      the reason Issue #751 stamps at publish time instead of copying the
-      verdict into the page's own frontmatter: a copy cannot notice it has gone
-      stale, which is the failure Issue #705 already cost this repository once.
-    - **The record is unreadable**, or the page's own frontmatter will not
-      parse. A build must not fail over an annotation.
-
-    `standing_verdict()` — not simply the last record — because a
-    `result: discarded` record carries an empty hash and describes a page that
-    was never written, so it says nothing about the file being published here.
-
-    Only a `result: pass` verdict is published. `standing_verdict()` answers
-    "which record is the current one", which is all `/wikicommit-status` needs
-    to measure staleness against — but `wikicommit-review` records
-    `--result fail` when its fact-check found something, against a page that is
-    still on disk. Publishing that as "checked against sources" would put a
-    passing badge on the one page whose latest check failed, and count its
-    unfixed findings among those "raised and fixed before publishing". An older
-    `pass` is not fallen back to either: a later failure does not stop applying
-    because an earlier check once succeeded.
+    `standing_verdict()` rather than the last record: a `result: discarded`
+    record carries an empty hash and describes a page that was never written.
+    Only `result: pass` is published, and an older pass is not fallen back to:
+    `wikicommit-review` records `--result fail` against a page still on disk,
+    and showing that page as "checked against sources" would put a passing
+    badge on the one page whose latest check failed.
     """
     try:
         page_rel = src_path.resolve().relative_to(repo_root.resolve()).as_posix()
@@ -151,8 +121,8 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
 
     try:
         # load_page_records(), as `/wikicommit-status` does, so a renamed page is
-        # judged on the record its old slug left (Issue #1162): shown when only the
-        # slug changed, withheld as stale when the title did.
+        # judged on the record its old slug left: shown when only the slug
+        # changed, withheld as stale when the title did.
         record = standing_verdict(load_page_records(page_rel))
     except OSError as e:
         print(f"WARNING: {src_path}: review records could not be read: {e}")
@@ -198,9 +168,9 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
     return {
         "model": model,
         "reviewed_at": reviewed_at,
-        # Issue #1031: what the page was checked against. `translate-check`
-        # compared a translation with its original page, not with sources, and
-        # every reader-facing surface has to say so rather than fold it into
+        # What the page was checked against. `translate-check` compared a
+        # translation with its original page, not with sources, and every
+        # reader-facing surface has to say so rather than fold it into
         # "checked against sources".
         "stage": str(record.get("stage") or ""),
         "findings_by_type": count_findings_by_type(record.get("findings")),
@@ -210,12 +180,11 @@ def load_ai_review(src_path: Path, repo_root: Path, page_fm: dict | None = None)
 def count_findings_by_type(findings: object) -> dict[str, int]:
     """Tally a record's findings by `type`, leaving out the ones about other pages.
 
-    A `page_at_fault: other` entry reports that a *neighbouring* page looks wrong
-    (a non-blocking cross-page finding); nothing was rewritten on this page for
-    it, so counting it among the findings "raised and fixed before publishing"
-    would overstate what the check did here (Issue #1063). Only the exact string
-    `other` is dropped: drifted values such as `this` / `self` are about this
-    page and stay counted.
+    A `page_at_fault: other` entry reports that a *neighbouring* page looks wrong;
+    nothing was rewritten on this page for it, so counting it among the findings
+    "raised and fixed before publishing" would overstate what the check did here.
+    Only the exact string `other` is dropped: drifted values such as `this` /
+    `self` are about this page and stay counted.
     """
     counts: dict[str, int] = {}
     if not isinstance(findings, list):
@@ -235,17 +204,14 @@ def count_unpublished_pages(repo_root: Path) -> int:
     """How many pages the review threw away before they were ever published.
 
     A page counts when its newest `kind: ai` record is `result: discarded` and
-    the page is not on disk. A discarded `action: update` does not count: the
-    earlier version stays published, so "not published" would be false for it.
-    Neither does a page discarded once and passed on a later run — its newest
-    record is the pass. Entity and view pages alike (synthesize Step 5.5 also
-    discards).
+    the page is not on disk. A discarded `action: update` does not count (the
+    earlier version stays published), nor does a page discarded once and passed
+    on a later run. Entity and view pages alike (synthesize also discards).
 
-    This is the one tally on the overview that is not a by-product of the page
-    walk: a page that is not on disk is never reached by it, so the record tree
-    is walked once more (Issue #1063). Records are read with the same helpers
-    `/wikicommit-status` uses, relative to the working directory, as
-    load_ai_review() does.
+    The one overview tally that is not a by-product of the page walk — a page
+    not on disk is never reached by it — so the record tree is walked once more,
+    with the helpers `/wikicommit-status` uses, relative to the working
+    directory as load_ai_review() does.
     """
     root = repo_root / REVIEW_DIR
     if not root.is_dir():
@@ -270,13 +236,10 @@ def inject_frontmatter_lines(content: str, lines: list[str]) -> str:
 
     Textual insertion rather than a YAML round-trip: this runs over every wiki
     page, and `yaml.safe_load` + `yaml.dump` would reformat quoting, reorder
-    keys and drop comments across the whole published site — the same round-trip
-    that cost this repository a config file's worth of comments (Issue #713).
+    keys and drop comments across the whole published site.
 
     A page with no frontmatter, or with an unterminated one, is returned
-    unchanged. Those are `validate_frontmatter.py`'s to report; a publish step
-    inventing a frontmatter block for them would be a bigger change than the
-    annotation is worth.
+    unchanged. Those are `validate_frontmatter.py`'s to report.
     """
     if not lines or not content.startswith("---"):
         return content
@@ -343,26 +306,21 @@ def load_translation_targets(repo_root: Path) -> list[str]:
 
 def load_site_description(repo_root: Path) -> dict[str, str]:
     """Return .wikicommit/config.yml's top-level `site_description` as a
-    {lang: text} mapping (Issue #671: the reader-facing counterpart to `theme`).
+    {lang: text} mapping — the reader-facing counterpart to `theme`.
 
-    `theme` tells the LLM what this wiki's subject scope is — one string, read by
-    wikicommit-generate Pass 2c and wikicommit-collect, never by a reader
-    (Issue #670). This one is written *for* readers, so it needs one entry per
-    language they might arrive in. The two are deliberately independent: no rule
-    derives either from the other, and both may be absent.
+    `theme` tells the LLM this wiki's subject scope and is never shown to a
+    reader; this one is written *for* readers, one entry per language they might
+    arrive in. The two are independent: neither is derived from the other, and
+    both may be absent.
 
-    Tolerant like load_theme() was: anything that is not a mapping of
-    language code to non-empty string is dropped, and a missing/unreadable
-    config yields {}. A malformed description must not take the whole build
-    down — the caller simply omits the line, which is also what an unset
-    field does.
+    Tolerant: anything that is not a mapping of language code to non-empty
+    string is dropped, and a missing/unreadable config yields {}. A malformed
+    description must not take the whole build down — the caller omits the
+    line, as it does for an unset field.
 
-    Internal whitespace is collapsed to single spaces, not just stripped at the
-    ends. The main rendering site is one Markdown list item per language, so a
-    value carrying its own newlines (a YAML `|` block is a natural way to write
-    three sentences) would otherwise be pasted verbatim into that item: a blank
-    line inside it terminates the language list, leaving the remaining languages
-    in a second list with a stray paragraph between. One line in, one line out.
+    Internal whitespace is collapsed to single spaces: the value is rendered as
+    one Markdown list item per language, and a blank line inside a YAML `|`
+    block would end the language list there.
     """
     result = {}
     for lang, text in _config_section(repo_root, "site_description").items():
@@ -380,10 +338,9 @@ def existing_lang_targets(
 ) -> list[str]:
     """Filter targets to languages with at least one non-removed content page.
 
-    Both input trees count (Issue #675): a language whose only pages are view
-    pages still publishes under `content/<lang>/View/`, and dropping it here
-    would leave those pages reachable by direct URL alone, with no entry in the
-    root index's language list.
+    Both input trees count: a language whose only pages are view pages still
+    publishes under `content/<lang>/View/`, and dropping it here would leave
+    those pages out of the root index's language list.
     """
     roots = [source_dir] + ([view_dir] if view_dir is not None else [])
     result = []
@@ -399,92 +356,60 @@ def existing_lang_targets(
 
 # The four *_LABELS dicts below (root index, source type, source page,
 # overview) ship ten languages: en (the DEFAULT_* fallback beside each one) and
-# ja, de, es, fr, it, ru, zh, pt, pl as entries (Issue #1017). **The set is
-# fixed by an external standard, not by which wikis happen to exist**: it is the
-# ten languages the Wikipedia portal (wikipedia.org) lists. Before #1017 these
-# dicts held ja only, and "add a language when a wiki in it appears" answered
-# every new language with "because a pilot happened to use it". Do not widen the
-# set past these ten on the same reasoning.
+# ja, de, es, fr, it, ru, zh, pt, pl as entries. **The set is fixed by an
+# external standard, not by which wikis happen to exist**: it is the ten
+# languages the Wikipedia portal (wikipedia.org) lists. Do not widen it because
+# some wiki happens to use another language.
 #
-# **The non-English entries were produced by an LLM from the English.** Most
-# keys are plain labels ("Sources", "Type", "Total pages"). A minority carry
-# claims — counts_note, ai_counts_note, licensing, reviewed_note,
-# retracted_notice — and each was translated to say no more than the English
-# says ("checked against sources" as compared, not verified). If a translation
-# reads stronger than the English, fix the translation; the English is
-# canonical.
+# **The English is canonical.** The non-English entries were produced by an LLM
+# from it. Keys that carry claims — counts_note, ai_counts_note, licensing,
+# reviewed_note, retracted_notice — say no more than the English says ("checked
+# against sources" as compared, not verified). If a translation reads stronger
+# than the English, fix the translation.
 #
 # **A partial language is not an option.** These dicts are read with bracket
-# access, so one missing key raises KeyError and fails the build. That is a
-# guarantee, not a defect — a language is complete or absent, never
-# half-rendered. The one exception is SOURCE_TYPE_LABELS, whose values are
-# looked up with .get(source_type, source_type) and degrade to the bare type
-# string instead. `tests/test_ui_translation_completeness.py` checks every
-# entry against the DEFAULT_* keys and placeholders, so a gap is caught before
-# a build hits it.
+# access, so one missing key raises KeyError and fails the build — a language
+# is complete or absent, never half-rendered. The one exception is
+# SOURCE_TYPE_LABELS, read with .get(source_type, source_type).
+# `tests/test_ui_translation_completeness.py` checks every entry against the
+# DEFAULT_* keys and placeholders.
 #
 # **The language set is kept in step elsewhere**: all four dicts here, the four
 # WikiCommit Quartz plugins' locales and init.py's WIKICOMMIT_UI_LANGS.
-# `tests/test_ui_language_fallback_disclosure.py` fails if they disagree —
-# adding to one dict and not the rest would otherwise be silent (that wiki
-# would get a translated root index and English source pages).
+# `tests/test_ui_language_fallback_disclosure.py` fails if they disagree.
 #
 # **A language outside the ten renders in English**, per surface, via the
 # DEFAULT_* dict.
 #
-# **The published pages do not say that the fallback happened** (Issue #825).
-# The question was whether a reader should be told, rather than being shown
-# English as if it were the site's language, and the answer is no. Three
-# reasons, in the order they decide it:
-#
-#   - **A notice would not restore what was lost.** The English string *is* the
-#     canonical wording — the other language's entry would be a translation of
-#     it — so a reader who can read English has already received the claim, and
-#     learning that Korean was intended changes nothing about what this wiki
-#     vouches for. A reader who cannot read English cannot read the notice
-#     either.
-#   - **A language-independent marker only restates what is already visible.**
-#     A flag or an `(en)` tag says "this is English", which is exactly what
-#     English text in a Korean page already says. That was the point of
-#     leaving it in English: the failure is visible without help.
-#   - **It would be a standing notice on every surface of every page**, one
-#     nobody can act on — a reader cannot supply the missing labels. That is the
-#     shape a reader stops seeing, and it would buy the fade at the cost of
-#     weight on the banner, where two Issues already hold the line against
-#     adding any.
+# **The published pages do not say that the fallback happened**: the English is
+# the canonical wording, so a reader who can read English has the claim already
+# and one who cannot could not read a notice either, and a standing notice
+# nobody can act on is the kind a reader stops seeing.
 #
 # **The operator is told instead, once**, by `init.py` when they choose a
-# primary_lang this project has no labels for. They are the one person who can
-# act on it, and telling them costs the published pages nothing. Do not read
-# this as "the fallback is fine and needs no disclosure" — it is disclosed, to
-# the party that can do something with it.
+# primary_lang with no labels — the one person who can act on it.
 ROOT_INDEX_LABELS = {
     "ja": {
         "top": "Wiki トップ",
         "select": "言語を選択",
         "sources": "情報源一覧",
         "overview": "Wiki 全体の俯瞰",
-        # Issue #730: appended to each language's link. The whole string,
-        # leading separator included, lives in the label because the word order
-        # differs per language and there is no separator that reads right in
-        # both (Japanese wants none before a full-width parenthesis).
+        # Appended to each language's link. The whole string, leading separator
+        # included, lives in the label because the word order differs per
+        # language and there is no separator that reads right in both
+        # (Japanese wants none before a full-width parenthesis).
         "counts": "（{pages} ページ / 人が読んで確認 {reviewed}）",
         # Japanese does not inflect for number, so this is the same string. It
         # is spelled out rather than defaulted so that every label set answers
         # the singular case explicitly.
         "counts_one": "（{pages} ページ / 人が読んで確認 {reviewed}）",
-        # Issue #730 carries Issue #664's note across: without the two
-        # frontmatter fields the banner renders nothing, and the note would
-        # vanish with it. A bare "reviewed 0" reads as "nobody cares about this
-        # project", which is the opposite of the honesty the count is there for.
-        # Kept consistent with the overview page's wording, since the root index
-        # links straight to it.
-        # Issue #800: says that the human number is partial *by design*, which is
-        # what turns it from a backlog into a stated design. Saying only "not a
-        # guarantee of correctness" left the reader nothing to draw from the
-        # number at all. Sampling vocabulary stays out (Issue #769): whether
-        # RISKY: actually selects well is still unmeasured, and the word alone
-        # would imply a formal sampling design exists.
+        # Always emitted with the counts: a bare "reviewed 0" reads as "nobody
+        # cares about this project". Kept consistent with the overview page's
+        # wording, since the root index links straight to it. It says the
+        # human number is partial *by design* — "not a guarantee of
+        # correctness" alone left the reader nothing to draw from the number.
+        # Sampling vocabulary stays out: whether RISKY: selects well is
+        # unmeasured, and the word would imply a formal sampling design.
         "counts_note": "ページは LLM が生成した時点で公開されます。"
                        "出典との照合は機械が行い、"
                        "「人が読んで確認」はそのうち人が最後まで読み、"
@@ -492,20 +417,18 @@ ROOT_INDEX_LABELS = {
                        "人による確認は設計上一部のページのみであり、"
                        "この数字が総数に達することは目指していません。"
                        "網羅的な品質保証でもありません。",
-        # Issue #769: the same line with the AI count in it. Kept as separate
-        # templates rather than assembled from fragments because word order and
-        # the parenthesis style differ per language, which is why `counts`
-        # carries its own leading separator (Issue #730) in the first place.
-        # The AI count comes first: it is the full-coverage number, and
-        # "read by a person" is the sample taken out of it — the same order the
-        # overview page uses.
+        # The same line with the AI count in it. Kept as separate templates
+        # rather than assembled from fragments because word order and the
+        # parenthesis style differ per language (which is also why `counts`
+        # carries its own leading separator). The AI count comes first: it is
+        # the full-coverage number, and "read by a person" is the sample taken
+        # out of it — the same order the overview page uses.
         "counts_ai": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んで確認 {reviewed}）",
         "counts_ai_one": "（{pages} ページ / 出典と照合 {ai_reviewed} / 人が読んで確認 {reviewed}）",
-        # Issue #769: a separate key, emitted only when some page actually
-        # carries a standing verdict. Worded like the overview page's
-        # `ai_reviewed_note`: it names what the check does *not* cover, because
-        # stating only what it does would rebuild, facing the other way, the
-        # overstatement Issue #740 removed from `reviewed`.
+        # A separate key, emitted only when some page carries a standing
+        # verdict. Worded like the overview page's `ai_reviewed_note`: it names
+        # what the check does *not* cover, because stating only what it does
+        # would overstate it.
         "ai_counts_note": "「出典と照合」は生成時に、ページの記述をその出典と"
                           "照合した件数です。照合しているのは出典との一致だけで、"
                           "網羅性・実在の人物や組織への影響・"
@@ -653,28 +576,21 @@ def compute_langs(
     has published pages (deduped, first occurrence wins).
 
     `targets` is the set of languages this wiki declared it translates into, and
-    existing_lang_targets() narrows it to those that really have pages (Issue
-    #190). `published_langs` closes the opposite gap (Issue #731): a language
-    can have real pages without appearing in `targets` at all, and the root
-    index is the only entry point that was deriving its language list from
-    `targets` alone, so those pages were published but unreachable from the
-    front door. The pipeline produces this state itself — `/wikicommit-translate
-    <page> --lang <lang>` writes a translation without touching config.yml, and
-    its own error message points at that option as the alternative to editing
-    `targets` — and it also arises from hand-added pages, from changing
-    `primary_lang` later, and from removing a language from `targets` after its
-    translations exist.
+    existing_lang_targets() narrows it to those that really have pages.
+    `published_langs` closes the opposite gap: a language can have real pages
+    without appearing in `targets` (`/wikicommit-translate <page> --lang <lang>`
+    does not touch config.yml; hand-added pages, a changed `primary_lang` or a
+    language dropped from `targets` do the same), and the root index is the
+    front door to those pages.
 
     Union rather than replacement: existing_lang_targets() admits a language on
     the strength of any non-removed `.md` under it, including one whose path
     never resolves to `<lang>/<Type>/<slug>.md`, whereas `published_langs` is
     built from resolved, published pages only. Dropping the targets side would
-    therefore remove languages that are linked today. (Both cover the view tree,
-    so that is not the difference between them.)
+    remove languages that are linked today.
 
-    Ordering keeps existing sites stable: `targets` is written by a person, so
-    its order is theirs to keep, and discovered languages follow it (the caller
-    sorts them) rather than interleaving.
+    `targets` is written by a person, so its order is kept, and discovered
+    languages follow it (the caller sorts them) rather than interleaving.
     """
     ordered = [primary_lang] + list(targets) + list(published_langs or [])
     return list(dict.fromkeys(lang for lang in ordered if lang))
@@ -692,84 +608,39 @@ def generate_root_index(
 ) -> None:
     """Write a root content/index.md that links to the wiki top page(s).
 
-    Quartz's FolderPage plugin deliberately skips generating a virtual index
-    page for the content root (it filters out the "." folder), so without a
-    real index.md the site root never gets an index.html. The content-index
-    plugin's RSS feed defaults to the "index" slug regardless, so index.xml
-    ends up as the only "index"-named file at the root and is what gets
-    served for "/" (GitHub Issue #75).
+    Quartz's FolderPage plugin skips the content root (it filters out the "."
+    folder), so without a real index.md the site root gets no index.html and
+    the RSS feed's index.xml is what gets served for "/".
 
-    Always overwritten, like convert_file(). An earlier version skipped
-    writing when content/index.md already existed, reasoning that
-    .wikicommit/entity/ has no root-level page by design so a pre-existing file
-    could only be a real mirrored page not to be clobbered. In practice that
-    guard fired on the file this same function wrote on a previous local
-    build (package.json's prebuild script never clears content/ between
-    `npm run build`/`npm run preview` runs), permanently freezing this page's
-    content — and because main()'s stale-cleanup treats a guard-skipped write
-    the same as a real one, the frozen file was never swept up either
-    (Issue #358).
+    Always overwritten, like convert_file(). Never skip the write because the
+    file exists: content/ is not cleared between local builds, so a skip would
+    freeze the file this function wrote last time, and the stale-cleanup pass
+    would treat it as written and never sweep it either.
 
-    total_pages/reviewed_pages (Issue #407) are embedded as custom frontmatter
-    fields so the WikiCommitBanner Quartz component can render a site-wide
-    summary (total page count, reviewed count) on this page without re-deriving
-    them from `allFiles` at render time — this script already walks every wiki
-    page once in main(), so computing the aggregate here avoids a second,
-    TSX-side pass that would have to duplicate the same index.md/removed-page
-    exclusions.
+    On a single-language wiki, total_pages / reviewed_pages / ai_reviewed_pages
+    are embedded as frontmatter fields so WikiCommitBanner renders the site
+    summary without re-deriving them from `allFiles`; ai_reviewed_pages is
+    omitted at zero (see the comment where it is written).
 
-    config.yml's `theme` was also embedded here (as `wikicommit_theme`) until
-    Issue #670. It is an LLM-facing scope instruction — read by
-    wikicommit-generate Pass 2c and wikicommit-collect, not by readers — held as
-    a single string in whatever language it was written in, so on a multilingual
-    site it reached every reader in one language, and it often carried
-    source-selection prose aimed at the generator. A reader-facing site
-    description belongs in a field written for readers; it is not this one.
+    `site_description` ({lang: text}) is rendered into the body, under each
+    language's own link, not into the frontmatter: it is a per-language mapping,
+    and placing it under its language's link needs no caption, so a description
+    in any language reaches that language's readers. Languages with no entry get
+    no description. config.yml's `theme` is not shown at all — it is an
+    LLM-facing scope instruction, not a description for readers.
 
-    `site_description` (Issue #671) is that field: {lang: text}, rendered into
-    the body rather than the frontmatter. Two reasons it is not another
-    frontmatter field for the banner to draw. (1) It is a per-language mapping,
-    which does not fit a single frontmatter string. (2) Putting each
-    description directly under its own language's link removes the need for a
-    "Description:" caption at all, so it sidesteps the banner i18n's two-locale
-    limit — a description written in any language reaches that language's
-    readers, whereas a caption could not. Languages with no entry simply get no
-    description; an absent field reproduces the previous output exactly.
+    `lang_counts` is {lang: (pages, reviewed, ai_reviewed)} counted from the
+    pages this build published. On a multilingual wiki the frontmatter fields
+    are omitted and these per-language counts take their place in the body,
+    one set per language link: a site-wide total is a number nobody experiences
+    (each language choice leads to one language's pages), and translations
+    would dilute the reviewed ratio. Omitting the fields is what suppresses the
+    banner's site summary (it renders only when both are numbers); the note on
+    what "reviewed" counts belongs to that block, so it is re-emitted here under
+    the language list.
 
-    `lang_counts` (Issue #730, extended by Issue #769) is
-    {lang: (pages, reviewed, ai_reviewed)} counted from the pages this build
-    published. On a multilingual wiki the two frontmatter fields above are
-    omitted entirely and these per-language counts take their place in the body,
-    one pair per language link. Two reasons the single
-    site-wide total was wrong there. (1) Nobody experiences it: this page exists
-    to choose a language, and the wiki behind each choice is one language's
-    worth of pages — a translation is the same knowledge again, not more of it.
-    (2) It dilutes the reviewed ratio: a fully reviewed original alongside two
-    untouched translations reports one third, and that number was reframed by
-    Issue #664 as a statement about the trust ladder, so translations drag it
-    away from what it means to claim. Splitting pages but not reviewed counts
-    would leave (2) intact, so both are split.
-
-    `ai_reviewed_pages` (Issue #769) is the site-wide count of pages carrying a
-    standing AI verdict, embedded as a third frontmatter field on a
-    single-language wiki. It is omitted at zero rather than written as 0, and
-    that is accuracy rather than tidiness: a wiki predating the review tree has
-    no records (they are never created retroactively), which is not the same
-    claim as "nothing was checked". On a multilingual wiki the per-language
-    third number in `lang_counts` takes its place, for the same reason the other
-    two are split there.
-
-    Omitting the two fields is what suppresses the banner's site summary: it
-    renders only when both are numbers, so no change to WikiCommitBanner.tsx is
-    needed — but Issue #664's note explaining what "reviewed" counts is part of
-    that same block and would disappear with it, so it is re-emitted here under
-    the language list. A single-language wiki has no language list to hang any
-    of this off, so it keeps both fields and the banner as before.
-
-    The "sources" entry point links to content/sources/ — a single,
-    language-independent tree (the source tree itself has no `lang` concept) built by
-    generate_source_pages(), not one link per lang like the old per-language
-    content/<lang>/sources.md this replaced (Issue #476).
+    The "sources" entry point links to content/sources/, a single
+    language-independent tree built by generate_source_pages().
     """
     out_path = output_dir / "index.md"
     labels = ROOT_INDEX_LABELS.get(primary_lang, DEFAULT_ROOT_INDEX_LABELS)
@@ -780,23 +651,21 @@ def generate_root_index(
     counts = lang_counts or {}
     multilingual = len(langs) > 1
     lines = ["---", 'title: "Wiki"', "review_status: reviewed", "comments: false"]
-    # Issue #730: on a multilingual wiki these two fields are left out, which is
-    # exactly what stops the banner from drawing a site-wide total nobody is
-    # about to read — it renders that block only when both are numbers. The
-    # per-language counts below replace it.
+    # On a multilingual wiki these two fields are left out, which is exactly
+    # what stops the banner from drawing a site-wide total — it renders that
+    # block only when both are numbers. The per-language counts below replace it.
     if not multilingual:
         lines += [
             f"wikicommit_page_count: {total_pages}",
             f"wikicommit_reviewed_count: {reviewed_pages}",
         ]
-        # Issue #769: omitted at zero rather than written as 0, and this is
-        # accuracy rather than tidiness. A wiki generated before review records
-        # existed has none (they are not created retroactively), and a language
-        # of nothing but translation pages has none either (the translation
-        # quality check is deliberately not recorded). Both mean "no record",
-        # while `checked against sources: 0` says "nothing was checked". The
-        # overview page already omits its own line the same way. It also keeps
-        # the output byte-identical on a repository with no records at all.
+        # Omitted at zero rather than written as 0, for accuracy: a wiki
+        # generated before review records existed has none (they are not
+        # created retroactively), and a language of nothing but translation
+        # pages has none either. Both mean "no record", while `checked against
+        # sources: 0` says "nothing was checked". The overview page omits its
+        # own line the same way, and the output stays byte-identical on a
+        # repository with no records at all.
         if ai_reviewed_pages:
             lines.append(f"wikicommit_ai_reviewed_count: {ai_reviewed_pages}")
     lines += [
@@ -804,15 +673,14 @@ def generate_root_index(
         "",
         f"[{labels['top']} ({primary_lang})](./{primary_lang}/)",
     ]
-    # Issue #671: the reader-facing site description, one line per language,
-    # attached to that language's own link. Every entry in `langs` other than
-    # primary_lang already stands on a language with at least one real page —
-    # existing_lang_targets() filters the declared targets (Issue #190) and
-    # main() derives the rest from pages this build actually wrote (Issue #731) —
-    # so a description never adds a dead link there. primary_lang is exempt from
-    # that filter (compute_langs() always prepends it), so on a wiki whose
-    # primary_lang has no pages the description follows the link that is already
-    # emitted for it — it does not create one.
+    # The reader-facing site description, one line per language, attached to
+    # that language's own link. Every entry in `langs` other than primary_lang
+    # already stands on a language with at least one real page —
+    # existing_lang_targets() filters the declared targets and main() derives
+    # the rest from pages this build actually wrote — so a description never
+    # adds a dead link there. primary_lang is exempt from that filter
+    # (compute_langs() always prepends it), so on a wiki whose primary_lang has
+    # no pages the description follows the link already emitted for it.
     descriptions = site_description or {}
     if multilingual:
         lines += ["", f"## {labels['select']}", ""]
@@ -821,14 +689,13 @@ def generate_root_index(
             # bare link: existing_lang_targets() admits a language on any
             # non-removed .md under it, and primary_lang skips that filter
             # entirely (compute_langs() always prepends it), so both can reach
-            # this list with nothing page_stats could count (Issue #730).
+            # this list with nothing page_stats could count.
             pages, reviewed, ai_reviewed = counts.get(lang, (0, 0, 0))
-            # Issue #769: counted per language for the same reason Issue #730
-            # split pages and reviewed counts, and the reason holds harder here
-            # — translation pages carry no record at all, so a site-wide figure
-            # would be diluted by however many translations exist. A language
-            # with no records keeps the two-number form (see the frontmatter
-            # note above on why zero is omitted rather than printed).
+            # Counted per language for the same reason pages and reviewed
+            # counts are — translation pages carry no record at all, so a
+            # site-wide figure would be diluted by however many translations
+            # exist. A language with no records keeps the two-number form (see
+            # the frontmatter note above on why zero is omitted).
             if ai_reviewed:
                 template = labels["counts_ai_one"] if pages == 1 else labels["counts_ai"]
             else:
@@ -847,18 +714,16 @@ def generate_root_index(
         # description off, so it goes under the top link instead.
         lines += ["", descriptions[primary_lang]]
     lines += ["", f"[{labels['sources']}](./{SOURCES_DIR_NAME}/)"]
-    # Issue #585: the overview page is the other build-generated entry point
-    # (aggregate counts, hubs, gaps, source breakdown), so the root index is
-    # the one place both are reachable from.
+    # The overview page is the other build-generated entry point (aggregate
+    # counts, hubs, gaps, source breakdown), so the root index is the one place
+    # both are reachable from.
     lines += ["", f"[{labels['overview']}](./{OVERVIEW_DIR_NAME}/)"]
-    # Issue #645: the site-wide counterpart of the per-page attribution
-    # WikiCommitSources renders (Issue #558). A reader who lands on one page sees
-    # that page's sources and their terms inline; a reader looking at the site as
-    # a whole arrives here, and had no signal that terms are per-page at all — the
-    # risk being that they read the absence of a stated license as one blanket
-    # license covering everything. Last, after both entry-point links, because it
-    # qualifies the site rather than offering somewhere else to go; the full
-    # wording lives on the sources index, which the link above reaches.
+    # The site-wide counterpart of the per-page attribution WikiCommitSources
+    # renders. A reader looking at the site as a whole otherwise has no signal
+    # that terms are per-page, and may read the absence of a stated license as
+    # one blanket license covering everything. Last, after both entry-point
+    # links, because it qualifies the site rather than offering somewhere else
+    # to go; the full wording lives on the sources index.
     lines += ["", labels["licensing"]]
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -870,19 +735,15 @@ def generate_root_index(
 # a machine-verification marker, not a folder a reader is meant to see: it is
 # the one signal telling validate_frontmatter.py,
 # check_property_wikilink_reinforcement.py and the wikicommit-jsonld plugin
-# that this type is absent from the Schema.org vocabulary on purpose. Because
-# .wikicommit/entity/ mirrors the type name into the directory tree, that
-# marker also became a folder in the Explorer, the breadcrumbs, the Quartz
-# folder page and the URL, where it means nothing (Issue #576).
+# that this type is absent from the Schema.org vocabulary on purpose.
 #
 # Publishing drops it, so custom types sit beside the standard ones in
-# content/<lang>/<Type>/. Cutting here rather than in the Explorer fixes all
-# four surfaces at once, and leaves the entity tree and every `type:` value
-# untouched. The asymmetry that follows — custom/ required under
-# .wikicommit/entity/, absent under content/ — is deliberate, not drift to be
-# tidied away: removing it from the entity side would make rebuild_index.py
-# write `type: schema:Decision`, which validate_frontmatter.py rejects as a
-# type absent from the Schema.org vocabulary (Issue #512).
+# content/<lang>/<Type>/ — one cut that fixes the Explorer, the breadcrumbs,
+# the folder page and the URL at once, and leaves the entity tree and every
+# `type:` value untouched. The asymmetry — custom/ required under
+# .wikicommit/entity/, absent under content/ — is deliberate: removing it from
+# the entity side would make rebuild_index.py write `type: schema:Decision`,
+# which validate_frontmatter.py rejects as absent from the Schema.org vocabulary.
 CUSTOM_TYPE_PREFIX = "custom/"
 
 
@@ -953,11 +814,8 @@ def rewrite_relative_links(content: str, src_dir: str, out_dir: str) -> str:
     Flattening a custom type moves the page up one level, and a body written
     against the source tree — `![alt](../../../assets/diagram.png)`, the form
     a page uses to reach .wikicommit/entity/assets/ — is plain Markdown that
-    convert_file()'s WikiLink substitution never touches.
-    Without this pass those links would be copied out verbatim and break at
-    exactly the moment flattening starts (Issue #589 made local images
-    actually reach the published site, so this is a live breakage rather than
-    a latent one).
+    convert_file()'s WikiLink substitution never touches. Without this pass
+    those links would be copied out verbatim and break.
 
     Every page is scanned, not just the flattened ones: a plain relative link
     *into* a custom type page breaks just as surely when written from a page
@@ -987,12 +845,12 @@ def _dot_relpath(target: str, start: str) -> str:
 def relative_link(current_lang: str, current_type: str, target_lang: str, target_type: str, slug: str) -> str:
     """Return the relative Markdown path from a <lang>/<type>/ page to <target_lang>/<target_type>/<slug>.md.
 
-    Both type names are flattened (Issue #576): this builds a link between two
-    pages as they sit in content/, so a `custom/` segment on either end would
-    point at a directory the published tree does not have. Callers pass the
-    entity type names; the existence checks they run beforehand use those
-    unflattened names against .wikicommit/entity/, which is correct — only the
-    link text is a content/ path.
+    Both type names are flattened: this builds a link between two pages as they
+    sit in content/, so a `custom/` segment on either end would point at a
+    directory the published tree does not have. Callers pass the entity type
+    names; the existence checks they run beforehand use those unflattened names
+    against .wikicommit/entity/, which is correct — only the link text is a
+    content/ path.
     """
     current_dir = posixpath.join(current_lang, flatten_custom_type(current_type))
     target_path = posixpath.join(target_lang, flatten_custom_type(target_type), f"{slug}.md")
@@ -1224,10 +1082,9 @@ DEFAULT_SOURCE_PAGE_LABELS = {
     ),
 }
 
-# Matches the old (pre-Issue #405) Japanese heading alongside the current
-# fixed-English one, so a management file that predates that change (no
-# automatic migration) still renders its
-# Summary body instead of falling back to "not yet generated".
+# Also matches the older Japanese heading: management files are not migrated
+# automatically, and one written with it should still render its Summary body
+# instead of falling back to "not yet generated".
 SUMMARY_HEADING_RE = re.compile(r"^## (?:Summary|サマリ)\r?\n(.*?)(?=\n## |\Z)", re.DOTALL | re.MULTILINE)
 
 
@@ -1238,11 +1095,10 @@ RETRACTION_REASON_HEADING_RE = re.compile(
 
 def parse_retraction_reason_section(body: str) -> str | None:
     """Return the management file's `## Retraction Reason` section body, or None
-    if absent/empty (Issue #737).
+    if absent/empty.
 
-    Unlike `## Summary`, this heading has no pre-Issue #405 Japanese variant to
-    accept: the section is new, and management-file headings have been fixed
-    English since then.
+    Unlike `## Summary`, this heading has no Japanese variant to accept: the
+    section only ever existed with the fixed-English heading.
     """
     m = RETRACTION_REASON_HEADING_RE.search(body)
     if not m:
@@ -1268,12 +1124,11 @@ def generated_page_link(wiki_rel: str, mgmt_rel: Path) -> str:
     to the corresponding content/<lang>/<Type>/<slug>.md page convert_file()
     writes.
 
-    A custom type's `custom/` segment is dropped here to match that output
-    path (Issue #576).
+    A custom type's `custom/` segment is dropped here to match that output path.
     """
     current_dir = posixpath.join(SOURCES_DIR_NAME, mgmt_rel.parent.as_posix())
     # The caller resolved the page on disk with the unflattened path; the link
-    # has to name where convert_file() actually wrote it (Issue #576).
+    # has to name where convert_file() actually wrote it.
     return _dot_relpath(flatten_entity_rel(Path(wiki_rel)).as_posix(), current_dir)
 
 
@@ -1282,10 +1137,9 @@ _ENTITY_PREFIX_RE = re.compile(r"^\.wikicommit/(?:entity|wiki)/")
 
 def normalize_wiki_rel(wiki_path: str) -> str | None:
     """Strip a generated_pages[] entry's `.wikicommit/entity/` prefix (or the
-    pre-Issue-#477 `.wikicommit/wiki/` prefix — management files generated
-    before that rename keep their old entries verbatim, with old and new forms
-    allowed to coexist rather than being auto-migrated) and validate the
-    remainder is a plain same-tree relative path, returning None if not.
+    older `.wikicommit/wiki/` prefix — old entries are kept verbatim, not
+    migrated, so both forms coexist) and validate the remainder is a plain
+    same-tree relative path, returning None if not.
 
     Strips at most one prefix occurrence (single regex match, mirroring
     WikiCommitSources.tsx's `/^\\.wikicommit\\/(entity|wiki)\\//` — not two
@@ -1323,11 +1177,10 @@ def path_href(path: str) -> str | None:
     GITHUB_REPOSITORY (set by GitHub Actions) is unavailable.
 
     Kept in sync by hand with pathHref() in
-    quartz-plugins/wikicommit-sources/src/components/WikiCommitSources.tsx
-    (Issue #212), including the `main` branch assumption — that component
-    renders a different, per-page sources box at render time (TSX/Quartz),
-    while this script runs at build time (Python), so the two can't share
-    one function.
+    quartz-plugins/wikicommit-sources/src/components/WikiCommitSources.tsx,
+    including the `main` branch assumption — that component renders the
+    per-page sources box at render time (TSX/Quartz), while this script runs
+    at build time (Python), so the two can't share one function.
     """
     repo = os.environ.get("GITHUB_REPOSITORY")
     if not repo:
@@ -1337,7 +1190,7 @@ def path_href(path: str) -> str | None:
 
 def url_host(url) -> str | None:
     """Return a `url`/`wikicommit` source's lower-cased host without a leading
-    "www.", or None when it has none (Issue #585's per-host source breakdown).
+    "www.", or None when it has none (the overview's per-host breakdown).
 
     Normalizing the same way check_extraction_quality.py's _domain_of() does
     keeps "example.com" and "www.example.com" from splitting one publisher
@@ -1373,16 +1226,34 @@ def render_source_label(source: dict) -> str:
     return ""
 
 
-def _normalize_source_lang(source: dict) -> str | None:
+def _raw_source_lang_text(content: str) -> str | None:
+    """Return the management file's `source.lang` exactly as written (no type
+    resolution), or None when it cannot be read that way.
+
+    Re-reads the frontmatter block with yaml.BaseLoader (via
+    parse_frontmatter_untyped_text()), which resolves no scalar to a bool, so
+    the YAML 1.1 spellings that safe_load folds into the one value False (`no`,
+    `off`, `false` and their capitalized forms) stay distinguishable. Only
+    called when safe_load gave False, so the second parse runs on the rare file
+    that needs it."""
+    fm, _ = parse_frontmatter_untyped_text(content)
+    source = fm.get("source") if isinstance(fm, dict) else None
+    raw = source.get("lang") if isinstance(source, dict) else None
+    return raw if isinstance(raw, str) else None
+
+
+def _normalize_source_lang(source: dict, content: str) -> str | None:
     """Return a source's recorded `source.lang` as a lower-case ISO 639-1 code,
     or None when it is missing, empty, or not a string.
 
-    Shared by generate_source_pages()'s per-language tally (Issue #989) and the
-    per-source page's language line (Issue #1007) so the two cannot drift.
-    YAML 1.1 reads an unquoted `lang: no` (Norwegian, a valid ISO 639-1 code)
-    as the boolean False; without the special case it would read as "false".
-    Pass 2a writes the code unquoted, so this is reachable (two `www.ssb.no`
-    sources in a pilot wiki carry it).
+    Shared by generate_source_pages()'s per-language tally and the per-source
+    page's language line so the two cannot drift. `content` is the management
+    file's text, read only when safe_load gave False: YAML 1.1 reads an
+    unquoted `lang: no` (Norwegian, a valid ISO 639-1 code) as False, and also
+    `off` / `false`. Only the written text `no` (any case) is Norwegian;
+    `off` / `false` break the one-code rule like `yes` / `on` (True) and are
+    treated as not recorded. Pass 2a asks for `lang: 'no'` quoted, but files
+    written unquoted exist, so the reader still has to tell them apart.
 
     Any other non-string value (a list such as `[ja, en]`, `True` from an
     unquoted `yes`/`on`, a number) breaks the "one code" rule and is treated as
@@ -1391,28 +1262,34 @@ def _normalize_source_lang(source: dict) -> str | None:
     its own — no value carries a recorded language, and a re-run overwrites it."""
     raw_lang = source.get("lang")
     if raw_lang is False:
-        raw_lang = "no"
+        raw_lang = "no" if (_raw_source_lang_text(content) or "").lower() == "no" else None
     if not isinstance(raw_lang, str):
         return None
     return raw_lang.strip().lower() or None
 
 
 def _write_source_page(
-    out_path: Path, fm: dict, body: str, source: dict, title: str, entity_dir: Path, mgmt_rel: Path, labels: dict
+    out_path: Path,
+    fm: dict,
+    body: str,
+    source: dict,
+    title: str,
+    entity_dir: Path,
+    mgmt_rel: Path,
+    labels: dict,
+    lang_code: str | None,
 ) -> list[str]:
     """Write one content/sources/<mgmt_rel> page mirroring a source
     management file: its type, original link, registration status, license and
     language lines (each only when recorded), `## Summary` body, and
-    generated_pages[] (as plain Markdown links, not WikiLinks —
-    these pages sit outside the WikiLink graph, a known limitation accepted
-    in Issue #476).
+    generated_pages[] (as plain Markdown links, not WikiLinks — these pages
+    sit outside the WikiLink graph, a known limitation).
 
     Returns the .wikicommit/entity/-relative paths of the generated_pages[]
     entries it actually linked — the ones that survived normalization plus the
     exists/not-removed filter below. generate_source_pages() feeds these into
-    the overview page's source x type cross-tab (Issue #585) so that tally is
-    built from the same filter as the links, rather than a second, drifting
-    copy of it."""
+    the overview page's source x type cross-tab so that tally is built from the
+    same filter as the links, rather than a second, drifting copy of it."""
     status = fm.get("status") or "pending"
 
     lines = [
@@ -1430,34 +1307,31 @@ def _write_source_page(
         "",
     ]
 
-    # Issue #558: mirror the management file's source.license here too, so the
-    # public source page states the same terms the per-page sources box does.
-    # Absent/blank means "unknown", which is not the same as "unrestricted", so
-    # the line is omitted entirely rather than rendered empty.
+    # Mirror the management file's source.license, so the public source page
+    # states the same terms the per-page sources box does. Absent/blank means
+    # "unknown", which is not the same as "unrestricted", so the line is
+    # omitted entirely rather than rendered empty.
     license_id = source.get("license")
     if isinstance(license_id, str) and license_id.strip():
         lines += [f"**{labels['license']}**: {license_id.strip()}", ""]
 
-    # Issue #1007: the `## Summary` below is written in primary_lang, so without
-    # this a source in another language reads as a primary_lang source. Shown
-    # whenever recorded — including when it equals primary_lang, so the line is
-    # a plain fact on every page rather than a mark singling out "non-primary"
-    # sources. Omitted when not recorded (like license): "not recorded" only
-    # says the source was processed before the field existed, which the
-    # overview page's per-language tally already reports.
-    lang_code = _normalize_source_lang(source)
+    # The `## Summary` below is written in primary_lang, so without this a
+    # source in another language reads as a primary_lang source. Shown whenever
+    # recorded — including when it equals primary_lang, so the line is a plain
+    # fact on every page rather than a mark singling out "non-primary" sources.
+    # Omitted when not recorded (like license); the overview page's
+    # per-language tally already reports those. lang_code is computed once by
+    # the caller with _normalize_source_lang(), the same value that tally counts.
     if lang_code:
         lines += [f"**{labels['lang']}**: {lang_code}", ""]
 
-    # Issue #737: a retracted source keeps its public page rather than losing it.
-    # "This wiki used this source and then withdrew it" is a record worth
-    # publishing, and keeping it is what GitOps asks for. Note this is the
-    # opposite requirement from a `status: removed` page, which is never written
-    # into content/ at all (Issue #271) precisely so it stops being reachable —
-    # here nothing needs to become unreachable, so what is needed is not deletion
-    # but a statement on the page itself. The bare `status: retracted` line above
-    # is a field value; on its own it does not tell a reader what it means for
-    # the pages this source produced.
+    # A retracted source keeps its public page: "this wiki used this source and
+    # then withdrew it" is a record worth publishing. This is the opposite of a
+    # `status: removed` page, which is never written into content/ so it stops
+    # being reachable — here nothing needs to become unreachable, so what is
+    # needed is a statement on the page itself. The bare `status: retracted`
+    # line above does not tell a reader what it means for the pages this
+    # source produced.
     if status == "retracted":
         lines += [
             labels["retracted_notice"],
@@ -1510,8 +1384,7 @@ def _write_source_page(
 
 def _write_sources_index(out_path: Path, entries: list[dict], labels: dict, type_labels: dict) -> None:
     """Write content/sources/index.md: a landing page grouping every mirrored
-    source page by type, so links from generate_root_index() never dead-end
-    (same invariant the old content/<lang>/sources.md upheld)."""
+    source page by type, so links from generate_root_index() never dead-end."""
     # Every entry["type"] is already one of SOURCE_TYPE_ORDER — filtered by
     # generate_source_pages() before appending — so a plain lookup suffices.
     groups: dict[str, list[dict]] = {t: [] for t in SOURCE_TYPE_ORDER}
@@ -1532,16 +1405,15 @@ def _write_sources_index(out_path: Path, entries: list[dict], labels: dict, type
     if not has_entries:
         lines.append(labels["empty"])
 
-    # Issue #645: the site-wide licensing notice (layer 2) lives here rather than
-    # in the Quartz footer. The footer plugin takes only a label -> URL mapping, so
-    # prose would need a fork or a new component — out of proportion to two
-    # sentences — and a footer *link* would need an absolute URL, which is not
-    # knowable at init time (baseUrl becomes <owner>.github.io/<repo> on a GitHub
-    # Pages project site, so a root-relative href breaks on the default shape).
-    # This page is where a reader asking "where did this come from, and under what
-    # terms" arrives, and the root index points here. It complements, and does not
-    # replace, the per-source notice WikiCommitSources renders on each page
-    # (Issue #558) — that one stays the operative attribution.
+    # The site-wide licensing notice lives here rather than in the Quartz
+    # footer. The footer plugin takes only a label -> URL mapping, so prose
+    # would need a fork or a new component, and a footer *link* would need an
+    # absolute URL, which is not knowable at init time (baseUrl becomes
+    # <owner>.github.io/<repo> on a GitHub Pages project site, so a
+    # root-relative href breaks on the default shape). The root index points
+    # here. It complements, and does not replace, the per-source notice
+    # WikiCommitSources renders on each page — that one stays the operative
+    # attribution.
     #
     # Shown unconditionally, including when no source is registered yet: the
     # statement is about how this wiki works, not about the current contents.
@@ -1558,7 +1430,7 @@ def _write_source_dir_index(out_path: Path, title: str, subdirs: list[str], file
     """Write an index.md for one intermediate directory under content/sources/
     (e.g. content/sources/url/ or content/sources/url/<host>/), listing its
     immediate subdirectories and mirrored source pages as plain relative
-    links (Issue #493)."""
+    links."""
     lines = ["---", f"title: {_yaml_quote(title)}", "review_status: reviewed",
              "comments: false", "---", ""]
     for sub in subdirs:
@@ -1578,37 +1450,25 @@ def _write_source_dir_indexes(
 ) -> set[Path]:
     """Write an index.md for every intermediate directory under
     content/sources/ (e.g. content/sources/url/, content/sources/url/<host>/)
-    so Explorer navigation into them doesn't 404 (Issue #493).
+    so Explorer navigation into them doesn't 404.
 
-    Every other folder WikiCommit generates under content/
-    (entity/<lang>/<Type>/ via rebuild_index.py, the content/ root via
-    generate_root_index(), content/sources/ itself via _write_sources_index())
-    already writes its own index.md explicitly instead of relying on Quartz's
-    `folder-page` plugin to auto-generate one — that plugin is enabled in
-    quartz.config.yaml but turned out not to do so for this tree, the first
-    place WikiCommit-generated content actually depended on it. This applies
-    the same established "write index.md explicitly" pattern one or more
-    levels deeper.
+    Quartz's `folder-page` plugin does not generate one for this tree, so like
+    every other folder WikiCommit generates under content/ (Type folders via
+    rebuild_index.py, the root via generate_root_index(), content/sources/
+    itself via _write_sources_index()) the index.md is written explicitly.
 
     Generalized over every source type in SOURCE_TYPE_ORDER rather than
     hardcoded to `url`: `type: path` management files mirror the ingested
-    file's own repo-relative path, which can be
-    nested just as deeply (e.g. `path/raw/paper-2024.md`) and would hit the
-    same underlying bug.
+    file's own repo-relative path, which can be nested just as deeply (e.g.
+    `path/raw/paper-2024.md`).
 
     `already_written` is the set of content/sources/ paths generate_source_pages()
-    already wrote a real mirrored source page to (one per source management
-    file, via _write_source_page()). A management file whose own mirrored
-    path happens to end in `index.md` — a `type: path` source for a
-    repo file literally named `index.*` (e.g. `src/index.js`), or a
-    `type: url` source sanitized from a URL whose path is `/index`
-    (the same `/index` collision class already solved once at the
-    bare-domain-vs-path layer for Issue #213) — produces an
-    intermediate-directory index_rel identical
-    to that real page's own path. Skipping the generic directory listing for
-    any such path avoids silently overwriting the real source page with a
-    bare subdirectory/file listing (the real page already satisfies
-    Explorer's need for an index.md there, so there is nothing to fill in).
+    already wrote a real mirrored source page to. A management file whose own
+    mirrored path ends in `index.md` — a `type: path` source for a repo file
+    named `index.*` (e.g. `src/index.js`), or a `type: url` source whose URL
+    path is `/index` — produces an intermediate-directory index_rel identical
+    to that real page's path. Such a path is skipped rather than overwritten
+    with a bare listing; the real page already gives Explorer its index.md.
     """
     all_dirs: set[Path] = set()
     for entry in entries:
@@ -1642,17 +1502,13 @@ def generate_source_pages(
     output_dir: Path, mgmt_dir: Path, entity_dir: Path, primary_lang: str
 ) -> tuple[set[Path], dict]:
     """Mirror .wikicommit/source/ into content/sources/, one page per source
-    management file, plus a content/sources/index.md landing page (Issue
-    #476). Replaces the old per-language content/<lang>/sources.md
-    aggregation (built by walking wiki pages and reading back each page's own
-    `sources` frontmatter) with a direct mirror of the management-file tree:
-    a management file's own `status`/`generated_pages`/`## Summary` are
-    already the authoritative record of what it produced, so walking
-    .wikicommit/source/ directly is both simpler (design docs' "反転" —
-    Issue #476) and surfaces sources with zero generated_pages (status:
-    excluded/pending/failed) that the old backlink-based aggregation could
-    never reach, since they have no page `sources:` entry pointing back at
-    them.
+    management file, plus a content/sources/index.md landing page.
+
+    Walks .wikicommit/source/ directly rather than collecting each page's
+    `sources` frontmatter: a management file's own `status` /
+    `generated_pages` / `## Summary` are the authoritative record of what it
+    produced, and the direct walk also reaches sources with no generated
+    pages (status: excluded/pending/failed), which nothing links back to.
 
     content/sources/ is a single language-independent tree (the source tree
     itself has no `lang` concept), unlike content/<lang>/ which exists once per
@@ -1660,11 +1516,10 @@ def generate_source_pages(
 
     Returns (written, stats): the set of repo-relative Path objects written
     (for main()'s stale-cleanup pass), and the aggregate breakdown the
-    overview page renders (Issue #585) — counts per source type, per registration
-    `status`, per URL host, and the source-type x page-type cross-tab. The
-    aggregation rides along on this walk rather than repeating it: this is
-    already the only pass over .wikicommit/source/, and management files are
-    the authoritative record of what each source produced.
+    overview page renders — counts per source type, per registration `status`,
+    per URL host, per source language, and the source-type x page-type
+    cross-tab. The aggregation rides along on this walk rather than
+    repeating it.
 
     Always writes at least content/sources/index.md, even with zero
     registered sources, so the root index's "sources" link never dead-ends.
@@ -1678,16 +1533,16 @@ def generate_source_pages(
         "status_counts": {},      # registration status -> management file count
         "host_counts": {},        # URL host -> management file count
         # source.lang (ISO 639-1) -> management file count; None for a file
-        # that carries no language yet (Issue #989) but has finished a run
+        # that carries no language yet but has finished a run
         "lang_counts": {},
         # management files with no language that have never finished a run
-        # (empty `last_generated_at`) — the queue, not old intake (Issue #1135)
+        # (empty `last_generated_at`) — the queue, not old intake
         "lang_unprocessed": 0,
         "type_x_page_type": {},   # source.type -> {published page type -> page count}
-        # source.url / source.path -> this source's page under content/sources/
-        # (Issue #1006). Keyed by the identity string the management file
-        # records, not by the derived file name (Issue #572 / #573), so the
-        # overview can link a hub concentration to the page listing it.
+        # source.url / source.path -> this source's page under content/sources/.
+        # Keyed by the identity string the management file records, not by the
+        # derived file name, so the overview can link a hub concentration to
+        # the page listing it.
         "page_for_source": {},
     }
 
@@ -1709,8 +1564,9 @@ def generate_source_pages(
             mgmt_rel = mgmt_file.relative_to(mgmt_dir)
             title = str(source.get("path") or source.get("url") or mgmt_rel.as_posix())
             out_rel = Path(SOURCES_DIR_NAME) / mgmt_rel
+            lang_key = _normalize_source_lang(source, content)
             linked_wiki_rels = _write_source_page(
-                output_dir / out_rel, fm, body, source, title, entity_dir, mgmt_rel, labels
+                output_dir / out_rel, fm, body, source, title, entity_dir, mgmt_rel, labels, lang_key
             )
             written.add(out_rel)
 
@@ -1726,22 +1582,22 @@ def generate_source_pages(
             host = url_host(source.get("url")) if source_type in ("url", "wikicommit") else None
             if host:
                 stats["host_counts"][host] = stats["host_counts"].get(host, 0) + 1
-            # Issue #989: a missing or empty source.lang is counted under None and
-            # shown as its own "not recorded" row — never dropped. Dropping it would
-            # make a wiki of mostly English sources, only a few of them re-read since
-            # the field was added, look as if every source were in those few
-            # languages.
-            lang_key = _normalize_source_lang(source)
-            # Issue #1135: an empty lang means one of two things. A source that has
-            # never finished a run (`add_source.py` writes `last_generated_at:`
-            # empty and only a completed run fills it — the same test
+            # A missing or empty source.lang is counted under None and shown as
+            # its own "not recorded" row — never dropped, or a wiki of mostly
+            # English sources, only a few of them re-read since the field was
+            # added, would look as if every source were in those few languages.
+            # lang_key is computed above, before the source page is written, so
+            # the page and this tally read the same value.
+            # An empty lang means one of two things. A source that has never
+            # finished a run (`add_source.py` writes `last_generated_at:` empty
+            # and only a completed run fills it — the same test
             # reconcile_ingest_status.py uses) is still in the queue; calling it
-            # "taken in before this was recorded" would tell a new wiki's readers
-            # it has old intake. Only a source that has run without a language
-            # is "not recorded". `excluded` is the exception to the date test:
-            # Pass 4 writes it at the end of a completed run but, unlike
-            # `generated`/`partial`, never writes `last_generated_at`, so a
-            # language-less `excluded` source was processed before the field
+            # "taken in before this was recorded" would tell a new wiki's
+            # readers it has old intake. Only a source that has run without a
+            # language is "not recorded". `excluded` is the exception to the
+            # date test: Pass 4 writes it at the end of a completed run but,
+            # unlike `generated`/`partial`, never writes `last_generated_at`, so
+            # a language-less `excluded` source was processed before the field
             # existed — not queued.
             if (
                 lang_key is None
@@ -1766,21 +1622,19 @@ def generate_source_pages(
     return written, stats
 
 
-# ── Wiki-wide overview page (Issue #585) ───────────────────────────────────────
+# ── Wiki-wide overview page ────────────────────────────────────────────────────
 #
-# A reader or operator arriving at the published site has no single place that
-# answers "what knowledge is in here, and what is missing?". The pieces exist,
-# scattered: the root index carries three numbers (Issue #407), content/sources/
-# shows one source at a time (Issue #476), each type's index.md lists that type
-# alone, and /wikicommit-status's orphan/wanted tallies never leave the console.
+# Answers "what knowledge is in here, and what is missing?" in one place, from
+# pieces otherwise scattered: the root index's numbers, content/sources/ (one
+# source at a time), each type's index.md, and /wikicommit-status's
+# orphan/wanted tallies, which never leave the console.
 #
 # Like generate_root_index() and generate_source_pages(), this is a
 # build-generated page: it has no file under .wikicommit/entity/ and is
-# rewritten from scratch on every build. That is deliberate. Its content is
-# recomputed aggregate, not something a human reviews once — putting it under
-# .wikicommit/entity/ would subject numbers that change every build to
-# review_status, a review-tracking Issue (Issue #313) and the wikicommit-merge
-# quality gate.
+# rewritten from scratch on every build. Its content is recomputed aggregate,
+# not something a human reviews once — putting it under .wikicommit/entity/
+# would subject numbers that change every build to review_status, a
+# review-tracking Issue and the wikicommit-merge quality gate.
 #
 # Everything here is derived from data main() and generate_source_pages()
 # already collect. In particular nothing calls check_ingest_freshness.py, which
@@ -1797,12 +1651,11 @@ OVERVIEW_LABELS = {
         "totals": "全体の数字",
         "total_pages": "総ページ数",
         "reviewed": "人が読んで確認",
-        # Issue #664: the bare count reads as "nobody cares about this project"
-        # to a first-time reader. The number stays — hiding it would give up the
-        # honesty it was added for — and this line says what it counts.
-        # Issue #800: says the human number is partial *by design*, matching the
-        # root index's `counts_note` word for word in substance. Sampling
-        # vocabulary stays out (Issue #769).
+        # The bare count reads as "nobody cares about this project" to a
+        # first-time reader. The number stays — hiding it would give up the
+        # honesty it is there for — and this line says what it counts: the
+        # human number is partial *by design*, matching the root index's
+        # `counts_note` in substance. Sampling vocabulary stays out.
         "reviewed_note": (
             "ページは LLM が生成した時点で公開されます。"
             "出典との照合は機械が行い、"
@@ -1812,40 +1665,37 @@ OVERVIEW_LABELS = {
             "この数字が総数に達することは目指していません。"
             "網羅的な品質保証でもありません。"
         ),
-        # Issue #751: a separate key from `reviewed`, never a reuse of it.
-        # Issue #664, and then Issue #740, deliberately made that one name the
-        # human reader out loud ("人が読んだページ"); putting
-        # the machine's count behind the same label would put back the ambiguity
-        # it removed. The wording says what was compared, not that the page is
-        # correct — Pass 4 checks fidelity to the sources and nothing else
-        # (Issue #722 on completeness, Issue #723 on harm and on the reader's
-        # own knowledge).
+        # A separate key from `reviewed`, never a reuse of it: that one names
+        # the human reader out loud ("人が読んだページ"), and putting the
+        # machine's count behind the same label would make it ambiguous again.
+        # The wording says what was compared, not that the page is correct —
+        # Pass 4 checks fidelity to the sources and nothing else (not
+        # completeness, not harm, not the reader's own knowledge).
         "ai_reviewed": "出典と照合済み（AI）",
-        # Issue #1030: the subject is pages generated from sources, not every
-        # page — a translation inherits its sources and is not checked.
+        # The subject is pages generated from sources, not every page — a
+        # translation inherits its sources and is not checked.
         "ai_reviewed_note": (
             "出典から生成されたページは、生成時にその記述を出典と照合しています。"
             "照合しているのは出典との一致だけで、"
             "網羅性・実在の人物や組織への影響・読者自身の知識との食い違いは見ていません。"
         ),
-        # Issue #1030: shown only when the wiki has translation pages. They are
-        # left out of the ratio above (they carry no record of their own), and
-        # saying so where it happens keeps a reader from assuming they are part
-        # of it.
+        # Shown only when the wiki has translation pages. They are left out of
+        # the ratio above (they carry no record of their own), and saying so
+        # where it happens keeps a reader from assuming they are part of it.
         "translation_pages": "翻訳ページ",
         "translation_pages_value": "{n}（原文との照合は記録されていません）",
         "translation_pages_note": "翻訳ページはこの照合の対象外であり、上の割合にも含めていません。",
         "translation_checked": "原文と照合済み（AI）",
         "translation_checked_note": "翻訳ページは、翻訳したときに訳文を原文ページと照合しています。照合しているのは原文との一致（意味・用語・加筆や訳漏れが無いこと）だけで、原文ページ自体が正しいかは見ていません。この照合が入る前に翻訳されたページには記録がありません。",
         "ai_findings": "うち指摘を受けて書き直された箇所",
-        # Issue #1063: reader-facing names for review-rules.md's finding types,
-        # never the enum names themselves.
+        # Reader-facing names for review-rules.md's finding types, never the
+        # enum names themselves.
         "finding_type_HALLUCINATION": "出典に書かれていない記述",
         "finding_type_CONTRADICTION": "出典と食い違う記述",
         "finding_type_MISSING_SOURCE": "手元に無い文書に依拠した記述",
         "finding_type_OTHER": "その他",
-        # Issue #1063: a count only, never page names — naming a page that was
-        # withheld would publish the heading of what was decided not to publish.
+        # A count only, never page names — naming a page that was withheld
+        # would publish the heading of what was decided not to publish.
         "unpublished": "検査を通らず公開されなかったページ",
         "unpublished_note": (
             "生成の過程で出典に照らして直せなかったページは公開していません。"
@@ -1857,9 +1707,8 @@ OVERVIEW_LABELS = {
         "hubs": "知識の中心",
         "hubs_desc": "他のページから参照されている回数が多いページ。",
         "backlinks": "被リンク数",
-        # Issue #990: a separate key from `sources` (the `## Sources` heading),
-        # never a reuse of it — the same rule Issue #664 / #751 set for
-        # `reviewed` and `ai_reviewed`.
+        # A separate key from `sources` (the `## Sources` heading), never a
+        # reuse of it — the same rule as `reviewed` and `ai_reviewed`.
         "sources_count": "情報源",
         "sources_count_note": (
             "「情報源」はそのページに記録されている出典の件数であり、"
@@ -1867,7 +1716,6 @@ OVERVIEW_LABELS = {
             "ある文書そのものについてのページは、構造上 1 件になります。"
             "少ないことは劣っていることを意味しません。"
         ),
-        # Issue #1006
         "hub_concentration": "上位 {n} 件のうち、次の情報源だけに立つもの:",
         "hub_concentration_count": "{n} 件",
         "hub_concentration_note": (
@@ -1893,7 +1741,6 @@ OVERVIEW_LABELS = {
         "by_source_type": "種別別",
         "by_status": "ステータス別",
         "by_host": "ホスト別（URL ソース）",
-        # Issue #989
         "by_source_lang": "言語別",
         "col_source_lang": "言語",
         "source_lang_unknown": "未記録",
@@ -2455,9 +2302,9 @@ DEFAULT_OVERVIEW_LABELS = {
     "translation_pages_note": (
         "Translation pages are outside this check and are left out of the ratio above."
     ),
-    # Issue #1031: a translation is checked against its original page, never
-    # against sources, so it gets its own line and its own caption — adding it
-    # to "checked against sources" would claim a comparison it never made.
+    # A translation is checked against its original page, never against
+    # sources, so it gets its own line and its own caption — adding it to
+    # "checked against sources" would claim a comparison it never made.
     "translation_checked": "Checked against the original (AI)",
     "translation_checked_note": (
         "Each translation page is checked against the page it was translated from when "
@@ -2488,7 +2335,6 @@ DEFAULT_OVERVIEW_LABELS = {
         "of independent confirmations. A page about one particular document has "
         "exactly one by construction — fewer is not worse."
     ),
-    # Issue #1006
     "hub_concentration": "Of the top {n}, these stand on one source alone:",
     "hub_concentration_count": "{n} hubs",
     "hub_concentration_note": (
@@ -2587,12 +2433,11 @@ def _truncated(items: list, limit: int, labels: dict) -> tuple[list, str | None]
 
 
 def _hub_concentration_lines(shown_pages: list[dict], source_stats: dict, labels: dict) -> list[str]:
-    """Lines reporting that several of the shown hubs stand on one source alone
-    (Issue #1006).
+    """Lines reporting that several of the shown hubs stand on one source alone.
 
-    Issue #990 put a source count on each hub row, but a column of "1"s cannot
-    say that seven of them are the *same* 1. This groups the one-source hubs
-    by that source's identity and reports each source holding two or more.
+    A column of per-row source counts cannot say that seven of the "1"s are
+    the *same* 1. This groups the one-source hubs by that source's identity
+    and reports each source holding two or more.
 
     Only one-source hubs are counted. Counting every hub a source appears on
     would light up a healthy wiki's main article (a novel's Wikipedia entry is
@@ -2601,10 +2446,10 @@ def _hub_concentration_lines(shown_pages: list[dict], source_stats: dict, labels
     outside the count, as they are outside the per-row figure.
 
     A report, not a verdict — the lead note says why, in the same register as
-    `sources_count_note`. The rows are not marked (marking is a verdict, Issue
-    #990); the reader follows the link to the source page, which lists the
-    pages it generated. Nothing is emitted when no source holds two, not even
-    "none": an absence of concentration is not a finding.
+    `sources_count_note`. The rows are not marked (marking is a verdict); the
+    reader follows the link to the source page, which lists the pages it
+    generated. Nothing is emitted when no source holds two, not even "none":
+    an absence of concentration is not a finding.
     """
     counts: dict[str, int] = {}
     for p in shown_pages:
@@ -2659,10 +2504,10 @@ def generate_overview_page(
       A page kept alive solely by a removed page's link is therefore an orphan
       on this page while check_orphans.py still counts it as referenced.
     - A wanted key whose slug exists under a different Type is dropped rather
-      than listed. Issue #563 established that such a link is a Type typo, not
-      a missing page; telling a reader to write a page that already exists is
-      worse than saying nothing. check_wanted_pages.py reports those as
-      TYPE_MISMATCH for the operator, which is the right audience for them.
+      than listed: such a link is a Type typo, not a missing page, and telling
+      a reader to write a page that already exists is worse than saying
+      nothing. check_wanted_pages.py reports those as TYPE_MISMATCH for the
+      operator, which is the right audience for them.
     - A page's link to itself is not a backlink to itself, so a page whose only
       inbound link is its own is an orphan here. check_orphans.py counts it as
       referenced.
@@ -2670,8 +2515,8 @@ def generate_overview_page(
     One page kind reaches neither: a .md that does not resolve to
     <lang>/<Type>/<slug>.md has no key to place it under, so it is absent from
     every tally here while still counting toward the root index's
-    wikicommit_page_count (Issue #407). Such a file is not a wiki page in the
-    sense the rest of the pipeline uses.
+    wikicommit_page_count. Such a file is not a wiki page in the sense the rest
+    of the pipeline uses.
     """
     labels = OVERVIEW_LABELS.get(primary_lang, DEFAULT_OVERVIEW_LABELS)
 
@@ -2691,10 +2536,10 @@ def generate_overview_page(
         "review_status: reviewed",
         # comments: false — giscus (github:quartz-community/comments) renders into
         # afterBody on every page, and these navigation and aggregation pages have
-        # nothing for a reader to respond to (Issue #741). The plugin skips a page
-        # whose frontmatter says so, and this is the same place, and the same
-        # reasoning, as the review_status stamp above: decided by the side that
-        # writes the page, not guessed from a slug at render time (Issue #580).
+        # nothing for a reader to respond to. The plugin skips a page whose
+        # frontmatter says so; like the review_status stamp above, this is
+        # decided by the side that writes the page, not guessed from a slug at
+        # render time.
         "comments: false",
         "---",
         "",
@@ -2718,23 +2563,22 @@ def generate_overview_page(
         pages_by_type.setdefault(p["type"], []).append(p)
         keys_by_lang.setdefault(p["lang"], set()).add(p["key"])
 
-    # Issue #751: the site-wide numbers live here, never on the page banner.
-    # "2 findings" beside one page reads as "this page is bad" when it means the
-    # opposite — a finding was raised and the page was rewritten until it passed.
+    # The site-wide numbers live here, never on the page banner. "2 findings"
+    # beside one page reads as "this page is bad" when it means the opposite —
+    # a finding was raised and the page was rewritten until it passed.
     # Aggregated, the same number says the check has teeth.
-    # Issue #1030: the ratio is taken over pages that can carry a check against
-    # sources at all. A translation inherits its sources (translated_from) and
-    # wikicommit-translate writes no review record (Issue #750), so counting it
-    # in the denominator made every translation lower the figure. Numerator and
+    # The ratio is taken over pages that can carry a check against sources at
+    # all. A translation inherits its sources (translated_from) and
+    # wikicommit-translate writes no source check, so counting it in the
+    # denominator would make every translation lower the figure. Numerator and
     # denominator are narrowed together — a translation that does carry an AI
     # record (/wikicommit-review run on it) would otherwise push the ratio past
-    # 100%. Split on translated_from, not on language (Issue #769 split the root
-    # index by language for a different purpose): a language can hold both
-    # originals and translations.
+    # 100%. Split on translated_from, not on language: a language can hold
+    # both originals and translations.
     checkable_pages = [p for p in content_pages if not p["is_translation"]]
     translation_count = total_pages - len(checkable_pages)
-    # Issue #1031: a translation's own check is against its original page, so
-    # it is counted on its own line, never added to the one above.
+    # A translation's own check is against its original page, so it is
+    # counted on its own line, never added to the one above.
     translation_checked = [
         p for p in content_pages
         if p["is_translation"] and (p.get("ai_review") or {}).get("stage") == TRANSLATE_CHECK_STAGE
@@ -2758,8 +2602,8 @@ def generate_overview_page(
     ]
     # Omitted entirely on a wiki whose pages all predate the record tree, rather
     # than shown as a zero: "0 / 95 checked" reads as a failed check, when the
-    # truth is that the check ran and left no record to count (Issue #750 —
-    # records cannot be made retroactively).
+    # truth is that the check ran and left no record to count (records cannot
+    # be made retroactively).
     if ai_reviewed:
         model_note = f" ({', '.join(ai_models)})" if ai_models else ""
         lines.append(
@@ -2774,10 +2618,9 @@ def generate_overview_page(
             for kind in (*FINDING_TYPES, OTHER_FINDING_TYPE):
                 if findings_by_type.get(kind):
                     lines.append(f"  - {labels['finding_type_' + kind]}: {findings_by_type[kind]}")
-    # Issue #1031 replaces Issue #1030's "no check is recorded" line once any
-    # translation carries a check; until then that line stays, and it is still
-    # emitted only beside the sources line (a wiki with no records at all keeps
-    # its output unchanged).
+    # Once any translation carries a check it gets its own ratio; until then
+    # the "no check is recorded" line stands, emitted only beside the sources
+    # line (a wiki with no records at all keeps its output unchanged).
     if translation_count and translation_checked:
         lines.append(
             f"- **{labels['translation_checked']}**: {len(translation_checked)} / {translation_count} "
@@ -2812,9 +2655,9 @@ def generate_overview_page(
     # with the other totals would split the list on every multi-language wiki and
     # leave the coverage bullet reading as if the caption introduced it.
     lines += ["", labels["reviewed_note"], ""]
-    # Says what the machine check actually compared. Without it "checked against
-    # sources" is read as "verified", which is the same over-claim Issue #740 is
-    # correcting on the human side — made once in each direction is still twice.
+    # Says what the machine check actually compared. Without it "checked
+    # against sources" is read as "verified" — the same over-claim an
+    # unqualified "reviewed" would make on the human side.
     if ai_reviewed:
         lines += [labels["ai_reviewed_note"], ""]
         if translation_count:
@@ -2840,13 +2683,13 @@ def generate_overview_page(
     lines += [f"## {labels['hubs']}", "", labels["hubs_desc"], ""]
     shown_hubs, more_hubs = _truncated(hub_keys, OVERVIEW_HUB_LIMIT, labels)
     if shown_hubs:
-        # Issue #990: said once, before the rows, because the number is easy to
-        # misread as a verdict — see `sources_count_note`.
+        # Said once, before the rows, because the number is easy to misread as
+        # a verdict — see `sources_count_note`.
         lines += [labels["sources_count_note"], ""]
         for key in shown_hubs:
             p = best_page_for_key[key]
-            # Issue #990: the source count is omitted, not written as 0, on a
-            # page that does not carry its own sources[] (translation, view).
+            # The source count is omitted, not written as 0, on a page that does
+            # not carry its own sources[] (translation, view).
             n_sources = p["source_count"]
             sources_part = (
                 f" / {labels['sources_count']}: {n_sources}" if n_sources is not None else ""
@@ -2876,7 +2719,7 @@ def generate_overview_page(
             f"{reviewed} ({_pct(reviewed, len(ps))})",
             f"{sum(counts) / len(counts):.1f}",
             # Same exclusion the orphan list below applies, so this column and
-            # that list never contradict each other (Issue #675).
+            # that list never contradict each other.
             str(sum(1 for p in ps if not p["is_view"] and backlink_count.get(p["key"], 0) == 0)),
         ])
     lines += _md_table(
@@ -2891,8 +2734,8 @@ def generate_overview_page(
     # leaves them out: every Type has one, so matching a link's slug against
     # `index` says nothing about whether its Type segment is wrong.
     # Same shape build_slug_type_index() returns, so the Type-typo test below is
-    # the shared other_types_for_slug() rather than a second copy of it
-    # (Issue #677). Built from this build's published set instead of a rescan of
+    # the shared other_types_for_slug() rather than a second copy of it. Built
+    # from this build's published set instead of a rescan of
     # `.wikicommit/entity/` — that difference is the point (see this function's
     # docstring), and it is exactly what the parameterized index allows.
     slug_index: dict[str, set[str]] = {}
@@ -2905,7 +2748,7 @@ def generate_overview_page(
             continue
         type_name, _, slug = key.rpartition("/")
         if other_types_for_slug(type_name, slug, slug_index):
-            continue  # Type typo, not a missing page (Issue #563)
+            continue  # Type typo, not a missing page
         # Referrers come straight out of the graph rather than a rescan of every
         # page per key, and are counted in the same unit as the hub ranking:
         # one entry per referring *key*, represented by its primary-language
@@ -2938,8 +2781,8 @@ def generate_overview_page(
         lines.append(labels["none"])
 
     # View pages are left out for the same reason `check_orphans.py` does not
-    # walk the view tree at all (Issue #675): a view page is unlinked the moment
-    # it is written — nothing but its own language index points at one — so every
+    # walk the view tree at all: a view page is unlinked the moment it is
+    # written — nothing but its own language index points at one — so every
     # view page in every wiki would sit in this list permanently, which is how a
     # report stops being read. Their outbound links still count toward everyone
     # else's backlinks; only their eligibility as a finding is removed.
@@ -2995,10 +2838,10 @@ def generate_overview_page(
     else:
         lines += [labels["none"], ""]
 
-    # Issue #989: which languages the wiki's knowledge stands on. Hosts cannot
-    # answer this — a host does not say its language, and the per-host table is
-    # truncated at OVERVIEW_HOST_LIMIT exactly where the few non-English hosts
-    # sit — while the number of languages is small, so this table is never cut.
+    # Which languages the wiki's knowledge stands on. Hosts cannot answer this
+    # — a host does not say its language, and the per-host table is truncated
+    # at OVERVIEW_HOST_LIMIT exactly where the few non-English hosts sit —
+    # while the number of languages is small, so this table is never cut.
     # The unrecorded row always comes last, whatever its size.
     lang_counts = source_stats.get("lang_counts", {})
     lang_unprocessed = source_stats.get("lang_unprocessed", 0)
@@ -3009,8 +2852,8 @@ def generate_overview_page(
             ((k, n) for k, n in lang_counts.items() if k is not None), key=lambda e: (-e[1], e[0])
         )
         lang_rows = [[f"`{k}`", str(n)] for k, n in known]
-        # Issue #1135: sources never processed yet are the queue, kept apart from
-        # "not recorded" (processed before the field existed).
+        # Sources never processed yet are the queue, kept apart from "not
+        # recorded" (processed before the field existed).
         if lang_unprocessed:
             lang_rows.append([labels["source_lang_unprocessed"], str(lang_unprocessed)])
         if lang_counts.get(None):
@@ -3073,30 +2916,26 @@ def convert_file(
     links, the third the set of `Type/slug` keys it references.
 
     link_keys is the page's outbound edge list for the overview page's link
-    graph (Issue #585). It is collected here, during the substitution pass
-    that already reads the file and already runs WIKILINK_RE over it, rather
-    than in a second walk: check_orphans.py and check_wanted_pages.py each
-    build this same graph from their own full re-read, and adding a third one
-    inside the build would be the most expensive of the three (it runs on
-    every deploy).
+    graph. It is collected here, during the substitution pass that already
+    reads the file and already runs WIKILINK_RE over it, rather than in a
+    second walk on every deploy.
 
     `rel_path` is the page's path relative to its own tree's root.
     `out_rel_path` is where it is written under output_dir; it defaults to
     `rel_path` and differs for a custom type, whose `custom/` segment
-    publishing drops (Issue #576), and for a view page, which gains a `View`
-    segment it does not have on disk (Issue #675). main() computes it once and
-    passes it here *and* into its stale-cleanup write set — the two must be the
-    same value, or the cleanup pass deletes this file in the same run that
-    wrote it (Issue #271).
+    publishing drops, and for a view page, which gains a `View` segment it
+    does not have on disk. main() computes it once and passes it here *and*
+    into its stale-cleanup write set — the two must be the same value, or the
+    cleanup pass deletes this file in the same run that wrote it.
 
     `is_view` says which tree `src_path` belongs to; `view_dir` is the view
     tree's root, needed either way to resolve `[[View/<slug>]]` links written
     from an ordinary page.
 
     `ai_review` is what load_ai_review() found for this page, stamped into the
-    published copy's frontmatter and nowhere else (Issue #751). main() looks it
-    up so the overview's site-wide tally and this stamp read one lookup, and so
-    the two can never disagree about which pages carry a standing verdict.
+    published copy's frontmatter and nowhere else. main() looks it up so the
+    overview's site-wide tally and this stamp read one lookup, and so the two
+    can never disagree about which pages carry a standing verdict.
     """
     unresolved = 0
     link_keys: set[str] = set()
@@ -3128,7 +2967,7 @@ def convert_file(
     # published depth writes). Rewriting them would need a mapping between two
     # sibling trees with different roots — `.wikicommit/view/` and
     # `.wikicommit/entity/assets/` — which is a different problem from the
-    # within-one-tree depth change this function exists for (Issue #675).
+    # within-one-tree depth change this function exists for.
     src_link_dir = out_rel_path.parent if is_view else rel_path.parent
     content = rewrite_relative_links(
         content, src_link_dir.as_posix(), out_rel_path.parent.as_posix()
@@ -3137,6 +2976,9 @@ def convert_file(
     def replace(m: re.Match) -> str:
         nonlocal unresolved
         type_name, slug = m.group(1), m.group(2)
+        # `[[Type/slug|表示名]]`: the author's display text wins
+        # over the target's title, resolved or not.
+        display = wikilink_display(m)
         # Recorded whether or not the link resolves: an unresolved one is
         # exactly what the overview's "gaps" section is looking for.
         link_keys.add(f"{type_name}/{slug}")
@@ -3144,10 +2986,10 @@ def convert_file(
         if lang is None or current_type is None:
             unresolved += 1
             print(f"WARNING: [[{type_name}/{slug}]] not resolved in {src_path}")
-            return f"{type_name}/{slug}"
+            return display or f"{type_name}/{slug}"
 
         # `View` is the reserved segment naming the view tree, whose pages sit
-        # directly under <lang>/ with no type directory (Issue #675).
+        # directly under <lang>/ with no type directory.
         if type_name == VIEW_TYPE_SEGMENT and view_dir is not None:
             same_lang_target = view_dir / lang / f"{slug}.md"
             primary_target = view_dir / primary_lang / f"{slug}.md"
@@ -3164,17 +3006,23 @@ def convert_file(
         else:
             unresolved += 1
             print(f"WARNING: [[{type_name}/{slug}]] not resolved in {src_path}")
-            return f"{type_name}/{slug}"
+            return display or f"{type_name}/{slug}"
 
+        if display:
+            # Copied from the page source, where it is already written for its
+            # context (a `\"` inside a double-quoted frontmatter value);
+            # escaping it again would turn that into `\\"` and end the YAML
+            # string. WIKILINK_RE already keeps `[` and `]` out of it.
+            return f"[{display}]({link_path})"
         title = (target_fm or {}).get("title") or f"{type_name}/{slug}"
-        return f"[{_escape_md_link_text(title)}]({link_path})"
+        return f"[{_escape_md_link_text(str(title))}]({link_path})"
 
     new_content = WIKILINK_RE.sub(replace, content)
 
     # The published copy carries the verdict; `.wikicommit/entity/` does not.
-    # That asymmetry is the point of Issue #751 — the record tree stays the one
-    # place the verdict lives, so it cannot go stale here, and no new
-    # validate_frontmatter.py rule is needed for a field wiki pages never hold.
+    # The record tree stays the one place the verdict lives, so it cannot go
+    # stale here, and no validate_frontmatter.py rule is needed for a field
+    # wiki pages never hold.
     if ai_review is not None:
         stamp = [
             f"{AI_REVIEW_MODEL_FIELD}: {_yaml_quote(ai_review['model'])}",
@@ -3246,15 +3094,13 @@ def is_in_assets(path: Path, root: Path) -> bool:
 
 
 def sync_assets(source_dir: Path, output_dir: Path) -> tuple[int, int]:
-    """Mirror .wikicommit/entity/assets/ into content/assets/ (Issue #589).
+    """Mirror .wikicommit/entity/assets/ into content/assets/.
 
     Quartz's builtin Assets emitter copies everything under content/ that isn't
     a .md to the published site, and it is registered unconditionally (not via
     quartz.config.yaml's plugins list), so putting a file here is all that is
-    needed to publish it. Nothing in the pipeline did that before, which meant
-    the recommended relative-path form for local images resolved to a 404 on
-    the published site — that recommendation had been verified by placing files
-    directly into content/ rather than going through this script.
+    needed to publish it; without this copy a page's relative-path image
+    resolves to a 404 on the published site.
 
     One non-obvious dependency this relies on: Quartz's Assets emitter globs
     with `gitignore: true`, and the distributed .gitignore lists `content/`.
@@ -3263,14 +3109,12 @@ def sync_assets(source_dir: Path, output_dir: Path) -> tuple[int, int]:
     quartz/content (a symlink created by prebuild-symlinks.cjs) and the
     gitignore scan starts inside the submodule's own repo rather than the wiki
     repo's. Pointing the build at the repo-root content/ instead would make
-    globby match nothing and silently publish no assets at all (verified
-    directly against globby).
+    globby match nothing and silently publish no assets at all.
 
     Only the assets/ subtree is mirrored, not every non-.md file under
     source_dir: assets/ is the one place for shared images and attachments,
-    and limiting the copy there avoids
-    publishing whatever else happens to sit next to a page (editor backups, a
-    stray source PDF, .DS_Store).
+    and limiting the copy there avoids publishing whatever else happens to sit
+    next to a page (editor backups, a stray source PDF, .DS_Store).
 
     Note that Quartz's Assets emitter excludes `**/*.md`, so a .md placed under
     assets/ is copied here but then rendered by Quartz as an ordinary page
@@ -3324,9 +3168,8 @@ def sync_assets(source_dir: Path, output_dir: Path) -> tuple[int, int]:
             copied_rel.add(rel_path)
             copied += 1
 
-    # Same stale-cleanup contract as pages (Issue #271), scoped to
-    # content/assets/ so this never deletes anything another tool wrote
-    # elsewhere under content/.
+    # Same stale-cleanup contract as pages, scoped to content/assets/ so this
+    # never deletes anything another tool wrote elsewhere under content/.
     removed_stale = 0
     if out_assets.is_dir():
         for out_path in sorted(out_assets.rglob("*")):
@@ -3340,9 +3183,9 @@ def sync_assets(source_dir: Path, output_dir: Path) -> tuple[int, int]:
     return copied, removed_stale
 
 
-# The Explorer's group manifest (Issue #1035). Written at the content/ root so
-# Quartz's Assets emitter publishes it next to contentIndex.json; the explorer's
-# inline script fetches it and files each grouped page under a virtual folder.
+# The Explorer's group manifest. Written at the content/ root so Quartz's
+# Assets emitter publishes it next to contentIndex.json; the explorer's inline
+# script fetches it and files each grouped page under a virtual folder.
 GROUP_MANIFEST_NAME = "wikicommit-groups.json"
 
 
@@ -3352,12 +3195,11 @@ def write_group_manifest(output_dir: Path, page_stats: list[dict]) -> bool:
     Why a separate file rather than a frontmatter field on each published page:
     the Explorer builds its tree in the browser from contentIndex.json, and
     Quartz's content index carries a fixed set of fields (slug, title, links,
-    tags, ...) — an injected frontmatter key would never reach it. A field
-    nobody can read is a receiver without a consumer (Issue #553), so the
+    tags, ...) — an injected frontmatter key would never reach it, so the
     membership goes here instead, keyed the way contentIndex.json keys pages.
 
     Keys are published slugs: `<lang>/<Type>` lowercased the way Quartz
-    slugifies (a custom type already flattened, Issue #576) and the page slug
+    slugifies (a custom type already flattened) and the page slug
     likewise, so the client compares strings without re-deriving anything.
     Labels are resolved per language here, so the client never sees the file's
     shape. The page's URL does not change — the folder is virtual.
@@ -3411,8 +3253,8 @@ def write_group_manifest(output_dir: Path, page_stats: list[dict]) -> bool:
 # extension unchanged.
 LLMS_TXT_NAME = "llms.txt"
 # How many pages the "Key pages" section lists. The whole wiki would push the
-# file past the few-to-tens of KB the convention expects (a pilot wiki holds
-# over 1,000 pages across two languages); the Type folders listed under "Index"
+# file past the few-to-tens of KB the convention expects (a wiki can hold over
+# a thousand pages across two languages); the Type folders listed under "Index"
 # reach the rest.
 LLMS_KEY_PAGES_LIMIT = 50
 # A description longer than this is cut at a word boundary. properties.description
@@ -3469,10 +3311,10 @@ def site_url(base_url: str | None, out_rel: str) -> str:
 
 
 def _llms_description(text: object) -> str:
-    """One line of plain text: WikiLinks reduced to their slug, whitespace collapsed."""
+    """One line of plain text: WikiLinks reduced to their display text or slug, whitespace collapsed."""
     if not isinstance(text, str):
         return ""
-    plain = " ".join(WIKILINK_RE.sub(lambda m: m.group(2), text).split())
+    plain = " ".join(WIKILINK_RE.sub(lambda m: wikilink_display(m) or m.group(2), text).split())
     if len(plain) > LLMS_DESCRIPTION_MAX_CHARS:
         cut = plain[:LLMS_DESCRIPTION_MAX_CHARS]
         # Back off to a word boundary only when one is near the end: CJK text
@@ -3512,9 +3354,10 @@ def generate_llms_txt(
 
     Only primary_lang pages are listed: a translation answers the same question
     as its original, and listing both would double the file for no new reach.
-    Review state is stated once in the preamble rather than on every line — each
-    published page shows its own state at the top, which is where an AI that
-    follows a link reads it.
+    Review state is explained once in the preamble rather than on every line —
+    the banner at the top of each published page is where an AI that follows a
+    link reads it, and a pending page is shown there only by the absence of the
+    "read" line, so the preamble says what that absence means.
 
     The links point at the published HTML pages, not at raw Markdown: the
     repository may be private, and the raw files carry `[[Type/slug]]` WikiLinks
@@ -3540,8 +3383,20 @@ def generate_llms_txt(
         "The pages of this wiki are generated by an LLM from source documents. "
         "Every page is checked against its sources by a machine when it is generated; "
         "only some pages have been read through by a person (a sample, by design). "
-        "Each page states its review status at the top."
+        "A page that a person has read says so in the banner at the top, in the page's "
+        "language (in English: \"Read by <name> \u2014 nothing obviously wrong stood out\" "
+        "or \"A person read this page\"). A page whose banner says it was generated by "
+        "an LLM but has no such line has not been read by a person yet (its review "
+        "status is `pending`)."
     )
+    # The pending banner deliberately carries no "not read yet" sentence (it
+    # would turn false while the reader is reading), so pending is shown only
+    # by the absence of the "read" line. An AI that fetches one page cannot
+    # compare it with a reviewed one, so the preface says what the absence means.
+    # The absence is scoped to pages carrying the generation notice: a reviewed
+    # page with no generation stamp and no reviewed_by (a hand-written page
+    # reviewed via /wikicommit-review, or a build-generated index page) takes
+    # the banner's stampless branch and shows no read line either.
     lines.append("")
     scope = f"The lists below cover the {len(pages)} pages in `{primary_lang}`"
     if other_langs:
@@ -3607,28 +3462,27 @@ def main() -> int:
     reviewed_pages = 0
     ai_reviewed_pages = 0
     written_rel_paths: set[Path] = set()
-    # Overview accumulators (Issue #585), filled by the same single walk that
-    # already computes total_pages/reviewed_pages: one entry per published page,
-    # and the inbound edge list keyed by Type/slug.
+    # Overview accumulators, filled by the same single walk that already
+    # computes total_pages/reviewed_pages: one entry per published page, and
+    # the inbound edge list keyed by Type/slug.
     page_stats: list[dict] = []
     referrers: dict[str, set[str]] = {}
     removed_keys: set[str] = set()
 
-    # Two passes so that flattening (Issue #576) can never let a custom type
-    # quietly overwrite a standard one. Custom types are Schema.org-absent by
-    # definition, so `custom/Decision` and a standard `Decision` cannot both
-    # exist today — but a name Schema.org adds later, installed alongside an
-    # existing custom type of the same name, would land both on one output
-    # path. Deciding that up front, over the whole set, keeps the outcome
-    # independent of the order rglob happens to return files in.
+    # The output path of every page is decided up front, over the whole set
+    # (see the passes below), so flattening can never let a custom type
+    # quietly overwrite a standard one and the outcome is independent of the
+    # order rglob returns files in. Custom types are Schema.org-absent by
+    # definition, but a name Schema.org adds later, installed alongside an
+    # existing custom type of the same name, would land both on one path.
     pages: list[tuple[Path, Path, Path, bool]] = []  # (src_path, rel_path, out_rel_path, is_view)
     claimed_by: dict[Path, Path] = {}               # out_rel_path -> src_path that won it
 
     for src_path in sorted(source_dir.rglob("*.md")):
-        # assets/ is the asset subtree, copied
-        # verbatim below rather than converted. A .md that happens to live
-        # there would otherwise be both converted as a page and copied as an
-        # asset, writing two different files from one source (Issue #589).
+        # assets/ is the asset subtree, copied verbatim below rather than
+        # converted. A .md that happens to live there would otherwise be both
+        # converted as a page and copied as an asset, writing two different
+        # files from one source.
         if is_in_assets(src_path, source_dir):
             continue
         if is_removed(src_path):
@@ -3645,10 +3499,10 @@ def main() -> int:
         rel_path = src_path.relative_to(source_dir)
         pages.append((src_path, rel_path, flatten_entity_rel(rel_path), False))
 
-    # Second input tree (Issue #675): view pages sit at <lang>/<slug>.md on disk
-    # and publish to <lang>/View/<slug>.md, gaining the segment that makes
-    # `[[View/<slug>]]` resolve and keeps the language first — the three Quartz
-    # plugins that read the first path segment as the language are unchanged.
+    # Second input tree: view pages sit at <lang>/<slug>.md on disk and publish
+    # to <lang>/View/<slug>.md, gaining the segment that makes `[[View/<slug>]]`
+    # resolve and keeps the language first — the three Quartz plugins that read
+    # the first path segment as the language need no view-specific case.
     view_page_count = 0
     for src_path in collect_view_pages(view_dir, include_index=True):
         if is_removed(src_path):
@@ -3709,33 +3563,29 @@ def main() -> int:
                 f"{claimed_by[out_rel_path]} — skipped. {remedy}"
             )
             continue
-        # Site-wide page/reviewed counts (Issue #407) exclude Type index.md
-        # pages — they're auto-generated navigation, not wiki content — the
-        # same exclusion check_orphans.py/check_expires.py/etc. already apply.
+        # Site-wide page/reviewed counts exclude Type index.md pages — they're
+        # auto-generated navigation, not wiki content — the same exclusion
+        # check_orphans.py/check_expires.py/etc. already apply.
         fm = load_frontmatter(src_path) or {}
         is_index = src_path.name == "index.md"
         # One lookup per page, shared by the published stamp and the overview's
-        # site-wide tally (Issue #751). Index pages are excluded: they are
-        # build-generated navigation that no model reviewed, and
-        # rebuild_index.py already stamps them `review_status: reviewed` for
-        # exactly that reason (Issue #580).
+        # site-wide tally. Index pages are excluded: they are build-generated
+        # navigation that no model reviewed, and rebuild_index.py already
+        # stamps them `review_status: reviewed` for exactly that reason.
         ai_review = None if is_index else load_ai_review(src_path, repo_root, fm)
         if not is_index:
             total_pages += 1
             if fm.get("review_status") == "reviewed":
                 reviewed_pages += 1
-            # Issue #769: counted in this walk rather than from page_stats so
-            # that all three site-wide numbers cover the same set of pages. A
-            # page whose path never resolves to <lang>/<Type>/<slug>.md is
-            # published, stamped with its verdict by convert_file() below, and
-            # counted in total_pages — but it never reaches page_stats, so
-            # tallying there would report "1 of 2 checked" for a wiki where
-            # both pages carry one, and "no record at all" for a wiki whose
-            # only page does. That is the misreading this count exists to
-            # remove, pointed the other way.
-            # Issue #1031: a translation checked against its original is not a
-            # page checked against sources, so it is not counted here — the
-            # frontmatter field this feeds is labelled "checked against sources".
+            # Counted in this walk rather than from page_stats so that all
+            # three site-wide numbers cover the same set of pages. A page whose
+            # path never resolves to <lang>/<Type>/<slug>.md is published,
+            # stamped by convert_file() below and counted in total_pages, but
+            # never reaches page_stats; tallying there would report "1 of 2
+            # checked" for a wiki where both pages carry a verdict.
+            # A translation checked against its original is not a page checked
+            # against sources, so it is not counted here — the frontmatter
+            # field this feeds is labelled "checked against sources".
             if ai_review and not fm.get("translated_from"):
                 ai_reviewed_pages += 1
         file_converted, file_unresolved, link_keys = convert_file(
@@ -3761,17 +3611,17 @@ def main() -> int:
         page_stats.append({
             "out_rel": out_rel_path,
             "lang": page_lang,
-            # Published pages drop a custom type's `custom/` segment (Issue
-            # #576), and this page is published, so the reader-facing tallies
-            # use the flattened name. type_raw keeps the entity-side name for
-            # the Type-typo check, which compares against WikiLink Type
-            # segments — those are never flattened.
+            # Published pages drop a custom type's `custom/` segment, and this
+            # page is published, so the reader-facing tallies use the flattened
+            # name. type_raw keeps the entity-side name for the Type-typo check,
+            # which compares against WikiLink Type segments — those are never
+            # flattened.
             "type": flatten_custom_type(page_type),
             "type_raw": page_type,
             "slug": page_slug,
             "key": key,
             "title": str(fm.get("title") or key),
-            # Read by generate_llms_txt() only (Issue #1117).
+            # Read by generate_llms_txt() only.
             "description": (
                 fm["properties"].get("description")
                 if isinstance(fm.get("properties"), dict) else None
@@ -3785,33 +3635,32 @@ def main() -> int:
             ],
             "is_index": is_index,
             # None when no verdict stands for this page — no record at all, or
-            # one made against text that has since changed (Issue #751).
+            # one made against text that has since changed.
             "ai_review": ai_review,
             # Read by the overview's orphan reporting only: a view page is
-            # unlinked at birth, so it is never a meaningful orphan finding
-            # (Issue #675).
+            # unlinked at birth, so it is never a meaningful orphan finding.
             "is_view": is_view,
-            # Issue #1030: a translation is left out of the overview's "checked
-            # against sources" ratio — it has no sources of its own to check.
+            # A translation is left out of the overview's "checked against
+            # sources" ratio — it has no sources of its own to check.
             "is_translation": bool(fm.get("translated_from")),
             "has_manual_source": isinstance(sources, list) and any(
                 isinstance(e, dict) and e.get("type") == "manual" for e in sources
             ),
-            # Issue #990: how many sources the page stands on, derived from the
-            # sources[] already read above (no extra I/O). None — never 0 — for
-            # a translation (it inherits sources from its parent) and a view
-            # page (derived_from, not sources; a different thing to count), so
-            # the hubs row can drop the figure instead of implying "no source".
+            # How many sources the page stands on, derived from the sources[]
+            # already read above (no extra I/O). None — never 0 — for a
+            # translation (it inherits sources from its parent) and a view page
+            # (derived_from, not sources; a different thing to count), so the
+            # hubs row can drop the figure instead of implying "no source".
             "source_count": (
                 len(sources)
                 if isinstance(sources, list) and not is_view and not fm.get("translated_from")
                 else None
             ),
-            # Issue #1006: which sources, not only how many, so the overview can
-            # tell that several one-source hubs stand on the *same* document.
-            # Same sources[] as above (no extra I/O), same None cases as
-            # source_count. The identity is `url` / `path` as recorded (Issue
-            # #572 / #573); a `manual` entry has neither and yields None.
+            # Which sources, not only how many, so the overview can tell that
+            # several one-source hubs stand on the *same* document. Same
+            # sources[] as above (no extra I/O), same None cases as
+            # source_count. The identity is `url` / `path` as recorded; a
+            # `manual` entry has neither and yields None.
             "source_ids": (
                 [
                     (e.get("url") or e.get("path")) if isinstance(e, dict) else None
@@ -3829,16 +3678,16 @@ def main() -> int:
                 referrers.setdefault(link_key, set()).add(key)
 
     targets = existing_lang_targets(source_dir, load_translation_targets(repo_root), view_dir)
-    # Issue #731: languages that actually published pages, taken from page_stats
-    # rather than by listing .wikicommit/entity/*/ — that directory also holds
-    # the language-neutral assets/ tree, and entries whose path never resolved
-    # to <lang>/<Type>/<slug>.md never reach page_stats at all.
+    # Languages that actually published pages, taken from page_stats rather
+    # than by listing .wikicommit/entity/*/ — that directory also holds the
+    # language-neutral assets/ tree, and entries whose path never resolved to
+    # <lang>/<Type>/<slug>.md never reach page_stats at all.
     #
-    # Type index.md pages are excluded for the same reason existing_lang_targets()
-    # excludes them (Issue #190): rebuild_index.py leaves one behind after the
-    # last page of a type is removed, and a language whose only remaining files
-    # are those would get a front-door link into an empty tree. Removed pages
-    # never reach page_stats at all, so they need no exclusion here.
+    # Type index.md pages are excluded for the same reason
+    # existing_lang_targets() excludes them: rebuild_index.py leaves one behind
+    # after the last page of a type is removed, and a language whose only
+    # remaining files are those would get a front-door link into an empty
+    # tree. Removed pages never reach page_stats at all.
     #
     # written_rel_paths is the gate that keeps this list free of dead links, the
     # same guarantee existing_lang_targets() gives the targets side: a page whose
@@ -3856,10 +3705,10 @@ def main() -> int:
     mgmt_dir = repo_root / ".wikicommit" / "source"
     source_written, source_stats = generate_source_pages(output_dir, mgmt_dir, source_dir, primary_lang)
     written_rel_paths |= source_written
-    # Issue #730: per-language (pages, reviewed) from the same page_stats the
-    # overview page tallies, so the two build-generated pages agree. Type index
-    # pages are excluded here as everywhere; view pages are counted, since they
-    # are published pages of that language like any other.
+    # Per-language (pages, reviewed) from the same page_stats the overview
+    # page tallies, so the two build-generated pages agree. Type index pages
+    # are excluded here as everywhere; view pages are counted, since they are
+    # published pages of that language like any other.
     # Deliberately not named `pages`/`reviewed`: `pages` above holds this
     # function's (src_path, rel_path, out_rel_path, is_view) list, and rebinding
     # it to an int here would leave any later use of it broken in a way neither
@@ -3872,12 +3721,11 @@ def main() -> int:
         lang_counts[stat["lang"]] = (
             lang_pages + 1,
             lang_reviewed + (1 if stat["review_status"] == "reviewed" else 0),
-            # `ai_review` is already resolved once per page above and shared with
-            # the published stamp and the overview tally (Issue #751), so
-            # counting it here adds no walk (Issue #769).
-            # Issue #1031: translations are left out for the same reason as the
-            # site-wide count above — split on translated_from, since a language
-            # can hold both originals and translations.
+            # `ai_review` is already resolved once per page above and shared
+            # with the published stamp and the overview tally, so counting it
+            # here adds no walk. Translations are left out for the same reason
+            # as the site-wide count above — split on translated_from, since a
+            # language can hold both originals and translations.
             lang_ai + (1 if stat["ai_review"] and not stat["is_translation"] else 0),
         )
     generate_root_index(
@@ -3896,9 +3744,9 @@ def main() -> int:
     # not (re)write: pages set to status: removed, deleted source files, or
     # pages moved/renamed since. Without this, repeated local builds (e.g.
     # `npm run preview`) accumulate residue that keeps removed pages
-    # reachable by direct URL even though they're no longer linked (Issue
-    # #271). CI builds start from a fresh checkout so output_dir is normally
-    # empty there, but this also guards ad hoc/incremental invocations.
+    # reachable by direct URL even though they're no longer linked. CI builds
+    # start from a fresh checkout so output_dir is normally empty there, but
+    # this also guards ad hoc/incremental invocations.
     removed_stale = 0
     if output_dir.exists():
         for out_path in sorted(output_dir.rglob("*.md")):

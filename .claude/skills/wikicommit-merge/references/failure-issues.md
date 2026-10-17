@@ -4,65 +4,33 @@ pass_token: "5cd0ed36"
 
 # Step 9: generation-failure tracking Issues (`failure-issues`)
 
-The workflow engine hands you this step only after `merge-pr` was confirmed merged.
+The workflow engine hands you this step only after `merge-pr` was confirmed merged, and only when there is something to file — or when it could not tell, because the open generation-failure Issues could not be read. Most merges carry no failed source, and the step is skipped.
 
-Report `filed` when every target management file has been handled — given a new Issue, found to have an open one already, or skipped and recorded for the report. As with Step 8 there is no completion check, for the same reason, and a resumed run simply runs this step again from the start: the marker match below keeps it from filing anything twice.
+Report `filed` when every management file the targets command lists has been handled — given a new Issue, or skipped and recorded for the report. As with Step 8 there is no completion check, for the same reason.
 
 ### Step 9: Generate Generation-Failure Tracking Issues
 
-Only run this step if Step 7 confirmed the merge completed (`gh pr merge` exited 0).
-
 > **Why this step exists**: when a `wikicommit-generate` entity fails source-integrity review (Pass 4) after exhausting `generate.max_retries`, it is recorded only inside the source management file's `failed_pages` list and `## Failure Reason` section — invisible from the page itself (for `action: update`, the pre-existing page is simply left unchanged, with no sign anything was attempted) and invisible from any later session unless someone happens to re-open that exact management file. This mirrors Step 8's tracking-Issue mechanism but for a different failure class: Step 8 surfaces successfully-generated pages awaiting human review; this step surfaces generation attempts that did *not* produce a page at all. It intentionally does not trigger any automation on close (unlike Step 8's `review_status` flip via `review-issue-close-sync.yml`) — closing this Issue is purely a human record-keeping action, since there is no single well-defined "fixed" state analogous to `review_status: reviewed` for a page that was never written. To actually retry, re-run `/wikicommit-generate` on the source.
 
-#### Extracting Target Management Files
+#### The Target Management Files
 
-Scan the **entire `.wikicommit/source/` tree on the default branch** (`<default branch>` — the run record's `default_branch` list) — not just this batch's changes — for the same reason as Step 8's full-tree scan: a management file whose tracking-Issue creation failed in a *previous* run, or one that picked up `failed_pages` through a batch other than the immediately preceding one, must still be caught on every run regardless of which run originally introduced it.
-
-```bash
-python -c "
-import re, sys
-from pathlib import Path
-import yaml
-FRONTMATTER_RE = re.compile(r'^---\r?\n(.*?)\r?\n---\r?\n?', re.DOTALL)
-for path in sorted(Path('.wikicommit/source').rglob('*.md')):
-    content = path.read_text(encoding='utf-8-sig')
-    m = FRONTMATTER_RE.match(content)
-    try:
-        fm = (yaml.safe_load(m.group(1)) or {}) if m else {}
-    except yaml.YAMLError as e:
-        print(f'WARNING: {path}: frontmatter YAML parse failed, skipping ({e})', file=sys.stderr)
-        continue
-    if not isinstance(fm, dict):
-        continue
-    failed = fm.get('failed_pages') or []
-    if isinstance(failed, list) and failed:
-        print(path)
-    elif fm.get('status') == 'failed':
-        print(path)
-"
-```
-
-**`status: failed` is a second target condition, not a redundant one.** `failed_pages` is written by Pass 4, so it is only ever non-empty when page generation was actually attempted. A source that fails in Pass 1 — a known JS-shell domain, an empty or unreadable extraction — never reaches Pass 4, so its `failed_pages` is empty; and nothing else reports it (Pass 1 does not collect `failed`, and `check_ingest_freshness.py`'s `CHECKABLE_STATUSES` does not include it), so without this condition it would drop out of the pipeline with no report anywhere. The two conditions do not overlap in practice — Pass 4 step 7 writes `status: failed` only on a branch where every entity was attempted and failed, and that branch fills `failed_pages` — but the `elif` makes one Issue per management file regardless.
-
-Same `FRONTMATTER_RE` and `try`/`except` resilience as Step 8's extraction script, for the same reason: one management file anywhere in the tree with malformed frontmatter must not abort the scan before every other target file is found. Relay any `WARNING:` lines to the user in the Step 10 completion report, same as Step 8.
-
-If there are zero target management files, display "No generation failures require tracking" and proceed to Step 10.
-
-Process every target management file found in this same run — same no-cap, sleep-2-seconds-between-creates rate-limit approach as Step 8's "No Cap — Rate Limit Safety Margin Instead" section, for the same reasons.
-
-#### Checking for Existing Tracking Issues (per target management file)
-
-Each tracking Issue embeds an exact machine-readable marker in its body: `<!-- wikicommit-ingest: <source management file path> -->`. Fetch open `wikicommit-generation-failure`-labeled issues and scan their `body` for that exact marker locally (same rationale as Step 8 — do not rely on `gh issue list --search`):
+Get them by running the scan again, now — not from the run record's `failure_targets` list, which was read before this step started:
 
 ```bash
-gh api "repos/{owner}/{repo}/issues?labels=wikicommit-generation-failure&state=open&per_page=100" \
-  --paginate --jq '.[] | select(.pull_request | not) | {number, body}'
+python <this Skill's directory>/scripts/workflow_checks.py targets --kind failure --run <run>
 ```
 
-Same fetch as Step 8 — type `{owner}/{repo}` literally, and do not swap it for a label-filtered `gh issue list`, which stops at 1000.
+Each `ITEM:` line is a source management file to file an Issue for. The command scans the whole `.wikicommit/source/` tree on the default branch (not only this batch, for the same reason as Step 8), keeps the files with a non-empty `failed_pages` **or** `status: failed`, and drops every file an open `wikicommit-generation-failure` Issue already names by its marker. Running it afresh keeps a resumed step from filing anything twice.
 
-- If any returned issue's `body` contains the exact marker for this management file → skip it and move to the next
-- If none do → create a new tracking Issue
+**`status: failed` is a second target condition, not a redundant one.** `failed_pages` is written by Pass 4, so a source that fails in Pass 1 — a known JS-shell domain, an empty or unreadable extraction — has an empty `failed_pages`, and nothing else reports it.
+
+- **No `ITEM:` line and a `WARNING:` that the open Issues could not be read** → file nothing (without that match every source would get a duplicate Issue). Keep the `WARNING:` for the Step 10 report and report `filed`; the next `/wikicommit-merge` picks the sources up.
+- **No `ITEM:` line otherwise** → display "No generation failures require tracking" and report `filed`.
+- Keep every other `WARNING:` line (a management file whose frontmatter YAML could not be parsed is skipped) for the Step 10 report as well.
+
+Process every listed management file in this same run, with the same 2-second pause between `gh issue create` calls as Step 8.
+
+Each tracking Issue embeds an exact machine-readable marker in its body: `<!-- wikicommit-ingest: <source management file path> -->`, with the path exactly as the targets command printed it. It is what the targets command matches open Issues by.
 
 #### Issue Generation (repeat per target management file)
 

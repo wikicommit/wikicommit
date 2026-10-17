@@ -1,4 +1,4 @@
-"""Group files: how the pages under one Type are shown in groups (Issue #1035).
+"""Group files: how the pages under one Type are shown in groups.
 
 A large Type (DefinedTerm passes 40 pages in the pilots) is one long list in its
 `index.md` and in the Explorer. This module reads `.wikicommit/groups/<Type>.yml`,
@@ -13,14 +13,14 @@ which sorts that Type's pages into named groups **without touching any page**:
 
 Why outside the page: grouping is how pages are *listed*, not what they *say*.
 Writing it into a page's frontmatter (`tags` or a new key) would make every
-grouping a content change, and `reset_review_on_content_change.py` (Issue #724)
-would send every `reviewed` page it touched back to `pending` — 40 tracking
-Issues for one reorganisation, and again for every regrouping.
+grouping a content change, and `reset_review_on_content_change.py` would send
+every `reviewed` page it touched back to `pending` — 40 tracking Issues for one
+reorganisation, and again for every regrouping.
 
-Membership is by slug. A slug is language-neutral (Issue #193), so one file
-covers every language: a translation lands in the same group as its original.
-Only the label is per language (the same shape as `site_description`, Issue #671);
-a language with no label shows the group key.
+Membership is by slug. A slug is language-neutral, so one file covers every
+language: a translation lands in the same group as its original. Only the label
+is per language (the same shape as `site_description`); a language with no
+label shows the group key.
 
 Three readers: `rebuild_index.py` (headings in the Type index),
 `convert_wikilinks.py` (publishes the membership for the Explorer), and

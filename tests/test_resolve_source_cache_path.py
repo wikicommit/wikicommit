@@ -120,6 +120,43 @@ def test_url_returns_none_when_no_source_is_registered(tmp_path):
     assert resolver.resolve_url("https://example.com/article", tmp_path) is None
 
 
+# ── a dot in the management file name is not an extension (Issue #1326) ─────
+
+_ARXIV_A = "https://arxiv.org/pdf/2606.05608"
+_ARXIV_B = "https://arxiv.org/pdf/2606.17799"
+_ARXIV_A_CACHE = ".wikicommit/.cache/ingest-fetch/arxiv.org/pdf-2606.05608.md"
+_ARXIV_B_CACHE = ".wikicommit/.cache/ingest-fetch/arxiv.org/pdf-2606.17799.md"
+
+
+def test_url_keeps_the_dotted_name_whole(tmp_path):
+    """`with_suffix("")` would read `.05608` as an extension and return
+    `pdf-2606.md`; Pass 1 writes `<scratch-path>.md` by concatenation."""
+    _url_source(tmp_path, "arxiv.org/pdf-2606.05608.md", _ARXIV_A)
+    _write(tmp_path, _ARXIV_A_CACHE)
+
+    located = resolver.locate_url(_ARXIV_A, tmp_path)
+    assert located.cache_file == tmp_path / _ARXIV_A_CACHE
+    assert resolver.resolve_url(_ARXIV_A, tmp_path) == tmp_path / _ARXIV_A_CACHE
+
+
+def test_two_sources_sharing_a_prefix_do_not_share_a_cache(tmp_path):
+    _url_source(tmp_path, "arxiv.org/pdf-2606.05608.md", _ARXIV_A)
+    _url_source(tmp_path, "arxiv.org/pdf-2606.17799.md", _ARXIV_B)
+    _write(tmp_path, _ARXIV_A_CACHE)
+
+    a = resolver.locate_url(_ARXIV_A, tmp_path)
+    b = resolver.locate_url(_ARXIV_B, tmp_path)
+    assert a.cache_file != b.cache_file
+    assert b.cache_file == tmp_path / _ARXIV_B_CACHE
+
+    got = _run(tmp_path, _ARXIV_B)
+    assert got.returncode == 1
+    assert got.stdout.strip() == (
+        f"NO_CACHE: {_ARXIV_B_CACHE} (.wikicommit/source/url/arxiv.org/pdf-2606.17799.md)"
+    )
+    assert _run(tmp_path, _ARXIV_A).stdout.strip() == _ARXIV_A_CACHE
+
+
 # ── type: path (Issue #885) ──────────────────────────────────────────────────
 
 def test_path_resolves_the_extraction_cache(tmp_path):
@@ -489,6 +526,27 @@ def test_settle_places_a_fetch_matching_both_hashes(tmp_path):
     assert not (tmp_path / ".wikicommit/.cache/ask-fetch/1.md").exists()
     # The next lookup — ask's or generate's — now finds it.
     assert _run(tmp_path, _URL).stdout.strip() == _CACHE
+
+
+def test_settle_does_not_overwrite_a_source_that_shares_a_prefix(tmp_path):
+    """The placement path is the resolver's. Before Issue #1326 both sources
+    resolved to the truncated `pdf-2606.md`, so placing B's fetch there replaced
+    the cache A was read from; now B lands on its own name and A's is untouched."""
+    _url_source_with_hash(tmp_path, "arxiv.org/pdf-2606.05608.md", _ARXIV_A, "sha256:" + "1" * 64)
+    _url_source_with_hash(tmp_path, "arxiv.org/pdf-2606.17799.md", _ARXIV_B, _FETCHED_HASH)
+    other = tmp_path / _ARXIV_A_CACHE
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text("the other paper\n", encoding="utf-8")
+    _fetched(tmp_path)
+
+    got = _run(
+        tmp_path, _ARXIV_B,
+        "--settle", ".wikicommit/.cache/ask-fetch/1.md", "--page-hash", _FETCHED_HASH,
+    )
+    assert got.returncode == 0
+    assert (tmp_path / _ARXIV_B_CACHE).read_text(encoding="utf-8") == _FETCHED
+    assert other.read_text(encoding="utf-8") == "the other paper\n"
+    assert not (tmp_path / ".wikicommit/.cache/ingest-fetch/arxiv.org/pdf-2606.md").exists()
 
 
 def test_settle_places_a_management_file_match_even_when_the_page_differs(tmp_path):

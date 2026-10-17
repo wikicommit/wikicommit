@@ -89,6 +89,7 @@ ScriptSpec はスクリプトごとに `## <スクリプト名>` の節を持つ
 | 翻訳 | pipeline §6.4、data §4.2、ScriptSpec `check_translation_status.py` |
 | 削除・取り下げ | pipeline §6.5、data §4.3（`retracted`）・§4.5、ScriptSpec `check_retracted_sources.py` |
 | 検索・`/wikicommit-ask` | pipeline §6.6、publish §9、ScriptSpec `search_index.py` |
+| ページをまたぐ問い合わせの索引（事実とつながり。クエリ型のビュー・インフォボックスの逆向きの行の土台） | publish §9.5、data §4.5.2・§4.5.3・§5.2 |
 | コミットトレーラー | pipeline §6.7 |
 | Skill を足す・SKILL.md を書き換える | skills §11.0〜§11.3・§11.7〜§11.9、TestSpec L5・L7・L9・L10・L14〜L16 |
 | `.wikicommit/scripts/` のスクリプトを足す・変える | ScriptSpec 共通規則・スクリプト一覧・当該スクリプトの節、skills §11.5（置き場所の規則） |

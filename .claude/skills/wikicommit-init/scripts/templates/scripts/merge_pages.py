@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""merge_pages.py — what a merge of "same" pages needs, worked out from disk (Issue #1119).
+"""merge_pages.py — what a merge of "same" pages needs, worked out from disk.
 
 A person who decided with `/wikicommit-relate` that two or more pages are one
 concept merges them with

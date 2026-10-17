@@ -2,14 +2,12 @@
 """Deterministically rebuild index.md for one or more wiki Type directories.
 
 wikicommit-generate and wikicommit-translate both need to update `index.md`
-for every Type directory they touched (a `[[Type/slug]]` listing).
-Previously this was a step the LLM
-agent had to remember to perform "once, after all sources/pairs" at the tail
-of a long multi-step run — a purely deterministic, full-directory-scan
-operation left to agent memory instead of a script (Issue #406). This script
-takes over that step: given a Type directory, it scans the directory on disk
-and writes a fresh `index.md` from scratch, so a skipped step in a long batch
-can no longer leave a stale or missing index.
+for every Type directory they touched (a `[[Type/slug]]` listing). That is a
+purely deterministic, full-directory-scan operation, so it is a script rather
+than a step the LLM agent has to remember to perform "once, after all
+sources/pairs" at the tail of a long multi-step run: given a Type directory,
+it scans the directory on disk and writes a fresh `index.md` from scratch, so
+a skipped step in a long batch cannot leave a stale or missing index.
 
 Usage:
     python .wikicommit/scripts/rebuild_index.py [<type-dir>...]
@@ -22,9 +20,9 @@ Usage:
   `.wikicommit/view/ja`.
 
 A directory under `.wikicommit/view/` is one language's whole view tree, not a
-Type directory: view pages carry no type and sit directly under `<lang>/`
-(Issue #675), so its index lists `[[View/<slug>]]` and is titled after the
-reserved `View` segment rather than after a Type.
+Type directory: view pages carry no type and sit directly under `<lang>/`,
+so its index lists `[[View/<slug>]]` and is titled after the reserved `View`
+segment rather than after a Type.
 
 Exit code: always 0 (this is a workflow step, not a wikicommit-merge quality
 gate; a directory that can't be resolved is reported as a WARNING and
@@ -69,7 +67,7 @@ def _parse_type_dir(type_dir: Path) -> tuple[str, str] | None:
 
 def _parse_view_lang_dir(lang_dir: Path) -> str | None:
     """Derive `lang` from a `<view>/<lang>` directory, or None if `lang_dir` is
-    not exactly one level under the view tree (Issue #675)."""
+    not exactly one level under the view tree."""
     try:
         rel = lang_dir.resolve().relative_to(VIEW_DIR.resolve())
     except (ValueError, OSError, RuntimeError):
@@ -99,7 +97,7 @@ def discover_type_dirs() -> list[Path]:
     index behind) still gets rebuilt: it holds no page for a later
     generate/translate run to rediscover it by, so keying discovery on pages
     alone would strand its index.md at whatever the last rebuild wrote — a
-    stale listing, and (Issue #580) frontmatter with no `review_status`, which
+    stale listing, and frontmatter with no `review_status`, which
     WikiCommitBanner renders as an "unreviewed" warning forever. Rebuilding it
     is exactly what an explicit `rebuild_index.py <that dir>` already does.
     """
@@ -120,8 +118,7 @@ def discover_type_dirs() -> list[Path]:
 
 
 def rebuild_view_index(lang_dir: Path, lang: str) -> tuple[str, int]:
-    """Rebuild `<view>/<lang>/index.md`, listing that language's view pages
-    (Issue #675).
+    """Rebuild `<view>/<lang>/index.md`, listing that language's view pages.
 
     Same contract as the Type index below — full rescan, deterministic order,
     idempotent — with two differences that follow from a view page having no
@@ -209,14 +206,13 @@ def rebuild_index(type_dir: Path) -> tuple[str, int] | None:
     # _write_sources_index() / _write_source_dir_index():
     # this is a build-generated navigation page, not LLM-authored wiki content,
     # so it should not show the wikicommit-banner "unreviewed" warning (which
-    # defaults to pending when the field is absent). Issue #580 — a Type index
-    # is written here rather than by convert_wikilinks.py and, unlike the root
-    # index and the source pages, has a real file under .wikicommit/entity/,
-    # which is how it fell outside that convention in the first place. Stamping
-    # it at the writing end keeps WikiCommitBanner.tsx free of any "is this an
+    # defaults to pending when the field is absent). A Type index is written
+    # here rather than by convert_wikilinks.py and, unlike the root index and
+    # the source pages, has a real file under .wikicommit/entity/. Stamping it
+    # at the writing end keeps WikiCommitBanner.tsx free of any "is this an
     # index page?" slug-naming test, which it deliberately avoids.
     #
-    # comments: false rides along for the same reason (Issue #741): giscus
+    # comments: false rides along for the same reason: giscus
     # renders into afterBody on every page, and an index has nothing for a
     # reader to respond to. The plugin skips a page whose frontmatter says so,
     # so this is one key in the place that already decides this question.
@@ -229,22 +225,21 @@ def rebuild_index(type_dir: Path) -> tuple[str, int] | None:
         "comments: false\n"
         "---\n"
     )
-    # One list item per page, the WikiLink alone (Issue #678). convert_wikilinks.py
-    # renders a WikiLink as the *target page's* `title`, so a trailing
-    # `— {title}` came out as "Title — Title" on every row of every Type index
-    # in every language — and a Type index is one of the wiki's main ways to get
-    # around. The suffix was not pointless: read as raw Markdown on GitHub, where
-    # `[[...]]` is not rendered, it was the only thing carrying the title. That
-    # reader is the operator rather than the audience, the filename beside it
-    # already holds the slug, and the cost on the other side falls on every
-    # reader on every browse — so the duplication goes.
+    # One list item per page, the WikiLink alone. convert_wikilinks.py renders
+    # a WikiLink as the *target page's* `title`, so a trailing `— {title}` would
+    # come out as "Title — Title" on every row of every Type index in every
+    # language — and a Type index is one of the wiki's main ways to get around.
+    # The suffix is not pointless: read as raw Markdown on GitHub, where
+    # `[[...]]` is not rendered, it would be the only thing carrying the title.
+    # That reader is the operator rather than the audience, the filename beside
+    # it already holds the slug, and the cost on the other side falls on every
+    # reader on every browse — so there is no suffix.
     #
     # The `- ` marker is load-bearing, not cosmetic. Rows are consecutive
     # non-blank lines, so CommonMark folds them into a single paragraph and
     # Quartz does not turn soft breaks into <br> (quartz.config.yaml ships
     # `hard-line-breaks` disabled). Without a marker the published index is one
-    # run-on line of adjacent link texts; the dropped `— {title}` had been
-    # separating them by accident. Every other generated listing
+    # run-on line of adjacent link texts. Every other generated listing
     # (generate_root_index() / _write_sources_index() /
     # _write_source_dir_index() / generate_overview_page()) already writes
     # `- [title](link)` for the same reason. remove_page.py's
@@ -270,7 +265,7 @@ def rebuild_index(type_dir: Path) -> tuple[str, int] | None:
 
 
 def _grouped_body(type_name: str, lang: str, slugs: list[str], group_file) -> str:
-    """The Type index split into `## <label>` sections (Issue #1035).
+    """The Type index split into `## <label>` sections.
 
     Groups come in the file's order, each listing its pages in slug order (the
     same order as an ungrouped index); a group with no page in this language is

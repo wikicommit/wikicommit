@@ -41,13 +41,24 @@ A is a person.
 
 sys.path.insert(0, str(SCRIPTS))
 
+# `gh api .../issues?labels=<label>...` prints the bodies held in `issues` (a JSON
+# map of label to bodies) as `--jq '... | .body | @json'` would, one per line, or
+# fails when `issues` says "FAIL".
 FAKE_GH = '''#!{python}
-import sys
+import json, sys
 args = sys.argv[1:]
 if args[:2] == ["repo", "view"]:
     print("main")
 elif args[:2] == ["pr", "view"]:
     print(open("{state}").read().strip())
+elif args[:1] == ["api"] and "/issues?labels=" in args[1]:
+    held = open("{issues}", encoding="utf-8").read()
+    if held.strip() == "FAIL":
+        print("HTTP 502: Bad Gateway", file=sys.stderr)
+        sys.exit(1)
+    label = args[1].split("labels=")[1].split("&")[0]
+    for body in json.loads(held).get(label, []):
+        print(json.dumps(body))
 else:
     sys.exit(1)
 '''
@@ -82,8 +93,11 @@ def wiki(tmp_path: Path):
     bin_dir.mkdir()
     state = tmp_path / "pr-state"
     state.write_text("OPEN\n", encoding="utf-8")
+    issues = tmp_path / "open-issues"
+    issues.write_text("{}", encoding="utf-8")
     gh = bin_dir / "gh"
-    gh.write_text(FAKE_GH.format(python=sys.executable, state=state), encoding="utf-8")
+    gh.write_text(FAKE_GH.format(python=sys.executable, state=state, issues=issues),
+                  encoding="utf-8")
     gh.chmod(0o755)
     lychee_out = tmp_path / "lychee-out"
     lychee_out.write_text('{"fail_map": {}}', encoding="utf-8")
@@ -116,7 +130,7 @@ def wiki(tmp_path: Path):
     page = work / PAGE
     page.parent.mkdir(parents=True)
     page.write_text(PAGE_TEXT, encoding="utf-8")
-    return {"dir": work, "env": env, "git": git, "pr_state": state,
+    return {"dir": work, "env": env, "git": git, "pr_state": state, "issues": issues,
             "lychee_out": lychee_out, "lychee_calls": lychee_calls}
 
 
@@ -319,13 +333,15 @@ def test_a_stopped_merge_resumes_from_where_it_stopped(wiki):
     resp, code = done("merge-pr", "merge-pr.md")
     assert code == 1 and "main" in resp["reason"], "still on the merge branch"
     git("checkout", "-q", "main")
+    git("merge", "-q", "--ff-only", "wikicommit/merge-20261006-120000")  # the pull
     resp, code = done("merge-pr", "merge-pr.md")
     assert code == 0 and resp["step"] == "tracking-issues"
 
     resp, _ = drive(wiki, "next", run)
     assert resp["step"] == "tracking-issues"
-    assert done("tracking-issues", "tracking-issues.md")[0]["step"] == "failure-issues"
-    assert done("failure-issues", "failure-issues.md")[0]["step"] == "report"
+    assert front(wiki["dir"] / run)["workflow"]["lists"]["review_targets"] == [PAGE]
+    # No failed source: the engine skips Step 9 and goes straight to the report.
+    assert done("tracking-issues", "tracking-issues.md")[0]["step"] == "report"
     resp, code = done("report", "completion-report.md", "--count", "pr=7",
                       "--count", "tracking_issues=1", "--count", "failure_issues=0")
     assert code == 0 and resp["finished"] is True
@@ -352,6 +368,140 @@ def test_a_merge_that_fails_halts_with_its_reason(wiki):
                        "--token", _token("merge-pr.md"), "--reason", "DIRTY")
     assert code == 0 and resp["state"] == "halted"
     assert front(wiki["dir"] / run)["halted_reason"] == "merge-pr: DIRTY"
+
+
+# --- Steps 8 and 9: what still needs an Issue (Issue #1266) ---------------------
+
+
+def merged(wiki) -> tuple[dict, str]:
+    """A run driven through `merge-pr`: the response that hands over what follows."""
+    git = wiki["git"]
+    quiet_orphans(wiki)
+    _, run = start(wiki)
+    passed(wiki, run)
+    git("checkout", "-q", "-b", "wikicommit/merge-20261006-120000")
+    git("add", ".wikicommit/")
+    git("commit", "-q", "-m", "wiki: bulk update")
+    git("push", "-q", "origin", "wikicommit/merge-20261006-120000")
+    for step, name, extra in (("commit", "commit.md", ["--outcome", "committed"]),
+                              ("open-pr", "open-pr.md", ["--outcome", "opened", "--add", "pr=7"])):
+        _, code = drive(wiki, "done", run, "--step", step, "--token", _token(name), *extra)
+        assert code == 0
+    wiki["pr_state"].write_text("MERGED\n", encoding="utf-8")
+    git("checkout", "-q", "main")
+    git("merge", "-q", "--ff-only", "wikicommit/merge-20261006-120000")  # the pull
+    resp, code = drive(wiki, "done", run, "--step", "merge-pr", "--outcome", "merged",
+                       "--token", _token("merge-pr.md"))
+    assert code == 0, resp
+    return resp, run
+
+
+def _log_of(wiki, run: str) -> dict:
+    return {entry["step"]: entry.get("outcome")
+            for entry in front(wiki["dir"] / run)["workflow"]["log"]}
+
+
+def test_nothing_to_file_skips_both_issue_steps_and_their_instructions(wiki):
+    """The page already has an open tracking Issue — one opened before the
+    `.wikicommit/wiki/` rename, whose marker still names the old prefix — and no
+    source failed: neither Issue step is handed over."""
+    wiki["issues"].write_text(json.dumps({"wikicommit-review": [
+        "body\n<!-- wikicommit-page: .wikicommit/wiki/ja/Person/a.md -->"]}), encoding="utf-8")
+    resp, run = merged(wiki)
+    assert resp["step"] == "report", resp
+    assert "instructions" not in resp or resp["instructions"].endswith("completion-report.md")
+    log = _log_of(wiki, run)
+    assert log["review-targets"] == "ran" and log["failure-targets"] == "ran"
+    assert log["tracking-issues"] == "skipped" and log["failure-issues"] == "skipped"
+    lists = front(wiki["dir"] / run)["workflow"]["lists"]
+    assert lists["review_targets"] == [] and lists["failure_targets"] == []
+    assert any(n.startswith("REVIEW_TARGETS: 1 pending page(s), 0 without")
+               for n in resp["notes"]), resp["notes"]
+
+
+def test_a_failed_issue_lookup_hands_the_step_over_with_nothing_to_file(wiki):
+    """`gh api` failing is not "nothing to file": the step is handed over with an
+    empty list and the failure in the notes, so nothing is filed blind and the
+    failure reaches the report."""
+    wiki["issues"].write_text("FAIL", encoding="utf-8")
+    resp, run = merged(wiki)
+    assert resp["step"] == "tracking-issues", resp
+    assert resp["instructions"] == "references/tracking-issues.md"
+    assert front(wiki["dir"] / run)["workflow"]["lists"]["review_targets"] == []
+    assert any(n.startswith("WARNING: the open `wikicommit-review` Issues could not be read")
+               and "HTTP 502" in n for n in resp["notes"]), resp["notes"]
+    out = checks(wiki, "target-warnings", "--run", run).stdout
+    assert "could not be read" in out, "the report can read the failure again"
+    resp, _ = drive(wiki, "done", run, "--step", "tracking-issues", "--outcome", "filed",
+                    "--token", _token("tracking-issues.md"))
+    assert resp["step"] == "report", "no failed source: Step 9 needs no lookup at all"
+
+
+def test_has_targets_hands_the_step_over_when_the_scan_result_is_gone(wiki):
+    """A run resumed on another machine, or a cleared cache: the condition cannot
+    tell that nothing is left, so it does not skip."""
+    resp, run = start(wiki)
+    result = checks(wiki, "has-targets", "--kind", "review", "--run", run)
+    assert result.returncode == 0, result.stdout
+
+
+def _page(wiki, rel: str, front_text: str) -> None:
+    path = wiki["dir"] / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"---\n{front_text}\n---\n\nbody\n", encoding="utf-8")
+
+
+def _targets(wiki, kind: str, run: str = ".wikicommit/run/none.md"):
+    result = checks(wiki, "targets", "--kind", kind, "--run", run)
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = result.stdout.splitlines()
+    return ([line[len("ITEM: "):] for line in lines if line.startswith("ITEM: ")],
+            [line for line in lines if line.startswith("WARNING:")])
+
+
+def test_the_review_scan_keeps_pending_pages_without_an_open_issue(wiki):
+    base = ".wikicommit/entity/ja/Person"
+    _page(wiki, f"{base}/index.md", "title: I\nreview_status: pending")
+    _page(wiki, f"{base}/gone.md", "title: G\nstatus: removed\nreview_status: pending")
+    _page(wiki, f"{base}/read.md", "title: R\nreview_status: reviewed")
+    _page(wiki, f"{base}/bare.md", "title: B")
+    _page(wiki, f"{base}/filed.md", "title: F\nreview_status: pending")
+    _page(wiki, f"{base}/broken.md", "title: [unclosed\nreview_status: pending")
+    _page(wiki, f"{base}/dashes.md", "title: \"a --- b\"\nreview_status: pending")
+    _page(wiki, ".wikicommit/view/ja/v.md", "title: V\nreview_status: pending")
+    _page(wiki, ".wikicommit/entity/assets/note.md", "title: attachment")
+    _page(wiki, f"{base}/list.md", "- a\n- b")
+    wiki["issues"].write_text(json.dumps({"wikicommit-review": [
+        f"<!-- wikicommit-page: {base}/filed.md -->", None]}), encoding="utf-8")
+    items, warnings = _targets(wiki, "review")
+    assert items == [PAGE, f"{base}/bare.md", f"{base}/dashes.md",
+                     ".wikicommit/view/ja/v.md"]
+    assert len(warnings) == 2, warnings
+    assert f"{base}/broken.md" in warnings[0] and "YAML parse failed" in warnings[0]
+    assert f"{base}/list.md" in warnings[1] and "not a mapping" in warnings[1]
+
+
+def test_the_failure_scan_takes_failed_pages_and_status_failed(wiki):
+    base = ".wikicommit/source/url"
+    _page(wiki, f"{base}/a.md", "status: partial\nfailed_pages: [x.md]")
+    _page(wiki, f"{base}/b.md", "status: failed\nfailed_pages: []")
+    _page(wiki, f"{base}/c.md", "status: generated")
+    _page(wiki, f"{base}/d.md", "status: failed")
+    _page(wiki, f"{base}/e.md", "status: [bad")
+    wiki["issues"].write_text(json.dumps({"wikicommit-generation-failure": [
+        f"<!-- wikicommit-ingest: {base}/d.md -->"],
+        "wikicommit-review": [f"<!-- wikicommit-ingest: {base}/b.md -->"]}), encoding="utf-8")
+    items, warnings = _targets(wiki, "failure")
+    assert items == [f"{base}/a.md", f"{base}/b.md"], (
+        "d has an open Issue; a review Issue's marker does not count")
+    assert len(warnings) == 1 and f"{base}/e.md" in warnings[0]
+
+
+def test_a_failed_lookup_lists_nothing(wiki):
+    wiki["issues"].write_text("FAIL", encoding="utf-8")
+    items, warnings = _targets(wiki, "review")
+    assert items == []
+    assert any("could not be read" in w and "1 pending page(s)" in w for w in warnings)
 
 
 # --- Step 2: classification ---------------------------------------------------
@@ -751,9 +901,35 @@ def test_lychee_progress_from_before_structured_findings_starts_over(wiki):
     assert data["findings"] == [f"{PAGE}: https://example.com/new (404 Not Found)"]
 
 
+def hide_tool(wiki, name: str) -> None:
+    """Make `name` unreachable on the fixture's PATH, including a real install.
+
+    Unlinking the fake in `bin/` is not enough where the tool is really
+    installed (the devcontainer has /usr/local/bin/lychee): PATH lookup falls
+    through to it. A PATH directory holding the tool is replaced by a mirror
+    of its other entries, so git, python and the rest stay reachable.
+    """
+    (wiki["dir"].parent / "bin" / name).unlink()
+    shims = wiki["dir"].parent / f"path-without-{name}"
+    dirs = []
+    for i, entry in enumerate(wiki["env"]["PATH"].split(os.pathsep)):
+        d = Path(entry) if entry else None
+        if d is None or not (d / name).exists():
+            dirs.append(entry)
+            continue
+        mirror = shims / str(i)
+        mirror.mkdir(parents=True)
+        for item in d.iterdir():
+            if item.name != name:
+                (mirror / item.name).symlink_to(item)
+        dirs.append(str(mirror))
+    wiki["env"]["PATH"] = os.pathsep.join(dirs)
+    assert shutil.which(name, path=wiki["env"]["PATH"]) is None
+
+
 def test_lychee_or_markdownlint_that_never_ran_is_a_warning_not_a_pass(wiki):
     quiet_orphans(wiki)
-    (wiki["dir"].parent / "bin" / "lychee").unlink()
+    hide_tool(wiki, "lychee")
     _, run = start(wiki)
     assert "LINKS: done" in checks(wiki, "links", "--run", run).stdout
     checks(wiki, "style", "--run", run, stdin="npx: command not found\n")

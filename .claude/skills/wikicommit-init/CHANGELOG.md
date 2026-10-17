@@ -84,402 +84,355 @@ deviation Django and Node.js make, for the same reason. Do not "restore" it to o
 
 ## [Unreleased]
 
-## [0.10.0] - 2026-10-08
+## [0.11.0] - 2026-10-17
 
 ### Added
 
-- **`/wikicommit-status` reports broken external links across every page** (Issue #1182).
-  `/wikicommit-merge` now checks only the pages it merges, so a link that broke after its
-  page was merged had nowhere to be found. `/wikicommit-status --links` checks every
-  published page (entity and view, removed pages left out) with the new
-  `.wikicommit/scripts/check_external_links.py`, a few pages per lychee call and within the
-  shell's time limit: while it prints `CONTINUE:`, the agent runs it again, and it carries on
-  where it stopped. The result is kept under `.wikicommit/.cache/lychee/`, and a plain
-  `/wikicommit-status` reads it back without touching the network, as a `Broken external
-  links` row with the time of the last check (`not checked yet` until one has completed). The
-  row does not block the "Wiki is healthy" verdict. The merge's lychee wrapper uses the same
-  batching code and shares lychee's cache. Run `/wikicommit-update` after updating the Skills,
-  since the new script is in `.wikicommit/scripts/` — `/wikicommit-merge` needs it too.
-  Each finding is stored with its kind (broken link or not checked) and the pages it is about
-  (Issue #1243), so the count of broken links never depends on how a message is worded. A
-  check left unfinished by a development build of this version starts over once; a
-  completed result from one is still read.
+- **Two new distributed types, `SoftwareApplication` and `Dataset`** (Issue #1291). Both
+  were added by hand in pilot wikis that write about software and research, and readers'
+  complaints about generated pages clustered on them: a `SoftwareApplication` section
+  called "Adoption & Ecosystem" filled with a survey's classification of the tool, and
+  `Dataset` pages that never said what one record holds. `/wikicommit-init` now installs
+  both (`schema.base_types` lists them). A wiki that already has its own
+  `SoftwareApplication.md` or `Dataset.md` keeps it: `/wikicommit-update` shows the
+  difference and applies only what you accept. `SoftwareApplication` has no
+  `softwareVersion` or `operatingSystem` key — they were empty on almost every pilot page;
+  the body says which version a behavior was observed in instead. Existing values of those
+  keys stay valid and are kept on regeneration.
+- **A source's license can be given when it is registered** (Issue #1312).
+  `/wikicommit-generate <path|url> --license <id>` records the value (an SPDX identifier, or
+  a short phrase such as `Saitama City website terms of use`) as `source.license`, so the
+  pages the same run writes carry it in `sources[].license`. Until now a license was
+  recorded at registration only for the Wikimedia sites in the known-domain table, and a
+  local file never got one. With `--include`, every newly registered file gets the same
+  value. `/wikicommit-collect` asks once, after you pick candidates, whether you know the
+  terms of any picked candidate that shows no license, and registers only those you answer
+  with `--license`. `add_source.py` now prints a `LICENSE_NOT_RECORDED:` line when
+  `--license` is given for a source that is already registered — it still never rewrites
+  an existing management file; edit `source.license` there instead.
 
-- **Each public source page now states the source's language** (Issue #1007). The page's
-  `## Summary` is written in the wiki's `primary_lang`, so a source in another language
-  (a Japanese article in an English wiki, say) looked like a `primary_lang` source, and
-  nothing on the page said otherwise. A `Language: <code>` line now appears next to the
-  license line whenever `source.lang` is recorded — also when it matches `primary_lang`, so
-  the line is a plain fact on every page rather than a mark on the "foreign" ones. Sources
-  processed before `source.lang` was recorded get no line (as with an unrecorded license);
-  the overview page's language table still counts them. Norwegian (`lang: no`, which YAML
-  reads as `false`) is shown as `no`.
+- **WikiLinks with display text, `[[Type/slug|display text]]`, are accepted** (Issue #1304).
+  The published link shows the display text instead of the target page's title; inside a
+  Markdown table cell, `[[Type/slug\|display text]]` works too. Until now this form matched
+  nothing: it was published as written, and no check (the removed-page error, orphan and
+  wanted-page counts, link rewriting on `--merge`, Pass 4's neighbouring-page check) saw it.
+  Existing pages that already use it need no change; they become ordinary links on the next
+  build. Generation and translation are told they may use it. Any other `[[...]]`
+  (`[[slug]]` without a Type, `#heading`, an empty display text) is now reported by
+  `check_wikilinks.py` as a `WARNING: ... → not a WikiLink` line, which `/wikicommit-merge`
+  lists in the pull request.
 
 ### Changed
 
-- **A renamed page keeps the review records of its old name** (Issue #1162). When
-  `/wikicommit-relate` renames an edition of a series, the review records stay under the old
-  path, so `/wikicommit-status` used to list the renamed page as never reviewed. It now reads
-  the old name's records through `.wikicommit/relations.yml`; since the title changed, the
-  check shows up as a stale review naming the old name, and `/wikicommit-review` on the new
-  page clears it. If only the slug changed, the original page's check still stands, and its
-  published page keeps its AI review line; neither the page's title nor its review status is
-  touched. A translation's check does not stand: its `translated_from` now names the new
-  path, so it shows up as a stale review, and `/wikicommit-status` also lists the
-  translation as out of date — `/wikicommit-translate` brings it up to date (Issue #1246).
+- **A `/wikicommit-generate` run that stops part-way now names the questions it set aside**
+  (Issue #1236). Guard A's low-density warnings and Pass 2b's type candidates are asked
+  once the loop is over, so a run that halted before then (a missing package, the network
+  lost twice, a review-rules mismatch) used to end without ever mentioning them. The halt
+  report now lists each such source with the first line of its deferred reason
+  (`workflow_checks.py halted-questions`). They stay queued as before, and a later run asks
+  them only if it picks those sources again and reaches the end of its loop.
+- **`/wikicommit-merge` skips its Issue-filing steps when there is nothing to file**
+  (Issue #1266). Finding the pages still waiting for a tracking Issue, and the failed
+  sources still waiting for a generation-failure Issue, is now done by the merge's own
+  script (`workflow_checks.py targets`), which scans the default branch and matches the
+  open Issues' markers. When nothing needs an Issue, the step is skipped and its
+  instructions are not handed to the agent — most merges carry no failed source, so Step 9
+  is usually skipped. The Issues filed, and what they say, are unchanged. When the open
+  Issues cannot be read, the step is not skipped: nothing is filed, the failure is shown
+  and reported, and the next merge picks the pages up.
+- **Text taken from a source is treated as data, not instructions** (Issue #1324). Every
+  step that hands fetched or extracted text to a model now says so in the same words:
+  `/wikicommit-generate` (Passes 1-4 and `--regenerate`), `/wikicommit-ask
+  --include-source`, `/wikicommit-review`, `/wikicommit-fix`, `/wikicommit-relate` and
+  `/wikicommit-collect`. An instruction written inside a source — to run a command, add a
+  link, or judge the page a certain way — is not followed and not written onto a page; it
+  is reported instead. `.wikicommit/review-rules.md` (`rules_version` 9) fails a page that
+  carries content the source holds only as such a directive (`HALLUCINATION`), ignores a
+  verdict the source asks for, and has the reviewer note each passage as an observation
+  beginning `Embedded instruction in SOURCE:`, which lands in the review record's body.
+  `/wikicommit-generate`'s Completion Notice lists them. `SOURCE` blocks handed to a review
+  subagent (generate Pass 4, `/wikicommit-synthesize`, `/wikicommit-translate`) are now
+  delimited by a random token drawn for each launch, so a source cannot close its own block.
+  Run `/wikicommit-update` to pick up the new rules file. A model can still disregard the
+  rule; this states what is expected, it does not enforce it.
+- **The GitHub Pages deploy keeps the Quartz community plugins between runs** (Issue
+  #1310). `deploy.yml` used to clone and build every `source:` in `quartz.config.yaml` on
+  every deploy (about 3m40s of a 10-minute build on a 3,117-page wiki, `enabled: false`
+  entries included). It now restores `quartz/.quartz/plugins` and `quartz/quartz.lock.json`
+  from the Actions cache, keyed on each plugin's `source:`, the Quartz submodule commit and
+  the Node.js major, so only the first deploy after you add, remove or re-pin a plugin or
+  update Quartz pays that cost. Your local `quartz-plugins/` are still re-linked on every
+  deploy. One consequence:
+  a `github:` plugin without a `#ref` now stays at the commit it was first cloned at until
+  the key changes, instead of following its default branch on each deploy. `setup-node`
+  also caches the npm download cache. `deploy.yml` is overwritten by `/wikicommit-update`.
+- **New wikis no longer generate a social-card image for every page** (Issue #1310). The
+  `og-image` Quartz plugin is gone from the `quartz.config.yaml` template. In a local build
+  of a 3,117-page wiki it took about 4m45s of the 5 minutes spent writing the site, and the
+  fonts it draws with have no Japanese glyphs, so Japanese text and tags came out as rows
+  of boxes. Without it, a link shared on social media shows Quartz's own site-wide image
+  (the Quartz logo) with the page's title and description as text. An existing wiki keeps
+  the entry:
+  `/wikicommit-update` does not edit `quartz.config.yaml` for you and reports only settings
+  the template gained, not ones it dropped. To get the shorter build, delete the
+  `github:quartz-community/og-image` entry yourself; keep it if your pages are in a
+  language the plugin's fonts cover. Setting it to `enabled: false` does not save the
+  time — the entry has to be removed.
 
-- **`ScholarlyArticle`'s `properties.keywords` now holds only the paper's own declared
-  keywords** (Issue #1177). Pages mixed three readings — the paper's Keywords section copied
-  as is, that list with entries dropped or replaced, and subject terms the generator picked
-  when the paper declared none (sometimes an arXiv subject class) — and the published page
-  shows them beside the authors and date, where a reader takes them as the paper's own.
-  Pass 3 now has a type-independent rule: a property that stands for a list the source
-  declares about itself (a Keywords section, Index Terms, Key words, CCS Concepts) is copied
-  in full, in the source's order and wording, and is omitted when the source declares none;
-  subject terms you chose go in `tags:` (the JSON-LD `keywords` already comes from `tags`).
-  Pass 4 checks it: `.wikicommit/review-rules.md` (`rules_version` 7) fails an entry the
-  source does not declare, and a `keywords` list on a page whose source declares none, as
-  `HALLUCINATION`; leaving out declared entries is not a failure. **The rule reaches existing
-  wikis with the Skills, but the type template does not**: `.wikicommit/schema/` is not
-  rewritten by `/wikicommit-update`, so the new `granularity` line in `ScholarlyArticle.md`
-  (the same rule, stated for this type) appears only in newly initialized wikis — copy it
-  into your `.wikicommit/schema/ScholarlyArticle.md` by hand if you want it there too.
-  Existing pages keep their `keywords` until regenerated. To fix them,
-  `/wikicommit-generate --regenerate --type ScholarlyArticle` rewrites every page of the type
-  (each page goes through generation and Pass 4 again), so it costs about as much as
-  generating them did; regenerating only the pages you are about to review
-  (`--regenerate <page>`) is the cheaper alternative.
+- **Registering an arXiv `/abs/` URL now says the paper's full text is not in it**
+  (Issue #1311). `arxiv.org/abs/<id>` is the paper's landing page — title, authors, abstract,
+  history — so a page written from it was silently written from the abstract alone. On
+  `CREATED:`, `add_source.py` now adds a `partial extraction:` line naming the full-text
+  URLs to register instead (`https://arxiv.org/html/<id>`, or `https://arxiv.org/pdf/<id>`
+  when the paper has no HTML version), and suggests a versioned URL when the one given has
+  none. Registration still goes ahead. `/wikicommit-collect` now offers an arXiv search
+  result by its full-text URL in the first place — `/html/<id>` when that exists, else
+  `/pdf/<id>` — through the new read-only `add_source.py --fulltext-url-for <url>`, and
+  treats either form as a duplicate of the other when checking what is already registered.
+- **The published page shows `properties:` as an infobox of key facts** (Issue #1292). The
+  panel under the page title used to be headed "Properties" and list the raw Schema.org
+  key names (`variableMeasured`, `jobTitle`). Each row is now labelled in the page's
+  language ("Variables measured", 「職名」) for the keys the distributed type templates
+  use, in all ten UI languages; any other key is shown as its name split into words. An
+  empty value (`""`, `[]`, null) is no longer shown as a blank row or "—", and
+  `properties.description` and `properties.abstract` are left out of the box because the
+  body's opening already says them. JSON-LD is unchanged — it still reads all of
+  `properties:`. Existing wikis get this through `/wikicommit-update`; to show
+  `description` again, set the new `proseProperties` option of `wikicommit-properties` in
+  `quartz.config.yaml` to `[]`.
 
-- **`/wikicommit-generate` reads a symlinked `type: path` source the way `/wikicommit-review`
-  and `/wikicommit-fix` do** (Issue #1216). Pass 1 decided between reading a source as text and
-  extracting it — and which extraction tool to use — from the name in `source.path`, so a
-  `raw/notes.md` symlink pointing at a PDF was read as raw PDF bytes, while review and fix
-  extract the PDF it points at: the page was generated from one text and checked against
-  another. `add_source.py --check-path-cache` now makes that decision on the file the path
-  resolves to: it prints `RAW: <file>` for a `.md` / `.txt` target (read it directly; it is
-  never cached) and adds `extract=<file>` to `CACHE_STALE:`, and Pass 1 runs it for every
-  `type: path` source. The extraction Pass 1 caches for such a link is the one review and fix
-  look up, so they no longer re-extract it each time. Run `/wikicommit-update` after updating
-  the Skills, since the change is in `.wikicommit/scripts/`.
+- **Review checks `properties:` values as claims, and against the body** (Issue #1292).
+  `.wikicommit/review-rules.md` (`rules_version` 8) now says that every `properties:`
+  value is checked against the sources like a body sentence. Pass 4 and `/wikicommit-review`
+  also compare each value with the page's body: a value that disagrees with the body fails
+  as `CONTRADICTION`, and the field is corrected to match the body. A value the body does
+  not state at all fails in Pass 4, and is reported as an observation, not a finding, by
+  `/wikicommit-review`, since pages written before Pass 3 filled `properties:` from the
+  body can carry such values. Identifiers and a list the source declares about itself
+  (`keywords`) are exempt.
 
-- **`/wikicommit-review` and `/wikicommit-fix` get a page's source texts with one command**
-  (Issue #1211). Both used to follow a shared step-by-step procedure, run once per source:
-  check for withdrawn sources, then call `resolve_source_cache_path.py --obtain` for each
-  entry. `resolve_source_cache_path.py --obtain-sources` now takes the page whose `sources`
-  apply (the parent page, for a translation) and handles every entry in one go, printing
-  one line each — `READ:`, `EXTRACT:`, `RETRACTED:`, `UNAVAILABLE:` or `MANUAL:`, each with
-  the entry's position — and a `SUMMARY:` line. A withdrawn source is still never read or
-  fetched, a path outside the repository is still refused, and the agent's own web-fetch
-  tool is still never used. Leftover scratch files from an earlier run under the same label
-  are cleared before fetching. The shared procedure file
-  (`wikicommit-ask/shared/source-fetch.md`) is gone, so `wikicommit-ask` no longer depends
-  on `wikicommit-generate`, and `wikicommit-review` / `wikicommit-fix` now depend on
-  `wikicommit-generate` directly instead of on `wikicommit-ask`. Run `/wikicommit-update`
-  after updating the Skills, since the new flag is in `.wikicommit/scripts/`.
+- **`DefinedTerm`, `SoftwareApplication` and `Dataset` list reader questions instead of
+  headings** (Issue #1291). Their body template is now a `READER QUESTIONS` block: the
+  questions a reader of that type usually comes with, in a recommended order. Pass 3 picks
+  the questions the source answers, builds sections from those under headings it chooses,
+  and writes nothing — no section, no sentence — for a question the source does not answer;
+  it lists such questions at the end of the run instead. `DefinedTerm` loses its
+  `## Related Terms` section (related terms are linked where they come up) and its
+  `## When It Applies` section becomes question 6. The other types keep their headings.
+  To bring existing pages of these three types into the new shape, accept the template
+  change through `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type
+  <Type>`.
 
-- **`/wikicommit-merge` checks external links only on the pages it is about to merge,
-  and runs its classification and fast quality checks as scripts** (Issue #1196). lychee
-  used to fetch every link in `.wikicommit/entity/` on every merge, so a large wiki could
-  outlast the agent's shell time limit and the PR body filled up with broken links on pages
-  the batch never touched. It now checks the changed pages only, a few per call (with
-  `--cache`, kept under `.wikicommit/.cache/lychee/`), and the agent calls it again until
-  it prints `LINKS: done`. Sorting the changes into what gets checked and staged, and the
-  frontmatter, WikiLink, raw-HTML and orphan/duplicate checks, are now steps the workflow
-  engine runs itself; a blocking finding halts the run with that finding as its reason, as
-  before. The lists are kept in the run record, so a resumed commit step no longer works
-  them out again, and the PR body is printed by `workflow_checks.py pr-body` instead of
-  being written by the agent. A merge run left open from before this update follows the
-  old steps: close it with `skill_workflow.py abandon <run> --reason …` and run
-  `/wikicommit-merge` again.
+- **Pass 3 writes the body first and fills `properties:` from it** (Issue #1291). Every key
+  the template offers is now filled from what the body states, after the body is written:
+  on a pilot wiki, about half the `Dataset` pages with an empty `variableMeasured` described
+  the fields of a record in the body. A value that needs a qualifier stays in the body only,
+  and identifiers (URL, DOI, repository) and a list the source declares about itself
+  (`keywords`) are the only values allowed in `properties:` without the body saying them.
+  An identifier is copied exactly as the source writes it, never assembled from parts. Keys
+  left out are reported at the end of the run as "not in source" or "does not apply to
+  this subject". `Dataset.md` now says what `variableMeasured` holds — the fields one record
+  carries, not an evaluation metric.
 
-- **`/wikicommit-generate` no longer stops in the middle of a batch to ask about a
-  low-density source or a new type** (Issue #1116). Both questions used to be asked on the
-  spot in an interactive run, so a 30-source run needed someone at the keyboard for each
-  one, and the agent itself decided whether anyone was there. Now the source is always set
-  aside with a `## Deferred Reason`, and once every source has been through the passes the
-  run asks all the questions at once — a type candidate once per type, however many sources
-  proposed it — and takes the answered sources through the passes again in the same run.
-  With a single source the question comes where it always did. A run started with
-  `--non-interactive` asks nothing and leaves the deferrals queued, exactly as before. A type
-  approved at the end was not available to the sources the run had already finished; the
-  Completion Notice says so and points at `/wikicommit-reconcile --source`. The workflow
-  engine (`.wikicommit/scripts/skill_workflow.py`) gained what this needs, so **run
-  `/wikicommit-update` and merge its PR before the next `/wikicommit-generate`**.
+- **Writing rules that apply to every type** (Issue #1291). Pass 3's lead must stand on its
+  own, names a field only when the source places the subject in one, and keeps every
+  qualifier the body keeps. Sections open with their main point; items described along the
+  same dimensions become a table; a term is explained only with the source's own
+  explanation; and a finding the source reports from another work is written as that work's
+  finding.
 
-- **The step checks of `/wikicommit-generate`, `/wikicommit-merge`, `/wikicommit-translate`
-  and `/wikicommit-synthesize` share one module, `.wikicommit/scripts/_workflow_checks.py`**
-  (Issue #1219). Each of these Skills used to carry its own copy of how a run record, a
-  recorded answer and a review record are read, and the copies had begun to differ. They
-  now import the one copy in `.wikicommit/scripts/`. **Run `/wikicommit-update` and merge
-  its PR before the next run of any of the four**: until then the module is missing, and
-  each stops at its first step and says to run `/wikicommit-update`. What the checks accept
-  is unchanged.
+- **`ScholarlyArticle`, `BlogPosting` and `NewsArticle` list reader questions instead of
+  headings** (Issue #1309). Their body template is now a `READER QUESTIONS` block, like the
+  three types above. `## Key Points` stays, as a fixed section after the block that answers
+  one of its questions: one claim per bullet, under that heading on every page, as before.
+  The `## Notes` (`ScholarlyArticle`) and `## Context` (`BlogPosting`, `NewsArticle`)
+  sections are gone; what they held — limitations, what the claims rest on, related work —
+  is now asked by separate questions. `ScholarlyArticle` no longer offers `abstract` or
+  `citation` in `properties:`: `abstract` copied the paper's own summary, which the body
+  already gives, and `citation` — in Schema.org, the works the paper cites — was mostly
+  filled with the paper's own bibliographic reference. Existing values of both keys stay
+  valid and are kept on regeneration. To bring existing pages into the new shape, accept
+  the template change through `/wikicommit-update`, then run
+  `/wikicommit-generate --regenerate --type <Type>`.
 
-- **`add_source.py`, `resolve_source_cache_path.py` and `remove_page.py` now live in
-  `.wikicommit/scripts/`** (Issue #1210). They used to sit inside one Skill each
-  (`wikicommit-generate`, `wikicommit-ask`, `wikicommit-remove`) while other Skills reached
-  them across Skill directories. Every Skill now calls them from `.wikicommit/scripts/`, so
-  **run `/wikicommit-update` and merge its PR before the next `/wikicommit-generate`**: until
-  then `.wikicommit/scripts/` does not have them, and `/wikicommit-generate`,
-  `/wikicommit-collect`, `/wikicommit-remove`, `/wikicommit-relate`, `/wikicommit-review`,
-  `/wikicommit-fix` and `/wikicommit-ask --include-source` stop and say so. Each SKILL.md
-  now declares the other Skills it reads files from in `metadata.requires` (for example
-  `wikicommit-collect` requires `wikicommit-generate` and `wikicommit-init`).
+- **Reader questions a page leaves unanswered are kept in the source management file**
+  (Issue #1309). Until now they were listed only at the end of the run, so they were lost
+  once the output scrolled away, and a `--non-interactive` run showed them to nobody. Pass 4
+  now also adds them to the source's `## Generation Notes`, one sentence per page and
+  question, for the pages that passed review. The section is not published. Regeneration
+  still lists them only at the end of the run, since it never writes management files.
 
-- **`.wikicommit/scripts/driver.py` is now `skill_workflow.py`** (Issue #1203). The script
-  that holds the order of a multi-step Skill's steps is renamed to match the workflow
-  definitions it runs (`workflow.yaml`); its commands (`start`, `next`, `done`, `status`,
-  `check-merge`, `abandon`) are unchanged. New run records keep its state under
-  `workflow:` instead of `driver:`; a record written by `driver.py` is still read, so a run
-  that stopped partway before the update continues with `skill_workflow.py next <run>`.
-  After `/wikicommit-update`, the old `.wikicommit/scripts/driver.py` remains and
-  `check_distribution_freshness.py` reports it as `ORPHAN:` — no distributed Skill calls it
-  any more, and `/wikicommit-update` asks before deleting it. If you added a Stop hook that
-  runs `driver.py status --stop-hook`, change its command to `skill_workflow.py` — keeping
-  `driver.py` does not keep the hook working, since the old script reads only `driver:` and
-  no longer sees any run opened or advanced after the update.
+- **New type files are written with reader questions too** (Issue #1309). When
+  `/wikicommit-init`, `/wikicommit-collect`, `/wikicommit-generate` or
+  `/wikicommit-schema-propose` adds a type, `.wikicommit/schema-authoring.md` now has it
+  write the body as a `READER QUESTIONS` block, built from what readers of that kind of
+  thing want to know rather than from how the source at hand is organized, and with no
+  `##` headings. Custom types written by `/wikicommit-schema-propose` follow the same rule.
+  Accept the updated `schema-authoring.md` through `/wikicommit-update` to get this in an
+  existing wiki.
 
-- **Inside a run record's `workflow:` state, the workflow definition's path and hash are now
-  `definition` / `definition_sha256`** (Issue #1209). They were `workflow` /
-  `workflow_sha256`, which put a path named `workflow` inside the mapping named `workflow`.
-  A record written with the old names — under either `workflow:` or `driver:` — is still
-  read, so a run that stopped partway continues with `skill_workflow.py next <run>`, and its
-  next write moves the fields to the new names.
+- **`Person`, `Organization` and `Place` list reader questions instead of headings**
+  (Issue #1330). Their body template is now a `READER QUESTIONS` block. Some questions apply
+  only to a real person or place, or only to a character or a place made up for a work;
+  generation skips those for the other kind instead of reporting them unanswered, so a
+  fictional character no longer gets a "background" or "works and achievements" section
+  filled with the plot, and an invented place no longer gets "geography and access".
+  `Person.md` and `Place.md` gain a rule for subjects that a work of fiction shares with the
+  real world: a real person or place the work refers to keeps a single page, with the
+  work's portrayal in its own section and, while the work is the only source, a first
+  sentence that presents it as the work's portrayal rather than as history; a person or
+  place the author made up — even one modelled on a real one — gets its own page, whose
+  first sentence names the work and says it is fictional. A character page describes who
+  the character is in the work rather than retelling the plot. Keys that no pilot page had
+  a value for are no longer offered in `properties:` — `affiliation` and `birthDate`
+  (`Person`), `foundingLocation` and `numberOfEmployees` (`Organization`), `address`,
+  `latitude`, `longitude` and `url` (`Place`). Existing values of these keys stay valid and
+  are kept on regeneration. To bring existing pages into the new shape, accept the template
+  change through `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type
+  <Type>`.
 
-- **`/wikicommit-review` and `/wikicommit-fix` get each source's text with one command per
-  entry** (Issue #1190). `resolve_source_cache_path.py --obtain` now does what the shared
-  procedure used to spell out step by step — the retraction check, the extraction cache
-  (for a `type: path` source, only while the file is still the version it was extracted
-  from), the fetch through `wikicommit-generate`'s fetcher, and settling that fetch into the
-  cache — and prints one `READ:` / `EXTRACT:` / `RETRACTED:` / `UNAVAILABLE:` line. The
-  agent is left with one decision (call the extraction skill on `EXTRACT:`), and the
-  instructions both Skills read are about 2KB shorter.
+- **`ShortStory` and `Book` list reader questions instead of headings, and keep endings in
+  the plot section** (Issue #1331). Their body template is now a `READER QUESTIONS` block,
+  so a page no longer gets the fixed `## Plot Summary` and `## Characters & Publication`
+  sections. Two rules for works of fiction come with it: the page's first sentence names
+  the work and says what kind of work it is — for fiction, that it is fiction — and what the work keeps back until late —
+  how it ends, a twist, who the culprit is — is written only in the section whose heading
+  says it is the plot. It no longer appears in `description` (shown in search results and
+  link previews), the opening paragraphs, or the account of the characters; inside the plot
+  section the plot is told to its end without a spoiler warning. `Person.md` gains the same
+  rule for a character's page, which leaves the ending to the work's page. `Book` no longer
+  offers `isbn` in `properties:` — an ISBN identifies an edition, and a work's page covers
+  all its editions; existing values stay valid and are kept on regeneration. A `Book` that
+  is not a work of fiction skips the plot and character questions. To bring existing pages
+  into the new shape, accept the template change through `/wikicommit-update`, then run
+  `/wikicommit-generate --regenerate --type ShortStory` (and `--type Book`, `--type
+  Person`).
 
-- **`/wikicommit-translate` now runs step by step under the same Skill workflow engine** (Issue #1194).
-  `.wikicommit/scripts/skill_workflow.py` checks the configuration and the arguments, collects the
-  (page, target language) pairs — glossary pages first in batch mode, as before — and hands
-  them out one at a time. A pair is not marked done until the translation is on disk with
-  `translated_from`, a `source_commit` that matches the source page, and
-  `review_status: pending`, and a `translate-check` review record from this run is there
-  (for a pair that still failed review, the discarded record alone). The pairs and their
-  results are kept in the run record, so a batch interrupted partway continues with
-  `skill_workflow.py next <run>` from the pair it stopped at. Run `/wikicommit-update` so
-  `.wikicommit/scripts/` matches before the next translation.
+- **`Event`, `HowTo` and `default.md` list reader questions instead of headings**
+  (Issue #1332). Every distributed type template now has a `READER QUESTIONS` body, so an
+  `Event` page no longer gets the fixed `## Overview` and `## Outcomes` sections, a `HowTo`
+  page no longer gets `## Prerequisites`, `## Steps` and `## Notes`, and a page generated
+  for a type with no schema file of its own no longer puts everything under `## Details`.
+  `default.md` asks questions that hold for any subject, and asks generation to add the
+  ones readers of that kind of thing come with. `HowTo.md` gains a rule that keeps the
+  steps a numbered list in the order the reader performs them, divided as the source
+  divides them, whatever the section is called (and unnumbered when the source gives no
+  order). Keys that pilot pages almost never filled are no longer
+  offered in `properties:` — `eventStatus` (`Event`), `totalTime` and `supply` (`HowTo`).
+  Existing values of these keys stay valid and are kept on regeneration. Type files that
+  an older wiki already holds in the heading form keep working: generation reads both
+  forms. To bring existing pages into the new shape, accept the template change through
+  `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type Event` (and
+  `--type HowTo`).
 
-- **`/wikicommit-synthesize` now runs step by step under the same Skill workflow engine** (Issue #1195).
-  `.wikicommit/scripts/skill_workflow.py` checks the configuration, `review-rules.md` and
-  `--max-grounding` before any search, and does not mark a step done until it is: the
-  grounding pages until each is an original page in `primary_lang` — not a translation, not
-  itself a synthesis — and there are no more of them than the cap; the written page until it
-  is in `.wikicommit/view/<primary_lang>/`, its `derived_from` names exactly those pages at
-  their commits, and a `synthesize-step5.5` review record from this run is there (for a
-  synthesis that still failed review, the discarded record alone, with nothing written). The
-  chosen topic and kind, the grounding pages and the page path are kept in the run record, so
-  a run interrupted partway continues with `skill_workflow.py next <run>` from the step it stopped
-  at. In a run with nobody to answer, an existing view page is no longer at risk of being
-  overwritten: the run leaves it as it is. Run `/wikicommit-update` so `.wikicommit/scripts/`
-  matches before the next synthesis.
-
-- **`/wikicommit-merge` now runs step by step under the same Skill workflow
-  engine as `/wikicommit-generate`** (Issue #1094). `.wikicommit/scripts/skill_workflow.py` holds the order of
-  its steps, runs the ones that need only a command itself (the scripts version check, the
-  default branch, change detection, another run's unfinished work), and does not mark a step
-  done until it is: the commit step until the merge branch holds every detected change, the
-  PR step until the branch is on `origin`, the merge step until GitHub reports the PR as
-  `MERGED` and the default branch is checked out. The default branch, the warnings and the PR
-  number are kept in the run record, so a merge interrupted partway — by a compaction or a
-  new session — continues with `skill_workflow.py next <run>` from the step it stopped at, on the
-  same PR. The warnings question is now asked as its own step; a run started with
-  `--non-interactive` still records the warnings in the PR body and proceeds, and answering
-  "stop" ends the run normally instead of leaving its record open. `skill_workflow.py` gains
-  `check-merge --except-run <run>` and a `finishes_on` list for questions. Run
-  `/wikicommit-update` so `.wikicommit/scripts/skill_workflow.py` matches before the next merge.
+- **A recurring `Event` gets one page for the event, not one per year** (Issue #1344).
+  `Event.md` now names a recurring event without a year ("Urawa Matsuri") and gives one
+  year's edition a page of its own — qualified by its year like any other edition — only
+  when a source is about that edition. The event's page and an edition's page are broader
+  and narrower pages, not a series. An event is treated as recurring only when the source
+  says it recurs. A name that gathers several separate events gets one page that lists
+  them. Pages for a recurring event or such a name leave `startDate` and `endDate` out and
+  keep this year's schedule in the body, with `expires_at` set to the schedule's first date.
+  To apply this to existing pages, accept the template change through
+  `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type Event`.
 
 ### Fixed
 
-- **`/wikicommit-review` and `/wikicommit-fix` no longer get cut off while fetching a page's
-  sources** (Issue #1240). Getting every source in one command meant that a page with several
-  uncached URL sources could outlast the agent's shell time limit (120 seconds by default in
-  Claude Code), and with no network every URL waited for its own failure. The command now
-  starts no new fetch after 45 seconds (`--budget`): it prints a `CONTINUE: next=<n>` line,
-  and the agent calls it again with `--from <n>` until no such line is printed. After two
-  fetches in a row fail for want of a network, the remaining URLs are not fetched and are
-  reported as `UNAVAILABLE: … environment … (not fetched: …)`. Run `/wikicommit-update` after
-  updating the Skills, since the change is in `.wikicommit/scripts/`.
+- **`llms.txt` now says how to tell that a page has not been read by a person yet**
+  (Issue #1183). Its opening paragraph claimed that every page states its review status at
+  the top, but a `pending` page's banner says nothing in words — it simply lacks the
+  "Read by …" line — so an AI that fetched one page could not tell it was `pending`. The
+  paragraph now says that a page a person has read says so in the banner (in the page's
+  language), and that a page whose banner says it was generated by an LLM but lacks that
+  line has not been read yet. The banner itself is unchanged.
 
-- **`/wikicommit-merge` no longer commits a page whose file name is not valid UTF-8 without
-  checking it** (Issue #1258). Such a page dropped out of the pages the quality checks read
-  without a word, yet the commit still staged it; the merge now stops and asks you to rename
-  the file (page file names are English identifiers, so this does not arise in normal use).
-  A file with such a name inside a directory `source.path` is left out of the commit with a
-  warning instead, as an ignored file is. The warning about a `.gitignore`d `source.path`
-  written as `./raw/x.pdf` or `raw/dir/` no longer names the same path twice.
-
-- **Non-ASCII paths no longer slip through the Skill workflow engine** (Issue #1256). An
-  unfinished run that touched a file with a non-ASCII name (a raw source named in Japanese,
-  or the management file that mirrors it) no longer lets `/wikicommit-merge` carry that
-  file: the engine read `git status` without `-z`, so git's quoted, escaped form of the path
-  matched nothing the run had recorded, and `abandon` did not name the file as left behind
-  either. On a locale that is not UTF-8 (cp932 / cp1252 on Windows), every Skill on the
-  engine — generate, translate, synthesize and merge — now reads its checks' output, and
-  writes its own JSON, as UTF-8, so a non-ASCII path no longer drops out of a step's list
-  or stops the run with `UnicodeEncodeError` / `UnicodeDecodeError`. The same goes for the
-  output of `add_source.py` read by `/wikicommit-ask --include-source`, lychee read by
-  `check_external_links.py`, and gh read by `check_actions_pr_permission.py`. Merge
-  `/wikicommit-update` first: the Skills now need the updated `.wikicommit/scripts/`.
-
-- **A Skill's checks run directly on a locale that is not UTF-8 no longer stop at a non-ASCII
-  path** (Issue #1264). The steps that tell the agent to run `workflow_checks.py` itself
-  (`/wikicommit-merge`'s commit and pull request steps, for example) printed a Japanese path
-  through the locale's codec, and on a cp1252 terminal or pipe that raised
-  `UnicodeEncodeError`. The checks of generate, translate, synthesize and merge now write
-  their output as UTF-8 whoever runs them, as the workflow engine already did.
-
-- **`/wikicommit-ask --include-source` no longer stops at a non-ASCII source on a locale that
-  is not UTF-8** (Issue #1265). `resolve_source_cache_path.py` read `add_source.py`'s output
-  as UTF-8 but printed its own `READ:` / `EXTRACT:` / `RETRACTED:` / `UNAVAILABLE:` lines
-  through the locale's codec, so on a cp1252 terminal or pipe a Japanese path or URL raised
-  `UnicodeEncodeError` after the fetch had succeeded. It now writes its output as UTF-8, and
-  reads the identifier on stdin as the system reads file names. `/wikicommit-review` and
-  `/wikicommit-fix`, which get a page's sources the same way, are fixed too.
-
-- **`/wikicommit-merge` now warns about links left pointing at a page being removed**
-  (Issue #1257). The page being marked `status: removed` is always among the changed
-  pages too, and `check_wikilinks.py` skipped the backlink check for a page passed with
-  both `--changed` and `--deleted` — so in an ordinary merge the "a backlink remains"
-  WARNING that `/wikicommit-remove` promises never appeared. A page in both lists now
-  gets both checks (its own links, and the links other pages still make to it; a page's
-  link to itself is not counted, nor is a link from any other page that is itself
-  `status: removed`, and a link counts against the page it resolves to from the
-  referrer's language, so removing a page with its translations does not report each
-  link once per language). The merge calls the two checks separately, once per
-  group of changed pages and once per group of removed pages, so the result no longer
-  depends on how many calls the change is split into, and no call reads the whole wiki
-  for nothing.
-
-- **`add_source.py --check-path-cache` hashes and names the same file** (Issue #1242). The
-  existence check, the hash and the `extract=` on `CACHE_STALE:` / `ERROR:` now all come
-  from one resolution of `source.path`'s symlinks, instead of the hash opening the link
-  again and `extract=` re-reading the management file. A link swapped mid-check can no
-  longer leave Pass 1 extracting a different file from the one whose hash was compared.
-
-- **`/wikicommit-merge`'s classification and quality checks handle four edge cases**
-  (Issue #1237). The output of git and of the Python checks is now read as UTF-8 whatever
-  the locale says, so on Windows (cp932 / cp1252) a page with a non-ASCII name no longer
-  drops out of the quality checks or stops the run with a `UnicodeDecodeError`, and a
-  check's Japanese finding no longer crashes the check. A batch removing hundreds of pages
-  no longer halts with `check_wikilinks.py: could not run`: the length of the repeated
-  `--deleted` list now counts toward each command line, and the list is split when it is
-  long. A management file whose `source.path` is a directory now carries only the untracked
-  files in it, never a tracked file's unrelated uncommitted edit. A run with no changed page
-  (assets, policy files or records only) skips the lychee/markdownlint step instead of
-  handing it to the agent.
-
-- **A missing PyYAML no longer sends you to `/wikicommit-update`** (Issue #1233). Run
-  directly (as the merge and generate steps tell the agent to), the `workflow_checks.py` of
-  `/wikicommit-generate` and `/wikicommit-merge` read a missing PyYAML as an outdated
-  `.wikicommit/scripts/` and said to run `/wikicommit-update`, which does not install it;
-  those of `/wikicommit-translate` and `/wikicommit-synthesize` stopped with a traceback and
-  exit code 1, which a workflow condition reads as "skip this step". All four now stop with
-  exit code 2 and say to install PyYAML (`pip install pyyaml`).
-
-- **A source language recorded as something other than one code no longer reaches the
-  published site as a stringified value** (Issue #1193). A management file whose
-  `source.lang` is a list (`[ja, en]`), `true` (an unquoted `yes` / `on`) or a number used
-  to show `['ja', 'en']` or `true` on its public source page and as a row in the overview
-  page's per-language table. Such a value is now treated as not recorded: the source page
-  omits the language line, and the table counts the source under "Not recorded" (or "Not
-  processed yet" if it has never finished a run). `lang: no` is still read as Norwegian.
-  Re-running the source (`/wikicommit-reconcile`, or a forced recheck with
-  `/wikicommit-generate <url>`) writes a proper code.
-- **`/wikicommit-translate --lang <target>` without a page translates only that language**
-  (Issue #1202). Batch mode used to take every target's pairs and ignore `--lang` without
-  saying so. It now narrows to that language, keeping the glossary-first order; a `--lang`
-  outside `translation.targets` with no translations yet halts the run before anything is
-  translated, because batch mode could never find anything for it — name a page or add the
-  language to `targets`. One outside `targets` that already has translations still refreshes
-  the stale ones.
-- **`/wikicommit-translate` and `/wikicommit-synthesize` fail a step's check when the run
-  record's `started_at` cannot be read** (Issue #1202). Without it the check cannot tell
-  this run's review records from an earlier run's, and it used to accept every record on
-  disk, so an earlier `pass` could complete the step. The check now fails and says the run
-  record is damaged.
-- **`/wikicommit-review` and `/wikicommit-fix` judge a `type: path` symlink by the file it
-  points to** (Issue #1208). `resolve_source_cache_path.py --obtain` decided between reading
-  the raw file and extracting it from the link's own name, so `raw/notes.md` pointing at a
-  PDF had the PDF's bytes handed over as text. The `.md`/`.txt` decision now uses the
-  symlink's target, and the `READ:` / `EXTRACT:` line names the target, so the extraction
-  skill is chosen by the real file's extension.
-- **`/wikicommit-status` and `/wikicommit-generate` no longer hash a source file outside the
-  repository named by a management file** (Issue #1207). A hand-written
-  `.wikicommit/source/path/**` file whose `source.path` was an absolute path, climbed out
-  with `..`, or named a symlink pointing outside the repository had that file hashed, and
-  the output told whether it existed. `check_ingest_freshness.py` now skips such a file with
-  `WARNING: … source.path resolves outside the repository … — not checked` (its `status` is
-  left as is), and `add_source.py --check-path-cache` returns `ERROR: … resolves outside the
-  repository` instead of `CACHE_STALE`. Both decide on the resolved path and before the
-  existence check, so neither answer depends on whether the outside file exists.
-- **`/wikicommit-ask --include-source` no longer reads a `type: path` source that points
-  outside the repository** (Issue #1206). The same paths Issue #1201 closed for review and fix
-  still reached ask, which answers a missing cache by reading the raw file. In its default
-  mode `resolve_source_cache_path.py --type path` now prints `OUTSIDE: <path>` (exit 1) for
-  an absolute path, a `..` that climbs out, or a symlink pointing outside the repository —
-  before `UNREGISTERED:` / `NO_CACHE:`, so a registered outside path is caught too — and
-  ask skips the entry and names it in the "could not include" note instead of opening it.
-- **`/wikicommit-review` and `/wikicommit-fix` no longer read a `type: path` source that
-  points outside the repository** (Issue #1201). A page whose `sources[].path` was an
-  absolute path (`/etc/passwd`), climbed out with `..`, or named a symlink pointing outside
-  the repository had that file read into the agent's context. `resolve_source_cache_path.py
-  --obtain` now prints `UNAVAILABLE: outside (…)` for such an entry — judged on the resolved
-  path, and before the existence check so the reply does not reveal whether the outside
-  file exists — and the shared procedure tells the agent not to open it. A symlink pointing
-  inside the repository is still read. `validate_frontmatter.py` reports the same paths as
-  an ERROR (`resolves outside the repository`), so `/wikicommit-merge` stops such a page
-  before it lands, and `/wikicommit-generate` no longer registers such a path as a source.
-
-- **`/wikicommit-generate --regenerate …` and `/wikicommit-translate <page> --lang …` start
-  their run** (Issue #1194). Both Skills told the agent to pass each argument as
-  `--arg "<argument>"`, and `skill_workflow.py start` rejects a value that starts with `--` written
-  that way, so a run with an option argument could not start. They now say `--arg=<argument>`.
-
-- **Answering the theme prompt again on a wiki whose theme spans several lines no longer
-  breaks `config.yml`** (Issue #1179). `init.py --update-theme` replaced only the first line
-  of the existing `theme:` value, leaving its continuation lines behind, so the whole file
-  stopped parsing and every Skill that reads `config.yml` failed. Earlier versions of init
-  folded any theme longer than about 80 characters onto several lines, so most real themes
-  were affected; hand-written block (`|`) and folded values were too. The update now
-  replaces the whole value, keeps comments and every other key as they were, and refuses to
-  write (with an `ERROR:`) if the result would not read back as the new theme. Init and
-  `--update-theme` now write the theme on a single line however long it is.
-- **Updating a single value in `config.yml` no longer changes the line endings of the whole
-  file** (Issue #1189). `init.py --update-theme`, `--update-version` and `--add-config-keys`
-  rewrote every line break to the running OS's default, so a CRLF `config.yml` on Linux or
-  macOS became LF (and an LF one on Windows became CRLF), and `git diff` showed every line as
-  changed. They now keep the file's own line endings and write any added lines with them;
-  the same applies to the `exclude_living_persons` switch init sets in `entity-policy.md`.
+- **A source language written as `off` or `false` is no longer published as Norwegian**
+  (Issue #1248). YAML reads an unquoted `lang: no` as false, and the publish step turned
+  every false back into `no` — including `off` and `false`, which YAML reads the same way.
+  Such a value now shows no language line on the source page and is counted as not
+  recorded on the overview page, like `yes` and `on` already were; an unquoted `no` (in
+  any case) is still Norwegian, so existing management files need no change.
+  `/wikicommit-generate` now writes the code in quotes (`lang: 'ja'`).
+- **`/wikicommit-init` and `/wikicommit-update` now install `markdown-it-py`** (Issue
+  #1342). The raw-HTML check needs it since the change below, but nothing installed it, so
+  a wiki without the package could not merge any page. Both Skills now install it when it
+  is missing and, when the install fails, print `pip install markdown-it-py` as a step to
+  run. `/wikicommit-update` no longer reports a check that could not run for lack of a
+  package as a problem already present in the pages.
+- **The raw-HTML gate no longer lets `<script>` through after certain code blocks**
+  (Issue #1322). `check_raw_html.py` decided where code ends with a pattern that did not
+  follow CommonMark, so HTML placed after a four-backtick fence holding a three-backtick
+  line, after a fence closed with an indented marker, after a `~~~~` fence holding `~~~`, or
+  after a double-backtick code span passed `/wikicommit-merge` and was rendered as live HTML
+  on the published site. The check now parses the page with a CommonMark parser and flags
+  exactly the HTML the site would render. It needs the Python package `markdown-it-py`
+  (`pip install markdown-it-py`); without it the check stops every merge with an `ERROR:`
+  naming the package. Two results change: HTML after a fence that is never closed is now
+  treated as code (as the site renders it) and passes, and a tag name with a hyphen
+  (`<my-el ...>`) is now caught. Run `/wikicommit-update` to get the new script, and
+  `/wikicommit-status` to recheck existing pages.
+- **`/wikicommit-generate --regenerate <page> --merge <page>` now finishes the merge when
+  the pages are named as `<Type>/<slug>`** (Issue #1131). Given that short form, the run
+  rebuilt the kept page and then skipped the step that takes the absorbed pages down,
+  records the merge and rewrites the links, while reporting success. Full paths worked.
+- **Closing the tracking Issue of a removed page no longer marks it reviewed** (Issue
+  #1131). `review-issue-close-sync.yml` now skips a page at `status: removed`; before, closing
+  the Issue of a page taken down by a merge or by `/wikicommit-remove` set it to `reviewed`
+  and wrote a human review record for a page nobody read. Run `/wikicommit-update` to get the
+  new workflow, and check `.wikicommit/review/` for `issue-close` records on removed pages
+  written before it.
+- **A merge now names the links it could not tidy** (Issue #1131). `rewrite_merged_links.py`
+  prints `SELF_LINK:` for a page that now links to itself (usually the kept page's
+  translation) and `ALSO_LINKED:` for a page that now names the kept page twice, and the
+  merge's report says how to fix each. The merge's report also names the other
+  `.wikicommit/relations.yml` items that still name an absorbed page (they stay valid), and
+  a merge stopped by a changed source now says to take the source in first, as its own
+  pull request.
+- **A URL source whose management file name contains a dot no longer reads another
+  source's cached text** (Issue #1326). `resolve_source_cache_path.py` dropped everything
+  after the last `.` of the name, so `pdf-2606.05608.md` and `pdf-2606.17799.md` (two arXiv
+  papers) both resolved to `pdf-2606.md`. `/wikicommit-ask --include-source`,
+  `/wikicommit-review` and `/wikicommit-fix` could then hand the other paper's text to the
+  check, and storing a fresh fetch could overwrite the other source's cache. The cache path
+  now keeps the management file's name whole, as Pass 1 already wrote it. A file left at a
+  truncated path such as `pdf-2606.md` is no longer read for either paper, but it would
+  still be read as the cache of a source whose management file has exactly that name, so
+  delete `.wikicommit/.cache/ingest-fetch/` if such a file may be there (it is re-fetched
+  as needed). Run `/wikicommit-update` to get the new script.
+- **Closing a tracking Issue as "not planned" or "duplicate" no longer marks the page
+  reviewed** (Issue #1323). `review-issue-close-sync.yml` now acts only on a close as
+  "completed"; any other reason, or none, leaves the page `pending`, writes no review
+  record, and comments on the Issue to say so (the workflow now needs `issues: write`).
+  Reopen and close as "completed" to record the reading. `/wikicommit-review` closes Route A
+  Issues with `--reason completed`. Run `/wikicommit-update` to get the new workflow, and
+  check `gh issue list --label wikicommit-review --state closed --json number,stateReason`
+  for pages marked `reviewed` by an earlier close of another kind.
 
 ### Notes
 
-- **One type template changed, `ScholarlyArticle`, and so did one page generation rule**
-  (Issue #1177, above). Pass 3 now copies a list a source declares about itself (its
-  Keywords section and the like) in full and in the source's wording, for any type, and
-  Pass 4 (`.wikicommit/review-rules.md`, `rules_version` 7) fails entries the source does
-  not declare. The `granularity` line added to `ScholarlyArticle.md` reaches only newly
-  initialized wikis; copy it by hand if you want it in an existing one. Existing pages keep
-  their `keywords` until regenerated, and regenerating a whole type costs about as much as
-  generating it did, so this is not a reason to regenerate a wiki — regenerate the pages
-  you are about to review instead.
-- **Run `/wikicommit-update` and merge its PR before running any Skill again.** Much of this
-  version moves work from instructions into `.wikicommit/scripts/`: the shared step checks
-  (`_workflow_checks.py`), the three scripts that left their Skill directories
-  (`add_source.py`, `resolve_source_cache_path.py`, `remove_page.py`), the renamed
-  workflow engine (`skill_workflow.py`) and the external link check
-  (`check_external_links.py`). Until the update is merged, the Skills that need them stop
-  at their first step and say so. A `/wikicommit-merge` run left open from before the
-  update follows its old steps; close it with `skill_workflow.py abandon` and start again.
-- **`wikicommit-review` and `wikicommit-fix` now need `wikicommit-generate` installed
-  beside them** (Issue #1211), instead of `wikicommit-ask`. A partial install that left
-  out `wikicommit-generate` must add it.
+- **Every distributed type template changed, and so did the page generation rules**
+  (Issues #1291, #1309, #1330, #1331, #1332, #1344, above). Each type file's body is now a
+  `READER QUESTIONS` block instead of fixed headings, Pass 3 writes the body before it fills
+  `properties:`, and `.wikicommit/review-rules.md` is at `rules_version` 9 (Issues #1292,
+  #1324).
+  `/wikicommit-update` shows each type file's difference and applies only what you accept;
+  a type file you keep in the heading form keeps working, because generation reads both
+  forms. Existing pages keep their shape until regenerated, and regenerating a whole type
+  costs about as much as generating it did, so this is not a reason to regenerate a wiki —
+  regenerate the types or pages you are about to review instead.
+- **Run `/wikicommit-update` and merge its PR before generating again.** The review rules
+  live in the wiki, not in the Skill: until the update is merged, Pass 4 and
+  `/wikicommit-review` keep reviewing with the wiki's older `review-rules.md`, so the checks
+  on `properties:` values and on instructions written inside a source do not apply, and
+  nothing says so. The update also brings the new raw-HTML check and installs the Python
+  package `markdown-it-py` it needs.
+- **Four things the update does not do for you**, each described above: delete the
+  `github:quartz-community/og-image` entry from `quartz.config.yaml` if you want the
+  shorter build (Issue #1310); look for pages marked `reviewed` by closing a removed page's
+  tracking Issue or by a close that was not "completed" (Issues #1131, #1323); delete
+  `.wikicommit/.cache/ingest-fetch/` if a URL source's management file name contains a
+  dot (Issue #1326); and run `/wikicommit-status` to recheck existing pages for raw HTML
+  the old check let through (Issue #1322).
 - **No new Skills.** `npx skills add` brings the changed Skill files; nothing needs to be
   installed for the first time.
 
@@ -490,6 +443,7 @@ bounded and a reader only opens the versions between theirs and the latest.
 
 | Version | Date | Entry |
 |---|---|---|
+| 0.10.0 | 2026-10-08 | [changelog/0.10.0.md](changelog/0.10.0.md) |
 | 0.9.0 | 2026-10-03 | [changelog/0.9.0.md](changelog/0.9.0.md) |
 | 0.8.0 | 2026-09-26 | [changelog/0.8.0.md](changelog/0.8.0.md) |
 | 0.7.0 | 2026-09-19 | [changelog/0.7.0.md](changelog/0.7.0.md) |

@@ -19,12 +19,21 @@ properties:
   description: ""
   author: []
   datePublished: ""
-  abstract: ""
   keywords: []
-  citation: ""
 ---
 
-(2-3 paragraph overview: what the paper studies, its method, and its main contribution/findings)
+```text
+READER QUESTIONS (ScholarlyArticle)
+Readers: someone deciding whether to read the paper, or someone who met it cited elsewhere
+and wants to know what it found and how far to trust it.
+1. What question does it address — the problem or gap it starts from, as the paper states it?
+2. What did it do — the method, the data or participants, and the setting?
+3. What does it find or propose? Answer this under the fixed `## Key Points` heading below.
+4. What do the findings rest on — sample size, setting, study design — and what limitations
+   do the authors state?
+5. How does it relate to earlier work it builds on or compares itself with?
+6. Who wrote it, and where and when was it published — a peer-reviewed venue or a preprint?
+```
 
 ## Key Points
 (one claim per bullet, each a single point the paper itself makes — a finding, a
@@ -34,6 +43,3 @@ what this section exists for. Keep each bullet to what this paper states — a r
 it only cites from other work is that work's claim, and its figures and dates are not
 established facts here. Where a claim rests on something narrower than it sounds — one
 dataset, one site, a simulation — say so in the same bullet)
-
-## Notes
-(context: how this paper relates to other work, limitations noted by the authors)

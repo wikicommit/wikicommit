@@ -8,7 +8,28 @@
 
 - **出力の言語**: stdout・stderr に出る文字列はすべて英語で書く（Issue #770）。読み手は運用者とエージェントであって読者ではないため、Issue #405 が管理ファイルの見出しについて下したのと同じ判断で固定の英語とする。コメント・docstring は日本語のまま据え置く（読み手が開発者であり `docs/` と揃う）。公開ページに出る読者向けラベル（`convert_wikilinks.py` の `ROOT_INDEX_LABELS` / `OVERVIEW_LABELS` / `SOURCE_*_LABELS`）はこの規則の対象外で、`primary_lang` で切り替わる。`tools/check_script_output_language.py` が CI で blocking の回帰ガードとして走るが、`print()` の引数しか見ないため、`_frontmatter.py` のようにメッセージを戻り値として返すスクリプト（同ファイル自身は英語化済みだが、走査には掛からない形である）は手作業で確認する
 
+- **コメント・docstring に書くもの**（Issue #1329）: 配布スクリプトの総行数は 2026-08-01 の 2,746 行から 2026-10-15 の 21,694 行（約 1.0MB）へ約 8 倍になり、その時点の内訳はコード 11,575 行・docstring 5,766 行・コメント 2,114 行・空行 2,239 行だった。docstring とコメントには `Issue #` が 623 箇所（番号の種類は 199）あり、冒頭 docstring は 1 本あたり平均約 47 行で、ScriptSpec 本文と history を兼ねた小さな DesignDoc になっていた。Issue #1138 が DesignDoc で解いた問題（読まれるのは「いま何が仕様か」なのに経緯が一緒に読まれる）がスクリプトに残っていたため、同じ規則をスクリプトに広げた。実行時のコンテキストには影響しない（Skill はスクリプトを実行するだけで本文を読ませない）ので、効くのは開発時に読む負担と、`Issue #NNN` を辿れない配布先（Issue #1054 と同じ理由）の 2 つである。Issue #1054 の時点ではスクリプトの検査を「出力する文字列」に限り、コメント・docstring を対象外にしていた。ラチェット（`SCRIPT_CAPS`）は導入時点の件数で始め、1 ファイルずつ移しながら下げる（移行の順序は `Issue #` と行数の多いものから。最初に移したのは `check_review_coverage.py`）。ラチェットの対象は `tools/check_distributed_issue_refs.py` の `distributed_scripts()` と同じ 62 本で、Issue #1329 が数えた `templates/scripts/` の 54 本に、配布 Skill 直下の `scripts/`（`init.py`・`_root_outputs.py`・各 `workflow_checks.py` 等）を加えたもの — これらも `install.sh` が利用者のリポジトリに配るため
+
+- **`SCRIPT_CAPS` を畳んだ**（Issue #1343）: コメント・docstring の検査は、導入時（Issue #1329）にはスクリプトごとの件数の上限表 `SCRIPT_CAPS`（`.claude/skills/` からのパスをキーにした 62 行）を持つラチェットだった。上限は下げるだけで、表に行の無い配布スクリプトと、配布スクリプトの無い行はどちらも ERROR、件数が上限を下回ると `NOTE:` が下げ先を示した。Issue #1343 が 9 本の PR（#1353〜#1360 と、最後の 22 本を移して表を畳んだもの）で全スクリプトの経緯を history の各見出しへ移し、全行が 0 になったため、完了条件どおり表を「0 件」の 1 規則に畳んだ。表のためだけにあった帳簿（行の過不足の ERROR と `NOTE:`）も外し、いまは参照 1 件ごとに行番号付きの ERROR を出す。指示文の `CAPS` は全 Skill が 0 だが、この変更の範囲外なので表のまま残した
+
 ## `.wikicommit/entity/` の走査は `_wikilink.py` に集約する
+
+**`_wikilink.py` の docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 543 → 529、コード 178 → 178、docstring 221 → 216、コメント 88 → 79、空行 56 → 56（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 21 → 0（`Issue` の付かない `PR #109` も外した）。出力する文字列には `#NNN` は無い。他のスクリプトが import する共有モジュールなので、名前は 1 つも変えていない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このモジュールは Issue #114。それまでは各スクリプトが `WIKILINK_RE` と path→(Type, slug) の変換関数をそれぞれ持っており、食い違っていた（`convert_wikilinks.py` の正規表現には、`check_orphans.py` / `check_wikilinks.py` が PR #109 で取り込んだ二重スラッシュを拒む修正が無かった）
+- 表示名付きの `[[Type/slug|表示名]]` を受け付ける前は、この形はここで何にも一致せず、どのゲート（削除済みページの ERROR・孤立ページの件数・統合の書き換え・Pass 4 の 1 ホップの集合）も黙って通していた
+- `ENTITY_DIR` は、9 本のスクリプト（と `templates/` の写し）がそれぞれ `ENTITY_DIR = Path(".wikicommit/entity")` を定義し直していたのをここへ集めたもの（Issue #487。Issue #477 のコードレビューで見つかった）。プロセスの cwd からの相対であることは集める前と同じ
+- view ツリーは Issue #675。view ページに型を選ばせた結果が Issue #545 で、同じ話題の 2 回の実行が `custom/Practice/…` と `Practice/…` に分かれ、片方はどの WikiLink からも辿れなかった
+- `VIEW_KINDS` のコメントが挙げる「空の受け皿を出荷しない」規則は Issue #553
+- `normalize_name()` を共有する `check_recurring_characters.py` は Issue #560、`check_unlinked_entity_mentions.py` は Issue #561
+- `.wikicommit/wiki/` → `entity/` の改名は Issue #477
+- `is_entity_asset()`・`collect_entity_pages()` は Issue #677（この節の以下の記述）。`collect_entity_pages()` の docstring は、`check_wanted_pages.py` が index を走査するのは走査を共有する前にそうしていたからだと書き、条件が 18 箇所に独立に書かれ `assets/` の半分が 3 通りの意味に割れていたこと・うち 1 つが誤っていたこと・新しい挙動は無く、同じ走査を各規則の最も厳しく最もよく文書化された読みで行うことを書いていた
+- Type 取り違えの判定（`build_slug_type_index()` の前のコメント）は Issue #563。view ページを `View` の Type で索引に入れるのは Issue #675
+- 書かれていないページへのリンクを止めない扱い（`other_types_for_slug()`・`resolve_wikilink()`）は Issue #340
+- ページの同一性と WikiLink 解決の 6 関数は、`build_onehop_context.py` が同じ解決を要したときに `check_wikilinks.py` から移った（Issue #947）。うち 3 つは既に他所に写しがあり、`load_primary_lang()` は `check_wikilinks.py`・`build_survey_view.py`・`convert_wikilinks.py` の 3 か所にあった — 4 つ目の写しは、Issue #677 がこのモジュールに集めて払うのをやめたコストそのものである。フォールバックの順序は関数ですらなく `check_wikilinks.py` の `main()` ループに直書きされていたので、2 つ目の呼び出し元はそのループを読んで書き直すしかなく、Pass 4 の 1 ホップの組み立ての Type/slug 抽出はそうして一から（誤って）書かれた。`resolve_wikilink()` の docstring も、これが関数でなかったことを書いていた
+- `load_primary_lang()` の既定値 `"en"`: Issue #159 がツール全体の既定を `"ja"` から変え、Issue #376 がこれをそれに揃えた
 
 `.wikicommit/entity/**/*.md` を走査して `assets/` と `index.md` を除く、という同じ判断が **18 箇所**に独立して書かれており、`assets/` の判定だけで **3 通りの意味論**に割れていた。うち `check_wikilinks.py` の被リンクインデックス構築は**実際に壊れていた** — 同スクリプトは絶対パスの `entity_dir`（`Path.cwd() / ENTITY_DIR`）を作る一方、`"assets" in wiki_page.parts` をそのフルパスに適用していたため、**リポジトリの祖先ディレクトリのどれかが `assets` という名前だと全ページがスキップされ、被リンクインデックスが空になる**。失われるのは削除フロー（`docs/DesignDoc-pipeline.md` §6.5）が依拠する参照切れ WikiLink の警告そのもので、**エラーにならず件数が減るだけ**なので `/wikicommit-remove` → `/wikicommit-merge` は正常に完了したように見える。
 
@@ -52,6 +73,17 @@ decameron の WARNING 27 件はすべて `index.md` の `review_status` 未設�
 
 ## build_onehop_context.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 285 → 282、コード 162 → 162、docstring 73 → 70、コメント 22 → 22、空行 28 → 28（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 6 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- これをスクリプトにしたのは Issue #947。それまでは `references/pass4-review.md` が近傍の探し方を散文で書いており、入ってくるリンクには具体的な手順があったが、出ていくリンクには何も無かった。あるパイロットの実行ではその穴を使い捨ての正規表現 `\[\[([A-Za-z0-9_/]+)\]\]` が埋め、文字クラスに `-` が無いため `vibe-coding` や `spec-driven-development` に 1 つも一致しなかった。エラーは出ず、集合が小さくなっただけで出力は正しく見えた。後から計算し直すと 27 ページ中 24 ページで文脈が変わった
+- slug を英語の kebab-case にする規則は Issue #193。決定論的な操作を実行のたびに散文から導き直さない規則は Issue #474
+- docstring は、`_wikilink.py` の `WIKILINK_RE` が当時すでに 4 本のスクリプトのリンク抽出に使われていたと書いていた（いまはリンクを抽出する他のスクリプトがそれを使う、と書き直した）
+- `MAX_PAGES = 5` を `wikicommit-ask` の 1 ホップ展開と同じ桁にしたのは Issue #459
+- 書かれていないページへのリンクが正常で blocking でないことは Issue #340
+- `.wikicommit/wiki/` から `entity/` への改名は Issue #477
+
 ### 目的
 
 **それまでは散文の指示であり、しかも片側にしか書かれていなかった。** inbound 側は「`\[\[<Type>/<slug>\]\]` と**エスケープして** `Grep` せよ」と具体的で、ripgrep で `[[` が文字クラスになる罠まで名指ししていた一方、outbound 側は "the existing pages this page links to" という散文だけで、抽出方法を一切書いていなかった。
@@ -84,6 +116,17 @@ entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグ�
 
 ## build_survey_view.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 293 → 293、コード 174 → 174、docstring 70 → 70、コメント 20 → 20、空行 29 → 29（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 7 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `<topic>` なしの `/wikicommit-synthesize` が Wiki 全体を見て題材を探すことは Issue #586
+- `properties.description` を 2〜3 文に抑える設計は Issue #495
+- `--pages`（名指ししたページだけを縮約し、集計の順位を省く）は Issue #1075
+- ページが本文に H1 を持たない決まりは Issue #546
+- view ページ（`--include-view` のときだけ含める・`sources` ではなく `derived_from` を持つ）は Issue #675
+- ページが立つソースの数（翻訳ページと view ページでは None）は Issue #990
+
 ### 目的
 
 **本文全体を読む案（チャンク分割 + サブエージェントの map-reduce）は採らなかった**。実行のたび Wiki 全文を読むコストに加え、横断パターンの証拠が2つのチャンクに分かれると双方のサブエージェントが「単独では平凡」として落とす分割ロスがあり、狙っている対象そのものに直撃する。将来の拡張余地として残し、その際は全ページ走査による矛盾検出（バッチをまたぐページ間矛盾。`docs/DesignDoc-pipeline.md` §7）と分割戦略・返却形式を共有する。
@@ -100,6 +143,15 @@ entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグ�
 - `PAGE:` 行の末尾に `path=<パス>` を付け、翻訳ページ（`translated_from`）には `translation`、合成ページ（view ページ、または `derived_from` を持つ entity ページ）には `synthesized` を付ける。**判定は frontmatter から行う** — 従来の `grep -l "^derived_from:"` は本文中に YAML 例として `derived_from:` を引用しただけのページにも一致し、frontmatter を読み直す 2 段目を要していた
 
 ## check_extraction_quality.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 450 → 449、コード 209 → 209、docstring 106 → 106、コメント 85 → 84、空行 50 → 50（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 14 → 0。出力する文字列には `#NNN` は無い。ただしこのスクリプトは `argparse.ArgumentParser(description=__doc__)` でモジュールの docstring を `--help` に出すため、docstring から経緯を外したことで `--help` の説明文も変わった（判定と出力そのものは変わらない）。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 空シェルの検出（ガード B・A の 2 つの検査）は Issue #425 が設計した。冒頭の docstring は x.com の事例の全容を Issue #425 に委ね、「Issue #425 が設計した 2 つの検査」を実装すると書いていた（ガード C は後から足した）。`KNOWN_JS_SHELL_DOMAINS` の x.com / twitter.com は Issue #425 が直接確かめた
+- ガード C（`check-fetch-capability`）と、YouTube の字幕が黙って落ちる partial extraction、`music.youtube.com` をガード B に入れたことは Issue #574。`FETCH_CAPABILITY_REQUIREMENTS` のコメントは、これを Issue #425 が x.com で見つけたのと同じ出所の失敗が別の経路で起きたものと書いていた
+- 2 つのガードの強さを分けたこと（B は blocking、A は人に確かめる WARNING）、`CJK_CHAR_WEIGHT`、URL の境界でトークンを切ること・URL を CJK と全角記号で止めること・URL をパーセントデコードして数えることは Issue #562
+- `.wikicommit/source-policy.md` の `wikicommit.exclude_domains`（`policy_exclude_domains()`）は Issue #564
 
 ### 目的
 
@@ -135,6 +187,20 @@ entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグ�
 
 ## validate_frontmatter.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 718 → 716、コード 421 → 421、docstring 117 → 115、コメント 82 → 82、空行 98 → 98（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 20 → 0（`pre-Issue-#495` の形の参照も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- frontmatter の分割（`properties:` に Schema.org の語彙のフィールドを入れ、それ以外はトップレベルに置く）は Issue #495。平置きの検出の docstring は、検出する形を「Issue #495 より前の形」に戻ったものと書いていた
+- `type:` が Schema.org の語彙に実在するかの検査は Issue #512
+- `sources[].license` は Issue #558
+- パスと `type:` の一致の検査（`validate_type_matches_path()`）は Issue #545。それまでは何も強制しておらず、`/wikicommit-synthesize` がカスタム型のページを非決定的にどちらの場所にも書いた。既存のゲートはどれも捕まえなかった（`validate_frontmatter.py` 自身もパスと `type:` を比べていなかった）
+- view ページの規則（`VIEW_REQUIRED_FIELDS`・`is_view_page()`・`validate_view_page()`・引数なしで view ツリーも走査すること）は Issue #675
+- `expires_at` が `generated_at` 以前のときの WARNING は Issue #1130。判断を要さないものを指示に書かずここで検査するのは Issue #474
+- `generated_with` / `translated_with` は Issue #577、`reviewed_by` は Issue #663
+- `source_commit` の空文字列を `check_translation_status.py` が STALE として扱う取り決め（`derived_from[].source_commit` も同じ）は Issue #409
+- `.wikicommit/wiki/` 接頭辞は Issue #477 の改名より前の形
+
 ### フォーマット検証ルール
 
 #### `properties:` のフォーマット
@@ -142,6 +208,17 @@ entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグ�
 **トップレベルへの平置き検出**: 上記 1〜3・5 で型が解決できた場合（4 で ERROR になった場合を除く）、`properties:` の中身とは別に、フロントマターのトップレベルに存在するキーのうち構造的フィールド一覧（`title`/`lang`/`type`/`sources`/`tags`/`review_status`/`expires_at`/`generated_at`/`generated_by`/`generated_with`/`wikidata`/`sameAs`/`aliases`/`properties`/`translated_from`/`source_commit`/`translated_at`/`translated_by`/`translated_with`/`translator_notes`/`derived_from`/`status`/`removed_at`/`removed_reason`/`merged_into`）に含まれないものを走査し、それが実際にそのページの型（祖先型含む）に属する Schema.org プロパティである場合は ERROR とする（例: `description:` をトップレベルに平置きしたページ。`properties:` へのネストが必須という Issue #495 の設計を LLM や人間の書き忘れから機械的に守るためのガード）。型に属さない、または Schema.org 語彙に存在しないキーは対象外（無関係な独自フィールドを誤検知しないため）。
 
 ## check_wikilinks.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 355 → 352、コード 201 → 201、docstring 37 → 35、コメント 82 → 81、空行 35 → 35（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 10 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 引数なしで全ページを検査するのは Issue #571。それまでは `OK: 0 files checked` を出して exit 0 で終わっていた
+- `--changed` と `--deleted` の両方に入ったページに両方の検査を掛けるのは Issue #1257。それまでは被リンクの検査がそのページで飛ばされ、`wikicommit-merge` は削除するページを `--changed` にも入れるので、変更が 1 回の呼び出しに収まったときに削除フローが約束する WARNING が出なかった。docstring はこれに続けて、merge は今は 2 つを分けて呼ぶと書いていた
+- `--skip-type-mismatch` は Issue #976
+- `load_primary_lang` / `page_lang` / `is_removed` / `link_target_path` / `type_slug_from_wiki_path` は、`build_onehop_context.py` が同じ解決を要したときに `_wikilink.py` へ移った（Issue #947）
+- 書かれていないページへのリンクを ERROR から WARNING に下げたのは Issue #340。Type セグメントの取り違えを WARNING にすると `check_wanted_pages.py` が既にあるページの複製を作るよう勧めることになる、という点は Issue #563
+- 被リンク索引の走査を `collect_entity_pages()` に替えたのは Issue #677。それまでの `"assets" in wiki_page.parts` は絶対パスに掛けていたため、`assets` という名前のディレクトリの下にあるリポジトリでは全ページを飛ばし、`--deleted` の WARNING が黙って出なくなっていた
 
 ### コマンド
 
@@ -161,6 +238,10 @@ entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグ�
    - 例外: `--changed` 内に同じ `<lang>/<Type>/<slug>` で新規追加されるファイルが存在する場合は上記 ERROR / WARNING としない（同一コミット内の新規追加ページへのリンク）
 3. `--deleted` が指定された場合、削除対象ページへの被リンクを `.wikicommit/entity/` 全体から検索する → 残存する被リンクがあれば WARNING
 
+#### WikiLink の形
+
+> **別名付きの形を受け付け、形の合わない `[[...]]` を報告するようにした（Issue #1304、2026-10-16）**: それまで `WIKILINK_RE` は `[[Type/slug]]` だけに合い、`[[Type/slug|表示名]]` などそれ以外の `[[...]]` は変換・未解決 WARNING・被リンク・削除済みページの ERROR・統合時の書き換え・Pass 4 の 1 ホップ近傍のどれにも掛からず、どこにも報告されなかった。Issue #1290 の調査中に見つかり、比較実験で生成が実際に別名付きの形を書いた。パイロット `wikicommit/ai-driven-dev-wiki`（`cfdc0f3`）の entity と view に 26 件（16 ファイル、うち 13 が翻訳ページ）あり、26 件すべてが別名付きだった。他の 4 パイロットには 0 件。禁止して Pass 3 と翻訳に書かせない案（b）も検討したが、AI が自然に書く形であり、翻訳では表示名を訳したくなるため禁止しても再発しやすいとして、メンテナが受け付ける案（a）を決めた。表示名はグループ 3 として末尾に足し、`findall` で 2 要素を受けていた 4 本（`check_orphans.py`・`check_wikilinks.py`・`check_wanted_pages.py`・`build_survey_view.py`）は `extract_wikilinks()` に替えた。形の合わない `[[...]]` を WARNING にしたのは、Issue #340 と同じく ERROR にすると地の文に逃げる方向に働くため。
+
 #### Type セグメントの取り違え
 
 `[[Type/slug]]` は Type セグメントと slug の**両方**が一致して初めて解決するため、slug は合っているが Type だけを間違えた WikiLink は「参照先が存在しない」として扱われる。しかし実体はリポジトリに在るので、正しい対処は新規ページの作成ではなく**リンク 1 語の修正**であり、上記 4.（Issue #340 の WARNING）とは行動が正反対になる。両者はメッセージ上まったく区別がつかず、`check_wanted_pages.py` に至っては「これから作るべきページ」として提示してしまう（そのとおりに作れば内容の重複した 2 ページができ、`check_orphans.py` の重複判定は `type` が違うため検出しない）。
@@ -171,13 +252,44 @@ entity ページは `[[View/<slug>]]` を張れ（`View` は予約 Type セグ�
 
 Issue #340 で「参照先ページが存在しない」ケースを ERROR から WARNING に変更したため、blocking ケースは一度 `status: removed` へのリンクのみになった。Issue #563 でそこに「別 Type に同名 slug が実在する未解決 WikiLink」が加わっている。終了コードの仕組み自体（`total_errors > 0` で `1`）は一貫して変更していない。
 
+## check_raw_html.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 203 → 202、コード 93 → 93、docstring 66 → 66、コメント 16 → 15、空行 28 → 28（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 未レビューのまま自動マージ・公開されたページの `<script>` / `<iframe>` が人のレビューより先に読者のブラウザで実行される穴を、マージ時の blocking なゲートで塞いだのは Issue #377。docstring の「an allowlist is exactly the sanitize-list design this Issue chose not to build」の「this Issue」はこの番号を指していた（いまは「this script」と書く）
+- どこを生 HTML と数えるかを CommonMark のパーサー（`markdown-it-py`）の生 HTML トークンで決めるのは Issue #1322
+- view ページの本文も同じ生 HTML の禁止に掛けるのは Issue #675
+
+Issue #1322（2026-10-15）: 判定をコードの範囲の正規表現（`FENCE_RE` と `INLINE_CODE_RE`。前者は 3 文字の区切りで開いて同じ 3 文字の行で閉じる形、後者は 1 文字のバッククォートで囲む形だけを読んだ）でコードを空白に塗りつぶしてから `<tag ...>` を探す 2 段構えから、`markdown-it-py` の生 HTML のトークンで判定する形に改めた。旧 regex は区切りを常に 3 文字として扱い、閉じる記号の前の字下げを許さず、インラインコードを 1 文字のバッククォートでしか認識しなかったので、(1) 4 文字のフェンスの中の 3 文字の行、(2) 字下げ 3 の閉じるフェンス、(3) `~~~~` の中の `~~~`、(4) 2 文字区切りのインラインコードのそれぞれの後ろに置いた `<script>` を検出しなかった。Quartz が使う micromark 4.0.0（`allowDangerousHtml: true`）では 4 つとも `<script>` がそのまま出力されることを確かめている。regex を直して追いかける案と、依存を増やさず行ごとのパーサを自前で書く案は、CommonMark の規則（リスト内・ブロック引用内のブロックなど）を 1 つずつ再現することになり、ずれが残るたびにゲートに穴が開くので採らなかった。依存を避けたい事情が出てきたら再検討する。
+
+この変更で期待値が変わったもの: 閉じていないフェンスの後ろの HTML は、旧 regex が一致しなかったため検出されていたが、CommonMark では文書の末尾までコードなので検出しなくなった（描画もコードになる）。旧 `HTML_TAG_RE` が読めなかったハイフンを含むタグ名（`<my-el onmouseover=...>`）は検出するようになった。旧 docstring・本文が既知の限界としていた「`a<b>c` のような不等式の誤検知」は、CommonMark 自身がタグとして読み描画するものなので、誤検知の扱いから外した。
+
 ## check_orphans.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 171 → 168、コード 108 → 108、docstring 33 → 30、コメント 1 → 1、空行 29 → 29（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 2 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- view ページを孤立の報告から外しつつ、そのリンクは被リンクに数えるのは Issue #675
+- ORPHAN 行にページの `sources` の短い識別子を添えるのは Issue #570。docstring は、`wikicommit/saitama-city-wiki` の監査で孤立 6 ページはすべて他にページを 1 つも生まなかったソースから来ており、対象の全体の構造を扱う 2 つのソースから来たページはどれも到達可能だったこと、それが 1 リポジトリの観測でありかつ部分的に自己成就的（構造を扱うソースは定義上すべてにリンクする）なので所見ではなく仮説であることを書いていた（いまは仮説の中身と、出所を出すことがそれを確かめられるようにする、とだけ書く）
 
 ### 定義
 
 `ORPHAN:` 行にはそのページの `sources`（`path`／`url`／`author`）を添える（Issue #570）。孤立の次に問う価値があるのは「どのソースが作ったか」であり、`wikicommit/saitama-city-wiki` の監査ではorphan 6 件すべてが「他に 1 ページも作っていないソース」由来である一方、対象全体の構造を述べる 2 ソース由来のページは全域で到達可能だった。ただし 1 リポジトリの観察であり、構造を述べるソースは定義上あらゆるページにリンクする側なので半ば同語反復でもある — **検証すべき仮説**であり、出自を印字することがそもそも検証を可能にする。`sources` を持たないページは `(no sources)` と出す。
 
 ## check_wanted_pages.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 125 → 124、コード 64 → 64、docstring 23 → 23、コメント 23 → 22、空行 15 → 15（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 6 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 書かれていないページへのリンクを `check_wikilinks.py` が ERROR から WARNING に下げたのは Issue #340。下げたことで、多くのソースから参照される概念がどこにも単独では現れなくなり、このスクリプトがその見え方を取り戻した
+- TYPE_MISMATCH を WANTED から分けたのは Issue #563
+- 素の文字列でしか言及されない概念が見えない限界は Issue #318
+- ページの走査を共有したのは Issue #677。Type の索引を参照元にも裏付けのファイルにも数える扱いは共有する前のままにした。コメントは、古くなった索引の項目を「誰かがこのページを書いてほしい」に数えるべきかは走査をまとめることとは別の問いだから元のままにした、と書いていた
+- view ページを両側に数えるのは Issue #675
 
 ### 目的
 
@@ -187,17 +299,58 @@ Issue #340 で「参照先ページが存在しない」ケースを ERROR か�
 
 既知の限界（Issue #318 に明記済み）: WikiLink 構文が一度も使われていない地の文言及（太字のみ等）は対象外。
 
+## check_expires.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 75 → 75、コード 49 → 49、docstring 7 → 7、コメント 3 → 3、空行 16 → 16（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- view ページも `expires_at` を他のページと同じ条件で持ち、両方のツリーを確かめるのは Issue #675
+
 ## check_translation_status.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 175 → 174、コード 107 → 107、docstring 30 → 29、コメント 13 → 13、空行 25 → 25（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 4 → 0（`pre-Issue-#477` の形の参照も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- pathspec に `:(literal)` を付けるのは Issue #369（Issue #115 と同じ修正）
+- view ページも翻訳の対象として走査するのは Issue #675
+- コメントは `.wikicommit/wiki/` から `entity/` への改名（Issue #477）より前の値を「pre-Issue-#477 の値」と呼んでいた
 
 > **命名の経緯（Issue #280）**: 当初 `check_translation_freshness.py` という名称だったが、「freshness（陳腐化）」は「存在するものが最新か」を問う語であり、`STALE`（翻訳はあるが原文更新に追従していない）・`MISSING_SOURCE`（翻訳はあるが原文が消えた）はこの定義に収まる。一方で本 Issue が追加した `UNTRANSLATED`（そもそも翻訳が1つも存在しない）は「存在するかどうか」という別種の問いであり、`freshness` という名前がこれを検出するのは実態と合わないため `check_translation_status.py` に改名した（分割ではなく改名を選んだ理由は、ページ走査ロジックの重複を避けるため）。
 
 ## check_derivation_freshness.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 121 → 120、コード 66 → 66、docstring 27 → 26、コメント 9 → 9、空行 19 → 19（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- pathspec に `:(literal)` を付けるのは Issue #369（Issue #115 と同じ修正）
+- `derived_from` を持つページを view ツリーに書くのは Issue #675（コメントは「Issue #675 以降そこに書かれる」と書いていた）
+
 ### 目的
 
 `wikicommit-synthesize`（Issue #283）が出力したページの `derived_from`（`{path, source_commit}` の配列）各エントリについて、出自ページの `source_commit` と現在 HEAD コミットを比較し、陳腐化した合成ページを検出する。`check_translation_status.py` の `STALE`/`MISSING_SOURCE` ロジック（単一の `translated_from`/`source_commit`）を配列用に切り出した新規スクリプト（既存スクリプトの改修ではなく新設。翻訳陳腐化スクリプトへの改修依存を作らないための設計判断）。
 
+## check_ingest_freshness.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 160 → 160、コード 96 → 96、docstring 23 → 23、コメント 12 → 12、空行 29 → 29（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `_frontmatter.py` への集約（読む側だけ）は Issue #231。コメントは、`status:` を書き換えるための `FRONTMATTER_RE` をその集約の範囲外と書いていた（いまは `_frontmatter.py` の範囲外と書く）
+- `retracted` は Issue #737。`reconcile_ingest_status.py` の対象に `outdated` が無いことは Issue #474
+
 ## read_policy.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 151 → 147、コード 52 → 52、docstring 65 → 61、コメント 17 → 17、空行 17 → 17（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #844。docstring は、それまで判定は 2 つの SKILL.md の 4 か所で繰り返された 1 文が行っており、どれも読んだばかりの本文が「still the shipped comment」かを LLM に判断させていたと書いていた
+- docstring は、それを Issue #474 が名指しした形（完全に決定論的な操作を指示として書く）と呼んでいた
+- 誤読は書くべきページを抑える側にだけ倒れることについて、docstring は、あるパイロットがすでにその向きに進み `Person` のページが 1 つも無くなったと書いていた
+- `strip_frontmatter()` が正規表現を使わず `_frontmatter.py` に任せる理由（そのモジュールの docstring が挙げるもの）は Issue #212
 
 ### 目的
 
@@ -219,11 +372,25 @@ Issue #340 で「参照先ページが存在しない」ケースを ERROR か�
 
 ## match_index_only.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 187 → 183、コード 98 → 98、docstring 59 → 55、コメント 8 → 8、空行 22 → 22（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 5 → 0。出力する文字列には `#NNN` は無い。ただしこのスクリプトは `argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])` でモジュールの docstring の 1 行目を `--help` に出すため、1 行目から `(Issue #1032)` を外したことで `--help` の説明文も変わった（照合と出力そのものは変わらない）。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1032。それまでは照合を 2 つの SKILL.md（`wikicommit-collect` の step 5 と `wikicommit-generate` の step 0）の散文で行い、その規則がパスを捨てていたため、どの項目もホスト全体を意味していた。docstring は、散文の 2 つの写しが別々にずれていく形を Issue #474 が名指しした形（決定論的な操作を指示として書く）と書いていた
+- `index_only:` は Issue #570
+- パスやクエリを持つ項目は、Issue #1032 より前はホスト全体を意味し、いまはその 1 ページを意味する。docstring は、公開パイロットにそうした項目を持つものは無かった（2026-09-25 に確認）こと、持っていた利用者には CHANGELOG.md がそう書いていることを書いていた
+
 ### 目的
 
 `.wikicommit/source-policy.md` の `index_only:` に URL が該当するかを判定する（Issue #1032）。エントリは 2 形あり、形が意味を決める — パスが無ければ**ドメイン**（そのホスト全体）、パスがあれば**ページ**（その 1 ページ）。従来この照合は `wikicommit-collect` Step 5 と `wikicommit-generate` Step 0 の散文が行っており、規則はパスを捨てていた。規則が 2 形に増えると 2 か所の散文が別々にずれる余地が大きくなるため、決定論的な照合をここに 1 つだけ置く（Issue #474）。設計判断の全体は `docs/DesignDoc-data.md` §3.4「`index_only`」。
 
 ## match_existing_names.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 145 → 145、コード 94 → 94、docstring 36 → 36、コメント 1 → 1、空行 14 → 14（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1096
 
 ### 目的
 
@@ -236,6 +403,20 @@ Pass 2c が `action: update` にするのは「型と slug が同じ既存ペー
 **既存の重複ページへの遡及は行わない**。既に並存しているページは、人が統合するまで残る。
 
 ## check_distribution_freshness.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 722 → 719、コード 389 → 389、docstring 169 → 166、コメント 89 → 89、空行 75 → 75（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 13 → 0（`Issue` の付かない `(#950)` も外した）。出力する文字列には `#NNN` は無い。ただしこのスクリプトは `argparse.ArgumentParser(description=__doc__)` でモジュールの docstring を `--help` に出すため、docstring から経緯を外したことで `--help` の説明文も変わった（判定と出力そのものは変わらない）。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- リポジトリが持つものを 3 種類に分け、WikiCommit 自身の配布物を利用者の持ち物と分けたのは Issue #712。それまでは 2 種類目を 1 種類目と同じに扱っていたため、1 版前に init したリポジトリは古いワークフロー・古いプラグインの `dist/`・古いビルドスクリプトを黙って使い続け、気づくにはクローンして手で diff するしかなかった
+- Skill ツリーを `.agents/skills/` にも探すのは Issue #1021。それまでは `.claude/skills/` だけを見ていたため、Codex だけに入れたリポジトリで「wikicommit-init is not installed」とすべて 0 の要約が出た
+- `.wikicommit/scripts` の `OUTDATED` 行にだけ帰結を添えるのは Issue #930。帰結だけを述べて止めるのは Issue #935 — それまでは末尾に「Run /wikicommit-update.」があった
+- variant を `quartz.config.yaml` と `deploy.yml` の有無から読むのは Issue #335
+- `config.yml` の `wikicommit_version` は Issue #577 で書くようになった
+- 識別子の候補を `source` 以外に推測しないのは、消費者の無い受け皿（Issue #553）になるため
+- リストの要素を識別子で比較すること（`_list_element_paths()`）と、`quartz.config.yaml` の値の検査（`_quartz_value_findings()`）は Issue #950。リストの手前で止まっていたときは `plugins` の 47 件が 1 つのパスに潰れ、メンテナが「検出されない」と挙げたドリフト 5 件のうち 4 件がこの形だった。5 件目の `comments`（Issue #755）は 3 つのパイロットのうち 2 つで欠けていたが、誰も書き留めていなかった。要素のマッピングの中に降りない理由に挙げた giscus について、docstring は「それを有効にすることこそ、そのプラグインを出荷した Issue の目的だった」と書いていた
+- `pageTitleSuffix` が `configuration` の下に入ったのは Issue #679
+- `.claude/settings.json` の比較（`_json_keys()`）は Issue #953
 
 ### 目的
 
@@ -341,6 +522,16 @@ Issue #712 以前は 2 番目が 1 番目と同じ扱いだったため、1 つ�
 
 ## search_index.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 493 → 493、コード 273 → 273、docstring 109 → 109、コメント 51 → 51、空行 60 → 60（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 9 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- タイトルのヒットを本文のヒットよりはるかに重くすること、スニペットを一致箇所の前後約 32 文字にすること（`SNIPPET_MAX_TOKENS = 64`）は Issue #126 の仕様として書いていた
+- `aliases` をタイトルと同じ重みにするのは Issue #1078
+- view ページを entity ページと一緒に索引に入れるのは Issue #675。合成の根拠集合から view ページを外したのは Issue #674 で、それは検索には及ばない
+- 位置引数の語を FTS5 の暗黙の AND で並べるのではなく、`--expand` のグループを「グループ内 OR・グループ間 AND」で組むこと、短い語が残るグループと残らないグループで警告を分けることは Issue #581
+- 3 文字未満の語がどこにも一致しないことを知らせるのは Issue #274
+
 ### `build` サブコマンド
 
 **fingerprint**（Issue #1061）: `collect_pages()` と同じページ集合（entity ＋ view、`assets/` と `index.md` を除く）について、`(パス, st_mtime_ns, st_size)` を 1 行ずつ並べた列の SHA-256（先頭にインデックスの形式番号 `INDEX_FORMAT` を混ぜる — ページが 1 つも変わっていなくても、列や索引の仕方を変えた版のスクリプトが古い形式のインデックスを使い続けないため。`_build()` の出力の形を変えたら上げる）。ページの追加・削除・編集をすべて捕まえる（削除すると集合から 1 行消える。最新 mtime だけを比べる形では削除を捕まえられない）。`git pull`・`/wikicommit-fix`・`/wikicommit-remove`・Close 同期による `review_status` の書き換えもファイルが変わるので同じように拾う。読むのは `stat()` だけでページの中身は読まない（判定は `query` のたびに走るため。実測 1,100 ページで約 9 ms、全件の作り直しは約 1 秒）。`git checkout` や clone で mtime だけが変わると中身が同じでも作り直すが、誤りは「約 1 秒余計にかかる」側に倒れるので受け入れる
@@ -361,6 +552,13 @@ Issue #712 以前は 2 番目が 1 番目と同じ扱いだったため、1 つ�
 
 ## check_schema_coverage.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 69 → 69、コード 31 → 31、docstring 24 → 24、コメント 1 → 1、空行 13 → 13（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 2 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `wikicommit-schema-propose` は Issue #285
+- 型の文字列を完全一致だけで集計する既知の限界（同じ概念が少しずつ違う型の文字列に分かれうる）は、docstring によれば Issue #285 の設計メモに書かれていた
+
 ### 目的
 
 `.wikicommit/entity/**/*.md` を走査し、`type:` フロントマターの値が `.wikicommit/schema/` に専用のスキーマファイルを持たない（`default.md` へのフォールバックのみで表現されている）ページを検出する。`wikicommit-generate` Pass 2 のコンテキスト注入（型文字列の再利用誘導）と、`wikicommit-schema-propose`（Issue #285）の検出源の両方から使われる。
@@ -374,6 +572,15 @@ Issue #712 以前は 2 番目が 1 番目と同じ扱いだったため、1 つ�
 > `validate_frontmatter.py` の当該 WARNING は**現状維持**とする（ERROR に格上げしない）。専用ファイルを持たない型は正常系であり、ブロックすると Pass 2b〈Issue #315〉以前に生成されたページを持つ既存リポジトリが軒並みマージ不能になる。スキーマファイルの移動・削除を git 履歴から追う案も採らない — 本スクリプトが「結果として今どうなっているか」を直接見るのに対し経路を追う分だけ複雑で、しかも最初からファイルが無いケース（古い版で init したリポジトリ）を拾えない。
 
 ## check_schema_org_type.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 332 → 327、コード 165 → 165、docstring 131 → 126、コメント 2 → 2、空行 34 → 34（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 12 → 0（`Issues #496/#497` の形の 2 つ目も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `wikicommit-schema-propose` の判断と対になる決定論的な検査であることは Issue #285
+- 型の想起を `--list-type-names` と `--describe` の 2 段にしたのは Issue #798。それまでは型を提案する 3 つの Skill が、実行のたびに無条件に、処理するソースの数にかかわらず、933 件の名前と説明（147 KB）をメインのコンテキストに受け取っていた。名前と説明を全件出す `--list-types` は、3 つの Skill が 2 段の形に移って呼び出し元が無くなったので、併存させずに削除した（消費者の無い受け皿は Issue #553）
+- `--list-installed-hierarchy` は Issue #565、`--show-range` は Issue #496、`--list-properties` は Issue #497。型ごとのテンプレートファイルを事前生成する案は Issue #497 の背景で退けた
+- 語彙の読み込みと継承チェーンの判定を `_schemaorg_vocab.py` に移したのは Issue #495。Issue #496 / #497 がそれを広げた
 
 ### 使用場面
 
@@ -411,6 +618,17 @@ Issue #712 以前は 2 番目が 1 番目と同じ扱いだったため、1 つ�
 **この削減は測れない**（同 検討事項 1）。説明文を落として型提案の recall が落ちたかを判定する eval 基盤はこのリポジトリに無く、Issue #669 が `chain_of_thought` を実装せず削除したときと同じ状況にある（削減は確実・品質劣化は判定不能）。壊れ方が軽いこと（型提案は元々ゼロ件が通常の結果で、`wikicommit-schema-propose` と `check_schema_coverage.py` が事後の安全網として残る）を根拠に採ったうえで、**次のパイロットの観察項目**として「`provenance` が `init-theme` / `collect` / `generate-interactive` / `generate-auto` の型が実際に生まれるか」を記録する — それが recall を落としていないことの唯一の間接的な証拠になる。
 
 ## rebuild_index.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 330 → 325、コード 171 → 171、docstring 83 → 80、コメント 42 → 40、空行 34 → 34（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 9 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- index.md の更新をスクリプトにしたのは Issue #406。それまでは、LLM エージェントが長い複数段の実行の末尾で「全ソース/ペアの後に 1 回」行うことを覚えておく手順だった（決定論的な全ディレクトリ走査をエージェントの記憶に任せていた）
+- view の言語ディレクトリの索引（`[[View/<slug>]]` を並べ、予約された `View` セグメントを題にする）は Issue #675
+- Type の索引の frontmatter に `review_status: reviewed` を書くのは Issue #580（最後のページが消えた Type ディレクトリの index.md も再構築するのは、`review_status` の無い frontmatter が残ると WikiCommitBanner が「未レビュー」の警告を出し続けるため、という docstring の理由も同じ番号を付けていた）。コメントは、Type の索引が `convert_wikilinks.py` ではなくここで書かれ、`.wikicommit/entity/` の下に実ファイルを持つことが、そもそもその慣習から外れた理由だと書いていた
+- `comments: false` を併せて書くのは Issue #741
+- 1 行を WikiLink だけにしたのは Issue #678。それまでの `— {title}` は全言語の全 Type 索引の全行で "Title — Title" と出ていた。コメントは、外した `— {title}` がリンクの文字列同士を偶然区切っていたと書いていた（行頭に `-` を付ける理由）
+- グループごとの `## <label>` の節に分けるのは Issue #1035
 
 ### 目的
 
@@ -474,7 +692,48 @@ Issue #675 で view ツリーを足したとき、実装（`rebuild_view_index()
 
 `kind` で見出しを分けない判断は Issue #675 の実装時のもの（`rebuild_view_index()` の docstring に同じ理由がある）。
 
+## convert_wikilinks.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 3,986 → 3,781、コード 2,402 → 2,402、docstring 674 → 546、コメント 688 → 611、空行 222 → 222（docstring 内の空行は docstring に数える）。`Issue #` はコメント・docstring で 172 → 0。
+
+**仕様の置き場**: 移行前は ScriptSpec に節が無く、仕様は docstring と `docs/DesignDoc-publish.md` §8 に分かれていた。読者に見える面（文言・表示条件・件数の意味）は publish §8 がすでに詳しく持っていたので正本のまま残し、ScriptSpec にはスクリプトとしての入出力と処理の契約（出力パスの 3 段の割り当て・`custom/` の扱い・相対リンクの書き換え順・照合の注入・前回の出力の掃除・ビルドがリポジトリを変えないこと）だけを書く節を起こした。§11.5 の共有スクリプト表に仕様を置く `add_source.py` / `resolve_source_cache_path.py` と違い、このスクリプトは Skill から呼ばれないため §11.5 に行が無く、置き場を選ぶ余地は ScriptSpec か publish §8 かだった。
+
+**分けるかの判断（Issue #1343）: 分けない**。移行後の 3,781 行の内訳は、10 言語の UI 文字列（`*_LABELS` の 8 つの辞書）が 1,132 行、俯瞰ページ 431 行、`main()` 340 行、root index 133 行、ソースページ 122 + 112 行、WikiLink 変換 132 行、`llms.txt` 105 行、アセット 88 行、グループのマニフェスト 55 行だった。分けない理由は次のとおり:
+
+- どの出力も `main()` の 1 回のページ走査の結果（`page_stats`・被リンク・書いたパスの集合）を材料にしている。別スクリプトにすると走査を出力の数だけ繰り返すか、走査の結果を受け渡す形を新たに作ることになる。前回の出力の掃除はこのビルドが書いた全パスの和を要るので、掃除だけを残しても分けた先の書いたパスを集めなければならない
+- 関数は既に出力ごとに分かれており、1 つの出力を直すときに他の出力のコードを読む必要は無い
+- 利用者のリポジトリでは `.wikicommit/scripts/` がツリーごと配られる（`_root_outputs.py` の `update: overwrite`）ので、モジュールを足すこと自体は `/wikicommit-update` と `check_distribution_freshness.py` を壊さないが、得るものが無い
+- 分ける候補として最も大きいのは UI 文字列の辞書（約 30%）だが、それはデータであって読む負担になる処理ではなく、`tests/test_ui_translation_completeness.py` 等が `convert_wikilinks` から import しているため、移すとテストの import 先も変わる。読む負担の問題は docstring・コメントの移行で解き、辞書は動かさなかった
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `content/sources/` は Issue #476 で、ページの `sources` を逆に引いて言語ごとに集める `content/<lang>/sources.md` を置き換えた（管理ファイルのツリーを直接写す「反転」）。WikiLink のグラフの外に置くこと（プレーンな Markdown リンク）はそのとき受け入れた制約。中間ディレクトリの `index.md` は、Quartz の `folder-page` プラグインがこのツリーには生成しなかったため Issue #493 で足した。そこでの `/index` の衝突は、URL ソースの素のドメインとパスの衝突（Issue #213）と同じ種類の問題
+- `generated_pages[]` の `.wikicommit/wiki/` 接頭辞は Issue #477 の改名より前の形。`## Summary` の日本語見出しは Issue #405 で管理ファイルの見出しを英語に固定する前の形で、`## Retraction Reason`（Issue #737）にはそれが無い
+- `path_href()` は `WikiCommitSources.tsx` の `pathHref()` と手で揃えている（Issue #212）
+- 予約ツリー（`RESERVED_PUBLISH_TREES`）は Issue #957。Issue #585 が `overview` を足したとき、グラフとエクスプローラのどちらにも登録しておらず、それぞれ黙って偽の言語・余計なフォルダが出た
+- 照合の注入（`ai_review_model` / `ai_review_at`）は Issue #751。ページにコピーしないのは、コピーが古くなる失敗（Issue #705）を一度経験しているため。記録の無い空白は Issue #750 より前のページで、記録はさかのぼって作れない。`reviewed_by`（Issue #663）と名前を分けた。`pass` 以外を出さないこと・古い `pass` に戻らないことも同じ Issue。改名したページが古い slug の記録で判定されるのは Issue #1162。翻訳の照合（`ai_review_stage`・「原文と照合」）は Issue #1031
+- 指摘の種類の集計（`FINDING_TYPES`・`OTHER`）、`page_at_fault: other` を数えないこと、公開されなかったページの件数（`count_unpublished_pages()`）は Issue #1063
+- frontmatter への挿入を YAML の読み書きにしないのは、読み書きで設定ファイルのコメントを失った Issue #713 のため
+- UI 文字列の 10 言語は Issue #1017 で決めた。それ以前は ja だけで、「その言語の Wiki が現れたら足す」はパイロットがたまたま使った言語を理由に足すことになっていた。英語に落ちたことを公開ページで告げない判断は Issue #825（理由は 3 つ: 告知では失われたものが戻らない、言語中立の印は見えていることを繰り返すだけ、誰も行動できない常設の告知になる。バナーにはすでに 2 つの Issue が文言を足さないよう抑えている）
+- root index: Quartz の FolderPage が root の index を作らず `index.xml` が `/` で配られる問題は Quartz 側の GitHub Issue #75。既にファイルがあれば書かない分岐は、前回のローカルビルドの出力を凍結させたため Issue #358 で外した。サイト全体の件数（Issue #407）、`theme` の埋め込みをやめた Issue #670、`site_description` は Issue #671、多言語 Wiki での言語別件数は Issue #730（Issue #664 の注記を言語一覧の下へ持ち越した）、照合済みの件数は Issue #769、`targets` に無い言語の取りこぼしは Issue #731（`existing_lang_targets()` は Issue #190）、サイト全体の帰属・ライセンスの注記は Issue #645（ページごとの注記は Issue #558）
+- 件数の注記の文言: 裸の数字が「誰も関心を持っていない」に読める（Issue #664）、人の確認が設計上一部であると述べる（Issue #800）、抜取の語彙を使わない（Issue #769 — `RISKY:` が良く選べているかは未測定）、`reviewed` は人の読み手を名指しする（Issue #664・#740）ので機械の件数を同じラベルに置かない（Issue #751）、照合が見ないもの（網羅性は Issue #722、害と読者自身の知識は Issue #723）、ソース件数のキーを `sources` と分ける（Issue #990）
+- 俯瞰ページは Issue #585。照合の割合から翻訳を外したのは Issue #1030（翻訳は記録を持たないので分母に入れると割合を下げ続けた。`/wikicommit-review` を翻訳に走らせると 100% を超えうるので分子も絞る）。Issue #769 が root index を言語で分けたのとは目的が違うので、言語ではなく `translated_from` で分ける。翻訳の照合が 1 件でもあれば Issue #1030 の「記録されていない」行を Issue #1031 の割合に置き換える。ハブ行のソース件数は Issue #990、同じソースに立つハブは Issue #1006（ソースの同一性は Issue #572 / #573 の命名規則と揃える）、ソースの言語別は Issue #989、未処理のソースを「未記録」と分けたのは Issue #1135、Type の取り違えを wanted から外すのは Issue #563、`other_types_for_slug()` の共有は Issue #677、view ページを孤立ページから外すのは Issue #675、`comments: false` は Issue #741（書き出す側で決めるのは Issue #580 と同じ考え）
+- `source.lang` の言語行は Issue #1007、`lang: no` を YAML 1.1 の `False` と区別するのは Issue #1193 の後続。パイロット Wiki に引用符なしの `lang: no` を持つ `www.ssb.no` のソースが 2 件あった
+- view ツリー（`View` セグメント・3 段目の割り当て・相対リンクを書き換えない）は Issue #675
+- `custom/` を公開時に落とすのは Issue #576（エクスプローラ・パンくず・フォルダページ・URL に意味の無いフォルダが出ていた）。entity 側に残すのは、落とすと `rebuild_index.py` が `type: schema:Decision` を書き、`validate_frontmatter.py` が拒否するため（Issue #512）。出力パスの割り当ては当初 2 段で、view ツリーを足したとき 3 段にした（コメントには「Two passes」が残っていた）
+- 本文の相対リンクの書き換えが実際の不具合になったのは、Issue #589 でローカル画像が公開サイトに届くようになってから。`sync_assets()` も Issue #589 で、それ以前は推奨していた相対パスの画像が公開サイトで 404 になっていた（推奨を確かめたとき、ファイルを `content/` に直接置いていた）。`gitignore: true` の glob が `content/` を隠さないことは globby に対して直接確かめた
+- 前回の出力の掃除は Issue #271。`removed` のページを `content/` に書かないのも同じ Issue
+- グループのマニフェストは Issue #1035。frontmatter のフィールドにしないのは、Quartz の content index に届かず読み手の無い受け皿になる（Issue #553）ため
+- `llms.txt` の記述（`description`）を `page_stats` に持たせたのは Issue #1117。「Key pages」の上限 50 は、パイロット Wiki が 2 言語で 1,000 ページを超えていたことから
+
 ## reconcile_ingest_status.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 227 → 224、コード 93 → 93、docstring 82 → 79、コメント 25 → 25、空行 27 → 27（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 6 → 0（うち 1 つは行をまたいで `Issue` と `#474` が分かれたもの）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトが救う状態（長いバッチで、別の管理ファイルの実行で書かれたページがこのファイルのハッシュを引くが、このファイルの `status` / `generated_pages` が書き戻されず `pending` のまま残る）は Issue #474。この修正の初期版は SKILL.md の散文（インラインの「バッチ全体のスコープ」規則と、実行の終わりの grep による掃き出し）で解こうとし、コードレビューがその設計を非決定論的で安全でないと判断した
+- `generated_pages` が空のファイルだけを対象にする条件は Issue #874。docstring は、この条件を当初書かなかったのは、ページを作り直させるために `pending` へ戻すものがそれまで無かったからだと書き、`add_source.py` を「その値を書くもう 1 つの書き手」と呼び、要求キューの Skill について「いまは意図して `pending` を書くものもある」と書いていた
 
 ### 目的
 
@@ -514,6 +773,17 @@ Issue #675 で view ツリーを足したとき、実装（`rebuild_view_index()
 
 ## reset_review_on_content_change.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 276 → 274、コード 130 → 130、docstring 99 → 97、コメント 14 → 14、空行 33 → 33（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 7 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #724。それまでは `reviewed` なページの本文を書き換える 2 経路がどちらも `reviewed` の主張を動かさないまま文章だけを差し替えていた — `wikicommit-generate` Pass 3 の `action: update` は既存の `reviewed` を明示的に維持する規則を持ち、`wikicommit-fix` は規則自体が無く、Edit してそのまま終わっていた
+- Pass 4 が `expires_at` をソースとの照合対象にしているのは Issue #279
+- 決定論的に判定できる操作を SKILL.md の散文に書くと非決定論的な失敗モードを持ち込む、という理由は Issue #474
+- `.wikicommit/view/` 配下のページも受け付けるのは Issue #675
+- `index.md` を除外する理由（`rebuild_index.py` が `review_status: reviewed` を刻む）は Issue #580
+- 旧ディレクトリ `.wikicommit/wiki/` から `entity/` への改名は Issue #477
+
 ### 目的
 
 信頼ラダーの上段（`review_status: reviewed` と、Issue #663 以降そこに添えられる `reviewed_by` の実名）は「この文章を人間が読んだ」という主張である。ところがページを書き込む 6 経路のうち 2 つが、その主張を動かさないまま文章だけを差し替えていた（Issue #724）。
@@ -542,6 +812,26 @@ Issue #675 で view ツリーを足したとき、実装（`rebuild_view_index()
 
 ## record_review.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 639 → 636、コード 274 → 274、docstring 278 → 275、コメント 27 → 27、空行 60 → 60（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 20 → 0（`Issue` の付かない `#570`・`pre-Issue-#477` と、行をまたいで `Issue` と分かれた `#429`・`#474`・`#750` も外した）。出力する文字列には `#NNN` は無い。
+
+冒頭の docstring は、このスクリプトが無い状態を「Pass 4 は判定を捨てる。Pass 4 step 1 が agent-to-agent の JSON を "never written to disk or Git" と明言している」と現在形で書いていた。いまの `references/pass4-review.md` にはこの文言が無いので、「記録が無ければ」という条件の形に書き直した。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #750。Pass 4 の 8 種の検査は、根拠の結び付けが Issue #442、細かな事実の検証と命名か捏造かが Issue #451、二次引用が Issue #473、帰属の正しさと単一ソースの無帰属の言い回しが Issue #429、ソース同士の不一致と 1 ホップのページ間の矛盾が Issue #566
+- `/wikicommit-fix` の書き換えで `reset_review_on_content_change.py` が `review_status` を `pending` に戻すのは Issue #724
+- 設定ファイルのコメントを丸ごと失った round-trip は Issue #713
+- モデル ID の `claude-opus-5[1m]` という綴りを実データで見たのは Issue #559
+- findings を本文に置くと集計スクリプトが散文を解析することになる — Issue #474 が名指しした失敗の形
+- `sources[].license` は Issue #558 / #570
+- 3 回のラウンドが 3 つの別の問題を見つけたのは Issue #571
+- 射影が互換面であること（「この形式は自由に変えてよい」と読まない）は Issue #750
+- 翻訳の証拠（`translated_from` + `source_commit`）と、`translate-check` の `discarded` で証拠を読まないことは Issue #1031
+- `wikicommit-synthesize` の `MISSING_SOURCE` が `source_file` を空にするのは Issue #674
+- スタンプを最新記録まで切り上げるのは Issue #991。記録が不変であることは Issue #750
+- `model` / `reviewer` の当てはまらない側を空で置かないのは、Issue #553 が退ける形だから
+- `stage: issue-close` に `skill_blob` が付かないのは Issue #750 の検討事項 5
+
 ### 目的
 
 `wikicommit-generate` Pass 4 は生成した全ページに 8 種類の検査を掛けながら、その判定を 1 バイトも残していなかった（Issue #750。詳細と設計判断は `docs/DesignDoc-data.md` §4.8）。本スクリプトはその判定を、ページ単位のディレクトリに**レビュー単位の不変ファイル**として書き出す。
@@ -567,6 +857,17 @@ Issue #675 で view ツリーを足したとき、実装（`rebuild_view_index()
 **「相手が悪い」（`other`）の行き先は本節の対象外**である。同じ調査で、告発した側が `RISKY:` に載り、最も告発された側は載らないことが分かっている（`RISKY:` は findings を `page_at_fault` を見ずに数える）。ただし告発先を引くには `page_at_fault` と `source_file` が信頼できる必要があり、いまはどちらも満たさないので、rule 4 の効果が出た後の実データで判断する。
 
 ## check_review_coverage.py
+
+**docstring・コメントから経緯を移した（Issue #1329）**: 移す前後の行数は、総行数 851 → 687、コード 383 → 383、docstring 288 → 155、コメント 115 → 84、空行 65 → 65（docstring 内の空行は docstring に数える）。`Issue #` はコメント・docstring で 40 → 0。冒頭 docstring にあった仕様（各行がどの記録を読むか・閾値を持たないこと・孤児の記録を報告しないこと・改名と統合の扱い）は本文の同じ節にすべてあったため、docstring 側を消すだけにした。docstring・コメントにあって本節に無かった経緯は次のとおり:
+
+- `--discarded-reason` は、`partial` 分岐が `## Failure Reason` を消すため生成失敗トラッキング Issue の理由欄が構造的に `unknown` になっていた問題（Issue #969）から生まれた
+- `--discarded-reason` が `nargs="*"` なのは、Pass 1 で失敗したソース（`failed_pages` が空）も Step 9 の対象にした Issue #910 のため
+- 破棄された記録で `round` を印字するのは、ラウンドごとに別の欠陥が出うる（Issue #571）ため
+- 改名したページが古い slug の AI 記録を引き継ぐのは Issue #1162、翻訳ページが改名後に `STALE_REVIEW:` になる扱いは Issue #1246
+- `kind: ai` の本文を `human_notes` に数えないのは、それが Pass 4 の非ブロッキングな観察（Issue #834）だから
+- 翻訳ページの `translated_from` / `source_commit` を証拠として突き合わせるのは Issue #1031、`source_identity()` の照合キーは Issue #572 / #573 の命名規則と揃えたもの
+- `ACCEPTED_PREFIXES` の 3 つ目は Issue #477 以前の `.wikicommit/wiki/` 接頭辞
+- `/wikicommit-fix` の編集は `review_status` を `pending` に戻す（Issue #724）ので人の側は自己修正するが、機械の判定が失効したことを記録するのはこのスクリプトだけである
 
 ### 目的
 
@@ -677,6 +978,27 @@ Issue #675 で view ツリーを足したとき、実装（`rebuild_view_index()
 
 ## record_run.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 687 → 678、コード 309 → 309、docstring 225 → 220、コメント 87 → 83、空行 66 → 66（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 29 → 0（`Issue` の付かない `#452`・`#474` と、行をまたいで `Issue` と分かれた `#567`・`#574`・`#911` も外した）。出力する文字列には `#NNN` は無い。
+
+docstring の `end` の段落は「`end` はこのファイル唯一の read-modify-write」と書いていた。`checkpoint` も同じ形を採る（下の「read-modify-write のコスト」）ので、本文の節に合わせて「`end` と `checkpoint` は read-modify-write」と書き直した。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 実行 1 回を単位とする記録（このスクリプト）と `KEEP_RECORDS` の件数によるローテーションは Issue #790。1 イベント 1 記録・追記せず新規作成という形はレビュー記録（Issue #750）のもので、レビュー記録を公開サイトに表示するのは Issue #751
+- 「実行は完走したか」の段落の、途中で死んだ実行と見分けが付かない滞留は Issue #567 が扱ったもの（キューがそこまで到達しなかった）。ファイルを 1 つも変えずに止まる halt の 2 経路は、ガード C が Issue #574、`rules_version` 不一致が Issue #752
+- 「どれだけかかったか」について、パイロットの手順には書かれたときから「リポジトリあたりの所要時間」の列が空のまま残っていた
+- `schemaorg-vocab.json` を `.wikicommit/.cache/` の外に出したのは Issue #319
+- 終了の打刻忘れ（長い多段フローの末尾の手順が落ちる）は、Issue #406・#452・#474 がそれぞれ一度ずつ直した失敗の形。`page_content_hash: ""` を「ページが書かれなかった」とする形は Issue #750
+- read-modify-write はレビュー記録（Issue #750）が意図的に避けた形。`config.yml` が YAML の round-trip でコメントの記入例を丸ごと失ったのは Issue #713
+- コスト・トークン数を記録しないのは、Issue #784 が同じ理由で配布ファイルから課金の数字を外したのに揃えたもの
+- `checkpoint`・`EXPECTED_PASSES`・空の `passes: []` を `start` が書くこと・照合の第三者をスクリプト自身とすること（`pass_files_for()` が照合先を引数で受け取らない）は Issue #797。Issue #406・#452・#474 は同じクラス（長い多段フローの末尾の手順が黙って走らない）で、3 件とも公開済みのパイロットリポジトリを人が後から監査して見つけ、3 件とも手順を決定論的スクリプトへ委譲して直した。サブエージェントが読んだことを照合できたのは Issue #752 で、`wikicommit-review` はサブエージェントを使わないので照合が効かないという限界も同じ Issue が記録している
+- `check_run_records.py` が消費者であることは、消費者の無い受け皿を Issue #553 が退けているため
+- `REGENERATE_PASSES` の `--regenerate`（Pass 2 を実行しない）は Issue #578
+- パスファイルを `references/` に置くのは Issue #911。「`--token` を送る呼び出し元がまだ無いので動かしてよい」というのが Issue #911 の挙げた理由だったが、それは誤りだった（Issue #925）。インストール済みの wiki は `.claude/skills/` と `.wikicommit/scripts/` を別のコマンドで更新するので、トークンを送る Skill と古いディレクトリを見るスクリプトが並びうる。その移動はほかの理由でも安全ではなかった — 移動の時点で、古いディレクトリを見るスクリプトの版を持つインストール済みの wiki がすでにあった
+- `token:` に消費者を与えるのを `mismatch` を持つ記録が実在するまで見送るのは Issue #925
+- `allocate_run_path()` がスタンプを既存の最新記録まで切り上げるのは Issue #991（`record_review.py` の `allocate_record_path()` と同じ欠陥・同じ修正）
+- Skill ツリーを `.agents/skills/` にも探すのは Issue #1021
+
 ### 目的
 
 このリポジトリの記録層は 4 つあり、**そのすべてが成果物を単位にしている** — git 履歴はファイル、ソース管理ファイルはソース 1 件、レビュー記録（Issue #750）はレビュー 1 件、追跡 Issue はページ 1 枚。**実行 1 回を単位とする記録が無い**ため、次の 3 つに答えられなかった（Issue #790）。
@@ -742,11 +1064,31 @@ Issue #752 が `rules_version` の echo 検証を成立させられたのは、�
 
 ## skill_workflow.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 1,106 → 1,106、コード 731 → 731、docstring 197 → 197、コメント 30 → 30、空行 148 → 148（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 7 → 0（`Issue` の付かない `#406`・`#474`・`#452`・`#947` も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このエンジンは Issue #1085。「Skill workflow」という呼び名（CI のワークフローと区別する）と、`driver.py` からの改名・状態のキーを `driver:` から `workflow:` に替えたことは Issue #1203
+- docstring は、長い Skill をそれまで記憶で進めていた（エージェントが手順全体を読み、どこにいるかを覚えていた）と書き、公開パイロットで見つかった失敗がすべてその形だった例として、末尾の手順が走らなかった（#406）・書き戻しが起きなかった（#474）・結果が渡されなかった（#452）・散文だけだったため即興になった（#947）を挙げていた
+- 定義ファイルとそのハッシュのフィールドは Issue #1209 まで `workflow` / `workflow_sha256` だった
+
 > **`human` 工程の `finishes_on` と `check-merge --except-run`（Issue #1094）**: `wikicommit-merge` をドライバーに載せたときに足した 2 つで、どちらも merge 固有の知識ではなく形の一般化である。前者は Step 3 の warning の続行確認で利用者が「やめる」と答えた場合のためにある — 以前の merge はこの場合、実行記録を開いたまま中断していたが、利用者が決めて止めた実行を `INCOMPLETE_RUN:` に数える理由は無く、`finish_if_empty`（「No changes to merge」）と同じく正常な終わりとして閉じる。halt を流用する案は、`check_run_records.py` が失敗と区別できなくなるため採らなかった。後者は、Issue #1085 の時点では merge が `record_run.py start` で記録を開いていて `driver:` キーを持たず、`open_runs()` に現れなかったため要らなかった。merge 自身がドライバーで進むようになると、自分の実行が開いたまま `check-merge` を呼ぶことになる。merge の工程は `TOUCHED:` を出さないので今の定義では重ならないが、それに頼ると「merge の確認スクリプトが `TOUCHED:` を出したら自分を止める」という離れた不変条件が生まれるため、名指しで除く形にした。
 >
 > **状態の中の定義ファイルのフィールドを `workflow` → `definition` に改名（Issue #1209）**: Issue #1203 が状態キーを `driver:` → `workflow:` にした結果、状態が自前の `workflow`（定義ファイルのパス）を持って `record["workflow"]["workflow"]` という入れ子ができた（PR #1205 のコードレビューの指摘）。3 案を比べた — (1) 現状のまま用語を DesignDoc に明記する: 読み違えの余地が残る。(2) 状態キーを `workflow_state:` などに変える: PR #1205 が決めたばかりのディスク上の形式を変え、旧キーが `driver:`・`workflow:` の 2 つになって、共有モジュールも使う `run_state()` が 3 キーを試すことになる。(3) 状態の中のフィールドを `definition` / `definition_sha256` に変える: 読み替えがエンジンの `load_run()` の中で閉じ、確認スクリプトの側（状態キー名を持たない）に影響しない。(3) を採った。旧フィールド名の記録は状態キーが `workflow:` でも `driver:` でも `next` で再開でき、次の書き込みで新しい名前へ移ることを `tests/test_skill_workflow.py` が確かめる。
 
 ## check_run_records.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 395 → 389、コード 153 → 153、docstring 178 → 172、コメント 24 → 24、空行 40 → 40（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 18 → 0（`Issue` の付かない `#452`・`#474` も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #790。消費者の無い受け皿は Issue #553 が退ける形
+- `INCOMPLETE_RUN:` の段落の、まだ順番が来ていない滞留は Issue #567、halt の 2 経路はガード C が Issue #574・`rules_version` 不一致が Issue #752。halt は `ended_at` が「完走した」の代理指標だった間、完走側に落ちていた（`end --halted-reason` が `ended_at` を書くため。Issue #872）
+- `MISSING_PASS:` は Issue #406・#452・#474 の形 — 3 件とも長いフローの末尾の手順が黙って走らなかったもので、3 件とも公開済みのリポジトリを人が後から監査して見つけた（Issue #797）
+- `passes` キーを持たない記録は Issue #797 より前に書かれたもの。`passes: []` を報告するのは Issue #864 で、部分的な欠落だけを報告していた間は、失敗が全面的なところでこの行が沈黙していた。`passes: []` を「打点より前の記録」として扱うことが、まさにその場合を隠していた
+- `has_checkpoints()` の docstring は、ガード C の halt をこの門番の例に挙げていた。Issue #872 からガード C の halt は `halted_reason` を持つので `finished_normally` ではなく、この門番に到達しない
+- `work_recorded()` の「常時点灯する行は読まれなくなる」は、Issue #562 が低情報密度ガードを降格させたときに量った力学
+- `finished_normally()`・`describe_last()` が halt に 1 語添えること・`main()` が述語を共有して `MISSING_PASS:` から halt を外すことは Issue #872。`ended_at` が「完走した」の代わりを務めていた間、halt は完走側に落ちて `MISSING_PASS:` に「finished, but ... left no stamp」と出ていた。`describe_incomplete()` の docstring は、`end --halted-reason` が `ended_at` を書き続ける理由（halt までの経過時間）を同じ Issue に結び付けていた
 
 ### 目的
 
@@ -780,6 +1122,17 @@ Issue #752 が `rules_version` の echo 検証を成立させられたのは、�
 
 ## check_retracted_sources.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 224 → 224、コード 86 → 86、docstring 109 → 109、コメント 9 → 9、空行 20 → 20（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 10 → 0（うち 1 つは行をまたいで `Issue` と `#918` が分かれたもの。`Issue #572 / #573` の並記の 2 つ目も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトと「報告して止める」判断は Issue #737。Issue #737 は、レビュー追跡 Issue のテンプレートがページのソースの健全さを問わないことから始まった
+- `review_status` を戻さない理由に挙げた規則（内容が変わったかを決定論的なスクリプトに委ねる）は Issue #724
+- `--regenerate` が取り下げたソースを `sources[]` から落とすのは Issue #744
+- view ページの間接参照を `wikicommit-synthesize` に読ませない理由の「参照側の 3 つ目の解釈者」は Issue #553
+- `--list` は Issue #928。`resolve_source_cache_path.py` の取り下げのガードは Issue #918 で、`/wikicommit-review` と `/wikicommit-fix` はそこを通らないため、取り下げたソースを正しいものとして読んでいた
+- 識別子の照合を `add_source.py` と揃える（`source.path` / `source.url`）のは Issue #572 / #573
+
 ### 目的
 
 `status: retracted`（Issue #737）は、人間が登録済みのソースを読み、内容が信用できないと判断して以後の取り込み対象から外したことを表す。この値を書くと**そのソースが再び取り込まれることは構造的に止まる**（`add_source.py` が `RETRACTED` を返して再登録せず、`check_ingest_freshness.py` が `outdated` へ書き戻さない）が、**既にそのソースから書かれたページには何も起こらない** — それらは `sources[]` にそのソースを持ったまま、何の印も付かずに残る。本スクリプトはその穴を、**行動ではなく報告で**塞ぐ。
@@ -801,6 +1154,14 @@ Issue #752 が `rules_version` の echo 検証を成立させられたのは、�
 
 ## check_actions_pr_permission.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 114 → 114、コード 61 → 61、docstring 32 → 32、コメント 2 → 2、空行 19 → 19（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `review-issue-close-sync.yml` の `Commit and open PR` がこのリポジトリ設定に依存することは Issue #313
+- `wikicommit-init` が初期化時にこの設定を有効にしようとする（best-effort）のは Issue #403
+- その試みが痕跡を残さず失敗し、後になってレビュアーが追跡 Issue を閉じたときに誰も見ない Actions のログの奥でワークフローが失敗して初めて表に出ることは Issue #478
+
 ### 目的
 
 "Allow GitHub Actions to create and approve pull requests"（Settings → Actions → General → Workflow permissions）リポジトリ設定が有効かを確認する。`review-issue-close-sync.yml`（Issue #313）の `Commit and open PR` ステップはこの設定に依存しており、無効なまま放置されると自動マージが失敗する（Issue #403）。`wikicommit-init` はこの設定をベストエフォートで自動有効化しようと試みるが、その試行が失敗しても通常の操作では痕跡が残らない — 失敗が顕在化するのはレビュー追跡Issueをcloseした数日後、しかもGitHub Actionsのログの中という運用者・読者どちらの目にも普段触れない場所でしかない（Issue #478）。本スクリプトは `wikicommit-status` の定期実行のたびにこの設定を再確認することで、ドリフトを事故ではなく能動的に検知できるようにする。
@@ -817,6 +1178,15 @@ Issue #752 が `rules_version` の echo 検証を成立させられたのは、�
 **読み取り専用**（`wikicommit-init` の Step 3 と異なり、この設定を自動修復しない）: `wikicommit-status` は定期ヘルスチェックであり、ユーザーの目に触れないままリポジトリ設定を書き換えるのは踏み込みすぎと判断した。有効化コマンド自体は `wikicommit-init` Step 3 と同じ `gh api -X PUT ...` をそのまま提示する。
 
 ## check_property_wikilink_reinforcement.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 215 → 209、コード 85 → 85、docstring 76 → 69、コメント 27 → 28、空行 27 → 27（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 14 → 0（うち 1 つは行をまたいで `Issue` と `#550` が分かれたもの）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 範囲の分類（entity-only / mixed）は Issue #496
+- このスクリプトは Issue #539。Issue #523 が補強の抜けを 1 つ手で見つけて直し（BlogPosting.md / NewsArticle.md の `publisher` は、補強のある `author` と同じ entity-only の範囲を持ちながら補強が無かった）、その PR への `/code-review --fix` が同じ `--show-range` の照合を繰り返して他の標準型テンプレートに同じ形を 4 つ見つけた（Organization.md の foundingLocation、Person.md の affiliation、Place.md の containedInPlace、Event.md の organizer / performer）。「補強」の 2 つの形と、それを型テンプレートの標準にしたのも Issue #523
+- 文字列でない `granularity` の箇条書きに WARNING を出すのは Issue #649
+- 箇条書きにリンクを指す手掛かりを求めるのは Issue #650。言及だけの判定は、HowTo.md の境界の規則が `HowTo.tool` を消したのが Issue #550、`tool` / `supply` を空のまま置けと書いた箇条書きが両方を消したのが Issue #551
 
 ### 目的
 
@@ -847,6 +1217,16 @@ Issue #523 は `BlogPosting.md`/`NewsArticle.md` の `publisher`（`author` と�
 
 ## check_recurring_characters.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 188 → 188、コード 84 → 84、docstring 69 → 69、コメント 13 → 13、空行 22 → 22（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 6 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #560
+- `check_wanted_pages.py` が素の文字列の名前を数えない限界は Issue #318（docstring はそれを `properties:` の値に当てはめたものと書いていた）
+- 既にある Person ページを指すべき値を WikiLink にすることは Issue #496、それを `character` だけでなく entity を範囲に持つ `properties:` のキー全体で報告する `check_unlinked_entity_mentions.py` は Issue #561
+- slug の規則（英語の識別子・種類ごとに翻訳か翻字）は Issue #193
+- `check_wanted_pages.py` の TYPE_MISMATCH の区別は Issue #563
+
 ### 目的
 
 この取りこぼしは既存のどのチェックにも掛からない。`check_wanted_pages.py` は `[[Type/slug]]` 形式の WikiLink しか読まないため、プレーンテキストの名前は wanted page として計上すらされない（Issue #318 が明記した「WikiLink 構文が一度も使われていない言及は対象外」という限界が、`properties:` の値についても同じように効く）。`check_orphans.py` は既に存在するページへの被リンクの話であって無関係。結果として `wikicommit/decameron-wiki` は健全な数字を返し続け、その裏で 4 話の主人公である Calandrino が「Calandrino」という同一のプレーンテキストとして 4 回独立に列挙されるだけで、ページを 1 つも持っていなかった（Issue #560）。
@@ -870,6 +1250,15 @@ Issue #523 は `BlogPosting.md`/`NewsArticle.md` の `publisher`（`author` と�
 
 ## check_unlinked_entity_mentions.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 189 → 190、コード 91 → 91、docstring 67 → 68、コメント 10 → 10、空行 21 → 21（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 5 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #561
+- Pass 3 が `properties:` の値を WikiLink にするかを Schema.org の範囲だけで決めることは Issue #496
+- 本文の散文を対象にしないことについて、docstring は「Issue #318 の限界は自由な文には残る」と書いていた（`check_wanted_pages.py` が素の文字列でしか言及されない概念を見ない限界。本文ではそう書き直した）。`properties:` の値が定義上短く構造化されていることは Issue #495
+- slug を言語中立の英語の識別子にする規則は Issue #193
+
 ### 目的
 
 Pass 3 は `properties:` の値を WikiLink にするかどうかを Schema.org の RANGE 分類のみで決め（Issue #496）、その指示は「参照先ページが未作成であることを理由に WikiLink を諦めるな」と**名指しで**述べている。それにもかかわらず `wikicommit/decameron-wiki` の `Book/decameron.md` は、`character` に並ぶ 10 人の語り手のうち、**同じ ingest で先にページが書かれた 8 人だけが WikiLink 化され、後の ingest でページが作られた 2 人がプレーンテキストのまま**になっていた。同一 property・同一値リスト・同一型・同一の資格で、分かれ目は取り込み順序だけである。
@@ -888,6 +1277,14 @@ Pass 3 は `properties:` の値を WikiLink にするかどうかを Schema.org 
 
 ## check_installed_type_usage.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 180 → 181、コード 99 → 99、docstring 54 → 55、コメント 4 → 4、空行 23 → 23（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 4 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #565。docstring は、入っている型ファイルを前にしてページが無い形を「それまで何も探していなかった」と書いていた
+- 同じ力（祖先の型に落ちる）が `DefinedTerm` に働くことを見つけ、型を*提案する*側で手当てしたのは Issue #447
+- `provenance` フィールドは Issue #519
+
 ### 目的
 
 `wikicommit/saitama-city-wiki` は `Park.md`・`Museum.md` を人間の承認を経てインストールしていたにもかかわらず、公園 7 件・博物館 2 件を素の `Place` として生成していた — しかも**型ファイルを追加したのと同じバッチ**で（型リストが古かったのではない）。その間 `check_schema_coverage.py` は 0 件を報告し続けた。`Place` にはスキーマファイルがあるためである。
@@ -898,6 +1295,14 @@ Pass 3 は `properties:` の値を WikiLink にするかどうかを Schema.org 
 
 ## check_self_referential_tags.py
 
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 135 → 133、コード 65 → 65、docstring 45 → 43、コメント 7 → 7、空行 18 → 18（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #571
+- タイトル・型と同じタグを散文で禁じたのは Issue #275。docstring は、再発の例としてパイロットの `Place/minuma-tanbo.md`（`見沼田んぼ`）・`Place/saitama-shintoshin.md`（`さいたま新都心`）と、自分のカテゴリでタグ付けされた 5 ページを挙げていた（下の「目的」の段落と同じ例）
+- `check_property_wikilink_reinforcement.py` は Issue #539
+
 ### 目的
 
 `tags` は「複数ページを横断して同じ概念で括る」ためのフィールドである（`docs/DesignDoc-data.md` §4.1・Issue #275）。ページ自身の `title` と同じタグはそのページ自身としか括れず、`type` と同じタグは `type:` フィールドが既に述べていることの繰り返しになる。どちらも Issue #275 が散文で明示的に禁じたが、**その後のパイロットで両方とも再発した**（`Place/minuma-tanbo.md` の `tags: [見沼田んぼ, ...]`、`Place/saitama-shintoshin.md` の `tags: [さいたま新都心, ...]`、および型と実質重複するカテゴリタグ 5 件）。
@@ -905,6 +1310,19 @@ Pass 3 は `properties:` の値を WikiLink にするかどうかを Schema.org 
 生成時の指示だけに依存し**検出手段が無い**ルールは drift する。`check_property_wikilink_reinforcement.py`（Issue #539）が「一度限りの手動監査を自動化する」のと同じ位置づけである。
 
 ## check_schema_files.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 400 → 394、コード 205 → 205、docstring 134 → 129、コメント 27 → 26、空行 34 → 34（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 11 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #889。それまでは `wikicommit-generate` の指示が「Nothing validates a schema file」と書いており、そのとおりだった。道具（`check_schema_org_type.py`・`_schemaorg_vocab.py`・`provenance_of()`）は揃っていて、ファイルに対して走らせる主体だけが無かった。`granularity_raw_bullets()` を単純に保つのは Issue #889 の 2 点目
+- `TRUNCATED_BULLET`（空白の後の `#` がコメントを開いて行の残りを落とす）は、Issue #649 が「何も警告しない」と名指しした失敗
+- `provenance` の 7 つの値と、欠けていることを「そのフィールドより前に作られた」と定義したのは Issue #519
+- `TYPE_PATH_MISMATCH` はページ側で Issue #545 が足した検査と同じもの
+- `NO_RATIONALE` は Issue #548
+- `granularity` の散文の良し悪しを判定しないのは、Issue #552 が同じ結論に達して指示の強化で止めたため
+- ファイルをサブディレクトリに移すと型が見つからなくなる問題は Issue #575
+- `Boundary with NewsArticle: ...` は、Issue #550 がコロンを em ダッシュに替える前に 3 つのテンプレートが持っていた形
 
 ### 目的
 
@@ -949,13 +1367,340 @@ Pass 3 は `properties:` の値を WikiLink にするかどうかを Schema.org 
 
 `/wikicommit-relate`（Issue #1095）が使う 2 本。設計判断の全体（関係の語彙・置き場所・形式）は `docs/DesignDoc-data.md` §4.5.2 にある。
 
+**`record_relation.py` の docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 191 → 191、コード 124 → 124、docstring 44 → 44、コメント 4 → 4、空行 19 → 19（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+`record_relation.py` の docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1095
+
+**`check_name_collisions.py` の docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 136 → 136、コード 86 → 86、docstring 37 → 37、コメント 1 → 1、空行 12 → 12（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 2 → 0。出力する文字列には `#NNN` は無い。
+
+`check_name_collisions.py` の docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1095
+- 生成が既存のページをタイトルと別名でも照合するのは Issue #1096（docstring は「Issue #1096 以降」と書いていた）
+
 ### check_name_collisions.py
 
 終了コード: 常に `0`（報告のみ。`/wikicommit-merge` の品質ゲートには入れない — 入れると既存のパイロットがマージ不能になる）。
 
+## check_groups.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 129 → 129、コード 87 → 87、docstring 29 → 29、コメント 1 → 1、空行 12 → 12（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 2 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- グループファイルは Issue #1035
+- グループファイルを持たない Type を報告しない理由（常に点いている行は読まれなくなる）は Issue #562
+
+## check_external_links.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 335 → 335、コード 229 → 229、docstring 68 → 68、コメント 9 → 9、空行 29 → 29（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 7 → 0（うち 3 つは行をまたいで `Issue` と `#1243` が分かれたもの）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1182
+- `/wikicommit-merge` の lychee がそのバッチで変わったページだけを見るのは Issue #1196
+- 所見を `{"kind", "pages", "text"}` の形で持ち、文言の書き出しに頼らないこと、それより前の素の文字列のファイルの扱い（進捗ファイルは捨てて最初から・結果ファイルは `read_legacy_findings()` が読む）は Issue #1243
+
 ## merge_pages.py / rewrite_merged_links.py
 
 `/wikicommit-generate --regenerate <残すページ> --merge <吸収するページ> [...]`（Issue #1119）が使う 2 本。設計判断の全体は `docs/DesignDoc-data.md` §4.5.2 の「統合」の節にある。本文の書き直し（Pass 3 / 4）はエージェントが行い、統合に関わる**決定論的な部分**をこの 2 本が持つ（Issue #474）。
+
+**`merge_pages.py` の docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 368 → 368、コード 263 → 263、docstring 54 → 54、コメント 1 → 1、空行 50 → 50（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+`merge_pages.py` の docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1119
+
+**`rewrite_merged_links.py` の docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 179 → 178、コード 110 → 110、docstring 46 → 45、コメント 6 → 6、空行 17 → 17（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 2 → 0。出力する文字列には `#NNN` は無い。
+
+`rewrite_merged_links.py` の docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このスクリプトは Issue #1119
+- 書き換えだけでは片付かないものを示す 2 つの注記（`SELF_LINK:` / `ALSO_LINKED:`）は Issue #1131
+
+## rename_page.py
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 290 → 290、コード 190 → 190、docstring 59 → 59、コメント 9 → 9、空行 32 → 32（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `check_review_coverage.py` と公開バナーが `renamed_at` の項目を辿ってレビュー記録に戻るのは Issue #1162
+
+## init.py
+
+**ScriptSpec に節を持たないスクリプトの置き場（Issue #1343。メンテナの判断で、最初に当てはめたのが本節）**: 本文に節を持たないスクリプトは、本文に節を起こさない。仕様は今ある場所を正本のままにする — 共有スクリプトなら `docs/DesignDoc-skills.md` §11.5 の委譲表、`init.py` なら `docs/DesignDoc-data.md` §3.1・§3.3（何をどこに配り再 init で何が更新されるかは `_root_outputs.py` の `update` 列）と `docs/DesignDoc-skills.md` §11.1。docstring にある仕様の文はそのまま残してよく、移すのは経緯だけである。経緯の置き場として、このファイルにスクリプト名の見出しを起こす（本文の節と揃えた見出しの後、付録の前に置く）。`convert_wikilinks.py` は Skill から呼ばれず §11.5 に行が無かったため、この判断の前に本文へ節を起こしている（上の同名の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 1,276 → 1,265、コード 723 → 723、docstring 173 → 168、コメント 279 → 273、空行 101 → 101（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 46 → 0。`Issue` の付かない `#NNN`（`#374`・`#160`・`#211`・`#93`・`#94`）もコメント・docstring からは外した。`--update-theme` の `--help` に残る `(#374 — ...)` は出力する文字列であり、この移行（コメント・docstring）の範囲外なので残した — `tools/check_distributed_issue_refs.py` の出力の検査は `Issue #NNN` の形しか見ないため、これを検出しない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `_version.py` が利用者のリポジトリに届く唯一の版の出所であること（`.claude-plugin/plugin.json` は配布リポジトリに残る）は Issue #577。`copy_tree()` が `__pycache__` を刈るのも同じ Issue（開発リポジトリでは `.wikicommit/scripts` が `templates/scripts` へのシンボリックリンクなので、スクリプトを 1 度走らせると `.pyc` が溜まる）。`wikicommit_version` を持たない `config.yml` は Issue #577 より前に作られたもの。`node_modules/` を走査の前に刈る（`os.walk()` にした）のは #211
+- 再 init は `.wikicommit/scripts/` を `--no-overwrite` の下でも上書きする（Issue #647）。具体的に壊れていたのは `_version.py` で、古いまま残ると `generated_with` / `translated_with` が新しい Skill で作ったページを古い版で作ったと主張した。この扱いは Issue #712 で `_root_outputs.py` の `update` 列に宣言する形へ移った。`copy_tree()` が消さないため、上流で改名したスクリプトの古い名前が残るのは Issue #583
+- コピーのフラグを `_root_outputs.py` の `update` 列から引く `_flags()` は Issue #712。呼び出し箇所ごとにリテラルで書いていたため、`.wikicommit/config.yml` と `.wikicommit/schema/` がフラグを持たず、利用者のテーマ・`targets`・手で直した型テンプレートを守るのが `--no-overwrite` だけになっていた
+- ルートに置く素のコピーを `_root_outputs.py` の 1 つの一覧から作り、`print_next_steps.py` の `git add` 案内も同じ一覧から作るのは Issue #642。一覧が 2 つあったため、`install-local-plugins.cjs` がコミットを促されないまま配られた（Issue #556）
+- `quartz.config.yaml` を `copy_file()` ではなく `write_file()` で書き、`pageTitle` の既定をリポジトリのディレクトリ名にしたのは Issue #317。`pageTitleSuffix` に同じ名前を ` - ` 付きで入れたのは Issue #679 で、それまでの空の既定では、サイト全体のどのタブ・`og:title`・`twitter:title` にもサイト名が載らず、トップページは「Wiki」とだけ表示されていた
+- フッターの `{REPO_URL}` は Issue #557。フッターのプラグインが Quartz 自身のリポジトリを GitHub のリンクとして持っていたため、生成した Wiki のいちばん目立つリンクが上流の SSG を指していた（`pageTitle` に Issue #317 でリポジトリごとの既定を与えたのと同じ理由）。リモートが解決できずリンクを落としたときに `NOTE:` を出すのも同じ Issue
+- `quartz.config.yaml` の `locale` を `primary_lang` から決める表は Issue #771。それ以前はテンプレートに `locale: en-US` が固定で書かれ init が置換しなかったため、日本語の Wiki は本文とバナーが日本語、サイドバー・検索・グラフが英語で配られた（翻訳はあったが届いていなかった）
+- WikiCommit 自身がラベルを持つ 10 言語は Issue #1017 で Wikipedia のポータルから決めた。その言語に無い `primary_lang` を選んだ運用者にだけ告げる（公開ページでは告げない）判断は Issue #825
+- 改行の慣習（CRLF / LF / 混在）を保って書き戻す `_read_keeping_newline()` / `_write_with_newline()`、および `_VERSION_LINE_RE` の `[^\r\n]*` は Issue #1189
+- `config.yml` を YAML の読み書きではなく文字列で書き換える理由（コメントにしか書かれていない例が失われる）は Issue #713。その例として挙げた `site_description` の言語別の例は Issue #671 で足したもの。`entity-policy.md` のスイッチ（`--exclude-living-persons`）も同じ理由で文字列で書き換える（Issue #837）。`--update-version`・`--add-config-keys`・プレースホルダの既定値（`_CONFIG_PLACEHOLDER_DEFAULTS`）も Issue #713。`{VERSION}` を引用符で二重に包んで `wikicommit_version: ""0.2.0""` を書いた不具合が実際にあり、`check_distribution_freshness.py` が自身の置換について同じ罠を記録している（Issue #712）
+- `re.sub` の置換に文字列ではなく lambda を渡す理由は `set_frontmatter_field.py` の Issue #371
+- `--update-theme`（`--theme` は再 init では効かない）は #374、`theme` フィールドは #160 で足した。`theme` を持たない `config.yml` はそれより前のもの
+- `.claude/settings.json` の `skillOverrides` を鍵ごとにマージするのは Issue #953。テンプレートが名指す 3 つの Skill は Issue #945 で `disable-model-invocation` を外し（無人実行の経路を開くため）、通りすがりの依頼で起動されうるようになった
+- README は Issue #1034。init が README.md を編集しないと決めたのは Issue #282 で、README が無いときはその理由が成り立たないので書く。LLM が書いた文を含まないことが基盤コミット（Issue #843）に載せられる理由。英語だけなのは、ja / en 以外の言語も予定しているため `primary_lang` で切り替えていない
+- `.wikicommit/guides/` は Issue #846。配布物が開発リポジトリの `docs/` を指してはならないのは `docs/DesignDoc-skills.md` §11.9
+- `.wikicommit/review/` を空で作るのは Issue #750（レビュー記録）
+- `quartz-plugins/` から vitest 関連（#93）・eslint 関連（#94）のファイルを除く
+- `GITIGNORE_READY:` を Quartz の `.gitignore` 追記の後に出すのは Issue #873。SKILL.md が `.gitignore` の中身を読まずにこの 1 行だけを読むのは Issue #474（決定論的な判定をスクリプトに持たせる）
+
+## add_source.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5 の委譲表の `add_source.py` の行。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 1,854 → 1,850、コード 945 → 945、docstring 431 → 425、コメント 269 → 271、空行 209 → 209（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 41 → 0。`Issue` の付かない `#NNN`（`#191`・`#192`・`#213`・`#269`・`#310`・`#425`・`#567`・`#570`・`#572`・`#573`・`#715`・`#951`・`#958` 等）もコメント・docstring からは外した。出力する文字列に残る 3 か所 — `--check-path-cache` / `--path-cache-path` の `ERROR:` の理由（`a pre-Issue-#476 .wikicommit/ingest/ tree is never auto-migrated`。2 か所）と `--fetch-url` の `--help`（`..., #527)`）— はこの移行（コメント・docstring）の範囲外なので残した。`tools/check_distributed_issue_refs.py` の出力の検査は `Issue #NNN` の形しか見ないため、どちらも検出しない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- スクリプトを Skill 内ではなく `.wikicommit/scripts/` に置くのは Issue #1210（wikicommit-collect・wikicommit-ask・`resolve_source_cache_path.py` も `--fetch-url` 等を呼ぶため）。`resolve_source_cache_path.py` が `add_source.py` を隣から呼ぶのも同じ Issue
+- 独自 User-Agent（`USER_AGENT`）と `--fetch-url` が `markitdown` の Python API に UA 付きの `requests.Session` を渡す形は Issue #527（既定の python-requests UA が Wikimedia 系ドメインに 403 で拒否された）
+- `KNOWN_SOURCE_LICENSES` と `source.license` の初期値（明示指定 > 既知ドメイン対応表 > 空欄）は Issue #558。`--license-for-url`（登録より 1 歩前に同じ表を引く読み取り専用モード）は Issue #646
+- `SHARE_ALIKE_LICENSE_PREFIXES` と登録時の ShareAlike 通知は Issue #570（Creative Commons ほか）。強い・弱いコピーレフトを足したのは Issue #951 で、弱いコピーレフトも一律で入れるのはその検討事項 1、通知を「負いうる」と書いて断定しないのは検討事項 2 の結論。`eupl`・`cpl`・`ms-rl` を足し CeCILL を意図的に入れなかったのは Issue #958。「評判ではなく条項で判定する」「確認済みのものだけを持つ」はこの表の規律として Issue #425 で決めたもの
+- `PARTIAL_EXTRACTION_URL_NOTES` と登録時の partial extraction 通知は Issue #715。partial extraction という失敗クラスは Issue #574 が YouTube（字幕が黙って落ちる。ガード C）について定義したもので、GitHub の Issue / PR スレッドはその 2 例目だった
+- `type: url` の同一性を導出ファイル名ではなく `source.url` の走査で判定し、クエリを残して `normalize_url_for_identity()`（トラッキングパラメータを落とし並べ替える）を通すのは Issue #572。それ以前はクエリを落としていたため、`https://www.youtube.com/watch?v=<id>` がすべて同じ `watch` に潰れ、2 本目の動画の登録が 1 本目の管理ファイルに対して黙って成功を報告していた。導出名が埋まっているときにハッシュ接尾辞付きの代替パスへ退避すること、長い名前をハッシュ付きで切り詰めること（`_MAX_STEM_BYTES`）、`youtu.be/<id>` と `youtube.com/watch?v=<id>` を同一視しないこと（サイト固有の知識が要る）も同じ Issue
+- `type: path` の同一性を `source.path` の走査で判定し、管理ファイル名を拡張子の置き換え（`with_suffix(".md")`）から付け足し（`raw/paper.pdf.md`）に変えたのは Issue #573。それ以前は `raw/paper.pdf` と `raw/paper.docx` が同じ管理ファイルに解決し、後から登録した方が既存ソースを `status: outdated` に誤って書き換えていた（登録したはずのファイルはどこにも記録されなかった）。`type: url` 側の Issue #572 と同じ柱
+- 管理ファイルをホスト名のディレクトリに分けたのは Issue #191（それ以前は全 URL が 1 つのディレクトリにフラットに置かれた）。非 ASCII のパーセントエンコードだけを復号し `%2F` 等の ASCII は残すのは Issue #192。素のドメインの URL を `{host}/index` ではなく `<host>.md` にし、ホストの無い URL を拒否するのは Issue #213。どの命名変更も自動移行はせず、同一性を走査で判定するので不要になっている
+- バックスラッシュ区切りのパスを `/` に正規化する（`normalize_source_path()`・`_yaml_single_quote()`）のは Issue #269
+- `source.lang` の空の行を雛形に置くのは Issue #989。消費者（俯瞰ページのソース言語別集計）が同じ変更で入っていたので、受け皿だけ配る形（Issue #553）には当たらないと判断した
+- `status: retracted` を `RETRACTED` で返し（`SKIP` に落とさない — Issue #737 の穴 (2)）、`## Retraction Reason` を 1 行に畳んで添えるのは Issue #737。人間にしか書けない値であることは証拠拘束ルール（Issue #442）から、理由を散文で残す形は `## Failure Reason`（Issue #408）から来ている
+- `failed_pages` の有無で `partial` を分けるのは Issue #567。Issue #992 より前はポリシー除外のみのソースも `partial` になっていた（今は Pass 4 が `generated` にする）ため、古い管理ファイルにはそれが残る
+- 完結済みの URL（`generated` / `failed` / `excluded`、および `failed_pages` の無い `partial`）を `RECHECK` で返すのは Issue #310
+- `--write-hash` は Issue #157 のスクリプト委譲パターン。`--check-hash`（キャッシュ済みスクラッチの再利用）は Issue #278
+- `type: path` の抽出テキストキャッシュ（`--check-path-cache` / `--path-cache-path`。`.wikicommit/.cache/extract-path/`）は Issue #885。URL 側の scratch と木を分けて既存の URL キャッシュを失効させずに衝突を無くした判断は、Issue #583 が改名を見送ったのと同じ代償計算。`.wikicommit/source/path/` の外の管理ファイルに `None` を返すのは、Issue #476 の改名（`.wikicommit/ingest/` → `.wikicommit/source/`）が自動移行されないため
+- `--check-path-cache` の `RAW` / `extract=` をシンボリックリンクの解決先の拡張子で判定するのは Issue #1216（`--obtain` 側の同じ扱いは Issue #1208）。存在の判定とハッシュも同じ 1 回の解決に対して行うのは Issue #1242。リポジトリ外の判定を存在の判定より前に置くのは Issue #1207
+- `FETCH_TIMEOUT` は Issue #1038。それ以前は `markitdown` がタイムアウト無しで `session.get()` を呼び、ヘッダを送って止まったサーバーがハーネスに殺されるまで実行を止めていた（何も記録されなかった）。`NETWORK_UNAVAILABLE`（exit 3）を `ERROR` から分けたのは Issue #1020 で、サーバーに届いた後の失敗を `ERROR` 側に戻す `_is_connection_failure()` の除外は Issue #1038。連続したら止める線引きはガード C（Issue #574）と同じ
+
+## resolve_source_cache_path.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5 の委譲表の `resolve_source_cache_path.py` の行。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 959 → 959、コード 442 → 442、docstring 390 → 390、コメント 42 → 42、空行 85 → 85（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 40 → 0（`Issue` の付かない `#191`・`#192`・`#572`・`#573` も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- スクリプトは `wikicommit-ask` の `--include-source`（Issue #470）のバックエンドとして作られた
+- 識別子からファイル名を再計算せず管理ファイルを走査するのは、Issue #191（旧フラット命名）・#192（旧パーセントエンコード命名）・#572（クエリを落としていた命名）・#573（拡張子を置き換えていた命名）より前に登録された管理ファイルが自動移行されないため。`add_source.py` の登録側の走査（Issue #572 / #573）と同じ判定
+- `type: path` のキャッシュの木（`.wikicommit/.cache/extract-path/`）は Issue #885。管理ファイルの相対パスを末尾の `.md` ごとそのまま使う規則は Issue #1326 — `with_suffix("")` で `.md` を落としていたため、`pdf-2606.05608.md` が `pdf-2606.md` になり、接頭辞が同じ別ソース（`pdf-2606.17799.md`）とキャッシュが重なって、別ソースの本文を返し `--settle` ではその置き場所を上書きしていた
+- 識別子を argv ではなく stdin から読むのは Issue #375
+- exit 1 の 2 つの意味を `UNREGISTERED:` / `NO_CACHE:` で分け、`--settle` を足したのは Issue #1036。それ以前、clean checkout ではキャッシュが常に空なので、`--include-source` は URL ソースを毎回諦めていた。review / fix が `.wikicommit/.cache/refetch/` に取得した後で `--settle` を呼ぶのは Issue #1137
+- `--type path` の `OUTSIDE:` は Issue #1206
+- `--obtain` は Issue #1190。それ以前はキャッシュ照会・`type: path` キャッシュの版の照合・`add_source.py --fetch-url`・`--settle`・scratch の扱いを SKILL.md の散文で順に指示していた。`UNAVAILABLE: outside` は Issue #1201。`type: path` の拡張子と返すパスをシンボリックリンクの解決先にしたのは Issue #1208（範囲の検査と読む先を 1 回の解決で決めるのも同じ）、generate の Pass 1 も同じ解決先を見るようにしたのは Issue #1216
+- `--obtain-sources` は Issue #1211。それ以前は review / fix が取得の前に `check_retracted_sources.py --list` を別に走らせていた。行に元の識別子を併記しないのは Issue #1216。時間の区切り（`--budget` / `--from` / `CONTINUE:`）は Issue #1240
+- 子プロセスとの入出力を UTF-8 に固定し（`run_fetch()`）、このスクリプト自身の出力も UTF-8 にする（`use_utf8_streams()`）のは Issue #1256 — 子が成功した後で、cp1252 の端末やパイプでこのスクリプト自身の `print` が `UnicodeEncodeError` を送出していた。非 UTF-8 のロケールで argv に URL を載せられないときに 1 行で返すのと、ファイル名の綴りの違いを吸収する `_same_identifier()` は Issue #1265（登録済みの非 ASCII のソースが `UNREGISTERED` になり、`path` の経路では `status: retracted` を越えて生ファイルが読まれていた）
+- `add_source.py` を隣の `.wikicommit/scripts/` から呼ぶのは Issue #1210
+- 取り下げ済みソースを exit 2（`RETRACTED:`）で伝えるのは Issue #918。それまで取り込み側（Issue #737）では再登録も `outdated` への復帰も止まるのに、参照側（`--include-source`）にはガードが 1 つも無かった。人間にしか書けない値であることは証拠拘束ルール（Issue #442）から。`retracted` 以外の `status` を見ないのは Issue #553 の「消費者と同時に足す」。frontmatter が壊れた管理ファイルに `WARNING:` を出すのも、`status: retracted` が手書きの値（Issue #737）であるため
+
+## _root_outputs.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-data.md` §3.3〈再 init の挙動をこのモジュールの `update` 列が決める〉と、`docs/DesignDoc-skills.md` §11.5 の委譲表の `_root_outputs.py` の行・「ルート生成物の一覧は 1 つに保つ」。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 672 → 662、コード 298 → 298、docstring 183 → 179、コメント 134 → 128、空行 57 → 57（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 34 → 0。`Issue` の付かない `#93`・`#94`・`#557`・`#313`（`Issue #317 / #557` のような並記の 2 つ目を含む）もコメント・docstring からは外した。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このモジュールは Issue #642。それまで `init.py` が書くファイルと `print_next_steps.py` が `git add` を促すファイルは手で保守する 2 つの一覧で（SKILL.md の散文を数えれば 3 つ）、`install-local-plugins.cjs` が `init.py` にだけ足され（Issue #434）案内から漏れたため、`--quartz --quartz-pages` で初期化したすべてのリポジトリが最初の GitHub Pages ビルドで `postinstall` の MODULE_NOT_FOUND を出して失敗した（Issue #556。パイロット 2 つで再現）。Issue #556 はそのずれを*検出する*テストを足し、Issue #642 は 2 つ目の一覧そのものを無くした
+- `package-lock.json` を `in_git_add=False` にして別のコマンドで案内するのは Issue #556
+- 既定の案内を `git add -A` にしたのは Issue #842。それより前は選択的な列挙が既定だったので、`vocab_cache` の条件と `in_git_add=False` が、存在しないパスで基盤コミットが abort するのを防いでいた。Issue #842 の後も、列挙は既存のリポジトリ向けのフォールバックとして下に残るので、両方を残した
+- `update` 列（`UPDATE_POLICIES`）・`copy_flags()`・`is_quartz_plugin_dev_artifact()` をこのモジュールに置き init と鮮度チェックで共有するのは Issue #712。除外する開発用ファイルは vitest 関連が #93、eslint 関連が #94
+- `COMPARISONS` が常時点灯する警告を避ける理由として挙げていた先例は、Issue #562 が低密度ガードを同じ理由で格下げしたこと
+- `condition="readme_created"` と `README.md` の行は Issue #1034。`README_LICENSE_TEXT` はライセンス表示の第 4 層（Issue #645）で、init と `print_next_steps.py` が 1 つの文字列を共有する形にしたのは Issue #1034
+- `.agents` / `skills-lock.json` の行は、`npx skills add` が 2 つ以上のエージェントを対象にすると実体を `.agents/skills/<name>/` に置き `.claude/skills/<name>` をそこへのシンボリックリンクにすること（Issue #555）による。`origin=install`・`update=skip` にしたのは Issue #948
+- `.claude/settings.json` の行（`skillOverrides`）は Issue #953。対象の 3 つの Skill は Issue #945 で `disable-model-invocation` を外したもの
+- `.wikicommit/entity-policy.md` は Issue #667、`.wikicommit/review-rules.md` は Issue #752、`.wikicommit/schema-authoring.md` は Issue #886（型を足す 4 つの経路がそれぞれ手順の全体を持っていた）
+- `.wikicommit/guides` は Issue #846。それまで giscus の手順は 600 行のエージェント向け指示ファイルの末尾にしか無く（そのファイル自身が「聞かれたら見せる」と書いていた）、人に指し示す置き場が無かった。最初は 1 ファイルだったが、2 本目で何も変えずに済むようツリーとして登録した
+- `.wikicommit/view` は Issue #675、`.wikicommit/review` は Issue #750、`.wikicommit/groups` は Issue #1035（空の受け皿を配らないのは Issue #553）
+- `quartz.config.yaml` を置換で書くのは Issue #317（`pageTitle`）と Issue #557（フッターの URL）。`deploy.yml` を `--quartz-pages` だけに絞ったのは Issue #335、`review-issue-close-sync.yml` を全 variant に配るのは Issue #313。`.github/ISSUE_TEMPLATE/report.md` はバナーの報告リンク（Issue #245 / #313）の受け先で、Quartz 限定なのはバナーが Quartz プラグインであるため（Issue #339）
+- `missing_gitignore_patterns()` は Issue #873。それまで基盤コミットの申し出は「この実行が `.gitignore` を書いたか」（`SKIPPED: .gitignore` のログ）で判定しており、2 回目以降の init では WikiCommit 自身が作ったリポジトリでも申し出が止まっていた。テンプレートに後から入ったパターンの例として挙げた `.wikicommit/run/` は Issue #790
+
+## print_next_steps.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5 の委譲表の `print_next_steps.py` の行と「ルート生成物の一覧は 1 つに保つ」。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 700 → 690、コード 429 → 429、docstring 51 → 49、コメント 163 → 155、空行 57 → 57（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 29 → 0。`Issue` の付かない `#NNN` は無かった。出力する文字列（案内文・argparse の引数）には `#NNN` は無い。ただしこのスクリプトは `argparse.ArgumentParser(description=__doc__)` でモジュールの docstring を `--help` に出すため、docstring から `(Issue #350)` と経緯を外したことで `--help` の説明文も変わった（案内の出力そのものは変わらない）。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- スクリプトは Issue #350。それまで SKILL.md は `--quartz` / `--quartz-pages` の組み合わせごとにほぼ同じ案内を 3 つ書いており、その重複で SKILL.md が推奨行数を超えていた
+- テンプレートのパスをこのファイルの位置から求める `_templates_display()` は Issue #1021（Skill が `.agents/skills/` に置かれる場合がある）
+- コミット手順の前置きが「これはあなただけが実行するもの」と言わなくなったのは Issue #843。それまで挙げていた 2 つの理由（`.wikicommit/schema/` に書けない・`main` に直接コミットできない）はどちらも既に成り立っていなかった — init が明らかな型の判断で型ファイルを直接書くのは Issue #490 で、禁じられているのは著作であってコミットではない。断られた・非対話・失敗の経路でこの案内をそのまま残すのは、この手順を足した Issue #86 の対処を弱めないため。Quartz のセットアップが残っている間は申し出を延期し、手順を除いた案内を再表示してから申し出るのは Issue #865
+- 既定を `git add -A` にしたのは Issue #842。それまでの選択的な列挙は誰も生成しない `.gitmodules` / `quartz` を含み、`git add` が存在しないパス 1 つで全体を abort するため（実測で exit 128・0 ファイル）、案内を順に写すと基盤コミット全体が落ちた — Issue #86 がこの手順で防ごうとした状態そのもの
+- 既存の `.gitignore` が WikiCommit のパターンを持たない場合を、以前は「このスクリプトはフラグを渡されるだけでリポジトリを見ない（`--gitignore-skipped` のようなフラグも無い）」という理由で両方の場合を覆う散文で書いていた。これは基盤コミットの申し出と同じ誤った前提で（Issue #873）、`.gitignore` を読んで 2 つの注記を出し分ける形に改めた。`--repo-root` をこのスクリプトにも持たせたのも同じ変更
+- 存在しないかもしれないパスの注意書きに `.agents` / `skills-lock.json` が加わったのは Issue #948。行を実行時に折り返すのは、2 パス用に置いた固定の改行が 4 パスになったとき 124 桁まで伸びたため
+- `package-lock.json` の注記を `in_git_add=False` で列挙から外すのは Issue #556 の対応方針 3 の結論で、`in_git_add=False` を残すのも Issue #556 の再発防止。Issue #842 で既定が `-A` になり、既定の経路では注記が要らなくなった後も残している
+- `git add` の行を `_root_outputs.py` から作るのは Issue #642（2 つの一覧のずれが `--quartz-pages` の最初の Pages ビルドを壊した Issue #556 による）
+- LICENSE を書かないのは Issue #558。README の項目はライセンス表示の第 4 層（Issue #645）で、README を表示専用にし編集しないと決めたのは Issue #282。サイト全体の層は第 2 層
+- `.wikicommit/guides/` への案内は Issue #846。全 variant に出すようになったのは、Quartz と無関係なガイドが Issue #867 で加わってから — それまでは棚にあった唯一のガイドが Quartz のプラグインに関するものだったので、Quartz の variant に限っていた
+- `build_licensing_step()` が README を作った実行では README の項目を省く・`--readme-created` は Issue #1034（既存の README に触れないのは Issue #282）
+- `.wikicommit/schemaorg-vocab.json` は Issue #319。init の中でこれを作りうる最初の工程が明らかな型の判断（Issue #490）で、それより前は generate / collect だけが作っていた（その出力は merge でコミットされる）。条件が選択的な列挙だけを左右するようになったのは Issue #842
+- `npm run install-plugins` が成功していれば手順から省くのは Issue #380
+- Codex の呼び出し方（`$wikicommit-…`）の注記は Issue #1015
+- 手順番号が 2 桁になる場合の字下げは、Issue #846 で 10 手順の一覧が初めて現れた（`quartz_pages` で lychee も markitdown も入っていない場合）ため
+
+## _schemaorg_vocab.py
+
+本文に節を持たない（仕様は本文の `check_schema_org_type.py` の節 — 語彙を読み込んで共有することは「使用場面」、キャッシュの置き場と再取得は「保存先（Git管理下）」 — と、`docs/DesignDoc-skills.md` §11.5 の置き場所の表〈共有モジュール〉。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 353 → 344、コード 140 → 140、docstring 166 → 157、コメント 5 → 5、空行 42 → 42（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 15 → 0（`pre-Issue-#495`・`pre-Issue-#496` の形の参照も外した）。出力する文字列には `#NNN` は無い。他のスクリプトが import する共有モジュールなので、名前は 1 つも変えていない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このモジュールは Issue #495 で `check_schema_org_type.py` から切り出した。`validate_frontmatter.py` に新しく入った `properties:` の domainIncludes 検査が同じ語彙の読み込みと継承チェーンを要したため。切り出す前の同じロジックは `check_schema_org_type.py` にあり、自分で `ERROR: ...` 行を出していた。`property_in_domain()` を共有にしたのも同じ Issue
+- `rangeIncludes` / DataType の参照（`range`・`is_datatype`、`is_in_datatype_lineage()`）は Issue #496。`URL` がその動機になった例。これらのキーを持たないキャッシュ（Issue #496 より前の版が書いたもの）は自動で作り直す
+- property の `comment` と `properties_available_to()`（`--list-properties`）は Issue #497。Issue #495 が旧 `recommended` フィールドの「書き始めの手掛かり」としての役割を外したため
+- `.wikicommit/schemaorg-vocab.json` を Git で追跡するのは Issue #319
+- 古いキャッシュの代償が軽くなくなった（`validate_frontmatter.py` の型の実在検査が ERROR を出す）のは Issue #512
+- テスト用の環境変数 `WIKICOMMIT_TEST_SCHEMA_ORG_JSONLD` は Issue #285
+- `load_or_build_index()` がすべての失敗を `(None, error_message)` に畳むのは、`validate_frontmatter.py` が wikicommit-merge のたびにこれを呼ぶようになったため。それまではたまに呼ばれる `check_schema_org_type.py` の CLI だけがこの経路を通っていた。同じ docstring は呼び出し元を「the two callers」と数えていたが、いまは 6 本が呼ぶので数を外した
+- 導入済みの下位型を推測させずに示す（`installed_descendants()`）のは Issue #565
+
+## _frontmatter.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5 の置き場所の表〈共有モジュール〉。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 151 → 147、コード 47 → 47、docstring 83 → 79、コメント 0 → 0、空行 21 → 21（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 5 → 0（うち 1 つは行をまたいで `Issue` と `#232` が分かれたもの）。出力する文字列には `#NNN` は無い。他のスクリプトが import する共有モジュールなので、名前は 1 つも変えていない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このモジュールへの集約は 2 段で、`convert_wikilinks.py`・`check_wikilinks.py`・`check_orphans.py`・`check_translation_status.py`・`validate_frontmatter.py` が Issue #212、`check_expires.py`・`check_ingest_freshness.py`・`search_index.py` が Issue #231。それまでは各スクリプトが `---\n...\n---` の抽出を自前で持ち、実際のバグになる形で食い違っていた — BOM は `utf-8-sig` で読むものと素の `utf-8` で読むものがあり、BOM 付きのページ（一部の Windows のエディタが書く）は半数のスクリプトで frontmatter が黙って検出されなかった。空のブロックは、集約前の 5 本のうち 4 本が正規表現で抽出しており、`validate_frontmatter.py` だけが行の走査で正しく扱っていた。このモジュールはその行の走査を引き継いだ
+- 集約の前例として `_wikilink.py`（Issue #114）を挙げていた
+- `parse_frontmatter_cached()` のキャッシュは Issue #232。`check_wikilinks.py` と `convert_wikilinks.py` が同じ `@lru_cache` の包みをそれぞれ持つようになっていたのを、ここにまとめたのは Issue #266
+
+## _groups.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-data.md` §4.5.3。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 180 → 180、コード 109 → 109、docstring 37 → 37、コメント 10 → 10、空行 24 → 24（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 4 → 0。出力する文字列には `#NNN` は無い。他のスクリプトが import する共有モジュールなので、名前は 1 つも変えていない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- グループファイルは Issue #1035
+- 内容が変わった `reviewed` ページを `pending` に戻す `reset_review_on_content_change.py` は Issue #724
+- slug を言語中立にする規則は Issue #193
+- ラベルを言語ごとに持つ形（`site_description` と同じ形）は Issue #671
+
+## _skill_tree.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.3「Skill ツリーの位置を仮定してよい箇所・してはならない箇所」と §11.5「置き場所の判断基準」の `_skill_tree.py` の項。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 44 → 44、コード 11 → 11、docstring 27 → 27、コメント 0 → 0、空行 6 → 6（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 4 → 0。出力する文字列には `#NNN` は無い。他のスクリプトが import する共有モジュールなので、名前は 1 つも変えていない。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このモジュールは Issue #1021。それまで `record_run.py` と `check_distribution_freshness.py` はどちらも `.claude/skills/` を固定で持っており、Codex だけに入れたリポジトリでは、前者が正しく読んだパスを `token: missing` と記録し（Issue #925 が版ずれについて直したばかりの向き）、後者が「wikicommit-init is not installed」とすべて 0 の要約を出して、Issue #930 が実行の最初に置いた版ずれの検査が黙って空になった
+- `.claude/skills` を先に探す理由について、docstring は「Issue #1021 より前に動いていたすべてのリポジトリで、このスクリプトの答えをそれまでと同じに保つ」と書いていた
+
+## set_frontmatter_field.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5 の委譲表の `set_frontmatter_field.py` を挙げる行と、同じ節のスクリプト依存図。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 287 → 283、コード 148 → 148、docstring 90 → 86、コメント 9 → 9、空行 40 → 40（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 6 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 共有実装にしたのは Issue #371。それまでこの部分書き換えは 3 箇所に独立実装として重複していた — `wikicommit-review` の SKILL.md Step 5（`review_status` を無条件で `reviewed` に上書き）、`review-issue-close-sync.yml`（`pending` のときだけ上書き）、`remove_page.py`（`status` / `removed_at` 等の複数フィールドを足す。当時は `wikicommit-remove` の Skill 内）。本スクリプトは前の 2 つを置き換え、`remove_page.py` は Issue #371 の完了条件で対応範囲の外とした
+- `remove_page.py` が `.wikicommit/scripts/` に移ったのは Issue #1210（複数フィールドを 1 回で書く処理は自前のまま）
+- `--unset` は Issue #705
+- `FrontmatterFileError` と `apply_frontmatter_fields()` をプロセス内で使えるようにしたのは Issue #724（`reset_review_on_content_change.py` のため）
+
+## remove_page.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5 の委譲表の `remove_page.py` を挙げる行と、`docs/DesignDoc-pipeline.md` §6.5・`docs/DesignDoc-data.md` §4.5。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 292 → 291、コード 189 → 189、docstring 54 → 53、コメント 8 → 8、空行 41 → 41（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 5 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- `wikicommit-remove` の Skill 内から `.wikicommit/scripts/` に移したのは Issue #1210。それまでは Skill 内のスクリプトとして自己完結の慣行に従い、frontmatter の読み取りの写しを持っていた
+- `.wikicommit/wiki/` から `entity/` への改名は Issue #477
+- `rebuild_index.py` が `- [[<type>/<slug>]]` を書くようになったのは Issue #678。docstring は、それ以前はリストマーカーなしで、さらに `— <title>` の接尾辞が付いていたと書いていた
+- 空になった `##` 見出しを落とす `_drop_empty_sections()` は Issue #1136。グループごとの節（`_grouped_body()`）は Issue #1035
+
+## wikicommit-merge/scripts/workflow_checks.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.0 の Skill ワークフローエンジンと §11.5「置き場所の判断基準」の Skill ごとの `workflow_checks.py` の項、merge の工程は `docs/DesignDoc-pipeline.md` §6.2。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 1,025 → 1,024、コード 650 → 650、docstring 163 → 162、コメント 81 → 81、空行 131 → 131（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 5 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 各 Skill の検査が同じように読むヘルパーを `.wikicommit/scripts/_workflow_checks.py` に置いたのは Issue #1219
+- `path_argvs()` が 1 本のコマンド行を `limit` 文字以内に収める（インタプリタ・スクリプトのパス・フラグも数える）のは Issue #1263
+- `wikilink_argvs()` が `--changed` と `--deleted` を別々の呼び出しに分けるのは Issue #1257
+- `links` とバッチの回し方（`check_external_links.check_link_batches()`）を共有する、`/wikicommit-status` の全ページの検査は Issue #1182。構造化した所見を返しつつ、実行の `lychee.json` には文言だけを残すことは Issue #1243
+
+## check_quartz_setup.py
+
+本文に節を持たない（`docs/DesignDoc-skills.md` §11.5「置き場所の判断基準」の `wikicommit-init` の 4 本の 1 つで、仕様は docstring と `wikicommit-init` の SKILL.md の Step 3.d。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 71 → 71、コード 33 → 33、docstring 24 → 24、コメント 2 → 2、空行 12 → 12（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0（`Issue` の付かない `#229` も外した）。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- Quartz のセットアップ状態の判定をこのスクリプトにしたのは Issue #229。docstring は、この状態機械の判定をそれまではエージェントが読んでいた（「previously agent-read」）と書いていた
+- `quartz/` があるときに `npm run install-plugins` を best-effort で試し `install_plugins_ok` を返すのは Issue #380
+
+## _version.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-data.md` §3.3「`wikicommit_version` — 最後に同期した版」。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 69 → 69、コード 5 → 5、docstring 54 → 54、コメント 5 → 5、空行 5 → 5（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- インストール先のリポジトリまで届く唯一の版の出所にしたのは Issue #577
+
+## _workflow_checks.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.5「置き場所の判断基準」の `_workflow_checks.py` の項。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 177 → 175、コード 86 → 86、docstring 51 → 49、コメント 7 → 7、空行 33 → 33（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- このモジュールは Issue #1219。docstring は、それまで各 Skill の `workflow_checks.py` は単独で動くように書かれ、共有するヘルパーがそれぞれに写されて、写しがずれ始めていた — `read_markdown` が 2 つの Skill では `(frontmatter, body)` を、3 つ目では frontmatter だけを返し、2 つの `records_since` は引数も戻り値も違っていた — と書き、実行記録やレビュー記録の読み方を直すには写しを全部探す必要があったと書いていた（いまは、各 Skill に写したヘルパーはずれ、読み方を直すたびに写しを全部探すことになる、とだけ書く）
+
+## wikicommit-generate/scripts/workflow_checks.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.0 の Skill ワークフローエンジンと §11.5「Skill 内スクリプト」の表の `wikicommit-generate` の行、generate の工程は `docs/DesignDoc-pipeline.md` §6.1。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 629 → 629、コード 432 → 432、docstring 68 → 68、コメント 44 → 44、空行 85 → 85（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 3 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 各 Skill の検査が同じように読むヘルパーを `.wikicommit/scripts/_workflow_checks.py` に置いたのは Issue #1219（4 つの写しが持つブートストラップのコメントは同じ形のまま外した）
+- `MOVED_SCRIPTS` の 3 本を Skill 内の `scripts/` から `.wikicommit/scripts/` に移したのは Issue #1210
+- `page_in_lang_dir()` の docstring が書く不具合（入力されたままの `<Type>/<slug>` がレビューの工程の記録するパスに一致せず、`merge-absorb` が「not ready」として飛ばされ、実行は成功を報告したまま統合が途中で止まった）は Issue #1131
+
+## wikicommit-synthesize/scripts/workflow_checks.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.0 の Skill ワークフローエンジンと §11.5「Skill 内スクリプト」の表の `wikicommit-synthesize` の行。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 426 → 426、コード 315 → 315、docstring 41 → 41、コメント 22 → 22、空行 48 → 48（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 各 Skill の検査が同じように読むヘルパーを `.wikicommit/scripts/_workflow_checks.py` に置いたのは Issue #1219
+
+## wikicommit-translate/scripts/workflow_checks.py
+
+本文に節を持たない（仕様は `docs/DesignDoc-skills.md` §11.0 の Skill ワークフローエンジンと §11.5「Skill 内スクリプト」の表の `wikicommit-translate` の行、translate の工程は `docs/DesignDoc-pipeline.md` §6.4。置き場の判断は上の `init.py` の見出し）。
+
+**docstring・コメントから経緯を移した（Issue #1343。規則は Issue #1329）**: 移す前後の行数は、総行数 400 → 400、コード 272 → 272、docstring 41 → 41、コメント 35 → 35、空行 52 → 52（docstring 内の空行は docstring に数える。数え方は `convert_wikilinks.py` の記録と同じ）。`Issue #` はコメント・docstring で 1 → 0。出力する文字列には `#NNN` は無い。
+
+docstring・コメントにあって本文に無かった経緯は次のとおり:
+
+- 各 Skill の検査が同じように読むヘルパーを `.wikicommit/scripts/_workflow_checks.py` に置いたのは Issue #1219
 
 ## 付録: 本文の行に付いていた Issue 番号と書き換えた表・図の行（移行時点）
 

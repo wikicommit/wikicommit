@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """reset_review_on_content_change.py — 内容が書き換わった `reviewed` ページを
-`pending` へ戻す（Issue #724）。
+`pending` へ戻す。
 
 信頼ラダーの上段（`review_status: reviewed` と、そこに添えられた `reviewed_by`
-の実名）は「この文章を人間が読んだ」という主張である。ところが `reviewed` な
-ページの本文を書き換える経路が 2 つあり、どちらもその主張を動かさないまま
-文章だけを差し替えていた:
+の実名）は「この文章を人間が読んだ」という主張である。`reviewed` なページの
+本文を書き換える経路が 2 つあり、本スクリプトが無ければ、どちらもその主張を
+動かさないまま文章だけを差し替える:
 
-  - `wikicommit-generate` Pass 3 の `action: update`（既存の `reviewed` を
-    明示的に維持する規則を持っていた）
-  - `wikicommit-fix`（規則自体が無く、Edit してそのまま終わっていた）
+  - `wikicommit-generate` Pass 3 の `action: update`
+  - `wikicommit-fix`
 
 後者の方が鋭い — `/wikicommit-fix` は「レビュー済みの内容が誤っていた」から
 起動されるものであり、そのレビューが見落としたからこそ書き直された文章に、
@@ -48,23 +47,22 @@ bookkeeping だけの更新（ソース追記のみ等）が普通にあるた�
 同じ記述に裏づけが 1 件増えることはその判断を無効にしない。
 
 `expires_at` は内容側に残す — Pass 4 がこれを他の主張と同様にソースとの
-照合対象にしている（Issue #279）以上、検証対象の主張である。
+照合対象にしている以上、検証対象の主張である。
 
 ## なぜスクリプトか
 
 完全に決定論的に判定できる操作を SKILL.md の散文として書くと、非決定論的な
-失敗モードを持ち込む（Issue #474）。しかも本件は「人間のレビューが要るか否か」
+失敗モードを持ち込む。しかも本件は「人間のレビューが要るか否か」
 を左右する判定であり、`--regenerate` の valve が同じ理由で比較を意味的同一性
 ではなくテキスト一致にしているのと同じ配慮が要る。
 
 Usage:
     python .wikicommit/scripts/reset_review_on_content_change.py <page>...
 
-    <page> は `.wikicommit/entity/` または `.wikicommit/view/`（Issue #675）
-    配下のページ。`wikicommit-fix` は両方のツリーを対象に取るため、entity
-    ツリーだけを見るとその半分が黙って素通りする。`index.md` は
-    `rebuild_index.py` がビルド生成物として `reviewed` を刻むページなので
-    除外する（Issue #580）。
+    <page> は `.wikicommit/entity/` または `.wikicommit/view/` 配下のページ。
+    `wikicommit-fix` は両方のツリーを対象に取るため、entity ツリーだけを
+    見るとその半分が黙って素通りする。`index.md` は `rebuild_index.py` が
+    ビルド生成物として `reviewed` を刻むページなので除外する。
 
 Exit code:
     0 = 正常終了（戻した／変わっていない／対象外、のいずれも正常系）
@@ -96,7 +94,7 @@ BOOKKEEPING_FIELDS = frozenset(
 ACCEPTED_PREFIXES = (
     f"{ENTITY_DIR.as_posix()}/",
     f"{VIEW_DIR.as_posix()}/",
-    # Issue #477 の .wikicommit/wiki/ -> entity/ 改名は自動移行しないため、
+    # .wikicommit/wiki/ -> entity/ の改名は自動移行しないため、
     # 旧ディレクトリのままのリポジトリからも呼ばれうる。
     LEGACY_ENTITY_PREFIX,
 )
@@ -187,7 +185,7 @@ def process_page(raw_path: str) -> str:
 
     if page_path.name == "index.md":
         # `rebuild_index.py` がビルド生成のナビゲーションページとして書き出し、
-        # まさにその理由で `review_status: reviewed` を刻む（Issue #580）—
+        # まさにその理由で `review_status: reviewed` を刻む —
         # 人間のレビューを経ていない `reviewed` はここだけが正当である。
         # 降格させると `wikicommit-merge` は index.md を追跡 Issue の対象外に
         # しているため Issue も立たず、公開サイトに未レビューバナーが出たまま

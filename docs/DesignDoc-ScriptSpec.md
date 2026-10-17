@@ -18,6 +18,12 @@
 - **stdout**: 構造化出力行（`ERROR:` / `WARNING:` / `OK:` / `SUMMARY:` / `ORPHAN:` / `DUPLICATE:` / `WANTED:` / `TYPE_MISMATCH:` / `STALE:` / `OUTDATED:` / `EXPIRED:` / `MISSING_SOURCE:` / `UNTRANSLATED:` / `UNCOVERED:` / `page:` 等）。Skills がパースする。エージェントに次の行動を伝える出力は、**行のキーワードを次の行動に 1 対 1 で対応させ**（`resolve_source_cache_path.py --obtain-sources` の `READ:` は読む・`EXTRACT:` は抽出 Skill を呼ぶ、等）、行に指示文を埋め込まない — 指示は呼び出す SKILL.md に 1 度だけ書く。出力は英語の固定文言なので、指示文を埋め込むとその Skill の版と食い違ったときに直す場所が 2 つになる
 - **stderr**: スクリプト実行時の予期しないエラー（Python 例外・ファイルアクセス失敗等）
 - **出力の言語**: stdout・stderr に出る文字列はすべて英語で書く。読み手は運用者とエージェントであって読者ではないため、管理ファイルの見出しと同じく固定の英語とする。コメント・docstring は日本語のまま据え置く（読み手が開発者であり `docs/` と揃う）。公開ページに出る読者向けラベル（`convert_wikilinks.py` の `ROOT_INDEX_LABELS` / `OVERVIEW_LABELS` / `SOURCE_*_LABELS`）はこの規則の対象外で、`primary_lang` で切り替わる。`tools/check_script_output_language.py` が CI で blocking の回帰ガードとして走るが、`print()` の引数しか見ないため、`_frontmatter.py` のようにメッセージを戻り値として返すスクリプトは手作業で確認する
+- **コメント・docstring に書くもの**: 配布スクリプトは利用者のリポジトリに配られ、開くのは開発者と利用者である。どちらにとっても読む必要があるのは「いま何をするか」なので、本文と経緯を分ける DesignDoc の規則（[README.md](README.md) §4）をスクリプトにも当てはめる
+  - **冒頭 docstring**: 1〜2 行の目的・Usage・出力の行の形（`ERROR:` / `OK:` 等）・終了コード・この仕様書の該当節への参照だけを書く。参照は配布先で辿れないパス（`docs/…`）にせず、「仕様は WikiCommit のスクリプト仕様書（ScriptSpec）の `<スクリプト名>` の節」のように名前で書く（`DesignDoc-` を冠した名前も `tools/check_distributed_path_refs.py` が開発リポジトリのパスとして止める）
+  - **仕様の表・規則**はこの仕様書の当該スクリプトの節に書き、docstring に写さない。docstring にあって本書に無い仕様は、消さずに本書へ移す
+  - **経緯**（以前の命名・退けた案・実測・Issue 番号）は [history/DesignDoc-ScriptSpec.md](history/DesignDoc-ScriptSpec.md) の当該スクリプトの見出しの下に書く。配布物の `Issue #NNN` は利用者から辿れない
+  - **コードの途中のコメント**: 「なぜこう書くか」を 1〜2 行で書く。誤った代替案を封じる短い理由（「`+` ではなく `*` にする — 空のときに exit 2 になるため」等）は残す。基準は DesignDoc 本文と同じく「この文を消したら、もっともらしい別の手を取りうるか」
+  - `tools/check_distributed_issue_refs.py` は配布スクリプトのコメント・docstring に `Issue #NNN` が 1 件でもあると失敗する（行をまたいで `Issue` と `#NNN` が分かれたものも数える）。番号の無い経緯の文は検出できないのでレビューで見る
 
 ---
 
@@ -32,7 +38,7 @@
 
 **`assets/` の意味論は最も狭い定義とする**。`docs/DesignDoc-data.md` §3.1 が `.wikicommit/entity/assets/` を全言語共通の単一の置き場と定義しており、`<lang>/assets/` のようなものは仕様上存在しない。緩い定義（配下の任意セグメント）を採ると `assets` という名前の Type やスラッグを将来禁じることになる。
 
-**`include_index=True` を渡すのは 3 箇所**: `rebuild_index.py`（最後のページが削除された Type ディレクトリは `index.md` しか残らないため、それ自体を見つける必要がある）・`check_wikilinks.py` の被リンク走査（`rebuild_index.py` が各ページの WikiLink を index に書くため、そこへのリンクは削除対象ページへの実在する参照である）・`check_wanted_pages.py`（index も走査する。「陳腐化した index のエントリを『誰かが書いてほしいページ』と数えるべきか」は走査の集約とは別の問いであり、この引数では決めない）。
+**`include_index=True` を渡すのは 4 箇所**: `rebuild_index.py`（最後のページが削除された Type ディレクトリは `index.md` しか残らないため、それ自体を見つける必要がある）・`check_wikilinks.py` の被リンク走査（`rebuild_index.py` が各ページの WikiLink を index に書くため、そこへのリンクは削除対象ページへの実在する参照である）・`check_wanted_pages.py`（index も走査する。「陳腐化した index のエントリを『誰かが書いてほしいページ』と数えるべきか」は走査の集約とは別の問いであり、この引数では決めない）・`build_onehop_context.py` の被リンク走査（index を走査に含めたうえで規則で除外するのは、除外したことを `skipped` として報告できるようにするため）。
 
 **`validate_frontmatter.py` と `check_raw_html.py` はこの関数を使わない**。この 2 本は `assets/` も `index.md` も除外せず全ファイルを検証する（前者は `index.md` の `sources` 必須を明示的に免除する分岐まで持つ）。対象は「グラフ・集計の対象となる本文ページ」ではなく「ディスク上の全 `.md`」であり、巻き込むとこのヘルパーの意味が薄まる。
 
@@ -111,6 +117,7 @@ blocking な（exit 1 を返す）ページ検査はスクリプト 4 本・所�
 | `build_onehop_context.py` | Pass 4 の check 8 が要る 1 ホップ近傍の組み立て（`wikicommit-generate` の Pass 4 と `--regenerate` が共有） | `--page-path` が entity / view ツリーの外を指す |
 | `rebuild_index.py` | Type ディレクトリの `index.md`、および view ツリーの言語別 `index.md` を決定論的に再構築（`wikicommit-generate`・`wikicommit-translate`・`wikicommit-synthesize`・`wikicommit-organize`・`wikicommit-update` 共有） | なし（常に 0） |
 | `check_extraction_quality.py` | 既知JS-shellドメイン判定（ブロッキング）・取得能力の事前チェック（ブロッキング）・抽出テキストの低情報密度判定（警告）（`wikicommit-generate`・`wikicommit-collect` 共有） | ドメインが既知不可リストに一致（`check-domain`）、必要な追加パッケージが未導入（`check-fetch-capability`）、抽出テキストが低密度（`check-density`）、または対象ファイルが読み込めない |
+| `convert_wikilinks.py` | Quartz ビルドの前段で `content/` を組み立てる（WikiLink の相対リンク化・ビルド生成ページ・アセットの写し。`package.json` の `convert` が呼ぶ。Skill からは呼ばない） | なし（常に 0） |
 | `reconcile_ingest_status.py` | `status: pending` のソース管理ファイルのうち内容が既に公開ページの `sources` に使われているものを検出し `status: generated` に是正（意図して requeue されたファイルは 3 つの条件が守る） | なし（常に 0） |
 | `reset_review_on_content_change.py` | 内容が書き換わった `reviewed` ページを `pending` へ戻し `reviewed_by` を落とす（`wikicommit-generate` Pass 4・`wikicommit-fix` 共有） | 引数が entity/view ツリーの外を指す、ページが存在しない、frontmatter がパースできない |
 | `record_review.py` | レビュー 1 件を `.wikicommit/review/` 配下の不変ファイルとして記録（`wikicommit-generate` Pass 4・`wikicommit-review`・`wikicommit-synthesize`・`review-issue-close-sync.yml` 共有） | 引数が entity/view ツリーの外を指す、`--kind ai` に `--model` が無い、`--result` が `discarded` 以外なのにページが存在しない、JSON が壊れている、書き込みに失敗 |
@@ -133,7 +140,7 @@ blocking な（exit 1 を返す）ページ検査はスクリプト 4 本・所�
 | `merge_pages.py` | 「同一」のページの統合の計画・記録・確認（`plan` / `record` / `check`。`wikicommit-generate --regenerate --merge` 専用） | 統合を許さない（判断の記録が無い・翻訳・`manual` ソース・ハッシュの食い違い等）、`check` で未完了の部分がある |
 | `rewrite_merged_links.py` | `merged_into` をたどって、吸収されたページへの WikiLink を残すページへ書き換える（同上。`rename_page.py` も使う） | なし（常に 0） |
 | `rename_page.py` | 系列の版の名前を年で修飾する改名（`plan` / `apply`。slug と title・翻訳・リンク・ソース管理ファイル・index を追随させる。`wikicommit-relate` 専用） | 改名を許さない（翻訳・合成ページ・`primary_lang` 以外・年の形式・新しい slug が使用済み等。何も書かない） |
-| `add_source.py` | ソースの登録（管理ファイルのパス計算・ハッシュ・生成・`status` 更新）・`--fetch-url` による URL の取得・`--license-for-url` による既知ライセンスの照会・`type: path` の抽出キャッシュの確認（`wikicommit-generate`・`wikicommit-collect`・`wikicommit-ask`・`resolve_source_cache_path.py` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表と `docs/DesignDoc-pipeline.md` §6.1） | 引数不正・登録の失敗・取得の失敗 |
+| `add_source.py` | ソースの登録（管理ファイルのパス計算・ハッシュ・生成・`status` 更新）・`--fetch-url` による URL の取得・`--license-for-url` による既知ライセンスの照会・`--fulltext-url-for` による arXiv の `/abs/` の本文 URL への読み替え・`type: path` の抽出キャッシュの確認（`wikicommit-generate`・`wikicommit-collect`・`wikicommit-ask`・`resolve_source_cache_path.py` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表と `docs/DesignDoc-pipeline.md` §6.1） | 引数不正・登録の失敗・取得の失敗 |
 | `resolve_source_cache_path.py` | ページの `sources[]` の 1 件から抽出テキストキャッシュを解決し、`--obtain-sources` で review / fix が渡したページの `sources` 全件の本文を得る（`wikicommit-ask`・`wikicommit-review`・`wikicommit-fix`・`wikicommit-relate`・`wikicommit-generate --regenerate` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表） | 管理ファイルもキャッシュも無い・取得できない（exit 2 は取り下げ済み）。`--obtain-sources` は引数の誤り・ページが読めないときだけ（取り下げ・取得失敗は行で伝え exit 0） |
 | `remove_page.py` | ページと翻訳ページに `status: removed` を付与し index から外す（`wikicommit-remove`・`wikicommit-generate --regenerate --merge` 共有） | ページが無い・既に `removed`・`--merged-into` の不備 |
 
@@ -325,7 +332,7 @@ TAG: 治水 7
 
 3つのガードは排他ではなく、`wikicommit-generate` Pass 1 で順に適用される（`.claude/skills/wikicommit-generate/SKILL.md` Pass 1 参照）。`check-domain` は `wikicommit-collect` の候補提示ステップからも、既知不可ドメインを候補から事前に除外する目的で呼ばれる。
 
-**このスクリプトが扱わない partial extraction がある**。ガードC が扱うのは「必要なパッケージを入れれば `markitdown` が完全に取れる」種類の欠落だけであり、`importlib.util.find_spec()` による判定はその前提の上に立っている。GitHub の Issue / PR URL は本文が取れてコメントだけが黙って落ちるが、必要なのはパッケージではなく別の取得経路なので、この前提を満たさない — ガードC を一般化すると exit 1 の意味（処理全体を止めて `pip install` を案内する）が端的に誤りになる。ガードB は「空シェル」の定義に反し（本文は取れている）、ガードA は落ちているものが自然文なので形状で区別できない（比率は閾値を余裕を持って上回る）。
+**このスクリプトが扱わない partial extraction がある**。ガードC が扱うのは「必要なパッケージを入れれば `markitdown` が完全に取れる」種類の欠落だけであり、`importlib.util.find_spec()` による判定はその前提の上に立っている。GitHub の Issue / PR URL は本文が取れてコメントだけが黙って落ちるが（arXiv の `/abs/` もアブストラクトだけが取れて論文本体が無い、同じ種類の欠落である）、必要なのはパッケージではなく別の取得経路なので、この前提を満たさない — ガードC を一般化すると exit 1 の意味（処理全体を止めて `pip install` を案内する）が端的に誤りになる。ガードB は「空シェル」の定義に反し（本文は取れている）、ガードA は落ちているものが自然文なので形状で区別できない（比率は閾値を余裕を持って上回る）。
 
 したがってこの失敗クラスは**本スクリプトではなく `add_source.py` の登録時通知**が扱う（`partial_extraction_note()` / `PARTIAL_EXTRACTION_URL_NOTES`。ブロックせず・`status` を変えず・登録時に一度だけ知らせる）。**ここに 4 つ目のガードを足さないこと** — ガードは Pass 1 の分岐を左右するものであり、ブロックしない判定を同じ場所に置くと、精度の異なるガードを同じ強度で扱う混同を作ることになる。次に 3 例目が出たときの判断手順は `docs/DesignDoc-pipeline.md` §6.1 にある。
 
@@ -563,7 +570,16 @@ python .wikicommit/scripts/check_wikilinks.py [--changed <path>...] [--deleted <
      4. いずれの言語・いずれの Type にも存在しない → **WARNING**（ERROR にしない — ブロックすると LLM・人間の双方が「まだ無い概念は WikiLink 化せず地の文のまま書く」を選びがちになり、複数ソースで繰り返し言及される一般概念がページ化されないまま埋もれる。集計は `check_wanted_pages.py` が別途担う）
    - 参照先ページの `status` が `removed` か → removed の場合は ERROR（変更なし。CLAUDE.md の orphan 検出の非対称設計が指す、削除フローの順序制約回避のための意図的なブロック）
    - 例外: `--changed` 内に同じ `<lang>/<Type>/<slug>` で新規追加されるファイルが存在する場合は上記 ERROR / WARNING としない（同一コミット内の新規追加ページへのリンク）
-3. `--deleted` が指定された場合、削除対象ページへの被リンクを `.wikicommit/entity/`・`.wikicommit/view/` 全体から検索する → 残存する被リンクがあれば WARNING（`--changed` に同じページがあっても行う。リンク元が `status: removed` のページ〈削除対象ページ自身の自己リンク・同じ変更で削除される他のページ・既に削除済みのページ〉は数えない — 公開されないリンクは何も壊さず、報告しても誰も消せない。被リンクはリンク元の言語から `[[Type/slug]]` を解決した先が削除対象ページであるものだけを数える — 同じ slug の翻訳ページへのリンクを言語ごとに重複して報告しないため）
+3. `--changed` の各ファイルで、`[[` と `]]` に挟まれているのに WikiLink の形（`[[Type/slug]]` / `[[Type/slug|表示名]]`）に合わない記述を **WARNING** として報告する（`_wikilink.find_malformed_wikilinks()`。コードフェンス・インラインコードの中は除く）。下記「WikiLink の形」参照
+4. `--deleted` が指定された場合、削除対象ページへの被リンクを `.wikicommit/entity/`・`.wikicommit/view/` 全体から検索する → 残存する被リンクがあれば WARNING（`--changed` に同じページがあっても行う。リンク元が `status: removed` のページ〈削除対象ページ自身の自己リンク・同じ変更で削除される他のページ・既に削除済みのページ〉は数えない — 公開されないリンクは何も壊さず、報告しても誰も消せない。被リンクはリンク元の言語から `[[Type/slug]]` を解決した先が削除対象ページであるものだけを数える — 同じ slug の翻訳ページへのリンクを言語ごとに重複して報告しないため）
+
+#### WikiLink の形
+
+WikiLink は `[[Type/slug]]` と、表示名付きの `[[Type/slug|表示名]]` の 2 つの形である。表示名は空白以外の文字を 1 つ以上含み、`[`・`]`・`|`・改行を含まない。区切りは Markdown の表の中で書く `\|` も受け付ける。正規表現は `_wikilink.py` の `WIKILINK_RE` 1 本で、表示名はグループ 3（末尾に足したので、グループ 1・2 だけを読む呼び出し側は影響を受けない。`findall()` は 3 要素のタプルを返すので、(Type, slug) が要る側は `extract_wikilinks()` を使う）。
+
+- **検証では表示名を見ない**: 存在確認・Type の取り違え・削除済みページ・被リンクは `Type/slug` だけで判定する。出力の `[[Type/slug]]` も表示名を落とした形で出す
+- **禁止せずに受け付ける理由**: 生成・翻訳が自然に書く形であり（翻訳では訳語を見せたくなる）、禁止しても再発する。受け付けないまま放置すると、どのチェック（削除済みページの ERROR・被リンク・統合時の書き換え・Pass 4 の 1 ホップ近傍）にも掛からず黙って通る
+- **それ以外の `[[...]]` は WARNING**: Type の無い `[[slug]]`・`#見出し`・`Prop::`・空の表示名・二重スラッシュなど。どのチェックも解決・集計せず `convert_wikilinks.py` も変換しないので、ここで報告しないとどこにも出ない。ERROR にしないのは、未解決リンクの WARNING と同じく、ブロックすると地の文に逃げる方向に働くため
 
 #### Type セグメントの取り違え
 
@@ -586,7 +602,8 @@ WARNING: .wikicommit/entity/ja/Person/yamada-taro.md: [[Place/nonexistent]] → 
 ERROR: .wikicommit/entity/ja/Person/yamada-taro.md: [[Place/tokyo]] → links to a page with status: removed
 ERROR: .wikicommit/entity/ja/GovernmentService/ward-office.md: [[Organization/saitama-city]] → this page does not exist, but the same slug exists at AdministrativeArea/saitama-city.md (the Type segment may be wrong)
 WARNING: .wikicommit/entity/ja/Place/tokyo.md (being changed to status: removed): a backlink remains (.wikicommit/entity/ja/Person/yamada-taro.md)
-OK: 3 files checked, 2 errors, 2 warnings
+WARNING: .wikicommit/entity/ja/Person/yamada-taro.md: [[tokyo]] → not a WikiLink (write [[Type/slug]] or [[Type/slug|display text]]); no check sees it and it is published as written
+OK: 3 files checked, 2 errors, 3 warnings
 ```
 
 ### 終了コード
@@ -622,12 +639,16 @@ python .wikicommit/scripts/check_raw_html.py <path>...     # 指定ファイル�
 ### 処理フロー
 
 1. 対象ファイルの YAML frontmatter を除いた本文を取得する（frontmatter 自体は検証対象外。frontmatter の解析に失敗したファイルは WARNING を出力してスキップする — 構造的な frontmatter エラー自体は `validate_frontmatter.py` の責務のため）
-2. 本文からコードフェンス（バッククォート3つ、または `~~~`）とインラインコード（バッククォートで囲んだ範囲）で囲まれた範囲を除外する。これらは Markdown がエスケープされた地の文として描画するため、`allowDangerousHtml` の影響を受けず実害がない（例: HowTo ページがコード例として `<script>` を紹介していても検出対象にしない）
-3. 残った本文に対し、`<tag ...>` / `</tag>` 形式の HTML タグを走査する
-4. CommonMark オートリンク（`<https://example.com>`・`<user@example.com>` 等）はタグ名の直後に `:`/`@` が続くため HTML タグのパターンに一致せず、自然に除外される（`wikicommit-generate` Pass 3 のベア URL 対応で明示的に使われる記法のため誤検知させない）
+2. 本文を CommonMark パーサ（`markdown-it-py`。`commonmark` プリセットに GFM の表と取り消し線を足したもの）でトークンに分け、**生 HTML のトークン（`html_block`・`html_inline`。表のセルなどインラインの子トークンを含む）だけを検査対象にする**。コードの範囲（任意の長さのフェンス・最大 3 文字の字下げで閉じるフェンス・字下げコードブロック・任意の長さのバッククォートで囲むインラインコード）はパーサがコードとして読むので、検査対象に入らない。これらは Markdown がエスケープされた地の文として描画するため、`allowDangerousHtml` の影響を受けず実害がない（例: HowTo ページがコード例として `<script>` を紹介していても、4 文字のフェンスの中で 3 文字のフェンスの書き方を示していても検出対象にしない）。閉じていないフェンスは CommonMark では文書の末尾までコードになるので、その後ろの HTML も検出しない
+3. 生 HTML のトークンの中の、開きタグ・閉じタグ（CommonMark 自身のタグの文法。ハイフンを含むタグ名や `>` を含む属性値も 1 つのタグとして読む）をすべて報告する。HTML コメント・処理命令・宣言・CDATA だけでタグを含まないものは、ブラウザが何も描画しないので報告しない（中にタグがあれば報告する — fail-safe 側）。タグのように始まるが完全なタグを含まない HTML ブロックは、その最初の行を報告する
+4. CommonMark オートリンク（`<https://example.com>`・`<user@example.com>` 等）はパーサがリンクとして読むので生 HTML のトークンにならず、検出されない（`wikicommit-generate` Pass 3 のベア URL 対応で明示的に使われる記法のため誤検知させない）
 5. 1件でも検出したら、そのタグ（120文字を超える場合は切り詰め）を含む ERROR を出力する
 
-タグの許可リスト（例: `<br>` のみ許可する等）は持たない — 「危険なタグだけ禁止」ではなく「生 HTML自体を一切禁止」という設計判断のため（`docs/DesignDoc-publish.md` §8.6「生 HTML の扱い方針」参照）。この設計上、`a<b>c` のような（コードフェンス外の）不等式チェーンを誤検知する可能性があるが、fail-safe なブロッキングゲートとして許容する既知の限界とする。
+判定をパーサに任せるのは、描画と同じ規則でコードの範囲を決めるためである。コードを正規表現で除外してから探す形は、区切りの長さ・閉じる記号の字下げ・インラインコードの区切りの長さのどれかが CommonMark とずれるたびに、ずれた範囲の HTML を検査前に塗りつぶし、公開サイトでは生 HTML として描画させる。規則を 1 つずつ正規表現や自前の行パーサで追いかける形は、リスト内・ブロック引用内のブロックなど再現すべき規則が尽きず、ずれが残るたびにゲートに穴が開くので採らない。
+
+`markdown-it-py` が import できない環境では、ファイルを 1 つも読まずに `pip install markdown-it-py` を案内する ERROR を stderr に出力して exit 1 で終わる。ブロッキングゲートなので、検査できないときは通さない側に倒す（`wikicommit-merge` は stderr の `ERROR:` も blocking として読む）。stdout に出さないのは、stdout の `ERROR:` をページの検出として数える `/wikicommit-status` に「実行できなかった」と読ませるためである（`validate_frontmatter.py` が `default.md` を読めないときと同じ形）。
+
+タグの許可リスト（例: `<br>` のみ許可する等）は持たない — 「危険なタグだけ禁止」ではなく「生 HTML自体を一切禁止」という設計判断のため（`docs/DesignDoc-publish.md` §8.6「生 HTML の扱い方針」参照）。`a<b>c` のようなコードの外の文字列は CommonMark 自身が `<b>` を HTML タグとして読み、公開サイトでもタグとして描画されるので検出する（誤検知ではない）。CommonMark に無い構文（Obsidian のコールアウト・数式）は通常の Markdown として読むので、その中の HTML も検出する。
 
 ### 出力フォーマット
 
@@ -635,6 +656,12 @@ python .wikicommit/scripts/check_raw_html.py <path>...     # 指定ファイル�
 ERROR: .wikicommit/entity/ja/Person/yamada-taro.md: raw HTML tag detected: <script>
 ERROR: .wikicommit/entity/ja/Person/yamada-taro.md: raw HTML tag detected: </script>
 OK: 1 files checked, 2 errors
+```
+
+`markdown-it-py` が無い場合（stderr）:
+
+```
+ERROR: markdown-it-py is not installed (No module named 'markdown_it'); this check cannot run without it. Install it with: pip install markdown-it-py
 ```
 
 エラーなしの場合:
@@ -1631,6 +1658,97 @@ SUMMARY: rebuilt=2
 
 ---
 
+## convert_wikilinks.py
+
+### 目的
+
+Quartz ビルドの前段で、Wiki のページツリーから Quartz の入力 `content/` を組み立てる。`[[Type/slug]]` を相対 Markdown リンクに変換してページを写すことと、`.wikicommit/entity/` に実体を持たないビルド生成ページを書くことを、1 回のページ走査で行う。
+
+読者に何がどう表示されるか（文言・表示条件・件数の意味）は `docs/DesignDoc-publish.md` §8 が正本であり、この節には書かない。この節が書くのは、スクリプトとしての入出力と、出力を組み立てる処理の契約である。
+
+### 使用場面
+
+- 配布する `package.json` の `convert` スクリプト（`npm run build` / `npm run preview` が最初に実行する）。`deploy.yml` の Pages ビルドと `/wikicommit-serve` のローカルプレビューはどちらもこれを通る
+- Skill からは呼ばない（ビルド時にだけ動く）
+
+### コマンド
+
+```
+python .wikicommit/scripts/convert_wikilinks.py --source .wikicommit/entity/ --output content/ \
+    [--view-source .wikicommit/view/] [--primary-lang <lang>]
+```
+
+- `--view-source`: view ツリーの入力。ディレクトリが無ければ黙って飛ばす（view ページの無い Wiki で呼び方を変えずに済む）
+- `--primary-lang`: 言語をまたぐフォールバックの基準言語。省略時は `.wikicommit/config.yml` の `primary_lang`
+
+### 書き出すもの
+
+| 出力 | 関数 | 表示の仕様 |
+|---|---|---|
+| `content/<lang>/<Type>/<slug>.md`（entity ページ） | `convert_file()` | publish §8.2・§8.4 |
+| `content/<lang>/View/<slug>.md`（view ページ） | `convert_file()` | data §4.5.1 |
+| `content/index.md`（root index） | `generate_root_index()` | publish §8.8 |
+| `content/sources/`（ソース管理ファイルの写し・索引・中間ディレクトリの `index.md`） | `generate_source_pages()` | publish §8.10 |
+| `content/overview/index.md`（俯瞰ページ） | `generate_overview_page()` | publish §8.8.1 |
+| `content/llms.txt` | `generate_llms_txt()` | publish §8.12 |
+| `content/wikicommit-groups.json`（Explorer のグループ） | `write_group_manifest()` | data §4.5.3 |
+| `content/assets/` | `sync_assets()` | publish §8.6 |
+
+Wiki ページ以外のビルド生成ページ（root index・`content/sources/` 配下・俯瞰ページ）は、書き出す側で `review_status: reviewed` と `comments: false` を書く（publish §8.4「ビルド生成のナビゲーションページにはバナーを出さない」）。どれも LLM が書いた Wiki コンテンツではなく、`validate_frontmatter.py` の品質ゲートの対象外である。
+
+### 処理の契約
+
+**出力パスは書く前に全件決める**。各ページの出力パスを次の強さの順に 3 段で割り当て、後の段は既に取られたパスを取れない。取れなかったページは WARNING を出して公開しない（ビルドは止めない。直すのは型の名前を変える著者の側である）。全件を先に決めるので、結果は `rglob` が返す順序に依らない。
+
+1. entity ページで、出力パスがディスク上のパスと同じもの
+2. view ページ（`View` は予約 Type セグメントなので、`View` という名前の entity 型があればそちらが異常だが、ディスク上にあるものが先に持っていたパスを保つ）
+3. `custom/` を落として出力パスが変わった custom 型のページ
+
+**custom 型の `custom/` は公開時に落とす**（`content/<lang>/<Type>/` に標準の型と並ぶ）。落とすのは先頭の 1 セグメントだけで、`custom/custom/Decision` は `custom/Decision` になる — 写像を単射に保ち、2 つの型が 1 つの出力パスに落ちないようにするため。`.wikicommit/entity/` 側は `custom/` を保ったままであり、落としたパスで entity ツリーを読まない。
+
+**本文の相対リンクは WikiLink の置換より前に書き換える**。custom 型を平らにするとページが 1 段上がるため、ソースツリーに対して書かれた `![alt](../../../assets/diagram.png)` 等をそのまま写すと切れる。全ページを走査するが、リンクの両端のどちらも動かないときは著者の文字列をそのまま返す。置換の後に行うと、出力ディレクトリ基準で挿入したリンクを二重に動かす。view ページでは何もしない（view ページの相対リンクは公開後の位置で書かれている）。
+
+**WikiLink の解決**は `_wikilink.py` の `resolve_wikilink()` に従う。解決できないものはプレーンテキストにして WARNING を出す（publish §8.2）。解決の成否に関わらず参照先のキーを記録し、俯瞰ページのリンクグラフに使う。
+
+**出典との照合（AI レビュー）は `content/` の写しにだけ書く**。`load_ai_review()` が `.wikicommit/review/` の記録から有効な `pass` の判定を引き、`ai_review_model` / `ai_review_at`（翻訳の照合なら `ai_review_stage` も）を写しの frontmatter に挿入する。判定が無い・`pass` でない・失効している（`check_review_coverage.py` の判定をそのまま使う）・読めない、のいずれも何も書かない。値に改行を含む記録は表示しない（frontmatter の行を壊すため）。挿入は YAML の読み書きではなく文字列の挿入で行い、frontmatter が無い・閉じていないページは変えない。
+
+**集計は同じ走査に相乗りする**。総ページ数・人が読んだ件数・照合済み件数・言語別件数・俯瞰ページの材料（`page_stats`・被リンク）はページ走査の中で数え、Type の `index.md` は数えない。`status: removed` のページは公開しないが、キーは俯瞰ページのために残す。`<lang>/<Type>/<slug>.md` に解決しないページは公開して総数に数えるが、キーを持たないので俯瞰ページの集計には入らない。
+
+**root index の言語一覧**は `primary_lang`・ページが実在する `targets`・このビルドが実際に書いた言語の和である（`compute_langs()`）。後者は書けたページで判定するので、読めずに書かれなかったページの言語は載らない。
+
+**ソースページ**は `.wikicommit/source/` を直接走査して作る。`generated_pages[]` の各項目は接頭辞（`.wikicommit/entity/`、または古い `.wikicommit/wiki/`）を 1 つだけ外し、絶対パス・`..` を含むものは捨てる。リンクは実在し `removed` でないページにだけ張る。中間ディレクトリには `index.md` を書くが、ソースページ自体がそのパスを持つ場合は上書きしない。`source.lang` は小文字の ISO 639-1 として読み、YAML 1.1 で `False` になる値は書かれた文字列が `no` のときだけノルウェー語とする。
+
+**前回の出力の掃除**: このビルドが書かなかった `content/` 配下の `.md`（`assets/` を除く）を消す。`content/` はローカルビルドの間で消されないため、消さないと削除・改名したページが直接 URL で読めたまま残る。ファイルが既にあることを理由に書き込みを飛ばさない（前回書いたものが凍結される）。`content/assets/` の掃除は `sync_assets()` が、`wikicommit-groups.json`（グループが 1 つも無いビルドでは書かない）の掃除は `write_group_manifest()` がそれぞれ別に持ち、その範囲に限る。
+
+**ビルドはリポジトリを変えない**。`check_ingest_freshness.py`（管理ファイルを書き換える）を呼ばず、`expires_at` も扱わない（ビルド時点の「今日」で固まるため。`/wikicommit-status` に任せる）。
+
+**アセット**は `.wikicommit/entity/assets/` だけを写す（ページの隣にある他のファイルを公開しない）。`assets/` 配下の `.md` は写すがページとしては変換しない。Quartz が付ける公開名（`quartz_asset_slug()` は Quartz の `slugifyFilePath` の移植）がページから書くべきパスと違うときは WARNING を出す。
+
+**UI 文字列**（`*_LABELS`）は 10 言語を持ち、言語ごとに全キーが揃うか、まったく無いかのどちらかである（publish §8.9.2）。
+
+### 出力フォーマット
+
+```
+Converting: .wikicommit/entity/ja/Person/yamada-taro.md → content/ja/Person/yamada-taro.md
+Skipping (status: removed): .wikicommit/entity/ja/Person/old-page.md
+WARNING: [[Person/nobody]] not resolved in .wikicommit/entity/ja/Person/yamada-taro.md
+Generating source page: content/sources/url/example.com/page.md
+Generating root index: content/index.md
+Generating overview: content/overview/index.md
+Removing stale build output: content/ja/Person/renamed.md
+SUMMARY: converted=42, unresolved_links=1, skipped_removed=1, removed_stale=1, assets=3, removed_stale_assets=0, view_pages=2
+```
+
+### 終了コード
+
+- 常に `0`（解決できないリンクは WARNING。リンク切れを止めるのは品質ゲートの `check_wikilinks.py`）
+
+### 1 本のまま保つ
+
+出力ごとにスクリプトを分けない。どの出力も 1 回のページ走査の結果（`page_stats`・被リンク・書いたパスの集合）を材料にしており、前回の出力の掃除はこのビルドが書いた全パスの和を要る。分けると、走査を出力の数だけ繰り返すか、走査の結果をスクリプト間で受け渡す形を新たに作ることになる。関数は既に出力ごとに分かれている。
+
+---
+
 ## reconcile_ingest_status.py
 
 ### 目的
@@ -2476,7 +2594,7 @@ SUMMARY: enabled=n/a
 
 「補強」の定義は 2 つの形である: (1) `wikicommit.granularity` のプローズに、property 名を単語境界付きで言及し**かつリンク化を指し示す**（property 名を取り除いた残りに `[[` または `link` を含む。大文字小文字を区別しないため `WikiLink`・`linked` も該当する。property 名自体を手掛かりに数えないのは、`originalMediaLink` のように名前に `link` を含む property が自分の名前だけで条件を満たしてしまうのを防ぐため）箇条書きがある、または (2) `properties:` のプレースホルダー値（文字列またはリストの要素）に `[[...]]` という WikiLink トークンが既に含まれている。いずれも持たない Entity-only/Mixed な property を `UNREINFORCED` として報告する。
 
-**言及だけでは補強とみなさない**: 正規表現は文脈を見ないため、言及だけを条件にすると**その property を否定する散文でも補強と判定される**（例: 「`tool` と `supply` は物理的な手順向けで空になることが多い。書かずに置け」という箇条書きが `HowTo.tool` / `HowTo.supply` を報告から消す）。散文が property に言及する必要がある限り、言及のみの判定では避けられない。**それでも判定は肯定・否定を見分けられない**。「`tool` の値はリンクにするな」と書けば依然として補強と判定される（正規表現に文脈は解けない）。縮めたのは誤判定の範囲であって、種類ではない。取りこぼす側の劣化（リンク化を促す意図の箇条書きが `[[`・`link` のどちらも含まない言い回しで書かれていた場合、`UNREINFORCED` として報告される）は、非ブロッキングな気づきが1行増えるだけであり安全側に倒れている。
+**言及だけでは補強とみなさない**: 正規表現は文脈を見ないため、言及だけを条件にすると**その property を否定する散文でも補強と判定される**（例: 「`tool` は空になることが多い。書かずに置け」という箇条書きが `HowTo.tool` を報告から消す）。散文が property に言及する必要がある限り、言及のみの判定では避けられない。**それでも判定は肯定・否定を見分けられない**。「`tool` の値はリンクにするな」と書けば依然として補強と判定される（正規表現に文脈は解けない）。縮めたのは誤判定の範囲であって、種類ではない。取りこぼす側の劣化（リンク化を促す意図の箇条書きが `[[`・`link` のどちらも含まない言い回しで書かれていた場合、`UNREINFORCED` として報告される）は、非ブロッキングな気づきが1行増えるだけであり安全側に倒れている。
 
 ブロッキングにはしない — `wikicommit-generate` Pass 3 の一律ルール（`docs/DesignDoc-skills.md` §11.6）が、テンプレートの補強の有無に関わらずすべての Entity-only/Mixed property に同じ WikiLink 判断を適用するため、本スクリプトの検出結果は「何かが壊れている証拠」ではなく、あくまで人間向けの気づきの提供に留まる。`description` はほぼ全ての型で Mixed 分類（`TextObject`）になるため、このwikiの慣習（`docs/DesignDoc-data.md` §4.1 — `properties.description` は2〜3文の要約に留め、WikiLink化を想定しない）と関わらず、実質的にほぼ常に `UNREINFORCED` として現れる — これは想定されたノイズであり、追いかけるべき不具合ではない。
 
@@ -3062,12 +3180,17 @@ python .wikicommit/scripts/rewrite_merged_links.py [--dry-run]
 
 対応表はディスクから作る — `status: removed` かつ `merged_into` を持つページ 1 枚ごとに `<その Type/slug> → <merged_into の Type/slug>`。連鎖（A → B → C）は最後までたどる。次の 3 つは書き換えず stderr に `WARNING:` を出す: その Type/slug がどこかの言語でまだ live（リンクがそこで解決する）、取り下げられた版が別々の先を指す、たどると循環する。
 
-entity と view の全 live ページ（`index.md` を除く — `rebuild_index.py` が作り直す）について、`WIKILINK_RE` に当たる `[[Type/old]]` を `[[Type/new]]` に置き換える。frontmatter も対象（`properties:` の値の WikiLink）。リンク以外は 1 文字も変えず、`review_status` も変えない。
+entity と view の全 live ページ（`index.md` を除く — `rebuild_index.py` が作り直す）について、`WIKILINK_RE` に当たる `[[Type/old]]` を `[[Type/new]]` に置き換える。表示名付きの `[[Type/old|表示名]]` は参照先だけを変えて `[[Type/new|表示名]]` にする（`_wikilink.retarget_wikilink()`。slug より後ろは区切りの `\|` も含めて書かれたまま残す。`check_review_coverage.py` が統合の書き換えを戻して照合するときも同じ関数を使う）。frontmatter も対象（`properties:` の値の WikiLink）。リンク以外は 1 文字も変えず、`review_status` も変えない。
 
 ```
 REWRITTEN: .wikicommit/entity/en/Person/x.md (2 link(s))
-SUMMARY: merged=1, pages=1, links=2
+ALSO_LINKED: .wikicommit/entity/en/Person/x.md ([[DefinedTerm/tool-use]] now stands where different pages were linked)
+REWRITTEN: .wikicommit/entity/ja/DefinedTerm/tool-use.md (1 link(s))
+SELF_LINK: .wikicommit/entity/ja/DefinedTerm/tool-use.md ([[DefinedTerm/tool-use]] now links to the page itself)
+SUMMARY: merged=1, pages=2, links=3
 ```
+
+`REWRITTEN:` の直後に、書き換えでは片付かない 2 種類を挙げる。`SELF_LINK:` — 書き換えた先がそのページ自身（残すページの翻訳が吸収したページにリンクしていた場合）。`ALSO_LINKED:` — 書き換えた先に、書き換え前から別のページとしてリンクしていた（残すページへのリンクが元からあった、または同じページに統合された 2 ページにリンクしていた）。どちらも消さない — リンクを消すのは本文の編集であり、このスクリプトはリンクの文字列以外を変えない。
 
 **公開時に張り替えない理由**: `check_wikilinks.py` は `status: removed` のページへのリンクをブロックする（削除は警告・removed へのリンクは阻止という非対称）。公開時に張り替えると、ディスク上の removed ページへのリンクを許す例外をそこに作ることになる。
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Detect `properties:` values naming a page that exists, written as plain text (Issue #561).
+"""Detect `properties:` values naming a page that exists, written as plain text.
 
 Pass 3 decides whether to write a `properties:` value as `[[Type/slug]]` from
-the property's Schema.org range alone (Issue #496), and its instructions say in
+the property's Schema.org range alone, and its instructions say in
 so many words not to let a missing target page stop it. `wikicommit/decameron-wiki`
 did exactly that anyway: `Book/decameron.md` lists ten narrators under
 `character`, and the eight whose Person pages had already been written by the
@@ -25,9 +25,10 @@ misses it whenever the page has backlinks from somewhere else — which
 `Person/filostrato` did, from the tale pages. So `/wikicommit-status` went on
 reporting a clean wiki.
 
-Scope is `properties:` values, never body prose. Issue #318's limitation stands
-for free text, but a `properties:` value is by definition short and structured
-(Issue #495), which is what makes matching it against page titles worth doing.
+Scope is `properties:` values, never body prose. check_wanted_pages.py's
+limitation (a concept mentioned only in plain text is invisible) stands for
+free text, but a `properties:` value is by definition short and structured,
+which is what makes matching it against page titles worth doing.
 
 A match must agree on type as well as name: the page found has to be one of the
 property's own `rangeIncludes` entity candidates, or a subtype of one, so
@@ -76,7 +77,7 @@ def page_names(frontmatter: dict, slug: str) -> list[str]:
     """Every name this page answers to — `title`, each `aliases` entry, and its slug.
 
     A value is written in the wiki's own language while the slug is a
-    language-neutral English identifier (Issue #193), so the two rarely coincide
+    language-neutral English identifier, so the two rarely coincide
     — but they do for English-language wikis, and `aliases` is the field already
     reserved for the alternate spellings a value may use instead of the title.
     """

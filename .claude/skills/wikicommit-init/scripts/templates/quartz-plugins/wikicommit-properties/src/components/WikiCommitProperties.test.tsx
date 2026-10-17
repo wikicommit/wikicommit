@@ -2,7 +2,7 @@ import type { GlobalConfiguration, QuartzComponentProps } from "@quartz-communit
 import type { VNode } from "preact"
 import render from "preact-render-to-string"
 import { describe, expect, it } from "vitest"
-import WikiCommitPropertiesConstructor from "./WikiCommitProperties"
+import WikiCommitPropertiesConstructor, { humanizeKey, labelFor } from "./WikiCommitProperties"
 
 const WikiCommitProperties = WikiCommitPropertiesConstructor()
 
@@ -58,8 +58,10 @@ describe("WikiCommitProperties", () => {
       },
     })
     expect(html).toContain("wikicommit-properties-key")
-    expect(html).toContain(">description<")
-    expect(html).toContain(">jobTitle<")
+    // No frontmatter.lang and no cfg.locale -> en-US labels (Issue #1292)
+    expect(html).toContain(">Description<")
+    expect(html).toContain(">Job title<")
+    expect(html).toContain('data-key="jobTitle"')
     expect(html).toContain("CompanyA のシニアエンジニア")
     expect(html).toContain("シニアエンジニア")
   })
@@ -152,7 +154,7 @@ describe("WikiCommitProperties", () => {
       { properties: { description: "x" } },
       { frontmatter: { lang: "ja" } },
     )
-    expect(html).toContain("プロパティ")
+    expect(html).toContain("基本情報")
   })
 
   it("uses the English caption for an en page even when cfg.locale is ja-JP", () => {
@@ -160,7 +162,7 @@ describe("WikiCommitProperties", () => {
       { properties: { description: "x" } },
       { frontmatter: { lang: "en" }, cfg: { locale: "ja-JP" } as unknown as GlobalConfiguration },
     )
-    expect(html).toContain(">Properties<")
+    expect(html).toContain(">Key facts<")
   })
 
   // Issue #514, upstream-inherited bug #2: a bare URL followed immediately
@@ -229,5 +231,48 @@ describe("WikiCommitProperties", () => {
     })
     expect(html).not.toContain("<a")
     expect(html).not.toContain('href="https://')
+  })
+
+  // Issue #1292: rows carry a readable label, not the raw Schema.org key.
+  it("labels a distributed template's key in the page's language", () => {
+    const html = renderProperties(
+      { properties: { affiliation: "x", variableMeasured: ["y"] } },
+      { frontmatter: { lang: "ja" } },
+    )
+    expect(html).toContain(">所属<")
+    expect(html).toContain(">測定項目<")
+    expect(html).not.toContain(">affiliation<")
+  })
+
+  it("labels a key no locale lists by splitting its Schema.org name into words", () => {
+    const html = renderProperties(
+      { properties: { softwareRequirements: "x" } },
+      { frontmatter: { lang: "ja" } },
+    )
+    expect(html).toContain(">Software requirements<")
+  })
+})
+
+describe("humanizeKey", () => {
+  it("splits camelCase into a sentence-case phrase", () => {
+    expect(humanizeKey("variableMeasured")).toBe("Variable measured")
+    expect(humanizeKey("numberOfEmployees")).toBe("Number of employees")
+    expect(humanizeKey("genre")).toBe("Genre")
+  })
+
+  it("keeps a run of capitals as written", () => {
+    expect(humanizeKey("isbnURL")).toBe("Isbn URL")
+    expect(humanizeKey("URLTemplate")).toBe("URL template")
+  })
+
+  it("treats snake_case and kebab-case separators as word breaks", () => {
+    expect(humanizeKey("custom_field-name")).toBe("Custom field name")
+  })
+})
+
+describe("labelFor", () => {
+  it("prefers the locale's label and does not read inherited object keys", () => {
+    expect(labelFor("url", { url: "URL" })).toBe("URL")
+    expect(labelFor("toString", {})).toBe("To string")
   })
 })

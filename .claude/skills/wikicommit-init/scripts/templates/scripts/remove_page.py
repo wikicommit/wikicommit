@@ -40,8 +40,7 @@ def parse_frontmatter(path: Path) -> dict:
     """ページの frontmatter を dict として返す。読めない・パース不能なら {} を返す。
 
     読み取りは共有の `_frontmatter.py` に任せる。このスクリプトは `.wikicommit/scripts/` に
-    あり、同じディレクトリの共有モジュールを import できる（Issue #1210 で Skill 内から
-    移した。それまでは自己完結の慣行で写しを持っていた）。
+    あり、同じディレクトリの共有モジュールを import できる。
     """
     fm, _err = _parse_frontmatter(path)
     return fm or {}
@@ -132,9 +131,9 @@ def find_translation_pages(entity_dir: Path, type_name: str, target_rel: str, ex
         if translated_from is None:
             continue
         # normalize_entity_prefix() lets a translation page written before the
-        # Issue #477 .wikicommit/wiki/ -> entity/ rename (translated_from
-        # still verbatim; no auto-migration) match against target_rel, which
-        # is always computed from the current (post-rename) tree.
+        # .wikicommit/wiki/ -> entity/ rename (translated_from still verbatim;
+        # no auto-migration) match against target_rel, which is always computed
+        # from the current (post-rename) tree.
         stored = normalize_entity_prefix(str(translated_from).strip().replace("\\", "/"))
         if stored == target_rel:
             results.append(candidate)
@@ -144,8 +143,8 @@ def find_translation_pages(entity_dir: Path, type_name: str, target_rel: str, ex
 def remove_index_entry(index_path: Path, type_name: str, slug: str) -> bool:
     """index.md から `[[<type>/<slug>]]` の行を削除する。削除した場合 True を返す。
 
-    rebuild_index.py が書く現在の書式は `- [[<type>/<slug>]]`（Issue #678。それ以前は
-    リストマーカーなしで、さらに ` — <title>` の接尾辞が付いていた）。ここは3形式すべてを
+    rebuild_index.py が書く現在の書式は `- [[<type>/<slug>]]`。旧書式にはリストマーカー
+    なしのものと、さらに ` — <title>` の接尾辞が付いたものがある。ここは3形式すべてを
     受けるため、先頭のリストマーカーを任意扱いにし、行末までを捨てる — 既存リポジトリの
     index.md は次回 rebuild_index.py が走るまで旧書式のまま残る（遡及移行を行わない方針）。
     """
@@ -163,10 +162,10 @@ _SECTION_HEADING_RE = re.compile(r"^##[ \t]")
 
 
 def _drop_empty_sections(content: str) -> str:
-    """Drop `## ` headings left with nothing under them (Issue #1136).
+    """Drop `## ` headings left with nothing under them.
 
     A Type with a groups file has an index split into `## <label>` sections
-    (rebuild_index.py's `_grouped_body()`, Issue #1035), and rebuild_index.py
+    (rebuild_index.py's `_grouped_body()`), and rebuild_index.py
     leaves out any section with no page — a group, or the unclassified section.
     Removing a section's last row here would otherwise leave its heading
     standing over nothing until rebuild_index.py next runs. A section counts as

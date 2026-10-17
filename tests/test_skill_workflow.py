@@ -575,6 +575,25 @@ def test_generate_hands_out_the_queued_source(wiki):
     assert resp["instructions"] == "references/pass1-extract.md"
 
 
+@pytest.mark.parametrize("args,step", [
+    (["--arg=raw/a.txt", "--arg=--license", "--arg=CC-BY-4.0"], "register"),
+    (["--arg=--license", "--arg=CC-BY-4.0", "--arg=raw/a.txt"], "register"),
+])
+def test_generate_license_value_is_not_taken_for_the_source(wiki, args, step):
+    """Issue #1312: `--license <id>` takes a value, like `--include <glob>`."""
+    resp = json.loads(gen(wiki, "start", "--workflow", WORKFLOW_PATH, "--model", "m", *args).stdout)
+    assert resp["step"] == step
+
+
+def test_generate_license_without_a_source_halts_at_the_start(wiki):
+    """The value after --license is not a source, and a run that registers nothing
+    would drop the value without a word, so the run does not start."""
+    resp = json.loads(gen(wiki, "start", "--workflow", WORKFLOW_PATH, "--model", "m",
+                          "--arg=--license", "--arg=CC-BY-4.0").stdout)
+    assert resp["step"] is None and resp["state"] == "halted"
+    assert "--license" in resp["halted_reason"]
+
+
 def test_generate_halts_at_the_start_without_review_rules(wiki):
     (wiki / ".wikicommit" / "review-rules.md").unlink()
     resp = json.loads(gen(wiki, "start", "--workflow", WORKFLOW_PATH, "--model", "m").stdout)
@@ -977,3 +996,58 @@ def test_a_pass1_deferral_reason_has_to_be_the_scripts_line(wiki):
     _queue(wiki, SOURCE, f"- {LOW}")
     refused = _done(wiki, run, "pass1-extract", SOURCE, "deferred")
     assert refused["accepted"] is False and "verbatim" in refused["reason"]
+
+
+def _halted_questions(wiki: Path, run: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, ".claude/skills/wikicommit-generate/scripts/workflow_checks.py",
+         "halted-questions", "--run", run],
+        cwd=wiki, capture_output=True, text=True, encoding="utf-8", check=False,
+    )
+
+
+def test_a_run_halted_part_way_lists_the_questions_it_never_asked(wiki):
+    """A halt closes the run before `ask-deferred`; the halt report lists what was set
+    aside so far, with the first line of each reason, and the deferral stays queued."""
+    _queue(wiki, SECOND)
+    _, run = _start(wiki)
+    _queue(wiki, SOURCE, LOW)
+    resp = _done(wiki, run, "pass1-extract", SOURCE, "deferred")
+    assert (resp["step"], resp["item"]) == ("pass1-extract", SECOND), resp
+    resp = json.loads(gen(wiki, "done", run, "--step", "pass1-extract", "--item", SECOND,
+                          "--outcome", "halted", "--token", TOKENS["pass1-extract"],
+                          "--reason", "MISSING_PACKAGE: markitdown").stdout)
+    assert resp["step"] is None and resp["state"] == "halted", resp
+    assert not any(e["step"] == "ask-deferred" for e in front(wiki / run)["workflow"]["log"])
+
+    result = _halted_questions(wiki, run)
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.splitlines() == [f"ITEM: {SOURCE}", f"REASON: {LOW}"]
+    assert front(wiki / SOURCE)["status"] == "pending"
+
+
+def test_halted_questions_leaves_out_a_deferral_that_is_not_a_question(wiki):
+    _, run = _start(wiki)
+    _queue(wiki, SOURCE, "NETWORK_UNAVAILABLE: name resolution failed")
+    _done(wiki, run, "pass1-extract", SOURCE, "deferred")
+    result = _halted_questions(wiki, run)
+    assert result.returncode == 0 and result.stdout == "", result.stdout
+
+
+def test_halted_questions_is_silent_once_the_questions_were_asked(wiki):
+    """A halt in `per-answered-source` comes after `ask-deferred`: the deferrals were
+    asked, so the halt report must not present them as never asked."""
+    _, run = _start(wiki)
+    _queue(wiki, SOURCE, LOW)
+    _done(wiki, run, "pass1-extract", SOURCE, "deferred")
+    resp = json.loads(gen(wiki, "done", run, "--step", "ask-deferred", "--answer", "answered",
+                          "--add", f"reprocess={SOURCE}",
+                          "--add", f"continue-low-density={SOURCE}").stdout)
+    assert (resp["step"], resp["item"]) == ("reprocess-pass1-extract", SOURCE), resp
+    resp = json.loads(gen(wiki, "done", run, "--step", "reprocess-pass1-extract",
+                          "--item", SOURCE, "--outcome", "halted",
+                          "--token", TOKENS["pass1-extract"],
+                          "--reason", "MISSING_PACKAGE: markitdown").stdout)
+    assert resp["step"] is None and resp["state"] == "halted", resp
+    result = _halted_questions(wiki, run)
+    assert result.returncode == 0 and result.stdout == "", result.stdout

@@ -3,13 +3,13 @@
 (Settings -> Actions -> General -> Workflow permissions) is enabled.
 
 review-issue-close-sync.yml's `Commit and open PR` step depends on this
-repository setting (Issue #313). wikicommit-init attempts to enable it
-automatically at repository initialization time (best-effort, Issue #403),
-but that attempt can silently fail for reasons that leave no trace in normal
-operation — the failure only surfaces days later, when a reviewer closes a
-tracking Issue and the workflow run fails deep in GitHub Actions logs nobody
-routinely checks (Issue #478). This script re-checks the setting on each
-wikicommit-status run so drift is caught proactively instead of by accident.
+repository setting. wikicommit-init attempts to enable it automatically at
+repository initialization time (best-effort), but that attempt can silently
+fail for reasons that leave no trace in normal operation — the failure only
+surfaces days later, when a reviewer closes a tracking Issue and the workflow
+run fails deep in GitHub Actions logs nobody routinely checks. This script
+re-checks the setting on each wikicommit-status run so drift is caught
+proactively instead of by accident.
 
 Usage:
     python .wikicommit/scripts/check_actions_pr_permission.py

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""record_run.py — write one file per run of a Skill (Issue #790).
+"""record_run.py — write one file per run of a Skill.
 
 This repository has four record layers and every one of them is keyed on an
 **artifact**: Git history on files, the source management files on one source,
-the review records on one review of one page (Issue #750), the tracking Issues
-on one page. Nothing is keyed on a **run**, and three questions follow from
-that gap:
+the review records on one review of one page, the tracking Issues on one page.
+Nothing is keyed on a **run**, and three questions follow from that gap:
 
 - **When was a page actually generated?** `generated_at` holds a date. A commit
   timestamp is the merge, not the generation. A review record's filename holds a
@@ -15,22 +14,21 @@ that gap:
   output, so every page in a batch would carry the same second. **A per-page
   instant does not exist. The unit that exists is the run.**
 - **Did the run finish?** When a run dies partway, some management files sit at
-  `pending` and some at `generated` — indistinguishable from the backlog Issue
-  #567 dealt with, where the queue simply never reached them. Worse, the two
-  halt paths that stop everything (guard C in Issue #574, a `rules_version`
-  mismatch in Issue #752) change no file at all, so they leave *no trace in Git*.
-- **How long did it take?** Nowhere. The pilot procedure has had an empty
-  "time per repository" column since it was written.
+  `pending` and some at `generated` — indistinguishable from a backlog the queue
+  simply never reached. Worse, the two halt paths that stop everything (guard C,
+  a `rules_version` mismatch) change no file at all, so they leave *no trace in
+  Git*.
+- **How long did it take?** Nowhere.
 
 ## One run is one file, and it is not tracked by Git
 
-The shape is Issue #750's — one record per event, created rather than appended —
-but the storage decision is the opposite one, and deliberately:
+The shape is the review records' — one record per event, created rather than
+appended — but the storage decision is the opposite one, and deliberately:
 
 | Why review records are tracked | Run records |
 |---|---|
 | Measurement over the wiki's whole life; it cannot be built retroactively | Only "the last run" and "runs that did not finish" are ever read |
-| Displayed on the published site (Issue #751) | Displayed nowhere; `convert_wikilinks.py` never walks this tree |
+| Displayed on the published site | Displayed nowhere; `convert_wikilinks.py` never walks this tree |
 | The verdict bears on whether a page can be trusted | The outward shape of a run; not knowledge the wiki holds |
 
 Tracking them would put a file into the PR of every single generate run, and —
@@ -41,9 +39,9 @@ appears in a diff.
 
 They are not put under `.wikicommit/.cache/` either. That directory is for
 derived data that can be rebuilt (`search_index.sqlite3`); a run record cannot
-be. Issue #319 already moved `schemaorg-vocab.json` out of it for the mirror
-image of this reason — that the name promises "safe to delete" about something
-whose real nature is different.
+be. `schemaorg-vocab.json` is kept out of it for the mirror image of this
+reason — that the name promises "safe to delete" about something whose real
+nature is different.
 
 What that costs, accepted in full: a cloud session's records die with the VM
 (so do that run's uncommitted outputs, so the two stay consistent), a clone
@@ -54,11 +52,11 @@ the first bullet above.
 ## An empty `ended_at` is the answer, not a bug
 
 `start` writes `ended_at: ""` and `end` fills it in. Forgetting the closing
-stamp at the tail of a long multi-pass flow is the failure mode Issues #406,
-#452 and #474 each had to fix once — and here it needs no fixing, because a
-record with a start and no end *is* the answer to "did this run finish". This
-is Issue #750's `page_content_hash: ""` meaning "no page was written", in the
-same position.
+stamp at the tail of a long multi-pass flow is a failure mode these flows have
+had to fix elsewhere — and here it needs no fixing, because a record with a
+start and no end *is* the answer to "did this run finish". This is the review
+record's `page_content_hash: ""` meaning "no page was written", in the same
+position.
 
 The direction of the error matters: a forgotten stamp reports a completed run
 as incomplete, never the reverse. A false "did not finish" costs a glance at a
@@ -67,11 +65,11 @@ this file exists to answer. That is also why `end` requires `--run <path>`
 rather than guessing at the newest unfinished record of the same Skill: guessing
 would close a genuinely dead run from a previous session and erase its signal.
 
-`end` is the one read-modify-write in this file, which Issue #750 avoided on
-purpose. It is safe here for a reason that does not generalize: a run record has
-no body and no comments (see below), so a YAML round-trip has nothing to lose —
-unlike `config.yml`, where exactly that cost a file's worth of commented
-examples (Issue #713).
+`end` and `checkpoint` are read-modify-writes, a shape the review records avoid
+on purpose. It is safe here for a reason that does not generalize: a run record
+has no body and no comments (see below), so a YAML round-trip has nothing to
+lose — unlike `config.yml`, where exactly that costs a file's worth of commented
+examples.
 
 ## The body is always empty
 
@@ -82,34 +80,31 @@ not taken — matching the shape of the other records is worth more than saving
 the delimiters. **The body stays empty**; it is not an invitation to write
 something because there is room.
 
-What is deliberately not recorded: cost and token counts (Issue #784 removed
-billing figures from a distributed file for the same reason), page text or model
+What is deliberately not recorded: cost and token counts, page text or model
 output (the page and its management file already hold it), individual judgments
 (`## Summary` and `.wikicommit/review/` own those — this file holds the outward
 shape of a run only), and per-script timings (most of the time is LLM inference
 outside any script, so timing the cheap deterministic parts would measure the
 wrong thing).
 
-## Checkpoints say *where* a run got to (Issue #797)
+## Checkpoints say *where* a run got to
 
 `ended_at` answers whether a run finished. It says nothing about what happened
 inside it, and two questions live in that gap:
 
-- **Where did it stop?** The two halt paths change no file (guard C in Issue
-  #574, a `rules_version` mismatch in Issue #752), so the run record is the only
-  trace — and without a checkpoint that trace has no position.
-- **Was a pass skipped?** Issues #406, #452 and #474 are all one class: a step at
-  the tail of a long multi-pass flow silently does not run. All three were found
-  by a human auditing a published pilot repository afterwards. All three were
-  fixed by delegating the step to a deterministic script — which does nothing
+- **Where did it stop?** The two halt paths change no file (guard C, a
+  `rules_version` mismatch), so the run record is the only trace — and without
+  a checkpoint that trace has no position.
+- **Was a pass skipped?** A step at the tail of a long multi-pass flow can
+  silently not run. Delegating the step to a deterministic script does nothing
   when the instruction to *call* that script is itself the step that drops.
 
 `checkpoint` stamps the entry to each pass into the `passes` list. A missing
 stamp is a pass that did not run; the last stamp is how far the run got.
 
-**The verification has a third party.** Issue #752 could check that a subagent
-had read the rules file because the subagent returns JSON an orchestrator
-compares — and that same Issue records the limit: `wikicommit-review` uses no
+**The verification has a third party.** The `rules_version` check can tell that
+a subagent read the rules file because the subagent returns JSON an orchestrator
+compares — and it has the limit that follows: `wikicommit-review` uses no
 subagent, so nothing checks it there. A single agent asserting it read a file,
 to itself, verifies nothing. Handing the comparison to *this script* restores
 the second party without needing a second agent: `--token` makes it open the
@@ -123,7 +118,7 @@ possible. The stamps stay in frontmatter as a list of flat mappings: the body
 stays empty (see above), and "scalars and lists all the way down" still holds.
 
 `check_run_records.py` is the consumer, without which this would be a receptacle
-nothing reads — the shape Issue #553 rules out.
+nothing reads.
 """
 
 import argparse
@@ -154,13 +149,13 @@ SKILLS = (
 )
 
 # Keep the newest N records and drop the rest at write time. A record is a few
-# hundred bytes, so a count is enough and needs no clock (Issue #790).
+# hundred bytes, so a count is enough and needs no clock.
 KEEP_RECORDS = 50
 
-# The passes a Skill stamps, in order (Issue #797). Only `wikicommit-generate`
-# has one: it is the multi-pass Skill, and starting with it alone is how the
-# shape gets confirmed before the other three inherit it. `merge`'s Step 1-10
-# already leave their result in `end`'s `--outcome`.
+# The passes a Skill stamps, in order. Only `wikicommit-generate` has one: it is
+# the multi-pass Skill, and starting with it alone is how the shape gets
+# confirmed before the other three inherit it. `merge`'s Step 1-10 already leave
+# their result in `end`'s `--outcome`.
 #
 # Pass 2a is deliberately not a checkpoint. It runs unconditionally, in the same
 # breath as Pass 1's extraction, and has no branch and no halt of its own; the
@@ -179,9 +174,8 @@ EXPECTED_PASSES = {
 }
 
 # `--regenerate` runs a narrower flow: it takes a page rather than a source, so
-# the entities are already settled and Pass 2 does not run at all (Issue #578).
-# Reporting 2b and 2c as missing there would be reporting the mode working as
-# designed.
+# the entities are already settled and Pass 2 does not run at all. Reporting 2b
+# and 2c as missing there would be reporting the mode working as designed.
 REGENERATE_PASSES = {
     "wikicommit-generate": ("pass1-extract", "pass3-generate", "pass4-review"),
 }
@@ -191,22 +185,19 @@ REGENERATE_PASSES = {
 # resolves the location itself, and a caller that could also name the file could
 # name one it had just written.
 #
-# `references/` rather than a directory of this script's own invention (Issue
-# #911): that is where the Skill anatomy puts material read on demand, it is
-# already where this Skill's other instruction files live, and keeping pass files
-# there means one directory holds everything `SKILL.md` points at rather than two
-# that a reader has to learn to tell apart.
+# `references/` rather than a directory of this script's own invention: that is
+# where the Skill anatomy puts material read on demand, it is already where this
+# Skill's other instruction files live, and keeping pass files there means one
+# directory holds everything `SKILL.md` points at rather than two that a reader
+# has to learn to tell apart.
 #
-# **Do not move it again on the grounds that nothing sends a `--token` yet.** That
-# was the stated reason in Issue #911 and it was wrong (Issue #925): an installed
-# wiki refreshes `.claude/skills/` and `.wikicommit/scripts/` with two different
-# commands, so it can hold Skills that send a token next to a script still looking
-# in the old directory — and that combination stamps `token: missing` on passes
-# that ran exactly as instructed. Nor was that move safe for some other reason:
-# installed wikis already existed when it happened, carrying the release whose
-# scripts look in the old directory. What limits the damage is only that every
-# such repository moves forward through a procedure that refreshes both halves,
-# which makes the skew a window rather than a state — and a window a human has to
+# **Do not move it, whether or not anything sends a `--token`.** An installed wiki
+# refreshes `.claude/skills/` and `.wikicommit/scripts/` with two different
+# commands, so it can hold Skills that send a token next to a script looking in
+# a different directory — and that combination stamps `token: missing` on passes
+# that ran exactly as instructed. What limits the damage is only that every such
+# repository moves forward through a procedure that refreshes both halves, which
+# makes the skew a window rather than a state — and a window a human has to
 # close, since the Skill that refreshes the scripts opens a pull request and does
 # not auto-merge it. Moving this constant reopens that window for everyone.
 PASS_FILE_DIR = "references"
@@ -224,7 +215,7 @@ PASS_FILE_DIR = "references"
 # `token:` a consumer (`/wikicommit-status` reporting it to a human) is the open
 # half of that, deliberately not built while no run record has ever carried a
 # `mismatch`: there is nothing yet to size a report against. Revisit when such a
-# record exists (Issue #925).
+# record exists.
 TOKEN_UNCHECKED = "unchecked"
 TOKEN_OK = "ok"
 TOKEN_MISSING = "missing"
@@ -310,12 +301,12 @@ def allocate_run_path(directory: Path, stamp: str, skill: str) -> Path:
     Two runs starting in the same second is not something this can produce in
     practice, but overwriting a record is not a thing this file is allowed to do.
 
-    **The stamp is clamped to the newest record already here (Issue #991.)** Same
-    defect and same fix as `record_review.py`'s `allocate_record_path()` — see the
-    reasoning there. It matters at least as much on this side: `run_sort_key()` does
-    not only pick what `LAST_RUN:` reports, it also decides which records rotation
-    *deletes*, so a backwards clock step can drop the newest run instead of the
-    oldest.
+    **The stamp is clamped to the newest record already here.** Same hazard (a
+    wall clock that steps backwards) and same fix as `record_review.py`'s
+    `allocate_record_path()` — see the reasoning there. It matters at least as
+    much on this side: `run_sort_key()` does not only pick what `LAST_RUN:`
+    reports, it also decides which records rotation *deletes*, so a backwards
+    clock step can drop the newest run instead of the oldest.
 
     The suffix is allocated from `next_seq()` — the stamp, not the exact filename —
     because the skill slug is not part of the sort key and rotation can free the
@@ -447,11 +438,11 @@ def expected_passes(record: dict) -> tuple[str, ...]:
 def pass_files_for(skill: str, pass_name: str) -> list[Path]:
     """`<skill tree>/<skill>/references/<pass>.md` for every installed copy of `skill`.
 
-    The Skill tree may sit under `.claude/skills/` or `.agents/skills/` (Issue #1021);
-    the search order is `_skill_tree.SKILL_TREE_ROOTS`. When neither holds the Skill,
-    the `.claude/skills` path is still returned so the failure message names a file.
+    The Skill tree may sit under `.claude/skills/` or `.agents/skills/`; the search
+    order is `_skill_tree.SKILL_TREE_ROOTS`. When neither holds the Skill, the
+    `.claude/skills` path is still returned so the failure message names a file.
     The path is never taken from the caller: a script that opens the file itself is
-    the third party the token check rests on (Issue #797).
+    the third party the token check rests on.
     """
     dirs = skill_dirs(skill) or [Path(".claude") / "skills" / skill]
     return [d / PASS_FILE_DIR / f"{pass_name}.md" for d in dirs]
@@ -486,7 +477,7 @@ def read_pass_token(path: Path) -> str | None:
 
 
 def cmd_checkpoint(args) -> int:
-    """Stamp the entry to one pass onto an open run record (Issue #797)."""
+    """Stamp the entry to one pass onto an open run record."""
     path = Path(args.run)
     if not path.is_file():
         raise RunError(f"{args.run}: no such run record (pass the path `start` printed)")
@@ -581,7 +572,7 @@ def open_record(skill: str, model: str, run_args: list[str], extra: dict | None 
         "pages": [],
         # Empty rather than absent, in the same shape the stamps will take: a run
         # that recorded nothing is then visibly different from one written before
-        # checkpoints existed, whose records have no such key at all (Issue #797).
+        # checkpoints existed, whose records have no such key at all.
         "passes": [],
         "outcome": {},
         "halted_reason": "",

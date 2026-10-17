@@ -5,18 +5,17 @@ Named for the `check_ingest_freshness.py` / `check_derivation_freshness.py` fami
 which all ask the same question: is what was recorded still true? Unlike
 `check_ingest_freshness.py`, this one has no side effects — it never writes.
 
-A wiki repository holds three kinds of thing (Issue #712), and only the first is the
-user's to keep:
+A wiki repository holds three kinds of thing, and only the first is the user's to keep:
 
   - content and configuration the user authors (`entity/`, `config.yml`, `schema/`)
   - WikiCommit's own payload, which the user never edits (`.wikicommit/scripts/`,
     `quartz-plugins/`, the two workflows, the `*.cjs` build scripts)
   - things generated elsewhere (`quartz/`, `package-lock.json`)
 
-Until Issue #712 the second kind was treated like the first, so a repository initialized
-a version ago silently kept running the old workflow, the old plugin `dist/` and the old
-build scripts, and the only way to find out was to clone it and diff by hand. This script
-makes that visible; `/wikicommit-init` refreshes it.
+Treating the second kind like the first would leave a repository initialized a version
+ago silently running the old workflow, the old plugin `dist/` and the old build scripts,
+with no way to find out short of cloning it and diffing by hand. This script makes that
+visible; `/wikicommit-init` refreshes it.
 
 Which policy each path gets is declared once, in `_root_outputs.py` — the same list that
 drives init.py's copies and print_next_steps.py's `git add` guidance. Keeping a second
@@ -50,12 +49,12 @@ from _skill_tree import SKILL_TREE_ROOTS, find_skill_dir  # noqa: E402
 def _init_scripts_dir(repo_root: Path) -> Path:
     """`<skill tree>/wikicommit-init/scripts` — where the templates to compare against live.
 
-    The Skill tree may be under `.claude/skills/` or `.agents/skills/` (Issue #1021; the
-    search order and why it is that order are in `_skill_tree.py`). Before this looked
-    only at `.claude/skills/`, so a Codex-only install printed "wikicommit-init is not
-    installed" and a clean all-zero summary — the Skill present, merely elsewhere, read
-    as absent. When no copy exists the `.claude/skills` path is returned so the
-    not-installed message still names somewhere to look.
+    The Skill tree may be under `.claude/skills/` or `.agents/skills/` (the search order
+    and why it is that order are in `_skill_tree.py`). Looking only at `.claude/skills/`
+    would make a Codex-only install print "wikicommit-init is not installed" and a clean
+    all-zero summary — the Skill present, merely elsewhere, read as absent. When no copy
+    exists the `.claude/skills` path is returned so the not-installed message still names
+    somewhere to look.
     """
     found = find_skill_dir("wikicommit-init", repo_root)
     return (found or repo_root / SKILL_TREE_ROOTS[0] / "wikicommit-init") / "scripts"
@@ -67,20 +66,20 @@ _PRUNED_DIRS = {"node_modules", "__pycache__"}
 # The update policies this script knows how to act on; see check() for why.
 _HANDLED_POLICIES = frozenset(("overwrite", "review", "skip"))
 
-# Appended to `.wikicommit/scripts` alone (Issue #930). A stale copy there means the
-# instructions a Skill is executing right now were written against newer scripts, and the
-# mismatch does not always announce itself: when only the inside of an existing option
-# changed, the old script can fail in a way that names the wrong cause. For quartz-plugins
-# or the workflows a stale copy means a stale published site or CI job instead, so a
-# suffix shared by every OUTDATED line would be wrong on most of them.
+# Appended to `.wikicommit/scripts` alone. A stale copy there means the instructions a
+# Skill is executing right now were written against newer scripts, and the mismatch does
+# not always announce itself: when only the inside of an existing option changed, the old
+# script can fail in a way that names the wrong cause. For quartz-plugins or the workflows
+# a stale copy means a stale published site or CI job instead, so a suffix shared by every
+# OUTDATED line would be wrong on most of them.
 #
-# It states the consequence and stops there (Issue #935). It used to end with
-# "Run /wikicommit-update.", which is wrong at one of the six places that run this check
-# and redundant at two more: three of them belong to /wikicommit-update itself, and the
-# one in its last step runs *after* the update, so a line there reports that the update
-# just made did not take — prescribing the command that has only now failed. The
-# consequence holds at every call site; what to do about it is what each SKILL.md already
-# says in context, which is why this string carries the first and not the second.
+# It states the consequence and stops there. Ending it with "Run /wikicommit-update."
+# would be wrong at one of the six places that run this check and redundant at two more:
+# three of them belong to /wikicommit-update itself, and the one in its last step runs
+# *after* the update, so a line there reports that the update just made did not take —
+# prescribing the command that has only now failed. The consequence holds at every call
+# site; what to do about it is what each SKILL.md already says in context, which is why
+# this string carries the first and not the second.
 _SCRIPTS_CONSEQUENCE = (
     ". The installed Skills were refreshed and these scripts were not, so an instruction "
     "written against the new scripts can meet an older one here and fail in a way that "
@@ -149,7 +148,7 @@ def detect_variant(repo_root: Path) -> str:
 
     Read off the two files that variant actually gates rather than off any recorded
     setting, because nothing records it: `quartz.config.yaml` is what `--quartz` adds,
-    and `deploy.yml` is the single thing `--quartz-pages` adds on top (Issue #335).
+    and `deploy.yml` is the single thing `--quartz-pages` adds on top.
     """
     if not (repo_root / "quartz.config.yaml").is_file():
         return "none"
@@ -181,7 +180,7 @@ def _load_yaml_mapping(path: Path) -> dict:
 def _synced_version(repo_root: Path) -> str:
     """`wikicommit_version` from config.yml, or "unknown".
 
-    Absent means the repository predates Issue #577, which stamped it. No date-based
+    Absent means the repository predates the version that stamps it. No date-based
     guess is made: every comparison below runs on the files themselves regardless, so
     the version is reported for the reader's benefit and never gates a check.
     """
@@ -193,9 +192,9 @@ def _synced_version(repo_root: Path) -> str:
 
 # The key a list element carries its identity in. `plugins` is the only list of mappings
 # in any compared template, and `source` is what names each entry there. No `name`/`id`
-# fallback is guessed at: a second candidate would be a receptacle with no consumer
-# (Issue #553), and an element with no identifier is skipped rather than matched by
-# position — see _list_element_paths().
+# fallback is guessed at: a second candidate would be a receptacle with no consumer, and
+# an element with no identifier is skipped rather than matched by position — see
+# _list_element_paths().
 _LIST_ELEMENT_IDENTIFIER_KEY = "source"
 
 
@@ -212,22 +211,22 @@ def _list_element_identifier(item) -> str | None:
 
 
 def _list_element_paths(items: list, path: str) -> set[str]:
-    """`<path>[<identifier>]` for each element that has one (Issue #950).
+    """`<path>[<identifier>]` for each element that has one.
 
     Three constraints, each settled by measuring the three pilots rather than by taste:
 
     1. **Identity, never position.** One plugin added upstream would shift all 47 and
        report every one of them as drift.
     2. **No descent into an element mapping.** `enabled` would report ai-driven-dev-wiki
-       for turning giscus on — the deliberate choice the very Issue that shipped the
-       plugin exists to enable — and `options` would report all three pilots forever,
-       because the footer's `{REPO_URL}` is still a placeholder on the template side.
-       So what is compared about `plugins` is *which plugins are there*, nothing else.
+       for turning giscus on — the deliberate choice the plugin exists to enable — and
+       `options` would report all three pilots forever, because the footer's `{REPO_URL}`
+       is still a placeholder on the template side. So what is compared about `plugins` is
+       *which plugins are there*, nothing else.
     3. **Additive only**, like every other `review` comparison: an element the local file
        has and the template does not is the user's own and is never reported.
 
     An element with no identifier is skipped, not matched by position: the degradation is
-    the same silence as before this existed, which is not a source of noise.
+    silence about that element, which is not a source of noise.
     """
     paths: set[str] = set()
     for item in items:
@@ -243,14 +242,12 @@ def _key_paths(value, prefix: str = "") -> set[str]:
 
     Recursive rather than top-level-only because the keys that actually get added
     upstream are nested: `quartz.config.yaml` has three top-level keys and never gains a
-    fourth, while `pageTitleSuffix` (Issue #679) arrived under `configuration`.
+    fourth, while `pageTitleSuffix` arrived under `configuration`.
 
-    Lists are descended into as well (Issue #950). Stopping at the key collapsed all 47
-    entries of `plugins` into a single path, so a plugin swapped for the local build, a
-    plugin added upstream, or a component added to `layout.byPageType.*.exclude` was
-    structurally invisible — four of the five drifts a maintainer had listed as "not
-    detected" were of exactly that shape, and a fifth (`comments`, Issue #755) was
-    missing from two of three pilots with nobody having written it down at all.
+    Lists are descended into as well. Stopping at the key would collapse all 47 entries
+    of `plugins` into a single path, so a plugin swapped for the local build, a plugin
+    added upstream, or a component added to `layout.byPageType.*.exclude` would be
+    structurally invisible.
     """
     if not isinstance(value, dict):
         return set()
@@ -330,7 +327,7 @@ def _frontmatter_keys(path: Path) -> set[str]:
 
 
 def _json_keys(path: Path) -> set[str]:
-    """Key paths in a JSON object — for `.claude/settings.json` (Issue #953).
+    """Key paths in a JSON object — for `.claude/settings.json`.
 
     Additive like the two above, and for the same reason: init merges three
     `skillOverrides` entries into a file whose other contents (permissions, env, hooks)
@@ -433,7 +430,7 @@ def _footer_github_link(config: dict) -> str | None:
 
 
 def _quartz_value_findings(repo_root: Path, local_path: Path) -> list[str]:
-    """`quartz.config.yaml` values that are wrong rather than merely different (#950).
+    """`quartz.config.yaml` values that are wrong rather than merely different.
 
     Two of the drifts that stayed invisible are not template-comparison problems at all:
     the template holds `{LOCALE}` and `{REPO_URL}`, so there is no upstream literal to

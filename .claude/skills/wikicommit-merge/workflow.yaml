@@ -137,23 +137,42 @@ steps:
     halts_on: [failed]
     check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-merged, --run, "{run}"]
 
+  # Steps 8 and 9 each start with a script step that scans the default branch and
+  # matches the open Issues' markers, producing only what still needs an Issue. A
+  # step with nothing to file is skipped, so its instructions are not handed over
+  # (most merges carry no failed source). A failed lookup is never read as "nothing
+  # to file": `has-targets` hands the step over all the same, the failure is in the
+  # notes, and nothing is filed blind.
+  #
   # No completion check on the two Issue steps, deliberately: a page whose Issue
   # could not be created is skipped and reported, and the next run's full scan of
   # the default branch picks it up. A check that every pending page has an open
   # Issue would turn a tolerated API failure into a stuck run. Resuming re-runs the
-  # step, which is safe because each Issue is matched by its marker before it is
-  # created.
+  # step, which reads the targets afresh (`targets` again) before filing, so an
+  # Issue created before the interruption is not filed twice.
+  - id: review-targets
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", targets, --kind, review, --run, "{run}"]
+    produces: review_targets
+
   - id: tracking-issues
     type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-targets, --kind, review, --run, "{run}"]
     instructions: references/tracking-issues.md
     outcomes:
-      filed: "every pending page has an open tracking Issue, a new one or an existing one, or was reported as skipped"
+      filed: "every page the targets command listed has an open tracking Issue, a new one or an existing one, or was reported as skipped"
+
+  - id: failure-targets
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", targets, --kind, failure, --run, "{run}"]
+    produces: failure_targets
 
   - id: failure-issues
     type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-targets, --kind, failure, --run, "{run}"]
     instructions: references/failure-issues.md
     outcomes:
-      filed: "every failed source has an open generation-failure Issue, a new one or an existing one, or was reported as skipped"
+      filed: "every source the targets command listed has an open generation-failure Issue, a new one or an existing one, or was reported as skipped"
 
   - id: report
     type: agent

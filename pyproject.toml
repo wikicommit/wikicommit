@@ -1,7 +1,7 @@
 [project]
 # This version declares only this development repository's own Python package,
 # which exists to pull in the dependencies needed to run this repository's
-# scripts and tests (`pyyaml` below, plus the `dev` extra) and to hold the
+# scripts and tests (`pyyaml` and `markdown-it-py` below, plus the `dev` extra) and to hold the
 # [tool.ruff] settings. **It is not WikiCommit's version**, and it is
 # deliberately not kept in sync with it (Issue #577 / #799): `packages = []`
 # below means this is not a distributed package, nothing in the repository
@@ -16,6 +16,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
+    "markdown-it-py>=3.0",
 ]
 
 [project.optional-dependencies]

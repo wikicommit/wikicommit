@@ -16,7 +16,7 @@ from _frontmatter import parse_frontmatter_text
 from _wikilink import (
     ENTITY_DIR,
     VIEW_DIR,
-    WIKILINK_RE,
+    extract_wikilinks,
     collect_entity_pages,
     collect_view_pages,
     parse_wiki_path,
@@ -47,7 +47,7 @@ def _parse_page(path: Path) -> tuple[dict, set[str]]:
     if err:
         print(f"WARNING: {path}: {err}", file=sys.stderr)
         fm = {}
-    wikilinks = {f"{t}/{s}" for t, s in WIKILINK_RE.findall(content)}
+    wikilinks = {f"{t}/{s}" for t, s in extract_wikilinks(content)}
     return fm, wikilinks
 
 
@@ -71,10 +71,10 @@ def collect_link_sources() -> list[Path]:
     """Pages whose outbound WikiLinks count as backlinks, which is a wider set
     than the pages this script can *report* on.
 
-    View pages (Issue #675) are excluded from the orphan report itself — one is
-    unlinked the moment it is written, so every one of them would be a finding
-    nobody can act on — but their links are ordinary links. Leaving them out of
-    the backlink set would mean moving a synthesized page from
+    View pages are excluded from the orphan report itself — one is unlinked
+    the moment it is written, so every one of them would be a finding nobody
+    can act on — but their links are ordinary links. Leaving them out of the
+    backlink set would mean moving a synthesized page from
     `.wikicommit/entity/` into `.wikicommit/view/` silently turns each page it
     references back into an orphan, and `check_wanted_pages.py` (which walks
     both trees) would disagree with this script about the same repository.
@@ -83,15 +83,12 @@ def collect_link_sources() -> list[Path]:
 
 
 def source_labels(frontmatter: dict) -> list[str]:
-    """Short identifiers for a page's `sources`, for the ORPHAN line (Issue #570).
+    """Short identifiers for a page's `sources`, for the ORPHAN line.
 
     An orphan is a page nothing links to, and the useful next question is which
-    source produced it — a `wikicommit/saitama-city-wiki` audit found all six of
-    its orphans came from sources that had produced no other page, while pages
-    from the two sources covering the subject's overall structure were reachable
-    throughout. That is one repository and partly self-fulfilling (a structural
-    source links to everything by definition), so it is a hypothesis rather than
-    a finding; printing the provenance is what makes it checkable at all.
+    source produced it: that orphans come from sources that produced no other
+    page is a hypothesis rather than a finding, and printing the provenance is
+    what makes it checkable at all.
     """
     sources = frontmatter.get("sources")
     if not isinstance(sources, list):

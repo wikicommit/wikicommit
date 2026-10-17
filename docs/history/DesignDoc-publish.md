@@ -18,6 +18,34 @@
 
 <!-- -->
 
+> **プラグインのキャッシュ（Issue #1310）**: ai-driven-dev-wiki の deploy（2026-10-13、成功）で `Build Quartz site` が 10 分 18 秒かかっていた。ログからの内訳は `npm install` 約 44 秒・`convert` + `prebuild` 約 10 秒・`quartz plugin install --from-config` + `repair-plugin-builds.cjs` 約 3 分 40 秒（`Found 47 uninstalled plugin(s) in config`。コミュニティ 38 件 ＋ 独自 9 件で、`enabled: false` の 9 件を含む）・パース 30 秒（3,117 ファイル）・出力約 6 分 30 秒（9,975 ファイル）。CI にキャッシュが無く、ページが 1 枚変わっただけでも毎回プラグインを未インストールの状態から入れ直していた。`deploy.yml` テンプレートに `actions/cache` によるプラグインのキャッシュと `setup-node` の `cache: npm` を入れた。
+>
+> **開発リポジトリで確かめたこと**: Quartz v5（`jackyzha0/quartz` の `v5`、`97a2d05`）の `plugin-git-handlers.js` を読み、インストール済みの判定が `lockfile.plugins[name] && fs.existsSync(pluginDir)` であること、ローカルソースはクローンせず `symlinkOrCopySync` で絶対パスのリンクを張ること、プラグイン index（`.quartz/plugins/index.ts`）が新たに入れたプラグインがあるときだけ再生成されることを確かめた。そのうえでリモート 2 件（`description`・`enabled: false` の `hard-line-breaks`）＋ローカル 1 件（`wikicommit-jsonld`）の設定で、初回のインストールが 59 秒、`.quartz/plugins` と `quartz.lock.json` を tar で退避・復元し、ローカルのエントリを外してから再実行すると 1 秒（ローカル 1 件のリンクのみ）であり、その後 `repair-plugin-builds.cjs` が何も直さずに終わり、さらにもう 1 度実行すると `✓ All configured plugins are already installed` になることを確かめた。
+>
+> **確かめていないこと**: ai-driven-dev-wiki での 3 条件（現状・`og-image` をエントリごと外す・`enabled: false` の 9 件をエントリごと外す）の時間と出力件数は、この実装をしたセッションから当該リポジトリの deploy を動かせなかったため測っていない。したがって「出力の 6 割強は `og-image` による」は未確認の仮説のままであり、`og-image` を (a) 残す・(b) テンプレートから外す・(c) サイト共通の 1 枚にする、と `enabled: false` のエントリを残すか消すかの判断は、計測を待って保留にした（テンプレートは変えていない）。Actions 上でキャッシュが当たったときにログが `Found 9 uninstalled plugin(s)`（ローカルの 9 件だけ）になること、キャッシュの大きさ（リポジトリあたり 10GB の上限に対して）も未確認である。
+>
+> **採らなかった案**: (a) `restore-keys` で部分一致を許す — Quartz の更新やプラグインの一覧の変更の後に、古い前提でビルドしたプラグインがインストーラに既存として扱われ、入れ直されない。(b) キャッシュの `path` に `!quartz/.quartz/plugins/wikicommit-*` の除外を書いてローカルプラグインを外す — 名前が `wikicommit-` で始まらない運用者のローカルプラグインを取りこぼすうえ、lockfile 側の記録は残る。lockfile の `commit: "local"` で判定する方が名前に依らない。(c) ローカルプラグインを外す処理を `package.json` の `install-plugins` に足す — `package.json` は `update: review` で既存の Wiki に黙っては届かず、`deploy.yml`（`update: overwrite`）に置けば再 init と `/wikicommit-update` で届く。
+
+<!-- -->
+
+> **計測と `og-image` の除外（Issue #1310 の続き。2026-10-16）**: 上の「確かめていないこと」のうち 3 条件の計測を、ai-driven-dev-wiki（`main` の `0bea40c`、Markdown 3,117 ファイル）をクローンしてローカル（16 コア・15GB RAM、Node 22）でビルドして行った。Actions 上の deploy は動かしていない。
+>
+> | 条件 | `install-plugins` | `quartz build`（うちパース / 出力） | 出力ファイル数 |
+> |---|---|---|---|
+> | 現状（47 件） | 114 秒（再計測 52 秒・75 秒） | 316 秒（16 秒 / 5 分） | 9,896（`html` 6,127・`webp` 3,714） |
+> | `og-image` をエントリごと削除 | 1 秒（インストール済み） | 32 秒（15 秒 / 15 秒） | 6,182 |
+> | `enabled: false` の 8 件をエントリごと削除（39 件） | 46 秒（再計測 56 秒） | 314 秒（15 秒 / 5 分） | 9,896 |
+>
+> ai-driven-dev-wiki は `comments`（giscus）を有効にしているので、`enabled: false` はテンプレートの 9 件より 1 件少ない 8 件である。出力の時間はほぼすべてが `og-image` だった（Issue の仮説どおり）。`webp` 3,714 件・101MB は出力全体 248MB の 4 割で、本文ページ 3,117 件が自分の画像を `og:image` に持ち、フォルダ・タグ等のページ 3,010 件は `static/og-image.png` を指していた。`enabled: false` の 8 件の寄与は、47 件のインストール時間そのものの揺れ（52〜114 秒。クローンのネットワーク時間）に埋もれて読み取れない。
+>
+> **判断を変えた観測**: 公開中の ai-driven-dev-wiki の画像（`ja/computerlanguage/shire-og-image.webp`）を取得して見ると、日本語の部分（本文の抜粋・タグ）がすべて豆腐（□）だった。ローカルで生成したものも同じである。プラグインは Google Fonts からヘッダ・本文のフォントを取得して Satori で描くが、そのフォントに日本語の字形が無い。つまり毎回 5 分かけて、日本語ページについては壊れたカード画像を作っていた。これで (a) 残す は退け、(b) テンプレートから外す を採った。外したときに Quartz 本体が出す共通画像は「Quartz 5 / quartz.jzhao.xyz」のロゴである。
+>
+> **採らなかった案**: (a) 残して CJK フォントを渡す — 出力の 5 分は残る。YAML から渡せるオプションは `colorScheme`・`width`・`height`・`excludeRoot`・`defaultTitle`・`defaultDescription` 程度で、フォントや `imageStructure` は TypeScript の上書きでしか変えられない。(c) Wiki 自身の共通画像を出す — Quartz の `Head.tsx` は `og-image` が無いとき `https://<baseUrl>/static/og-image.png` を固定で指し、その実体は `quartz/` サブモジュール内の追跡ファイルなので、差し替えるとサブモジュールを汚す（§8.1 のサブモジュール更新の議論と同じ問題）。手段の調査が要るため本 Issue からは外した。`enabled: false` の 8 件（テンプレートでは 9 件）は、寄与が測れないほど小さく、キャッシュが当たれば再 deploy では掛からないので残した。
+>
+> **まだ確かめていないこと**: Actions 上でキャッシュが当たった 2 回目以降の deploy のログ（ローカルプラグイン分だけの `Found 9 uninstalled plugin(s)` になるか）と、キャッシュの大きさ。ai-driven-dev-wiki にキャッシュ入りの `deploy.yml` が届いてから確かめる。
+
+<!-- -->
+
 > **ローカルプレビュー**: `/wikicommit-init --quartz` が生成する `package.json` には `npm run build`（ビルドのみ）・`npm run preview`（ビルド後にローカルサーバーを起動してブラウザで確認）が配線済み。GitHub Pages へのデプロイを待たずに手元で見た目を確認できる（Issue #240）。
 
 <!-- -->
@@ -30,6 +58,8 @@
 
 ### 8.2 WikiLink の解決方法
 
+> **別名付き `[[Type/slug|表示名]]` を受け付けた（Issue #1304、2026-10-16）**: それまで `convert_wikilinks.py` はこの形を変換せず、書かれたまま Quartz に渡していた。パイロット `wikicommit/ai-driven-dev-wiki`（`cfdc0f3`）には 26 件あった（例: `[[DefinedTerm/spec-growth-engine|Spec Growth Engine]]`）。公開サイトでそれらがどう描画されていたか（Quartz が最短一致で解決したのか、壊れたリンクになったのか）は、この変更の時点ではメンテナの目視確認として残した。受け付けたので、この 26 件はこの版以降の再ビルドで表示名をリンク文字列にした通常のリンクになり、ページ側の修正は要らない。禁止案を採らなかった理由は `history/DesignDoc-ScriptSpec.md` の `check_wikilinks.py`「WikiLink の形」。
+>
 > **未解決 WikiLink の表示仕様（Issue #431）**: `check_wikilinks.py` は「参照先ページがどの言語にも存在しない」ケースを ERROR ではなく WARNING として扱う（Issue #340）ため、参照先が解決できない `[[Type/slug]]` を含んだページも `wikicommit-merge` を通過しうる。この場合、ビルド前変換スクリプト（`convert_wikilinks.py`）は当該 WikiLink をリンクにはせず、ブラケットを除いたプレーンテキスト `Type/slug` として出力する（`lang`/`current_type` が特定できない場合、および同言語・`primary_lang` いずれのターゲットファイルも存在しない場合の両方でこの挙動になる）。生の `[[Type/slug]]` というダブルブラケット構文がそのまま読者に表示されることはない。この変換は `unresolved_links` カウント・`SUMMARY:` 行の集計には影響しない（集計は変換前の判定結果に基づくため）。
 
 ### 8.3 JSON-LD 埋め込み
@@ -226,6 +256,8 @@ Issue #167 の当初仮説は「YouTube 埋め込みには `enableInHtmlEmbed: t
 上記リスクへの対応として、本節冒頭の表が確認した通り画像・動画・YouTube の埋め込みは標準 Markdown 構文（`![alt](path-or-url)`）だけで完結しており、ページ本文が生 HTML タグを必要とする正当なユースケースは存在しないと結論づけた。この前提の下、Issue #377 が挙げた3案（a. サニタイズ処理の追加、b. 生成時制約 + `wikicommit-merge` でのブロッキング検証、c. 経路A自体の見直し）のうち **b を採用**した:
 
 a 案（サニタイズ）・c 案（経路Aの設計見直し）は不採用: a はそもそも許可すべき生 HTML タグが存在しない（前提が成立しない）ため、許可リストを維持するコストに見合うメリットがない。c は経路A全体（レビュー前の自動マージ・公開）という中核設計を、この1つのリスクのためだけに見直す影響範囲の大きさに見合わないと判断した — b で「レビュー前に公開されうる生 HTML」自体をマージ時点で機械的に排除できるため、経路Aの設計そのものは変更不要という結論に至った。
+
+Issue #1322（2026-10-15）: `check_raw_html.py` が除外するコードの範囲を正規表現で決めていたため、4 文字のフェンスや字下げで閉じるフェンスの後ろの `<script>` を素通りさせていた（公開サイトではそのまま描画される）。判定を CommonMark パーサ（`markdown-it-py`）の生 HTML のトークンに改め、描画と同じ規則にそろえた。許可リストを持たない判断と、Quartz 側で `allowDangerousHtml` を切らない判断は変えていない。詳細は `history/DesignDoc-ScriptSpec.md` の `## check_raw_html.py`。
 
 ### 8.7 `tags` による多軸フィルタリング
 
@@ -614,6 +646,8 @@ wanted ページは定義上リンク先が存在しないため、`[[Type/slug]
 > **未記録（値を持たない管理ファイル）は必ず最後の 1 行として出す**。フィールドは遡及付与されず、再実行でも `status: generated` のソースには付かない。隠すと、英語ソースだらけの Wiki が記録済みの少数の言語だけでできているように見え、本節が見せようとしているものと正反対の嘘をつく。表の直前に 1 文を置き、`primary_lang` 以外の行が出るのは正常であり、そのソースから書かれたページが要約・翻訳を経ていることを意味する、と述べる（`reviewed_note` / `ai_reviewed_note` と同じく、数字が誤読されうる箇所に 1 文を添える慣習）。コードは言語名へローカライズしない。
 >
 > **値を持たない管理ファイルは `last_generated_at` で 2 行に分ける（Issue #1135）**。`source.lang` が空になるのは、(1) Issue #989 より前に処理され読み直されていない、(2) **まだ一度も実行を完走していない**（`add_source.py` が空の `lang:` と空の `last_generated_at:` を置き、Pass 2a まで埋まらない。`pending` で未取得・Pass 1 の失敗を含む）の 2 通りで、(2) は新しい Wiki で常に非ゼロになる**キューの長さ**である。両者を「未記録」1 行にまとめ、注記で「記録が始まる前に取り込まれた」と説明すると、0.8.0 以降に始めた Wiki（`world-of-work-wiki` の未記録 8 件は全部が (2)）の読者に古い取り込みがあると読ませる。そこで `last_generated_at` が空のものを「未処理」（`source_lang_unprocessed`）として「未記録」の前に別行で出す。判定は `reconcile_ingest_status.py` と 5 件ガードの選定順序が「一度でも完走したか」の目印に使っているのと同じ値で、決定論的に分かれる。`lang` を持つソースは `last_generated_at` が空でも（Pass 2a の後で保留されたもの）言語の行に数える。`status: excluded` は `last_generated_at` が空でも「未記録」に数える — Pass 4 の `excluded` 分岐は完走した実行の末尾で書かれるが `last_generated_at` を書かないため、日付が無いことが未完走を意味しない。Pass 1 で失敗したソースは「未処理」に入る — `status` 別の表が `failed` を別に数えているので、言語の表で細かく分けない。ビルドのたびに計算する表なので遡及は要らない。
+>
+> **`off` / `false` は `no` に数えない（Issue #1248）**: `False` を一律に `no` に戻していたため、YAML 1.1 が同じ `False` と読む `off` / `false` も `no` 行に数えられていた。書かれた文字が `no` のときだけ `no` とし、それ以外は値を持たないものとして分ける。判断は `docs/DesignDoc-data.md` §4.3 と同じ `_normalize_source_lang()` の 1 か所にあり、公開ソースページと食い違わない（経緯は `history/DesignDoc-data.md` の同じ見出し）。
 
 #### ハブ行のソース件数と、同じソースに立つハブ
 
@@ -719,6 +753,12 @@ wanted ページは定義上リンク先が存在しないため、`[[Type/slug]
 ### 8.9 読者向けに表示されるフィールドの一覧
 
 Issue #495 が `properties:` にネスト化するまで、型固有の Schema.org プロパティ（`description`/`affiliation`/`jobTitle` 等）は `wikicommit-jsonld` が読む JSON-LD 埋め込み（クローラー向け、UI 上は不可視）以外のどこにも表示されておらず、`generated_at`/`sources` 等の WikiCommit 独自フィールドは見えるのに Schema.org 語彙側のフィールドだけ読者から隠れているという非対称な状態だった。本 Issue が解消するのはこの非対称のうち `properties:` の可視化のみで、上表最終行の `wikidata`/`sameAs` 等（`docs/DesignDoc-data.md` §4.1 の「外部識別子」フィールド）は引き続き UI 上非表示のまま残る — これらを表示対象に含めるかどうかは `includedProperties` の設定範囲であり、本 Issue とは別の判断が必要なため対象外とした。
+
+#### `properties:` はインフォボックスとして表示する
+
+> **インフォボックスに変えた経緯（Issue #1292。2026-10-14）**: それまでの枠は「プロパティ」という見出しの折りたたみパネルで、`variableMeasured`・`jobTitle` のような英語のキー名をそのまま行の見出しにしていた（キー名を整形しない、と決めていた — Schema.org の語彙が英語ベースで、キーはすべて英語という方針と揃えるため）。gold set の後の対話で、メンテナが「フロントマターの情報が本文と重複しているページがあった。Wiki ページにすると見づらいので、ビルド時に本文側に移すとよい」と指摘し、Issue #1290 が欄を本文の要約にする方式を選んだことで、枠はインフォボックス（本文の主要な事実の要約。Wikipedia の MOS:INFOBOX）として読める形にすることになった。キーを整形しないという以前の判断は、識別子を翻訳しないという §8.9.1 の境界と混ざっていた。キー自体はフロントマターと JSON-LD で英語の識別子のまま残り、表示ラベルは UI chrome の側に当たる。
+>
+> 空の値を出さない規則は Issue #1290 の申し送り（MOS:INFOBOX: "Infobox templates that contain many blank fields, question marks, or 'Unknown's present an unprofessional appearance."）による。`description`・`abstract` を枠から外したのは、`properties.description` が本文のリードを 2〜3 文で言い直したもので、枠の最初の行がリードと同じ説明になっていたため。見出しの横に浮かせる配置は、Quartz の `beforeBody` と本文の `<article>` が別の要素で本文を回り込ませられないので採らなかった。対象の UI 文字列は 127 から 165 になった（表示ラベル 38）。
 
 ### 8.9.1 公開サイトの言語の境界: 識別子は言語中立・UI chrome はローカライズ
 
@@ -838,6 +878,13 @@ GitMCP は Claude Code に HTTP の MCP サーバーとして登録して使っ�
 
 `/wikicommit-ask` との 4 観点の比較と、一覧外のページへ降りられるかの確認（予定の 3〜5 問目）は、運用者の判断で行わなかった。ask 自体の検証がまだであり、`llms.txt` は動いていることが確かめられれば十分としたため。
 
+Issue #1183 で冒頭の文を直した。以前は「Each page states its review status at the top.」と書いており、表の「信頼度」の行も「各ページの上部に状態が出ている」ことを前提にしていたが、`pending` のバナーは状態を文字で書かない（Issue #774 が否定文を出すのをやめた）ため、上の観察のとおりページを読んだだけでは `pending` を言い当てられなかった。メンテナの判断（2026-10-16）で次のようにした:
+
+- **採った案 A**: `llms.txt` の冒頭で「人が読んだページは上部にそう書いてある。その行が無ければまだ人が読んでいない（`pending`）」と、行が無いことの意味を言う。最小の変更で、人向けの表示を変えない
+- **見送った案 B**: JSON-LD か `<meta>` に状態を載せる。JSON-LD の最上位ノードはページではなくページが述べるもの（`DefinedTerm`・`Person` など）なので、`creativeWorkStatus` を載せるには `WebPage` ノードを足して構造を変える必要があり、語彙の選定が要る。必要になったら別の Issue として起票する
+- **退けた案 C**: `llms.txt` の各行に状態を載せる。Issue #1117 と同じ理由（行が長くなる）に加え、Key pages 以外のページには効かない
+- **変えなかった制約**: 人向けのバナーに「まだ誰も読んでいない」を戻さない（Issue #774）
+
 ## 9. 検索エンジン実装
 
 ### 9.1 全文検索（キーワード）
@@ -871,6 +918,16 @@ GitMCP は Claude Code に HTTP の MCP サーバーとして登録して使っ�
 > **重複排除の重みは Skill によって違う**。`wikicommit-search` では同一ページの複数言語版が並ぶのは「見づらい」で済むが、`wikicommit-quiz` では同じ事実についての設問が 2 問生成され、3〜5 問しかないクイズの出題内容そのものが壊れる。あわせて `wikicommit-quiz` は出題・解説の言語を `--topic` の言語（省略時は `primary_lang`）に固定する — クロスリンガル化により grounding が複数言語にまたがりうるため、規定がないと設問ごとに言語が変わる。`wikicommit-search` 側では、抑制された他言語版の存在を `(also in: <lang>)` としてヒット行に併記する（集約で消えたことが分からないと、Wiki が実際より薄く見える）。
 >
 > **クロスランゲージのランキング厳密化は行わない**。言語ごとにコーパスサイズと trigram 分布が異なるため bm25 スコアの厳密な比較はできず、`wikicommit-ask` が明記している「naive な近似で妥協する」をそのまま踏襲する（将来 Phase の再検討課題）。
+
+### 9.5 ページの事実とつながりの索引
+
+> **発端（Issue #1297）**: 2026-10-12、型を読むときに当てる（schema-on-read）にはどうするかを議論する中で、メンテナが「裏側に全部のオントロジーを格納しておく方式」を挙げ、「グラフは今あるのか、あるような無いような感じ」と問うた。確かめると、見るためのグラフ（`wikicommit-graph`。線に種類が無い）とページごとの JSON-LD（全体を集めたものが無く、型ごとの対応はプラグインに決め打ち）はあるが、問い合わせに使えるグラフは無かった。`relations.yml`（Issue #1095）と groups（Issue #1035）はどちらにも流れていなかった。
+>
+> **正本の 2 案**: 同じ対話で (a) グラフが正本でページはそこから作る表示（Wikidata を先に置く形）と (b) ページが正本でグラフは毎回作り直す派生物、の 2 つが挙がった。Issue #1297 の草案は (b) を前提にし、(a) は Issue #1290 の事実の層の方式 (3)（欄が正本）と同じ問題を持つとして、Issue #1290 の判断に委ねた。Issue #1290 は方式 (3) を外部の実践の調査の段階で見送り、方式 (2)（本文が先・欄は本文の要約）を採った（2026-10-14、`dev/type-redesign-2026-10/results-2026-10-14.md` §6）。これで (b) が確定した。
+>
+> **置き方の 3 案**（SQLite のテーブル・全ページの JSON-LD を集めた 1 ファイル・RDF と SPARQL）は草案の時点で未定だった。2026-10-14、パイロット 2 つで SQLite の試作を作り、問題 1 の問い合わせを SQL で書いて足りることを確かめてから SQLite に決めた（`dev/graph-index-2026-10/results-2026-10-14.md`）。JSON-LD の 1 ファイルは「集めても問い合わせの仕組みが別に要る」、RDF は「依存が増え、試した問い合わせに SPARQL が要らなかった」が採らなかった理由である。
+>
+> **試作の数字**（`ai-driven-dev-wiki` `cfdc0f3`、原文 1,157 枚）: 本文の線 4,995 本に対し、`properties:` から出た種類の付いた線は 186 本。`world-of-work-wiki` の 3 問を合わせた 15 の問い合わせのうち索引だけで答えられたのは 6（参照の逆引き・`author` の線・年で並べる・ソースごとの枚数など）、一部だけが 6、答えられなかったのが 3（`license` キーが型に無い・`softwareVersion` と `foundingDate` がほぼ空）。SoftwareApplication 31 枚の本文が MIT ライセンスを述べているのに、`license` キーは型に無かった。`world-of-work-wiki`（`4648fcd`）では Report の `about` が 295 / 295 WikiLink で、Report → Dataset の「扱っている」の問い合わせに答えられた。
 
 ## 付録: 本文の行に付いていた Issue 番号と書き換えた表・図の行（移行時点）
 

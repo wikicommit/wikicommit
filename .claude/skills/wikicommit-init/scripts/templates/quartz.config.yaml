@@ -130,8 +130,15 @@ plugins:
       enableRSS: true
   - source: github:quartz-community/favicon
     enabled: true
-  - source: github:quartz-community/og-image
-    enabled: true
+  # og-image is deliberately not listed. It drew a social-card image for every
+  # page on every build — on a 3,117-page wiki about 4m45s of the 5 minutes Quartz
+  # spent writing the site — and the fonts it draws with have no Japanese glyphs,
+  # so Japanese text and tags came out as rows of boxes. Without it, Quartz points
+  # every page's card at its own static/og-image.png (the Quartz logo; the file is
+  # quartz/quartz/static/og-image.png in the submodule); the title and description
+  # still appear as text. Add the entry back only if your pages are in a language
+  # its fonts cover and the build time is acceptable; `enabled: false` is not
+  # enough to drop its cost, the entry has to go.
   - source: github:quartz-community/cname
     # Disabled by default: baseUrl is run in the <owner>.github.io/<repo> form
     # (a GitHub Pages project page), so emitting a CNAME file for a custom domain
@@ -357,11 +364,14 @@ plugins:
   # wikicommit-sources above — self-vendored instead of resolved from the
   # external quartz-community org at build time. This plugin is Quartz's
   # actual frontmatter parser (not just the properties panel display), so it
-  # must not be disabled. The only behavioral change from upstream is that
+  # must not be disabled. What changes from upstream is the display:
   # `properties`, WikiCommit's nested Schema.org property block
-  # (Issue #495), is now flattened into
-  # individual rows instead of rendering as one raw JSON dump — see
-  # getVisibleProperties() in wikicommit-properties/src/transformer.ts.
+  # (Issue #495), is flattened into individual rows instead of rendering as
+  # one raw JSON dump — see getVisibleProperties() in
+  # wikicommit-properties/src/transformer.ts — and the panel is an infobox
+  # (Issue #1292): each row is labelled in the page's language, an empty
+  # value is left out, and the keys in `proseProperties` (prose summaries of
+  # the body) are not shown in it. JSON-LD still reads all of `properties`.
   - source: ../quartz-plugins/wikicommit-properties
     enabled: true
     options:
@@ -372,6 +382,9 @@ plugins:
         - aliases
         - properties
       excludedProperties: []
+      proseProperties:
+        - description
+        - abstract
       hidePropertiesView: false
       delimiters: ---
       language: yaml

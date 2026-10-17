@@ -846,6 +846,8 @@ properties:
 > **公開ソースページへの 1 行（Issue #1007）**: Issue #989 は消費者を俯瞰ページ 1 本に据え、1 ページ単位の表示は「値が実際に埋まり始めてから決める」として送った（導入直後の `ai-driven-dev-wiki` では URL ソース 284 件すべてが未記録で、決め方が一時的な分布に引きずられるため）。2026-10-06 に `world-of-work-wiki`（234 ソース中 201 件記録・英語以外 62 件）が一時的でない分布に達したのを確認して着手した。実例は `ai-driven-dev-wiki` の日本語記事（`developers.cyberagent.co.jp`）で、Type・Original・Status・英語の Summary だけが並び英語ソースに見えていた。メンテナの決定は 2 点 — (1) 未記録は省く（`ai-driven-dev-wiki` では 728 件中 613 件〈84%〉に「未記録」が並ぶことになり雑音。俯瞰側と判断が違う理由は本文）、(2) 記録があれば `primary_lang` と同じでも出す（違うときだけ出す案は、行の存在が要注意の印になり Issue #751 の線引きに触れるため退けた）。値は言語名へローカライズせずコードのまま出す — 全ラベル辞書に言語名の対応表を持つ費用に見合わない。`lang: no` は `world-of-work-wiki` の `www.ssb.no` 2 件で実在し、集計側にあった正規化を共通ヘルパーへ切り出した（Issue #677 の複製禁止）。
 >
 > **文字列でない `source.lang` を未記録として扱う（Issue #1193）**: PR #1187 のレビューで、`_normalize_source_lang()` が文字列でない値を `str()` で文字列化するため、`lang: [ja, en]` なら公開ソースページに `['ja', 'en']`、`lang: yes` / `on` なら `true` が載ることが分かった。#1187 以前はこうした値は俯瞰ページの集計にしか届かなかった。3 案（未記録に含める／別の行を立てる／現状どおり文字列化）から未記録に含める案を採った — 文字列化は読者向けのページに壊れた値を出し続け、別の行は 10 言語分のラベルを要するうえ「欠如の意味を割らない」と同じ理由で値の種類を増やす。未記録の行は「記録が始まる前に処理された」と説明しているので厳密には意味が少しずれるが、この値は LLM が規則を破ったときにしか生じず件数は小さい。書き込み点（Pass 2a）への検査は足さなかった（指示はすでに「コードを 1 つ」と言っており、書き込みはスクリプトを通らず、足しても既存の管理ファイルの値には効かない）
+>
+> **`off` / `false` を未記録として扱う（Issue #1248）**: PR #1231（Issue #1193）の `/code-review --fix` で、`_normalize_source_lang()` が `False` を一律に `no` に戻すため、YAML 1.1 が同じ `False` と読む `lang: off` / `lang: false` もノルウェー語として公開ソースページと俯瞰ページの `no` 行に載ることが分かった（#1193 は `True` 側だけを未記録にしていた）。2 案（生の文字を読んで `no` だけをノルウェー語とする／`False` は常に `no` とし、`off` / `false` は LLM がまず書かない値として理由を書く）から、メンテナーの判断で前者を採った — 読む側の変更なので「書き込み点に検査を足さない」と衝突せず、引用符なしで書かれた既存の管理ファイル（パイロットの `www.ssb.no` のソース等）にも効く。生の文字は `False` のときだけ frontmatter を `yaml.BaseLoader` で読み直して得る（行の正規表現で拾う案は、フロー形式の mapping やコメント付きの行で外れる）。あわせて Pass 2a に `lang: 'no'` と引用符付きで書かせる手当てを入れた。これは原因を断つが、単独では既存ファイルに効かないので読む側の区別と併用する
 
 <!-- -->
 
@@ -1611,6 +1613,69 @@ view ページは `derived_from[].source_commit` を同じ位置に記録する�
 > **型レベルの `required`/`recommended`/`excluded`/`custom` を廃止した経緯（Issue #495）**: `properties:` ネスト化以前は型スキーマファイルにも `wikicommit.frontmatter.{required,recommended,excluded,custom}` という分類があったが、実装調査の結果、型レベルの `required` は全型で常に空配列、`custom` は全型で一字一句同じ固定リストであり、`recommended`/`excluded` は Pass 2b/Pass 3 のプロンプト材料としてのみ使われ `validate_frontmatter.py` からは一切参照されていなかったことが判明した。つまり機械検証に接続されておらず、認知的負荷を下げる効果も限定的だった。`properties:` ネスト化によって「型固有のプロパティ一覧」というrecommendedが担っていた実質的な役割はテンプレート本体の `properties:` ブロックのキー一覧がそのまま代替し、`excluded` が唯一持っていた実質的な情報（Schema.org 上は存在するが意図的に書かない、という判断）は `granularity` の箇条書きに自然文として移した（例: `Person.md` の "Do not record marital/family relationship properties (spouse, children) or physical attributes (height, weight) even when the source states them"）。型レベル `required` は実際には一度も使われていなかった（全型で空配列）が、これは「特定の `properties.<key>` を必須にする」という能力自体が今後も存在しないことを意味する — `properties:` 配下の各キーは常に任意項目であり、値の有無ではなく値がある場合の Schema.org 語彙適合性のみを `validate_frontmatter.py` が検証する（§5.2）。特定プロパティを必須にしたいケースが将来生じた場合は、この能力自体を再設計する別 Issue が必要になる。
 
 ### 5.2 `.wikicommit/schema/*.md` のフォーマット
+
+#### 本文テンプレートは読者の問いで書く（見出しを固定しない）
+
+> **読者の問いと事実の層を決めた経緯（Issue #1290。2026-10-14）**: きっかけは 2 つある。1 つは gold set（Issue #1081）の感想ノートで、欠陥とは別に同じ指摘が繰り返し出ていた。`SoftwareApplication` の見出し「Adoption & Ecosystem」と中身が合わない（i027・i046・i047）、`Dataset` のページにデータの構造が無い（i042・i045）、情報は多いが読みづらい（i001・i039・i049）。もう 1 つは `properties:` の数え上げ（`dev/properties-fill-2026-10-12.md`）で、書誌情報は埋まっていたが、対象そのものの事実はほとんど埋まっていなかった（`SoftwareApplication.softwareVersion` 4 / 185、`Person.birthDate` 0 / 26）。
+>
+> **外部の実践を原文で調べた**（`dev/research/28_type_template_external_practices.md`）。Wikipedia は一般記事の本文の節順に標準を持たない（MOS:LAYOUT）。分野別の節リスト（MEDMOS・MOS:COMPSCI・MOS:VG）はどれも推奨にとどまり、MEDMOS は "Omit sections that secondary sources do not address" と書く。MOS:INFOBOX は infobox を本文の要約とし、本文の代わりにはしない。STORM は読者像（視点）から問いを作り、問いは資料を読んでから出す方が質が上がると報告している。
+>
+> **比較実験**（`dev/type-redesign-2026-10/results-2026-10-14.md`）では、3 題材（Multi-SWE-bench・AutoCodeRover・Trustworthiness Dimensions）について、型ファイルの本文テンプレートを 3 通りに変えて書かせた。(a) 今の見出し、(b) 構成を指定しない、(c) 読者の問いの一覧。メンテナが読み比べ、3 題材とも (c) を選んだ。主な理由は次のとおり。表を使った整理がある。(b) の AutoCodeRover は見出しが論文の要約のようで、ソフトウェアについて知りたい人が期待する構成になっていない。(a) の関連用語の節はリンクで足りる。(a) では、今の Pass 3 に「答えられない見出しは落とす」規則があるにもかかわらず、「Adoption & Ecosystem」の節がサーベイの分類だけで埋まり、Pass 4 はこれを PASS にした（見出しと中身の不一致は照合の範囲外）。
+>
+> **(c) の 2 ページは Pass 4 で FAIL になり、リードの規則を直した。** 「どの分野に属するかを言う」という規則が、ソースに無い分野付けを書かせた（AutoCodeRover）。要約が「必要かつ十分な次元は無い」を「必要でも十分でもない」と言い切った（Trustworthiness）。引用先の知見を事実として書いた（同）。分野付けはソースが述べる場合に限り、要約は留保を保ち、引用先は引用として書く、の 3 点に直した。
+>
+> **事実の層は、本文を先に書き欄を本文から抜き出す形（方式 (2)）にした。** 欄と本文を同時に書く形（方式 (1)。それまでの形）では、脚注の URL から組み立てたリポジトリの URL が欄に入り、照合はこれを指摘しなかった。方式 (2) ではこれが起きなかった。本文の誤りが欄に移る（AutoCodeRover の `applicationCategory`）という弱点は承知で採った。値ごとに出典と修飾子を持つ Wikidata 寄りの形（方式 (3)）は調査の段階で見送った — Wikidata はこれを人の大量編集と bot と提案制の語彙で支えており、WikiCommit でこの形を採ると照合とレビューの単位がページより細かくなる。本文の WikiLink に関係の種類を付ける Semantic MediaWiki の形は保留した（SMW 自身が散文中の注釈より `#set` を勧めており、語彙を閉じた集合にすることが前提になる）。
+>
+> **保留したこと**: 空の欄の理由を「ソースに無い」と「当てはまらない」に分けて書けるようにするか。実験の 3 題材では「当てはまらない」が 1 件も出なかった。架空の人物の `birthDate` のような例を扱う Issue #1291 で確かめる。配布テンプレートと Pass 3 をこの形に移す作業は、Issue #1291（配布型の見直し）と後続の実装 Issue で行う。
+>
+> **配布テンプレートへの移行（Issue #1291。2026-10-14）**: 上の方針を、`DefinedTerm`・`SoftwareApplication`・`Dataset` の 3 型から配布テンプレートに入れた。後の 2 型はパイロット（`ai-driven-dev-wiki`）が足していた型で、ページ数はそれぞれ 183・46 だった。それまでの本文の「移行の状況」は「配布テンプレートと Pass 3 はまだこの形に移っていない」と書いていた。
+>
+> **`properties:` が埋まらない原因を 46 件で確かめた**（`dev/type-redesign-2026-10/dataset-properties-2026-10-14.md`）。`ai-driven-dev-wiki`（`cfdc0f3`）の `en/Dataset` 46 件のうち `variableMeasured` を持つのは 13 件。持たない 33 件のうち 16 件は、本文に「1 件のデータが何でできているか」が書いてあるのに欄が空だった。残る 17 件のうち 10 件は、ソースが arXiv の abs ページ・ランディングページか、そのデータセットを主題にしない文書だった。持つ 13 件にも、評価指標（2 件）やデータの分類軸（2 件）を欄として書いたものがあった。生成が省く側の原因が半分近くを占め、キーの意味も揺れていたので、Pass 3 に「本文を先に書き、テンプレートのキーを 1 つずつ本文から埋める」規則を入れ、`Dataset.md` の `granularity` に `variableMeasured` が何を指すか（1 件のデータが持つ欄。ベンチマークなら入力・期待される出力・判定のテスト。指標は欄ではない）を書いた。出典側はこの環境から arXiv に届かず確かめていない。
+>
+> **`SoftwareApplication` の欄を減らした。** `softwareVersion` は 183 件中 4 件、`operatingSystem` は 12 件しか埋まっておらず、MOS:INFOBOXDESIGN の「ほとんどの記事で空になる欄は設けない」に当たる。パイロットの型ファイルにあった「ベンチマークの値は書かない」は、読者の問い 5（どれくらい効くか。測った研究に帰属させる）と食い違うので、「欄には書かない・本文に帰属付きで書く」に直した。
+>
+> **欄の表示と照合（Issue #1292。2026-10-14）**: 欄を本文の要約にした（上の方式 (2)）ことを受けて、公開ページの表示をインフォボックスに変え（publish §8.9）、`review-rules.md` check 1 に欄の照合範囲を書いた（`rules_version` 7 → 8）。それまで check 1 が欄を名指ししていたのは `expires_at`・生成が足した `aliases`・宣言されたリスト（`keywords`）だけで、ほかの `properties.*` が「ページの主要な主張」に入るかは書かれていなかった。gold set の A（Pass 4 の指摘）30 件のうち `properties:` の値に触れた指摘は 4 件（i002・i007 の `keywords`、i005 の `publisher`、i008 の `description`）で、いずれも人のラベルは defect だった。Pass 4 は実際には欄の値も照合していたことになり、規則はその実態を書いたものである。B（見逃し。20 ページ）では i046 の 1 件が「冒頭と properties が出典なしに断定」と書かれており、欄にだけ現れる断定の見逃しが実際にあった。欄の値が本文にあるかの確認は、スクリプトではなく Pass 4 に持たせた。同じ事実が本文と欄で別の形（日付の書式・正式名と略称）で書かれるため、文字列の一致では判定できない。`review-skill` で本文に無い値を所見にとどめたのは、方式 (2) より前に書かれたページがそうした値を持つのが普通で、指摘にすると既存ページの再レビューが指摘で埋まるためである。
+>
+> **記事系 3 型の移行と、4 経路・答えの無い問いの決定（Issue #1309。2026-10-15）**: Issue #1291 が残した 10 型と `default.md` の移行を、(1) 記事系 3 型 → (2) `Person`・`Organization`・`Place` → (3) `ShortStory`・`Book` → (4) `Event`・`HowTo`・`default.md` の順に分け、本 Issue は (1) と次の 2 つの決定だけを扱った。(2)〜(4) は別 Issue に切り出した。作品を扱う型の 2 規則・架空の人物の欄の扱い・Issue #1305 の分け方の反映もそちらに移した。
+>
+> - **4 経路に問いの一覧を書かせた**（メンテナの決定）。見送る案（本文は簡単なまま残す）と、根拠が足りる経路だけ書かせる案も検討した。採った理由は、問いが悪くても生成が答えの無い問いを飛ばし一覧に無い問いを足すので害が小さく、見出しの形の害（関連の薄い材料で埋める）の方が大きいこと。専用の承認は足さず、`granularity` と同じく変更を見る人に任せた。危険は 1 本のソースの論じ方を問いに写すこと（比較実験 (b) の AutoCodeRover と同じ失敗）で、`schema-authoring.md` に「読者の問いで書き、別のソースから作ったページでも読者が聞くかで確かめる」と書いた。`schema-authoring.md` が固定の書式リファレンスにしていた `default.md`・`Person.md` はどちらも見出しの形なので、本文についてはリファレンスから外した。
+> - **答えの無い問いを `## Generation Notes` にも残すことにした**（メンテナの決定）。候補は、報告だけ（Issue #1291 の形）・`## Generation Notes`・レビュー追跡 Issue だった。レビュー追跡 Issue は Close で埋もれ、状態をコミットに置く方針から外れるので採らなかった。書く場所は Pass 3 ではなく Pass 4 手順 7 にした — Pass 4 が差し戻したページは書き直されて答える問いが変わり、レビューを通らなかったページについての記録は残すべきでないため。
+> - **記事系 3 型の `properties:` を数えた**（`ai-driven-dev-wiki`・`world-of-work-wiki` の `ja/`。2026-10-15 時点）。`ScholarlyArticle`（172 件・29 件）: `description` 171・28、`author` 168・12、`keywords` 142・27、`datePublished` 101・27、`abstract` 77・6、`citation` 20・26。`BlogPosting`（236 件・3 件）: `publisher` 162・2 で、ほかはほぼ全件が埋まっていた。`NewsArticle` はどちらにも 0 件。`citation` の値は `arXiv:2404.04834` や雑誌名・巻号のような論文自身の書誌情報が大半で、Schema.org の意味（この論文が引用する文献）で WikiLink を並べていたのは 46 件中 3 件だけだったので外した。`abstract` は埋まり方が半分以下で、要旨を写す欄でもあるので外した。`BlogPosting`・`NewsArticle` のキーは変えていない。
+> - 見出しの集計では、`ScholarlyArticle` の `## Notes` に当たる節（補足・注記）が 172 件中 170 件にあり、中身は手法の詳細・限界・関連研究が混ざっていた。問い 4（何に立っているか・限界）と問い 5（先行研究との関係）に分けた。
+> - **読み比べ**（`dev/type-redesign-2026-10/articles-2026-10-15/`）: パイロットの既存ページ 3 件（`ScholarlyArticle` 2・`BlogPosting` 1）と同じソースから、新しい型ファイルでページを書かせ、メンテナが日本語版で読み比べた。3 件とも新しい方が選ばれた（理由は「書くべきことが書かれている」「内容が構造化されている」）。新しい方は 1.3〜2.5 倍長かったが、理由には挙がらなかった。`NewsArticle` はどちらのパイロットにもページが無く、題材にしていない。
+>
+> **`Person`・`Organization`・`Place` の移行（Issue #1330。2026-10-15）**: Issue #1309 が分けた順の (2) に当たる。あわせて Issue #1305 の決定（作品が実在を指しているか、モデルにして作ったか）を `Person.md`・`Place.md` の `granularity` に入れ、Issue #1291 の比較実験で保留した「ソースに無い」と「当てはまらない」の区別を決めた。
+>
+> - **欄の見直し**: パイロットの原文ページで数えた。`Person`（decameron 23 件。ai-driven-dev は存命の人物を除く設定で 0 件、world-of-work も 0 件）: `description` 23・`jobTitle` 5・`affiliation` 0・`birthDate` 0。`Organization`（3 Wiki 25 件）: `description` 25・`url` 10・`foundingDate` 4・`founder` 2・`foundingLocation` 0・`numberOfEmployees` 0。`Place`（decameron 6 件）: `containedInPlace` 4、`address`・`latitude`・`longitude`・`url` 0。0 件のキーを外した。`jobTitle`・`founder` は少ないが 0 ではないので残した。Person を決めた材料は 23 件中 12 件が架空の人物の 1 Wiki だけで、弱いことは承知している。`numberOfEmployees` は `tests/test_schema_template_property_reachability.py` の allowlist から外した
+> - **「ソースに無い」と「当てはまらない」**: 欄では区別せず、問いで区別することにした。架空の人物（decameron の `Person/dioneo`）で、条件付きの問い（実在の人物だけ・作中の人物だけ）が報告されずに飛ばされ、答えの無い問いとして残るのが「当てはまるのにソースに無い」問いだけになることを確かめた。欄ごとに理由を書かせる案は、欄ごとの理由を書く場所が無く（生成メモは問い単位）、当てはまらない値が出たのが `birthDate` だけでそれを外したので採らなかった
+> - **作品と実在の分け方の分類**: decameron の `it` 原文 30 ページ（Person 23・Place 6・Organization 1）は全件が基準で分類できた。作品が指している実在の人物 3 件（saladin・giotto・guido-cavalcanti）は、どれも作品だけをソースに、作中の描き方を史実のように最初の文で書いていた。akechi-kogoro・roudoku-stories は非公開でこのセッションから読めず、開発リポジトリの記録からの分類にとどまる（Ｄ坂は「作った」側。分類できないページは出なかった）。記録は `dev/type-redesign-2026-10/person-org-place-2026-10-15/README.md` §3
+> - **`schema-authoring.md` の手本**: `Person.md` の `granularity` は書き方の手本として読ませている（Part 3）。規則が増えて手本が人物に固有の規則（作品と実在・存命の人物）を持つので、手本にするのは書き方であって規則ではないと 1 段落足した
+> - **読み比べ**（`dev/type-redesign-2026-10/person-org-place-2026-10-15/`）: 6 題材（サラディン・ディオネーオ・ベンゴーディ・チェルタルド・公正労働庁・Qodo）。ソースのサイトにこの環境から届かなかったので、既存の `ja` ページを材料にして構成だけを比べる形にした。メンテナの判断はそのファイルに書く
+>
+> **`ShortStory`・`Book` の移行と作品を扱う型の 2 規則（Issue #1331。2026-10-16）**: Issue #1309 が分けた順の最後から 2 つ目に当たる。2 規則は Issue #1290 が外部の実践（Wikipedia の MOS:WAF・ファン wiki の方針。`dev/research/28_type_template_external_practices.md` §3.4）から申し送ったもので、Issue #1291 の比較実験（C）は題材に作品が無く試していなかった。
+>
+> - **規則 2 を足した根拠**: 作品を扱う 3 パイロットの 14 ページで、結末や犯人があらすじの節の外に書かれていた — `description`（akechi `Person/fukiya-seiichiro`「心理試験を通じて明智小五郎に自白へ追い込まれる」・roudoku `ShortStory/red-headed-league`「銀行への侵入計画をホームズが見抜く」）、登場人物の節（同ページ「その助手を装った犯人ジョン・クレイ」）、人物ページ（akechi `Person/akechi-kogoro` が『Ｄ坂の殺人事件』の犯人を書き、roudoku `Person/zenigata-heiji` が 5 作品の犯人を並べる）
+> - **規則 1 は `Person`・`Place` 側に Issue #1330 で入っていた**（作者が作った人物・場所の最初の文）。作品のページ側は、作品の種類を言えば足りる形にした
+> - **規則 2 を `Person.md` にも入れ、`Place.md` には入れなかった**: 結末が書かれていた作品ページ以外の場所は人物ページで、場所のページでは見つからなかった
+> - **欄の見直し**: パイロットの原文ページ（`translated_from` を持たないもの）で数えた。`ShortStory`（decameron 101・akechi 5・roudoku 7）: `description`・`author`・`character`・`genre` はほぼ全件（akechi は旧レイアウトでトップレベルに置いていた）、`datePublished` は akechi 5・roudoku 1・decameron 0。`Book`（decameron 5）: `description`・`author`・`character`・`genre` 5、`datePublished` 1、`isbn` 0。`isbn` を外した。decameron の短編 101 件に `datePublished` が無いのは、短編集の中で書かれ単独の発表日を持たないためで、キーが合わないのではない
+> - **読み比べ**（`dev/type-redesign-2026-10/works-2026-10-16/`）: 6 題材（ShortStory 3・Book 1・Person 2）。前回（Issue #1330）と違い、青空文庫と it.wikisource・it.wikipedia にこの環境から届いたので、4 題材はソースから書き直した。YouTube の朗読がソースの roudoku の 2 題材は既存ページを材料にした。新しいページは型ファイルを書いたエージェントとは別のサブエージェントが書いた。メンテナは 6 題材とも新しい方を選んだ（理由は「整理されている」「登場人物・構成が表になっていて見やすい」「節の名前が適切」。旧の人物ページの `Background`・`Works & Achievements` は「変」とされた）。長さ（最大 3.3 倍）は理由に挙がらなかった
+>
+> **`Event`・`HowTo`・`default.md` の移行（Issue #1332。2026-10-16）**: Issue #1309 が分けた順の最後。これで配布型はすべて問いの形になった。
+>
+> - **`default.md` の本文**: 問いの形にするか、見出しの形（`## Details`）のまま残すかを検討した。Issue #1309 で `schema-authoring.md` が本文の手本を自分で持つようになったので、見出しのまま残しても新しい型ファイルには写らない。それでも問いの形にしたのは、フォールバックで生成されるページが「詳細」の下にソースの順で事実を並べるためである。旧の本文が型ファイルに写って広がった実例もあった。`world-of-work-wiki` で Pass 2b が書いた `Legislation.md`（`provenance: generate-auto`）は本文が `## Details` で、`Legislation` の原文ページ 12 件すべてがこの見出しを持つ
+> - **`HowTo` の手順**: Issue が「問いの形にしても番号付きのリストは保つ」と求めていた。`## Steps` を固定の節にする案は採らず、`granularity` の規則にした。最初の文面は「1 項目 1 動作」で、「順序が答え」と言い切っていた。読み比べのエージェントは、この文面のもとで、番号の無いソース（スウェーデン労働環境庁の指針）から順序を組み立てた。そこで「ソースの区切りのまま書き、ソースが順序を言わなければ番号を振らない」に直した
+> - **欄の見直し**: パイロットの原文ページ（`index.md` を除く）で数えた。`Event` 27 件（ai-driven 2・decameron 1・saitama 24）で `eventStatus` 0・`organizer` 0・`performer` 1。`HowTo` 7 件（ai-driven 4・world-of-work 3）で `totalTime` 0・`supply` 0・`tool` 2。`eventStatus`・`totalTime`・`supply` を外し、`organizer`・`performer` は残した（saitama の 24 件は主催者を書かないイベント一覧 1 本から作られていて、偏った標本だったため）。`eventStatus` は「埋められないキー」の例外として残していた最後のキーだったので、`test_schema_template_property_reachability.py` の allowlist は空になった
+> - **読み比べ**（`dev/type-redesign-2026-10/event-howto-default-2026-10-16/`）: 6 題材（Event 3・HowTo 2・`default.md` 1）。6 題材ともソースに届き、型ファイルを書いたエージェントとは別のサブエージェントがソースから書き直した。書いたエージェントが挙げた曖昧な点のうち 2 つは型ファイルで直した（`HowTo` の順序と `Event` の問い 1 の主催者）。繰り返し開かれる催しの切り方（`granularity` は回ごとに 1 ページと言うが、saitama の 24 件はすべて催しごとのページ）は `Issues/p3.3-032-recurring-event-granularity.md` に切り出した。メンテナは全体として新の方を選んだ（題材ごとの理由は挙がらず、長さも理由に挙がらなかった）
+
+#### 繰り返し開かれる催しの切り方（`Event`）
+
+> **回ごとから催しごとへ（Issue #1344。2026-10-16）**: それまでの `Event.md` の `granularity` は "Recurring events (annual conferences) get one page per edition unless content differs substantially" と書いていた（例外がどちら向きかも読み取りにくかった）。Issue #1332 の読み比べ（`dev/type-redesign-2026-10/event-howto-default-2026-10-16/notes/`）で、ページを書いたサブエージェントが 2 題材でこの規則を適用できないと報告した。
+>
+> - **パイロットは規則と逆を向いていた**: `saitama-city-wiki` の `Event` の原文ページ 24 件はどれも催しごとのページ（「浦和まつり」「岩槻人形のまち」など）で、回ごとのページは無い。ソースは市の観光サイトの年間イベント一覧 1 本で、今年の回しか載せない
+> - **総称**: 「大宮夏まつり」は 1 つの催しの繰り返しではなく、7 つの別々の祭りの総称だった。書いたエージェントは問い 3（進行）が当てはまらないとして「どんな催しで構成されているか」の節を自分で足し、それがページの唯一の本節になった。問い 3 を「総称なら構成する催しの一覧」と広げる案（問いを増やさない）と、条件付きの問いとして足す案を比べ、メンテナは後者を選んだ — 書いたエージェント自身が別の問いだと報告しており、1 つの問いに 2 つの意味を持たせるとまた迷うため。条件付きの問いは対象外なら飛ばすので、総称でない催しを書く負担は増えない
+> - **日付の欄**: さいたまの 24 件のうち 20 件が `startDate` に今年の回の日付を入れていた。Pass 3 の規則（留保の要る値は欄に入れない）に照らすと規則に反する状態で、読み比べのエージェントは規則どおり欄から落とした。パイロットの大宮夏まつりは `expires_at: "2026-07-19"`（日程表の最初の日付）を持っており、決めた扱いはこれと同じである
+> - **繰り返しかどうか**: 「AI Code Agents 祭り ～ 2025 Winter ～」は名前が回を示唆するが、ソース（企画者の振り返り記事）は定期開催を述べない。エージェントは問い 6 を対象外として飛ばしたが、それでよいかを判定できないと報告した
+> - **催しのページと回のページの関係**: §4.5.2 の `series` に揃えて催しのページを立てない案も検討した。さいたまの 24 件と逆を向いたままになるので、上位と下位にする案をメンテナが選んだ
 
 #### 記事系 3 型は共通の `## Key Points` を持つ
 

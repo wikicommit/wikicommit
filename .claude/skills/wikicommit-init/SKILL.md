@@ -279,14 +279,14 @@ Confirm the following with the user (use the default value if there is no answer
       other WikiCommit output, per that script's own docstring.
 
    ii. Using the `--list-type-names` output and the theme text alone, judge whether a Schema.org standard
-      type — beyond the 6 always-generated base types (Person/Place/Organization/Event/HowTo/DefinedTerm)
+      type — beyond the base types `init.py` always writes (`schema.base_types` in `config.yml`)
       — is **obviously** implied by the theme, not merely plausible. The bar is deliberately strict, so
-      that a firing is rare but worth it — e.g. a theme like "Knowledge base for AI-driven development tooling" obviously implies
-      `schema:SoftwareApplication` (named software products are near-certain to be a core topic), whereas
+      that a firing is rare but worth it — e.g. a theme like "Knowledge base for home cooking" obviously implies
+      `schema:Recipe` (individual recipes are near-certain to be a core topic), whereas
       a vague or broad theme with no single unmistakably-implied type should yield zero candidates, same
       as leaving theme blank. **Re-scan `.wikicommit/schema/` on disk right now** (not from memory of
       Prerequisites) and skip any type that already has a file there — this directory only just gained
-      its 6 base type files moments ago in step 2 above, so this is the first point where that scan is
+      its base type files moments ago in step 2 above, so this is the first point where that scan is
       trustworthy.
 
       **This step's evidence is the weakest of the three type-proposal routes** — one sentence of
@@ -316,8 +316,8 @@ Confirm the following with the user (use the default value if there is no answer
       on a blank Enter — this suggestion must never be added silently):
 
       ```
-      Based on the theme you entered ("Knowledge base for AI-driven development tooling"), this
-      Schema.org type seems clearly implied: schema:SoftwareApplication (named software products/tools
+      Based on the theme you entered ("Knowledge base for home cooking"), this
+      Schema.org type seems clearly implied: schema:Recipe (individual recipes
       are a near-certain topic for this theme).
 
       Add this type now? [y/N]
@@ -330,7 +330,8 @@ Confirm the following with the user (use the default value if there is no answer
       whole procedure: browsing `--list-properties`, verifying each candidate with `--property`
       heredocs, dropping what comes back `ERROR:`, the standard-type file format with
       `.wikicommit/schema/default.md` and `.wikicommit/schema/Person.md` (both just written by
-      `init.py`) as the fixed style references, and how to write `granularity`. Four paths write type
+      `init.py`) as the fixed style references for the frontmatter, the body as a list of reader
+      questions (not copied from those two files' bodies), and how to write `granularity`. Four paths write type
       files and only the judgment differs between them, so the procedure lives in one place.
 
       What this step supplies on top of it:
@@ -425,6 +426,23 @@ Confirm the following with the user (use the default value if there is no answer
    markitdown ended up installed (already present, or `pip install 'markitdown[pdf]'` exited 0) —
    this becomes the `--markitdown-installed` flag passed to `print_next_steps.py` below,
    independently of the lychee outcome above.
+
+   Next, attempt to auto-install `markdown-it-py` the same way (unconditionally, no prior
+   confirmation, best-effort). `.wikicommit/scripts/check_raw_html.py` parses each page with it,
+   and without it the check stops every `/wikicommit-merge` that changes a page — so a wiki
+   initialized without it cannot merge its first page.
+
+   ```bash
+   python -c "import markdown_it" || python -m pip install markdown-it-py
+   python -c "import markdown_it"
+   ```
+
+   Record whether it ended up installed (the second import check exits 0) — this becomes the
+   `--markdown-it-installed` flag passed to `print_next_steps.py` below. Use the same `python`
+   that runs `.wikicommit/scripts/`, and install through `python -m pip` rather than a bare `pip`:
+   a `pip` bound to another interpreter is the one way the install can "succeed" without helping,
+   which is also why the install's exit code is not what decides the flag. This step never stops
+   the overall init flow.
 
    Next, attempt to enable the repository setting "Allow GitHub Actions to create and approve pull
    requests" (Settings → Actions → General → Workflow permissions). This runs unconditionally,
@@ -596,7 +614,7 @@ Confirm the following with the user (use the default value if there is no answer
    ```bash
    python scripts/print_next_steps.py \
      --variant <none|quartz_only|quartz_pages> \
-     [--lychee-installed] [--markitdown-installed] \
+     [--lychee-installed] [--markitdown-installed] [--markdown-it-installed] \
      [--actions-pr-permission-enabled] \
      [--package-json-skipped] [--quartz-status <status>] \
      [--install-plugins-status <ok|failed>] \
@@ -614,7 +632,7 @@ Confirm the following with the user (use the default value if there is no answer
      exit from `--list-type-names` (regardless of whether any type ended up approved in step iii — the
      vocabulary cache file is written to disk as soon as that call succeeds); omit it if that call was
      skipped (blank theme) or failed (non-zero exit, e.g. no network).
-   - `--lychee-installed` / `--markitdown-installed`: pass whichever of these ended up installed,
+   - `--lychee-installed` / `--markitdown-installed` / `--markdown-it-installed`: pass whichever of these ended up installed,
      per the auto-install steps above.
    - `--actions-pr-permission-enabled`: pass this whenever the "Allow GitHub Actions to create and
      approve pull requests" setting ended up enabled (already `true`, or the `PUT` succeeded) per
@@ -811,6 +829,7 @@ What is worth knowing here, because it shapes what the agent should and should n
 - The `gh api repos/{owner}/{repo}/actions/permissions/workflow` calls in step 3 (enabling "Allow GitHub Actions to create and approve pull requests") run unconditionally, regardless of `--quartz`/`--quartz-pages` — unlike the Pages setting immediately above, this one backs `review-issue-close-sync.yml`, which every variant generates. It is the same kind of GitHub *repository setting* change as the Pages call, so the agent runs it directly and does not defer it to the user. It is unconditionally best-effort: any failure (missing remote, unauthenticated `gh`, insufficient token scope) falls back to printed manual instructions and never aborts `wikicommit-init`. The GET-before-PUT check exists to make the change idempotent and to avoid silently overwriting the unrelated `default_workflow_permissions` field the same API endpoint also controls
 - The `lychee --version` / `cargo install lychee` calls in step 3 only install a local dev tool — they touch neither Git nor `main` — so the agent runs them directly and unconditionally (no prior user confirmation needed, unlike the Quartz Y/n prerequisite). Like the GitHub Pages step, this is best-effort: any failure (`cargo` missing, network unreachable) falls back to the printed manual instructions and never aborts `wikicommit-init`
 - The `markitdown --version` / `pip install 'markitdown[pdf]'` calls in step 3 mirror the lychee handling above — a local Python package install that touches neither Git nor `main`, so the agent runs them directly and unconditionally, independently of the lychee outcome. `markitdown` is required by `wikicommit-generate`'s URL extraction and its `.pdf` fallback (hence the `[pdf]` extra). It is best-effort: any failure (`pip` missing, network unreachable) falls back to the printed manual instructions and never aborts `wikicommit-init`
+- The `python -c "import markdown_it"` / `python -m pip install markdown-it-py` call in step 3 is the same kind of best-effort local install. It is not optional the way markitdown is: `check_raw_html.py` is a blocking gate that fails closed without the package (stderr `ERROR:`, exit 1), so a wiki without it cannot merge any page. When the install fails, the printed guidance carries `pip install markdown-it-py` as its own step; `/wikicommit-update` makes the same check for repositories initialized before the check needed it
 - The `check_quartz_setup.py` call in step 3.d (when `--quartz` was specified, and only if `init.py` actually generated `package.json` rather than skipping a pre-existing one — see step 3 above) mirrors the lychee "check first, only act if needed" pattern: its `node_modules` / `quartz/node_modules` pre-check avoids re-running a possibly slow `npm install` when a `--no-overwrite` re-init finds Quartz v5 already fully set up, and it runs `npm install` itself when needed. `npm install` touches neither Git history nor `main` (the `git submodule update` its `postinstall` may run only affects the working tree), so the agent runs the script directly without prior user confirmation. Because `postinstall` guards on `quartz/`'s existence, `npm install` exits 0 either way; the script distinguishes "fully set up" from "top-level dependencies only" by checking for `quartz/` afterward and reports one JSON contract, so the agent does not branch on exit codes. Any `npm install` failure is reported as one of the `npm_install_failed_*` statuses, which keep `npm install` in the printed manual instructions; the script always exits 0 and never aborts `wikicommit-init`
 - `print_next_steps.py` (step 3's final call) owns the "Next steps" guidance text itself — which lines to show/omit/reword is fully determined by the flags the preceding sub-steps already computed (variant, install statuses, GitHub Pages `html_url`, Quartz setup status). It only ever formats and prints text to stdout — it never touches Git, `main`, or `.wikicommit/schema/`, so the agent runs it directly and prints its output to the user verbatim, same as the other auto-run steps in step 3
 - The "Set up Quartz v5" guidance line (`print_next_steps.py`'s `_QUARTZ_SETUP_FULL`/`_QUARTZ_SETUP_NPM_ONLY`) appends `npm run install-plugins` after `git submodule add` / `npm install`, with a note that the first run commonly takes several minutes. `check_quartz_setup.py` cannot auto-run this itself on a first-time init: at the point it runs, `quartz/` does not exist yet. Putting it in the same manual block means the user pays this cost once, right after adding the submodule, rather than it landing on whichever `/wikicommit-serve` run first calls `npm run install-plugins` and timing out there

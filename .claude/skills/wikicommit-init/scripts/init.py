@@ -28,7 +28,7 @@ def _read_template_version(templates_dir: Path) -> str:
 
     That module is the only version source that reaches an installed wiki
     repository (`.claude-plugin/plugin.json` stays behind in the distribution
-    repository — see the module's own docstring, Issue #577), so the stamp
+    repository — see the module's own docstring), so the stamp
     written into `.wikicommit/config.yml` has to come from there. It is loaded
     by path rather than imported by name because `templates/scripts/` is a
     payload directory, not a package on `sys.path`.
@@ -162,14 +162,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# ── README.md for a repository that has none (Issue #1034) ─────────────────────────────
+# ── README.md for a repository that has none ───────────────────────────────────────────
 #
-# Issue #282 decided init never edits README.md, because a README is usually already there
-# with a structure of its own. That reason does not hold when there is no README at all, so
-# init writes one then — and only then. What it writes is a fixed template with the
+# init never edits an existing README.md, because a README usually has a structure of its
+# own. It writes one only when there is none. What it writes is a fixed template with the
 # repository name filled in: no LLM-written text, which is what lets it ride in the
-# foundational commit (Issue #843). English only for now; more languages than ja/en are
-# planned, so this does not switch on primary_lang.
+# foundational commit. English only for now: this does not switch on primary_lang.
 #
 # The published-site link cannot be written here: GitHub Pages is enabled, and its
 # `html_url` learned, in SKILL.md step 3 — after this script has run. So a marker holds the
@@ -252,19 +250,18 @@ _FOOTER_LINKS_BLOCK_RE = re.compile(
 
 
 def _apply_footer_repo_url(config_content: str, repo_url: str | None) -> str:
-    """Resolve quartz.config.yaml's `{REPO_URL}` footer placeholder (Issue #557).
+    """Resolve quartz.config.yaml's `{REPO_URL}` footer placeholder.
 
     The footer plugin ships with Quartz's own repository as its GitHub link, which
-    points every generated wiki's most prominent link at the upstream SSG instead of
-    at the wiki being read — the entry point for the whole "read the wiki → open an
-    Issue → close the review-tracking Issue" path. pageTitle already gets a
-    per-repository default for the same reason; this extends that to the footer.
+    would point every generated wiki's most prominent link at the upstream SSG instead
+    of at the wiki being read — the entry point for the whole "read the wiki → open an
+    Issue → close the review-tracking Issue" path.
 
     With a URL, substitute it. Without one (no GitHub remote, or a local-only
     repository), drop the `GitHub:` entry entirely and collapse the now-empty mapping
     to `links: {}` — leaving a literal `{REPO_URL}` in a config file would be worse
-    than having no link, and restoring the upstream Quartz URL is the very defect
-    being fixed. `links: {}` is what the plugin already treats as "no links"
+    than having no link, and falling back to the upstream Quartz URL is what this
+    exists to prevent. `links: {}` is what the plugin already treats as "no links"
     (`opts?.links ?? []`), so the footer still renders, minus the list.
 
     A template with no `{REPO_URL}` placeholder left (already resolved, or reshaped)
@@ -276,16 +273,16 @@ def _apply_footer_repo_url(config_content: str, repo_url: str | None) -> str:
     return _FOOTER_LINKS_BLOCK_RE.sub(lambda m: f"{m.group('indent')}links: {{}}\n", config_content)
 
 
-# `primary_lang` (ISO 639-1) -> the BCP 47 tag quartz.config.yaml's `locale` takes
-# (Issue #771). The values are exactly the locale files shipped by the three
+# `primary_lang` (ISO 639-1) -> the BCP 47 tag quartz.config.yaml's `locale` takes.
+# The values are exactly the locale files shipped by the three
 # community-derived plugins that draw the site chrome (explorer / graph / search);
 # `tests/test_init.py` checks that every one of them still exists in all three, so a
 # locale dropped upstream fails here rather than silently falling back at build time.
 #
 # This is NOT the same table as `LANG_TO_LOCALE` in the WikiCommit plugins' own
 # `src/i18n/index.ts`. That one lists the languages *WikiCommit itself* has written
-# translations for (ten, fixed by the Wikipedia portal — Issue #1017); this one lists what the community plugins already
-# translate (28). Naming them alike would make them look like two copies to keep in
+# translations for (ten); this one lists what the community plugins already translate
+# (28). Naming them alike would make them look like two copies to keep in
 # sync, which they are not.
 #
 # Where a language has several regional locales, the one covering the most readers is
@@ -306,11 +303,10 @@ QUARTZ_LOCALE_BY_PRIMARY_LANG = {
 DEFAULT_QUARTZ_LOCALE = "en-US"
 
 
-# The languages WikiCommit has written its *own* labels for (Issue #825). Kept
-# apart from QUARTZ_LOCALE_BY_PRIMARY_LANG above for the reason stated there:
-# that table is what the community plugins already translate (28 languages),
-# this one is what this project translates (10 — Issue #1017), and they move for different
-# reasons.
+# The languages WikiCommit has written its *own* labels for. Kept apart from
+# QUARTZ_LOCALE_BY_PRIMARY_LANG above for the reason stated there: that table is
+# what the community plugins already translate (28 languages), this one is what
+# this project translates (10), and they move for different reasons.
 #
 # It exists to tell the operator, once, at the moment they pick a primary_lang
 # this project has no labels for. **That is the whole of the disclosure**: the
@@ -352,14 +348,11 @@ def ui_language_notice(primary_lang: str) -> str | None:
 
 
 def quartz_locale_for(primary_lang: str) -> str:
-    """Resolve quartz.config.yaml's `{LOCALE}` from `primary_lang` (Issue #771).
+    """Resolve quartz.config.yaml's `{LOCALE}` from `primary_lang`.
 
-    Before this, the template carried a hard-coded `locale: en-US` that init never
-    substituted, so a Japanese wiki shipped with its body text and banner in Japanese
-    and its sidebar, search and graph in English — the translations existed, they were
-    simply never reached. An unmapped language stays en-US rather than being guessed
-    at: an invented tag would leave the chrome in English regardless while making the
-    config claim otherwise.
+    An unmapped language stays en-US rather than being guessed at: an invented tag
+    would leave the chrome in English regardless while making the config claim
+    otherwise.
     """
     return QUARTZ_LOCALE_BY_PRIMARY_LANG.get((primary_lang or "").strip().lower(),
                                              DEFAULT_QUARTZ_LOCALE)
@@ -412,14 +405,14 @@ def _node_end(node: yaml.Node) -> int:
 
 # `[^\r\n]*` rather than `.*$`: in a mixed-line-break file (handed out with its `\r`
 # kept, see `_read_keeping_newline()`) `.` would swallow a CRLF line's `\r`, and the
-# rewritten line would come back LF (Issue #1189).
+# rewritten line would come back LF.
 _VERSION_LINE_RE = re.compile(r"^wikicommit_version:[^\r\n]*", re.MULTILINE)
 
 # The one switch in entity-policy.md, matched as a line rather than as YAML.
 # That file is nine parts commented-out worked example to one part frontmatter,
 # and a yaml.safe_load + yaml.dump round-trip drops every one of those comments
-# — the same way it drops config.yml's commented-out site_description example
-# (Issue #713). What is lost here is worse: the comment block is the file's
+# — the same way it would drop config.yml's commented-out examples (see
+# _update_version()). What is lost here is worse: the comment block is the file's
 # entire body, including the warning about over-excluding that the template
 # exists to deliver. So this is a textual rewrite, like _update_theme().
 _EXCLUDE_LIVING_PERSONS_LINE_RE = re.compile(
@@ -428,7 +421,7 @@ _EXCLUDE_LIVING_PERSONS_LINE_RE = re.compile(
 
 
 def _read_keeping_newline(path: Path) -> tuple[str, str]:
-    """`path`'s text with LF line breaks, and the line break to write it back with (Issue #1189).
+    """`path`'s text with LF line breaks, and the line break to write it back with.
 
     `Path.read_text()` translates CRLF to LF on the way in and `write_text()` translates LF
     to `os.linesep` on the way out, so a single-value rewrite through them changes the line
@@ -450,7 +443,7 @@ def _read_keeping_newline(path: Path) -> tuple[str, str]:
 
 
 def _write_with_newline(path: Path, text: str, newline: str) -> None:
-    """Write `text` (LF breaks) back with `newline`, untranslated by the OS (Issue #1189)."""
+    """Write `text` (LF breaks) back with `newline`, untranslated by the OS."""
     if newline != "\n":
         text = text.replace("\n", newline)
     with path.open("w", encoding="utf-8", newline="") as f:
@@ -458,7 +451,7 @@ def _write_with_newline(path: Path, text: str, newline: str) -> None:
 
 
 def _set_exclude_living_persons(policy_path: Path) -> bool:
-    """Flip the freshly-written entity-policy.md's switch to true (Issue #837).
+    """Flip the freshly-written entity-policy.md's switch to true.
 
     Only ever called on a file this run just created. A re-init must not touch
     an existing one: it is `update: review` in _root_outputs.py because the user
@@ -471,7 +464,7 @@ def _set_exclude_living_persons(policy_path: Path) -> bool:
             return False
         # A lambda replacement, not a raw string: re.sub would interpret
         # backslash escapes in the replacement text (same reason as
-        # set_frontmatter_field.py, Issue #371).
+        # set_frontmatter_field.py).
         content = _EXCLUDE_LIVING_PERSONS_LINE_RE.sub(
             lambda m: f"{m.group(1)}exclude_living_persons: true", content, count=1
         )
@@ -482,14 +475,14 @@ def _set_exclude_living_persons(policy_path: Path) -> bool:
 
 
 def _merge_skill_overrides(settings_path: Path, template_path: Path) -> str:
-    """Add the template's `skillOverrides` keys to `.claude/settings.json` (Issue #953).
+    """Add the template's `skillOverrides` keys to `.claude/settings.json`.
 
     Returns one of "created" / "updated" / "unchanged" / "unreadable", which the caller
     turns into the line it prints.
 
-    The three Skills named in the template lost `disable-model-invocation` in Issue #945,
-    which opened the unattended path and, with it, the possibility of a passing request
-    triggering them. `name-only` hides the description — the mechanism a model matches
+    The three Skills named in the template do not set `disable-model-invocation`, so
+    that they can run unattended — which also lets a passing request trigger them.
+    `name-only` hides the description — the mechanism a model matches
     against — while leaving `/wikicommit-generate` and the like working, so an unattended
     run needs nothing flipped. The alternative, `user-invocable-only`, would have to be
     turned back to `on` to run unattended at all, and that is an all-or-nothing switch:
@@ -560,7 +553,7 @@ def _read_config(repo_root: Path) -> tuple[Path, str, str] | None:
 
 
 def _update_version(repo_root: Path, version: str) -> int:
-    """Rewrite only the `wikicommit_version:` line of an existing config.yml (Issue #713).
+    """Rewrite only the `wikicommit_version:` line of an existing config.yml.
 
     The field records the version this repository was last brought in step with, so an
     update has to restamp it — and it is the only writer that ever does (init stamps it
@@ -569,8 +562,8 @@ def _update_version(repo_root: Path, version: str) -> int:
     Text-level, exactly like `_update_theme()` above, and for a reason that outweighs the
     convenience of a YAML round-trip: config.yml ships commented-out worked examples that
     are the only documentation for the fields they describe (`site_description`'s per-
-    language example, added by Issue #671, is a key the template deliberately does not
-    ship — only the comment shows the shape). `yaml.safe_load` + `yaml.dump` discards
+    language example is a key the template deliberately does not ship — only the
+    comment shows the shape). `yaml.safe_load` + `yaml.dump` discards
     every one of them, so a repository that ran an update would silently lose the
     instructions for the fields it had not filled in yet.
     """
@@ -582,11 +575,11 @@ def _update_version(repo_root: Path, version: str) -> int:
         new_line = f'wikicommit_version: "{version}"'
         if _VERSION_LINE_RE.search(content):
             # Lambda replacement rather than a raw string, for the same reason
-            # set_frontmatter_field.py gives (Issue #371): re.sub interprets backslash
-            # escapes in a string replacement.
+            # set_frontmatter_field.py gives: re.sub interprets backslash escapes in a
+            # string replacement.
             content = _VERSION_LINE_RE.sub(lambda _m: new_line, content, count=1)
         else:
-            # A config.yml created before Issue #577 has no stamp at all. Prepend rather
+            # A config.yml from before the stamp existed has none at all. Prepend rather
             # than append: the template carries it as the first line, and keeping that
             # position means a stamped file looks the same however it got stamped.
             content = new_line + "\n" + content
@@ -598,8 +591,8 @@ def _update_version(repo_root: Path, version: str) -> int:
         return 1
 
 
-# What each `{NAME}` placeholder becomes when a key is *added* to an existing config.yml
-# (Issue #713). These are the values a fresh init with no flags would write, which is
+# What each `{NAME}` placeholder becomes when a key is *added* to an existing config.yml.
+# These are the values a fresh init with no flags would write, which is
 # exactly right here: a key the template has only just gained is inert until the user
 # fills it in, and that is what "newly introduced" means. `{VERSION}` is resolved from
 # the template rather than listed, since it changes every release.
@@ -623,10 +616,10 @@ def _substitute_config_placeholders(block: list[str], version: str) -> list[str]
     adding the key at all, so an unrecognized one refuses rather than guesses."""
     # `{VERSION}` substitutes *bare*, exactly as the full-init path at the bottom of
     # main() does, because the template already writes it inside quotes
-    # (`wikicommit_version: "{VERSION}"`). Adding a second pair here produced
+    # (`wikicommit_version: "{VERSION}"`). Adding a second pair here would produce
     # `wikicommit_version: ""0.2.0""`, which YAML rejects for the whole document — the
-    # same `""""` trap check_distribution_freshness.py records against its own
-    # placeholder substitute (Issue #712).
+    # same `""""` trap check_distribution_freshness.py guards its own placeholder
+    # substitute against.
     defaults = dict(_CONFIG_PLACEHOLDER_DEFAULTS, **{"{VERSION}": version})
     out = []
     for line in block:
@@ -639,7 +632,7 @@ def _substitute_config_placeholders(block: list[str], version: str) -> list[str]
 
 
 def _add_config_keys(repo_root: Path, templates_dir: Path, keys: list[str]) -> int:
-    """Append top-level keys the template has and this config.yml lacks (Issue #713).
+    """Append top-level keys the template has and this config.yml lacks.
 
     Takes the block verbatim from the template — the key, and the comment lines directly
     above it. Those comments are the field's only documentation on the installed side, so
@@ -745,7 +738,7 @@ def _template_key_block(template_lines: list[str], key: str) -> list[str] | None
 
 
 def _update_theme(repo_root: Path, theme: str) -> int:
-    """Rewrite only the `theme` value of an already-existing config.yml (#374).
+    """Rewrite only the `theme` value of an already-existing config.yml.
 
     Unlike write_file()'s --no-overwrite handling (which skips config.yml wholesale
     on a repeat init to protect the rest of the file), this is an explicit,
@@ -787,7 +780,7 @@ def _update_theme(repo_root: Path, theme: str) -> int:
             replacement = theme_yaml if start != end else f" {theme_yaml}"
             content = content[:start] + replacement + trailing + content[end:]
         else:
-            # A config.yml created before #160 has no theme field at all; append
+            # An older config.yml may have no theme field at all; append
             # one. theme is a flat top-level key, so its position doesn't affect
             # parsing.
             if content and not content.endswith("\n"):
@@ -855,14 +848,13 @@ def main() -> int:
         return str(path.relative_to(repo_root))
 
     def _flags(dest_rel: str) -> dict:
-        """The copy flags declared for this repository-relative path (Issue #712).
+        """The copy flags declared for this repository-relative path.
 
         Ownership — "WikiCommit's payload" vs "the user may have edited this" — is
         recorded once, in _root_outputs.py, next to the variant and `git add` decisions
-        for the same path. Restating it as a literal at each call site is what let
-        `.wikicommit/config.yml` and `.wikicommit/schema/` end up with no flag at all,
-        leaving --no-overwrite as the single thing standing between a re-init and the
-        user's theme, targets and hand-edited type templates.
+        for the same path. Restating it as a literal at each call site lets a path end
+        up with no flag at all, leaving --no-overwrite as the single thing standing
+        between a re-init and the user's theme, targets and hand-edited type templates.
 
         An unlisted path falls back to the protective end rather than raising: this is
         the flag lookup for a copy that is about to happen either way, and refusing to
@@ -906,11 +898,11 @@ def main() -> int:
         # Root-level files (package.json, deploy.yml, quality gate configs) pass
         # always_skip_existing=True: an existing repo's own files must never be
         # clobbered, regardless of --no-overwrite. quartz.config.yaml is the one
-        # root-level exception — it goes through write_file() instead (Issue #317),
-        # since its pageTitle needs placeholder substitution rather than a raw copy.
+        # root-level exception — it goes through write_file() instead, since its
+        # pageTitle needs placeholder substitution rather than a raw copy.
         #
-        # always_overwrite=True is the opposite end of the same ownership axis
-        # (Issue #647): `.wikicommit/scripts/` is distribution payload, not the
+        # always_overwrite=True is the opposite end of the same ownership axis:
+        # `.wikicommit/scripts/` is distribution payload, not the
         # user's content, so a re-init refreshes it even under --no-overwrite.
         # The two flags are mutually exclusive by construction — nothing passes
         # both — and always_skip_existing wins if one ever did, keeping the
@@ -931,7 +923,7 @@ def main() -> int:
         # and `.wikicommit/scripts` are symlinks into templates/ so that
         # dogfooding cannot drift from the distributed copy
         # (tests/test_template_mirror_sync.py) — and the always_overwrite path
-        # above no longer skips past it.
+        # above does not skip past it.
         if dest.exists() and dest.samefile(src):
             print(f"SKIPPED: {rel(dest)} (already the same file as the template)")
             skipped.append(rel(dest))
@@ -950,14 +942,14 @@ def main() -> int:
     ) -> None:
         # os.walk() (rather than Path.rglob("*")) lets us prune node_modules/
         # before descending into it, instead of listing/stat-ing every file
-        # inside it and filtering afterward (#211). node_modules is only
+        # inside it and filtering afterward. node_modules is only
         # present if a local `npm install`/`npm ci` has been run inside a
         # template directory (e.g. to run its vitest suite); a fresh git
         # checkout never has it. __pycache__ is pruned for the same reason:
         # in this development repository `.wikicommit/scripts` symlinks to
         # `templates/scripts`, so running any script leaves a whole directory
         # of .pyc files there that has no business being copied into a user's
-        # wiki repository (Issue #577).
+        # wiki repository.
         for dirpath, dirnames, filenames in os.walk(src_dir):
             dirnames[:] = [d for d in dirnames if d not in ("node_modules", "__pycache__")]
             for filename in filenames:
@@ -1015,12 +1007,12 @@ def main() -> int:
             return 1
         copy_tree(schema_src, repo_root / ".wikicommit" / "schema", **_flags(".wikicommit/schema"))
 
-        # Human-facing how-to documents (Issue #846). update="overwrite" per
-        # _root_outputs.py, for the same reason as review-rules.md and the scripts tree
-        # below: these are WikiCommit's own instructions, not prose the user authors, so a
-        # re-init refreshes them. That is the whole point of putting the shelf here rather
-        # than in the development repository's docs/ — an installed wiki never sees a change
-        # made there, and §11.9 forbids a distributed file from pointing at it either.
+        # Human-facing how-to documents. update="overwrite" per _root_outputs.py, for the
+        # same reason as review-rules.md and the scripts tree below: these are
+        # WikiCommit's own instructions, not prose the user authors, so a re-init
+        # refreshes them. That is the whole point of putting the shelf here rather than in
+        # the development repository's docs/ — an installed wiki never sees a change made
+        # there, and a distributed file must not point at it either.
         guides_src = templates_dir / "guides"
         if not guides_src.is_dir():
             print(f"ERROR: templates/guides/ not found at {guides_src}", file=sys.stderr)
@@ -1033,7 +1025,7 @@ def main() -> int:
             repo_root / ".wikicommit" / "entity" / "assets",
             repo_root / ".wikicommit" / "entity" / args.primary_lang,
             repo_root / ".wikicommit" / "view" / args.primary_lang,
-            # Review records (Issue #750). Created empty, with no per-language or
+            # Review records. Created empty, with no per-language or
             # per-tree subdirectory: record_review.py mirrors a page's own path under
             # here on demand, and which pages exist is not known at init time.
             repo_root / ".wikicommit" / "review",
@@ -1045,15 +1037,14 @@ def main() -> int:
         if not scripts_src.is_dir():
             print(f"ERROR: templates/scripts/ not found at {scripts_src}", file=sys.stderr)
             return 1
-        # update="overwrite" (Issue #647, now declared in _root_outputs.py per Issue
-        # #712): `.wikicommit/scripts/` is WikiCommit's
-        # own distribution payload — shared quality-gate scripts the Skills call, not
-        # content the user authors — so a re-init refreshes it even under
+        # update="overwrite" (declared in _root_outputs.py): `.wikicommit/scripts/` is
+        # WikiCommit's own distribution payload — shared quality-gate scripts the Skills
+        # call, not content the user authors — so a re-init refreshes it even under
         # --no-overwrite (which exists to protect the user's own files: config.yml,
         # schema/, entity pages, root-level configs).
         #
-        # The concrete failure this fixes is `_version.py`, the one version source
-        # that reaches an installed wiki repository (Issue #577). Left stale, it makes
+        # The file this matters most for is `_version.py`, the one version source
+        # that reaches an installed wiki repository. Left stale, it makes
         # `generated_with` / `translated_with` claim that pages built under the NEW
         # Skills were built under the OLD version — actively wrong, where a missing
         # stamp would merely have been uninformative, and wrong in exactly the way
@@ -1063,8 +1054,8 @@ def main() -> int:
         # The whole tree is refreshed rather than `_version.py` alone: exempting one
         # file would leave the version claiming to be new while the scripts it ships
         # alongside stayed old. Note that copy_tree() never deletes, so a script
-        # renamed upstream still leaves its old name behind as an orphan here
-        # (Issue #583) — refreshing does not make the tree an exact mirror.
+        # renamed upstream still leaves its old name behind as an orphan here —
+        # refreshing does not make the tree an exact mirror.
         copy_tree(
             scripts_src,
             repo_root / ".wikicommit" / "scripts",
@@ -1072,14 +1063,13 @@ def main() -> int:
         )
 
         # Every root-level output that is a verbatim copy comes from _root_outputs.py,
-        # the same list print_next_steps.py builds its `git add` guidance from
-        # (Issue #642). Which variant each file belongs to, and why, is recorded there
-        # rather than here, so adding one is a single edit instead of two lists to keep
-        # in step — the drift that shipped install-local-plugins.cjs without telling
-        # anyone to commit it (Issue #556). The copy flags come from the same list's
-        # `update` column (Issue #712): the user's own files are never clobbered, while
-        # WikiCommit's own payload (the workflows, the *.cjs build scripts) is refreshed
-        # even under --no-overwrite.
+        # the same list print_next_steps.py builds its `git add` guidance from. Which
+        # variant each file belongs to, and why, is recorded there rather than here, so
+        # adding one is a single edit instead of two lists to keep in step — two lists
+        # drift, and a file then ships without anyone being told to commit it. The copy
+        # flags come from the same list's `update` column: the user's own files are
+        # never clobbered, while WikiCommit's own payload (the workflows, the *.cjs
+        # build scripts) is refreshed even under --no-overwrite.
         # The rest of the root-level outputs are generated further down and cannot be
         # plain copies: config.yml and quartz.config.yaml substitute placeholders,
         # schema/scripts/quartz-plugins are directory trees, and entity/source are
@@ -1088,7 +1078,7 @@ def main() -> int:
             copy_file(templates_dir / template_rel, repo_root / dest_rel, **_flags(dest_rel))
 
         # `.claude/settings.json` is a per-key merge, not a copy, so it cannot go
-        # through plain_copies() above (Issue #953). The flags in _root_outputs.py
+        # through plain_copies() above. The flags in _root_outputs.py
         # are per file; the protection needed here is per key.
         settings_rel = ".claude/settings.json"
         settings_outcome = _merge_skill_overrides(
@@ -1118,7 +1108,7 @@ def main() -> int:
             )
 
         # Flip entity-policy.md's one switch, but only on the copy this run just
-        # made (Issue #837). `.wikicommit/entity-policy.md` is always_skip_existing,
+        # made. `.wikicommit/entity-policy.md` is always_skip_existing,
         # so on a re-init copy_file() left the user's own file alone and `created`
         # will not list it — rewriting it here anyway would overwrite prose and a
         # decision the user already made, which is exactly what that flag protects.
@@ -1152,18 +1142,17 @@ def main() -> int:
                 print(f"ERROR: templates/quartz-plugins/ not found at {quartz_plugins_src}", file=sys.stderr)
                 return 1
 
-            # pageTitle defaults to the repo directory name (Issue #317) rather than
-            # a plain copy_file(), so a fresh --quartz init doesn't ship every wiki
-            # with the literal template title "WikiCommit Wiki".
+            # pageTitle defaults to the repo directory name rather than a plain
+            # copy_file(), so a fresh --quartz init doesn't ship every wiki with the
+            # literal template title "WikiCommit Wiki".
             #
-            # pageTitleSuffix gets the same name with a " - " separator (Issue #679).
-            # Quartz's Head.tsx builds <title> from the page's own frontmatter title
-            # plus this suffix and nothing else, so with the previous empty default no
-            # tab, og:title or twitter:title on the whole site carried the site's name
-            # — the front page read simply "Wiki". pageTitle does not reach any of
-            # those three; it goes to the sidebar heading and og:site_name. Quoting
-            # through yaml.dump preserves the leading space, which a bare YAML scalar
-            # would strip.
+            # pageTitleSuffix gets the same name with a " - " separator. Quartz's
+            # Head.tsx builds <title> from the page's own frontmatter title plus this
+            # suffix and nothing else, so with an empty suffix no tab, og:title or
+            # twitter:title on the whole site carries the site's name. pageTitle does
+            # not reach any of those three; it goes to the sidebar heading and
+            # og:site_name. Quoting through yaml.dump preserves the leading space, which
+            # a bare YAML scalar would strip.
             quartz_config_template = (templates_dir / "quartz.config.yaml").read_text(encoding="utf-8")
             page_title_yaml = yaml.dump(repo_root.name, default_style='"', allow_unicode=True).strip()
             page_title_suffix_yaml = yaml.dump(
@@ -1189,7 +1178,7 @@ def main() -> int:
                 # silent: the caller passes --repo-url as a `$(gh ...)` command
                 # substitution, so an unresolvable remote only shows up as gh's own
                 # stderr, and wikicommit-init's SKILL.md nonetheless requires the
-                # agent to tell the user it happened (Issue #557).
+                # agent to tell the user it happened.
                 print(
                     f"NOTE: {rel(quartz_config_path)}: no --repo-url resolved, so the footer's "
                     "GitHub entry was dropped (links: {}) instead of being left pointing at "
@@ -1212,7 +1201,7 @@ def main() -> int:
             # dist/ はコミット済みのビルド成果物（他の Quartz v5 コミュニティプラグインと同じ配布形態）
             # のため、npm install 不要でそのままコピーする。copy_tree はファイルシステムを直接
             # 走査するため git 管理外の node_modules/ も存在すればコピーしてしまう。加えて
-            # vitest 関連ファイル（#93）・eslint 関連ファイル（#94）はテンプレート自身の CI 専用で
+            # vitest 関連ファイル・eslint 関連ファイルはテンプレート自身の CI 専用で
             # ありユーザーの Wiki には不要なため、copy_tree 側で明示的に除外する。
             copy_tree(
                 quartz_plugins_src,
@@ -1221,7 +1210,7 @@ def main() -> int:
                 **_flags("quartz-plugins"),
             )
 
-        # README.md only when the repository has none GitHub would show (Issue #1034).
+        # README.md only when the repository has none GitHub would show.
         # Checked across every place and spelling GitHub reads, not by dest.exists():
         # a `readme.rst`, a bare `README` or a `.github/README.md` is just as much a README.
         existing_readme = find_existing_readme(repo_root)
@@ -1239,14 +1228,14 @@ def main() -> int:
         # 基盤コミットの提案（SKILL.md step 3）を出してよいかの判定材料。**printed after the
         # Quartz append above**, deliberately: that append does not branch on whether the copy
         # happened, so reading the log would make the first --quartz run report `no` even
-        # though the file is complete by the time it finishes (Issue #873).
+        # though the file is complete by the time it finishes.
         #
         # 判定はファイルの内容であって、この実行が書いたかどうかではない。.gitignore は
         # always_skip_existing なので、一度 init したリポジトリは以後すべての再 init で
         # SKIPPED を出す — そこを条件にすると、WikiCommit 自身が作ったリポジトリの再 init が
         # 常に止まる（git add -A は初回と同じだけ安全であるにもかかわらず）。
         #
-        # SKILL.md 側はこの 1 行を読むだけで .gitignore の中身を読まない（Issue #474）。
+        # SKILL.md 側はこの 1 行を読むだけで .gitignore の中身を読まない。
         # 欠けているパターンを名指しするのは、それがそのまま対処になるため（1 行足せば通る）。
         #
         # 判定できなかった場合は yes ではなく no に倒す。要求集合が空になると「全部揃っている」と

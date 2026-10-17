@@ -83,6 +83,10 @@
         "properties"
       ],
       "excludedProperties": [],
+      "proseProperties": [
+        "description",
+        "abstract"
+      ],
       "hidePropertiesView": false,
       "delimiters": "---",
       "language": "yaml"
@@ -90,7 +94,7 @@
     "components": {
       "WikiCommitPropertiesComponent": {
         "displayName": "WikiCommit Properties",
-        "description": "Renders selected frontmatter fields in a collapsible panel, flattening WikiCommit's nested Schema.org properties: block (Issue #495) into individual rows",
+        "description": "Renders selected frontmatter fields as an infobox under the page title, flattening WikiCommit's nested Schema.org properties: block (Issue #495) into labelled rows and leaving empty values out (Issue #1292)",
         "defaultPosition": "beforeBody",
         "defaultPriority": 15
       }

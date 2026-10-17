@@ -1,5 +1,10 @@
+// An infobox (Issue #1292): the page's key facts as a short labelled table
+// between the title and the body. It is capped in width so that it reads as
+// a box of short values beside the prose, not as a second body; on a narrow
+// screen it takes the full column like everything else.
 .wikicommit-properties {
   margin: 0.5rem 0 1rem;
+  max-width: 34rem;
   border: 1px solid var(--lightgray);
   border-radius: 5px;
   font-size: 0.9rem;
@@ -63,8 +68,10 @@
   .wikicommit-properties-key {
     width: 35%;
     padding: 0.35rem 0.8rem;
-    color: var(--gray);
+    color: var(--darkgray);
     font-size: 0.85rem;
+    font-weight: 600;
+    text-align: left;
     vertical-align: top;
     word-break: break-word;
   }

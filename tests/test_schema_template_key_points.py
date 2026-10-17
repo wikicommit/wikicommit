@@ -52,7 +52,8 @@ ARTICLE_TYPES = {
 # arguments; the rest describe a subject rather than a document about one.
 NON_ARTICLE_TYPES = {
     "ShortStory.md", "Book.md", "Person.md", "Place.md", "Organization.md",
-    "Event.md", "HowTo.md", "DefinedTerm.md", "default.md",
+    "Event.md", "HowTo.md", "DefinedTerm.md", "SoftwareApplication.md",
+    "Dataset.md", "default.md",
 }
 
 

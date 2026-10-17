@@ -667,6 +667,18 @@ def test_a_merge_link_rewrite_does_not_make_the_page_stale(tmp_path):
     assert "STALE_REVIEW: " + PAGE_REL not in run(tmp_path).stdout
 
 
+def test_a_merge_rewrite_of_a_link_with_display_text_does_not_make_the_page_stale(tmp_path):
+    """`[[Type/slug|表示名]]` keeps its display text through the rewrite, and the
+    undo reverses exactly that (Issue #1304)."""
+    write_page(tmp_path, body="[[Person/old-name|旧名]] と働いた。表では [[Person/old-name\\|旧名]]。")
+    ai(tmp_path)
+    merge(tmp_path, "Person/old-name", "Person/new-name")
+    text = (tmp_path / PAGE_REL).read_text(encoding="utf-8")
+    assert "[[Person/new-name|旧名]]" in text
+    assert "[[Person/new-name\\|旧名]]" in text
+    assert "STALE_REVIEW: " + PAGE_REL not in run(tmp_path).stdout
+
+
 def test_the_same_link_change_without_a_recorded_merge_is_stale(tmp_path):
     """The tolerance comes from the merge record, not from links being ignored."""
     write_page(tmp_path, body="[[Person/old-name]] と働いた。")

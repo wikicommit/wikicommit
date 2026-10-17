@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""check_run_records.py — read the run records back (Issue #790).
+"""check_run_records.py — read the run records back.
 
 `record_run.py` writes one immutable-until-closed file per run under
 `.wikicommit/run/`. This is the consumer that makes that tree worth having;
-without it the records would be a receptacle nothing reads, which is the shape
-Issue #553 rules out.
+without it the records would be a receptacle nothing reads.
 
 Three lines, answering the questions the run records exist for:
 
@@ -15,17 +14,14 @@ Three lines, answering the questions the run records exist for:
 - `INCOMPLETE_RUN:` — a run that did not finish **normally**: either a record
   with a start and no end, or one closed by a halt. The state either leaves
   behind is otherwise indistinguishable from a backlog that has simply not come
-  up yet (Issue #567) — or, on the two halt paths that stop everything before any
-  file changes (guard C in Issue #574, a `rules_version` mismatch in Issue #752),
-  from nothing having been run at all. When the run recorded why it stopped,
-  `halted_reason` is on the line, and when it stamped checkpoints, so is how far
-  it got. Halts used to land on the finished side, because `ended_at` was
-  standing in for "finished" and `end --halted-reason` writes one; see
-  `finished_normally()` (Issue #872).
+  up yet — or, on the two halt paths that stop everything before any file
+  changes (guard C, a `rules_version` mismatch), from nothing having been run at
+  all. When the run recorded why it stopped, `halted_reason` is on the line, and
+  when it stamped checkpoints, so is how far it got. A halt is listed here even
+  though `end --halted-reason` writes an `ended_at`; see `finished_normally()`.
 - `MISSING_PASS:` — a run that finished **normally**, with a pass that left no
-  stamp. That is the shape of Issues #406, #452 and #474, all three of which
-  were a step at the tail of a long flow silently not running, and all three of
-  which a human found afterwards by auditing a published repository (Issue #797).
+  stamp. That is the shape of a step at the tail of a long flow silently not
+  running.
 
 **`MISSING_PASS:` is an observation, not a verdict** — the posture
 `check_installed_type_usage.py` takes with `ANCESTOR_FALLBACK:`. A run can
@@ -36,11 +32,11 @@ not on its own a defect.
 
 Records written before checkpoints existed carry no `passes` key at all, and
 nothing about passes is printed for them. **An empty list is a different thing**
-and is reported (Issue #864): `start` writes the key empty rather than leaving it
-out, so a run that stamped nothing is distinguishable from one that could not
-have, and the first of those is the worst case this line exists for — every
-stamping instruction lost rather than one. Reporting only the partial case had
-the line fall silent exactly where the failure was total.
+and is reported: `start` writes the key empty rather than leaving it out, so a
+run that stamped nothing is distinguishable from one that could not have, and
+the first of those is the worst case this line exists for — every stamping
+instruction lost rather than one. Reporting only the partial case would have the
+line fall silent exactly where the failure is total.
 
 A zero-stamp run is reported only when the record shows it did work — a source or
 page it named, or a non-zero outcome count. Without that gate the line would be
@@ -161,9 +157,9 @@ def has_checkpoints(record: dict) -> bool:
     rule leaves open: a run whose closing call lost its `--source` / `--page` /
     `--outcome` flags to the same compaction that dropped its later stamps still
     holds the stamps it managed before that, and those are all that keep it
-    reportable. The guard C halt used to be the example here; since Issue #872 it
-    carries a `halted_reason`, so it is not `finished_normally` and never reaches
-    this gate at all — it is reported on `INCOMPLETE_RUN:` instead.
+    reportable. A guard C halt is not such a run: it carries a `halted_reason`, so
+    it is not `finished_normally` and never reaches this gate at all — it is
+    reported on `INCOMPLETE_RUN:` instead.
     """
     return bool(stamped_passes(record))
 
@@ -171,14 +167,14 @@ def has_checkpoints(record: dict) -> bool:
 def records_passes(record: dict) -> bool:
     """Whether this record is from a run that could have stamped at all.
 
-    A record written before Issue #797 has no `passes` key, and nothing about
-    passes can honestly be said of it. One written after it carries the key — an
-    empty list when the run stamped nothing — and `record_run.py`'s `start`
+    A record written before checkpoints existed has no `passes` key, and nothing
+    about passes can honestly be said of it. One written since carries the key —
+    an empty list when the run stamped nothing — and `record_run.py`'s `start`
     writes it empty rather than leaving it out precisely so the two are
-    distinguishable (Issue #864). Keying the gate on the key rather than on the
-    stamps is what lets the worst case be reported: a run that lost *every*
-    stamping instruction to compaction leaves `passes: []`, and treating that as
-    "predates stamping" hid exactly the case these stamps exist for.
+    distinguishable. Keying the gate on the key rather than on the stamps is what
+    lets the worst case be reported: a run that lost *every* stamping instruction
+    to compaction leaves `passes: []`, and treating that as "predates stamping"
+    would hide exactly the case these stamps exist for.
     """
     return isinstance(record.get("passes"), list)
 
@@ -191,8 +187,7 @@ def work_recorded(record: dict) -> bool:
     file to process and says so and exits (Pass 1 step 2) — a legitimate finish
     with no stamp at all, and on a wiki that is current it is the *usual* finish.
     Reporting it would put this line on most runs, and a line that is always on
-    stops being read (the force Issue #562 weighed when it demoted the
-    low-density guard).
+    stops being read.
 
     So a zero-stamp run is only reported when the record itself shows work: a
     source or page it named, or an outcome count that is not zero. A run that
@@ -213,14 +208,13 @@ def work_recorded(record: dict) -> bool:
 def finished_normally(record: dict) -> bool:
     """Whether the run finished normally — closed, and not halted.
 
-    **`ended_at` is not that question.** It was standing in for it, and the halt
-    paths broke the proxy: guard C (Issue #574) and a `rules_version` mismatch
-    (Issue #752) both stop everything and close the record through
-    `record_run.py end --halted-reason`, so they carry an `ended_at` and landed
-    on the finished side. That put them under `MISSING_PASS:` saying
-    "finished, but ... left no stamp" — false on both halves, since a halt did
-    not finish and not reaching the later passes is the point rather than an
-    omission (Issue #872).
+    **`ended_at` is not that question.** The halt paths break it as a proxy:
+    guard C and a `rules_version` mismatch both stop everything and close the
+    record through `record_run.py end --halted-reason`, so they carry an
+    `ended_at` and would land on the finished side — under `MISSING_PASS:`
+    saying "finished, but ... left no stamp", which is false on both halves,
+    since a halt did not finish and not reaching the later passes is the point
+    rather than an omission.
 
     Deriving both `INCOMPLETE_RUN:` and `MISSING_PASS:` from this one predicate
     is what makes the second half fall out for free: a halt is not
@@ -233,9 +227,9 @@ def finished_normally(record: dict) -> bool:
     at all. `halted_reason` is on every record — `start` writes it empty — so
     judging on it covers every Skill.
 
-    The cost is that "forgot to stamp the close" and "halted" are now told apart
-    by `halted_reason` alone. That was always the only value separating them,
-    and it is on the line.
+    The cost is that "forgot to stamp the close" and "halted" are told apart by
+    `halted_reason` alone. It is the only value that separates them, and it is
+    on the line.
     """
     ended = str(record.get("ended_at") or "").strip()
     halted = str(record.get("halted_reason") or "").strip()
@@ -265,7 +259,7 @@ def describe_last(record: dict) -> str:
     A halt is named here too. Only one `LAST_RUN:` is printed, so when the halt
     is the most recent run this is the only line it can appear on besides
     `INCOMPLETE_RUN:` — and without the word, a halt reads as an ordinary run
-    that happened to take five minutes (Issue #872).
+    that happened to take five minutes.
     """
     count = len(stamped_passes(record))
     passes = f"{count} pass(es)" if count else ""
@@ -283,10 +277,10 @@ def describe_incomplete(record: dict) -> str:
     A run that was never closed has no `ended_at`, and saying so is the literal
     state of the file. A halt **did** close its record, so "no ended_at" would be
     false there; what it has instead is a reason and an elapsed time, and the
-    elapsed time is the whole reason `end --halted-reason` keeps writing
-    `ended_at` (Issue #872) — guard C halts before fetching anything while a
-    `rules_version` mismatch halts after reaching Pass 4, and those differ by
-    orders of magnitude. The checkpoints say where it got to in either shape.
+    elapsed time is the whole reason `end --halted-reason` writes `ended_at` —
+    guard C halts before fetching anything while a `rules_version` mismatch
+    halts after reaching Pass 4, and those differ by orders of magnitude. The
+    checkpoints say where it got to in either shape.
     """
     reason = str(record.get("halted_reason") or "").strip()
     ended = str(record.get("ended_at") or "").strip()
@@ -369,7 +363,7 @@ def main() -> int:
     # above, and it has an obvious reason for the gap — reporting it twice would
     # say the same thing in two voices, one of which ("finished, but") would be
     # false. Sharing the predicate is what keeps halts out of here without a
-    # clause of their own (Issue #872).
+    # clause of their own.
     skipped = [
         (p, r)
         for p, r in records

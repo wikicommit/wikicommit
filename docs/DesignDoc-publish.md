@@ -18,6 +18,8 @@
 - **`--quartz` と `--quartz-pages` は分かれている**。`--quartz` はローカルビルド一式だけを生成し、`--quartz-pages`（`--quartz` 指定時のみ有効）が `deploy.yml` の生成と GitHub Pages（Source: GitHub Actions）の自動有効化を足す。`wikicommit-init` の Prerequisites も 2 段階の Y/n で聞く。手元で読みたいだけの運用者に、リポジトリ外への公開を強いないためである。`/wikicommit-merge` は Quartz / Pages に一切依存しない（`.wikicommit/entity/` の変更検出・品質チェック・Git/PR 操作のみで完結する）。
 - **公開 URL は README.md へ自動で書き込まない**。次ステップ案内が `gh api repos/{owner}/{repo}/pages` の `html_url` を使った追記例（コピペ用の Markdown 片）を示すだけである。既存リポジトリの README.md は利用者独自の構成を持ちうるため、エージェントは README.md を編集しない（display-only。`.claude/skills/wikicommit-init/SKILL.md` の Notes）。
 - **`syntax-highlighting` プラグインは配布テンプレート（`.claude/skills/wikicommit-init/scripts/templates/quartz.config.yaml`）に含めない**。依存する `rehype-pretty-code`（Shiki ベース）が全言語の文法定義をバンドルするため他プラグインより突出して重く、GitHub Actions 標準ランナーでビルドが失敗する。`enabled: false` ではビルド自体はスキップされない（プラグインインストーラは `enabled` に関わらず列挙された全プラグインをクローン・ビルドし、`enabled` が効くのは適用段階だけ）ので、無効化にはエントリ自体の削除が要る。コードブロック自体の描画は `obsidian-flavored-markdown` / `github-flavored-markdown` が担うので、失うのはハイライト・コピーボタン・トークン単位の CSS クラスだけである。**再導入を検討する条件**: コード例中心のコンテンツ（HowTo 等）を多用する Wiki が増え、ハイライト・コピーボタンの需要が実際に現れたとき。そのときは上流（バンドルサイズ・Quartz 本体がビルド失敗の内容を握り潰して `"build failed"` とだけ出すこと）の状況を改めて確認する。
+- **`deploy.yml` はコミュニティプラグインを Actions のキャッシュに持つ**。インストーラ（`quartz plugin install --from-config`）は `quartz.lock.json` に記録があり、かつ `quartz/.quartz/plugins/<name>` が在るプラグインを飛ばすので、この 2 つを `actions/cache` で戻せばリモートのプラグインはクローンもビルドもされない。キーは `quartz.config.yaml` の各プラグインの `source:`（文字列でも `{repo, subdir, name}` のオブジェクトでも PyYAML で読んで値を見るので、追加・削除・`#ref` や `subdir` の付け替えで変わり、コメントでは変わらない）と Quartz サブモジュールのコミットと Node.js のメジャー版であり、`restore-keys` は置かない — 部分一致で別の一覧・別の Quartz 向けに作ったプラグインを戻すと、インストーラはそれを既存として使い続けるため。`quartz.lock.json` はキーに入れない（チェックアウト時点には無く、インストールの結果である）。ローカルプラグイン（`source: ../quartz-plugins/<name>`。絶対パスのシンボリックリンクで、ビルド済みの `dist/` をリポジトリに持つ）は戻した後に lockfile とリンクから外し、毎回リンクし直す — キーを変えずに中身が変わりうるうえ、リンクし直すことで `quartz/.quartz/plugins/index.ts` が現在の export から再生成される。代償として、`#ref` の無い `github:` プラグインはキーが変わるまで最初にクローンしたコミットに留まる。`setup-node` は `cache: npm` で npm のダウンロードキャッシュを持つ（`node_modules` ではないので `npm install` 自体は走る。ルートの `package-lock.json` は Wiki リポジトリにコミットされているとは限らないので、`cache-dependency-path` には `quartz/` とローカルプラグインの lockfile を入れる）。**`enabled: false` のエントリはテンプレートに残す** — 運用者が `true` にするだけで使える手軽さに対し、インストール時間への寄与はネットワークの揺れに埋もれるほど小さく、キャッシュが当たる限り再 deploy では掛からない。
+- **`og-image` プラグインは配布テンプレートに含めない**。ページごとに共有カード用の画像（1200×630）を描くプラグインで、出力処理の時間のほぼすべてを占めるうえ、描画に使うフォントが日本語の字形を持たず、日本語の本文の抜粋・タグが豆腐（□）になる。外すと Quartz 本体の `Head.tsx` が全ページの `og:image` を `https://<baseUrl>/static/og-image.png`（実体は `quartz/quartz/static/og-image.png`。Quartz のロゴ）に向ける。タイトルと説明はテキストの OGP（§8.11）で出るので失われない。テンプレートには外した理由をコメントで残す。**既存の Wiki からは自動では外れない** — `/wikicommit-update` は `quartz.config.yaml` を書き換えず、`check_distribution_freshness.py` の `yaml_keys` 比較はテンプレートが得たキーしか報告しないので、エントリの削除は差分として現れない。届く経路は `/wikicommit-update` の報告（Step 9）が読む CHANGELOG の記述であり、運用者が自分でエントリを消す。**再導入を検討する条件**: CJK を描けるフォントを渡す手段が上流にでき、かつ出力時間がキャッシュ等で毎回掛からなくなったとき。Quartz のロゴではなく Wiki 自身の共通画像を出すことは、`quartz/` サブモジュールを汚さずに `static/og-image.png` を差し替える手段が要るため別に扱う。
 - **Quartz サブモジュールの更新手順は `.wikicommit/guides/updating-the-quartz-submodule.md` に置く**。ガイド棚は `update: overwrite` なので、再 init と `/wikicommit-update` で既存リポジトリにも届く（init 時にしか印字されない次ステップ案内では届かない）。WikiCommit のビルドは他人のリポジトリである `quartz/` の中へ書き込み、そのうち `postinstall` が `quartz/` 内で走らせる `npm install` による追跡ファイル `quartz/package-lock.json` の変更だけが `quartz/` 内の `git pull` を止める（`quartz/content`・`quartz/quartz.config.yaml`・`quartz/quartz.lock.json`・`quartz/.quartz/plugins/*` は未追跡で止めない）。ガイドは `(cd quartz && npm install)` を明示する — ルートの `npm install` は `postinstall` の `git submodule update` で、`git add quartz` 前の古いポインタへ黙って巻き戻すため。**`quartz/` 内を `npm ci` にして汚さない案は採らない** — `package.json` と lockfile がずれればビルド失敗になり、そのずれは上流 Quartz と利用者の npm の版で決まってこちらが制御できない。`.gitmodules` の `ignore = dirty` の案内・`.vscode/settings.json` の配布もしない（前者は表示の問いで更新の塞がりを解かず、後者は利用者のエディタ設定である）。
 
 ### 8.2 WikiLink の解決方法
@@ -35,7 +37,11 @@ SSG（Quartz v5）に渡す
 
 ファイル名は言語中立の英語識別子で統一する（例: `auth.md`、`yamada-taro.md`）。タイトルや本文は各言語で記述する。
 
-**未解決 WikiLink の表示**: `check_wikilinks.py` は「参照先ページがどの言語にも存在しない」ケースを ERROR ではなく WARNING として扱うため、参照先が解決できない `[[Type/slug]]` を含んだページも `wikicommit-merge` を通過しうる。ビルド前変換スクリプト（`convert_wikilinks.py`）は、そのような WikiLink をリンクにはせず、ブラケットを除いたプレーンテキスト `Type/slug` として出力する（`lang`/`current_type` が特定できない場合、および同言語・`primary_lang` いずれのターゲットファイルも存在しない場合の両方）。生の `[[Type/slug]]` というダブルブラケット構文がそのまま読者に表示されることはない。この変換は `unresolved_links` カウント・`SUMMARY:` 行の集計には影響しない（集計は変換前の判定結果に基づく）。
+**リンク文字列**: 解決できた `[[Type/slug]]` のリンク文字列は参照先ページの `title`（無ければ `Type/slug`）。別名付きの `[[Type/slug|表示名]]` も WikiLink として受け付け、リンク文字列は表示名になる（表の中では区切りを `\|` と書く形も同じに扱う）。翻訳では訳語を見せたくなり、生成も自然にこの形を書くため、禁止せずに受け付ける。解決・存在確認・被リンク・削除済みページの検出・統合時の書き換え（表示名は保ち、参照先だけを変える）・Pass 4 の 1 ホップ近傍は、表示名の有無に関係なく `Type/slug` で扱う。
+
+**WikiLink でない `[[...]]`**: Type の無い `[[slug]]`・`[[Type/slug#見出し]]`・`[[Prop::Type/slug]]`・空の表示名など、`WIKILINK_RE` に合わない `[[...]]` は変換されず、書かれたまま公開される。どのチェックもこれを解決しないので、`check_wikilinks.py` が WARNING として報告する（CISpec「WikiLink 検証」）。コードフェンスとインラインコードの中は対象にしない。
+
+**未解決 WikiLink の表示**: `check_wikilinks.py` は「参照先ページがどの言語にも存在しない」ケースを ERROR ではなく WARNING として扱うため、参照先が解決できない `[[Type/slug]]` を含んだページも `wikicommit-merge` を通過しうる。ビルド前変換スクリプト（`convert_wikilinks.py`）は、そのような WikiLink をリンクにはせず、ブラケットを除いたプレーンテキスト `Type/slug`（表示名があれば表示名）として出力する（`lang`/`current_type` が特定できない場合、および同言語・`primary_lang` いずれのターゲットファイルも存在しない場合の両方）。生の `[[Type/slug]]` というダブルブラケット構文がそのまま読者に表示されることはない。この変換は `unresolved_links` カウント・`SUMMARY:` 行の集計には影響しない（集計は変換前の判定結果に基づく）。
 
 ### 8.3 JSON-LD 埋め込み
 
@@ -268,7 +274,7 @@ Wiki 本文に混入した `<script>` タグは、`enableInHtmlEmbed` の設定�
 画像・動画・YouTube の埋め込みは標準 Markdown 構文（`![alt](path-or-url)`）だけで完結しており、ページ本文が生 HTML タグを必要とする正当なユースケースは存在しない。この前提の下、**生成時の制約と `wikicommit-merge` でのブロッキング検証で生 HTML 自体を排除する**:
 
 - `wikicommit-generate` の Pass 3（`.claude/skills/wikicommit-generate/SKILL.md`）に、ページ本文へ生 HTML タグを一切書かないという生成時制約を明記した（ソース文書自体が生 HTML を含む場合でも、意味を抽出するだけでマークアップはコピーしない）。
-- `.wikicommit/scripts/check_raw_html.py`（新規）を `wikicommit-merge` の品質ゲートに追加した。ページ本文（frontmatter を除く）を対象に、コードフェンス（バッククォート3つ、または `~~~`）とインラインコード（バッククォートで囲んだ範囲）で囲まれた箇所（Markdown が地の文としてエスケープ表示するため実害がない）と、CommonMark オートリンク（`<https://...>`・`<user@example.com>`。Pass 3 のベア URL 対応で明示的に使われる記法）を除外した上で、`<tag ...>` 形式の生 HTML タグを1件でも検出したら blocking ERROR とする。タグの許可リスト（例: `<br>` だけ許可）は意図的に持たない — 「危険なタグだけ禁止」ではなく「生 HTML自体を一切禁止」という設計判断のため、サニタイズによる許可リストという (a) 案の性質を部分的に持ち込まないようにした。
+- `.wikicommit/scripts/check_raw_html.py`（新規）を `wikicommit-merge` の品質ゲートに追加した。ページ本文（frontmatter を除く）を CommonMark パーサ（`markdown-it-py`）でトークンに分け、生 HTML のトークン（`html_block`・`html_inline`）の中に `<tag ...>` 形式のタグを1件でも見つけたら blocking ERROR とする。コードフェンス・インラインコード（Markdown が地の文としてエスケープ表示するため実害がない）と CommonMark オートリンク（`<https://...>`・`<user@example.com>`。Pass 3 のベア URL 対応で明示的に使われる記法）はパーサが生 HTML として読まないので検出されない。コードの範囲を正規表現で除外する形は採らない — 区切りの長さや字下げが CommonMark とずれると、ずれた範囲の HTML が検査を素通りして公開サイトで描画されるため、描画と同じ規則で判定する。タグの許可リスト（例: `<br>` だけ許可）は意図的に持たない — 「危険なタグだけ禁止」ではなく「生 HTML自体を一切禁止」という設計判断のため、サニタイズによる許可リストという (a) 案の性質を部分的に持ち込まないようにした。
 
 **サニタイズ（許可リスト）は採らない** — 許可すべき生 HTML タグがそもそも存在しないので、許可リストを維持するコストに見合うメリットがない。**経路A（レビュー前の自動マージ・公開）の見直しも採らない** — このリスクはマージ時点で機械的に排除できるため、中核設計をこの 1 つのリスクのために変える必要はない。
 
@@ -677,7 +683,7 @@ root index は「人が読んで確認」に加えて「出典と照合」（Pas
   - 判定は `reconcile_ingest_status.py` と 5 件ガードの選定順序が「一度でも完走したか」の目印に使っているのと同じ値で、決定論的に分かれる。
   - `lang` を持つソースは `last_generated_at` が空でも（Pass 2a の後で保留されたもの）言語の行に数える。
   - `status: excluded` は `last_generated_at` が空でも「未記録」に数える — Pass 4 の `excluded` 分岐は完走した実行の末尾で書かれるが `last_generated_at` を書かないため、日付が無いことが未完走を意味しない。
-  - 文字列でない `lang`（リスト・`yes` / `on` が読まれた `True`・数値。`False` は `no` に戻す）は値を持たないものとして同じ規則で分ける（`docs/DesignDoc-data.md` §4.3）。
+  - 文字列でない `lang`（リスト・`yes` / `on` が読まれた `True`・`off` / `false` が読まれた `False`・数値。`False` は書かれた文字が `no` のときだけ `no` に戻す。公開ソースページと同じ `_normalize_source_lang()` を通る）は値を持たないものとして同じ規則で分ける（`docs/DesignDoc-data.md` §4.3）。
   - Pass 1 で失敗したソースは「未処理」に入る（`status` 別の表が `failed` を別に数えているので、言語の表で細かく分けない）。
 
 #### ハブ行のソース件数と、同じソースに立つハブ
@@ -776,15 +782,29 @@ sources             ← 出自の記録（tier 2）
 | `sources`（+ `translated_from` 経由の継承） | `wikicommit-sources` | §8.10 |
 | `sources[].license` ＋ 改変告知の固定文言 | `wikicommit-sources` | §8.10 |
 | `derived_from`（合成ページの出自。+ `translated_from` 経由の継承） | `wikicommit-sources` | §8.10.1 |
-| `description`/`tags`/`aliases`/`properties`（Schema.org 型固有プロパティ。`quartz.config.yaml` の `includedProperties` で選定） | `wikicommit-properties` | 本節 |
+| `description`/`tags`/`aliases`/`properties`（Schema.org 型固有プロパティ。`quartz.config.yaml` の `includedProperties` で選定。`properties.description`・`properties.abstract` は表示しない） | `wikicommit-properties`（インフォボックス） | 本節 |
 | `type`・`properties.*` の Schema.org マッピング（`<head>` への JSON-LD 埋め込み。UI 上は不可視） | `wikicommit-jsonld` | §8.3 |
 | `lang`・`wikidata`・`sameAs` 等 | — （どのコンポーネントも UI に表示しない） | — |
 
 型固有の Schema.org プロパティ（`properties:` 配下の `description`/`affiliation`/`jobTitle` 等）は、`wikicommit-jsonld` の JSON-LD 埋め込み（クローラー向け、UI 上は不可視）に加えて `wikicommit-properties` が UI に表示する。`wikidata`/`sameAs` 等（`docs/DesignDoc-data.md` §4.1 の「外部識別子」フィールド）は UI 上非表示である — これらを表示対象に含めるかどうかは `includedProperties` の設定範囲であり、別の判断を要する。
 
-`wikicommit-properties`（`.claude/skills/wikicommit-init/scripts/templates/quartz-plugins/wikicommit-properties/`）はこの非対称を解消する。Quartz v5 の必須プラグイン `github:quartz-community/note-properties`（フロントマター解析そのものを担う。無効化不可）を、他の `wikicommit-*` プラグインと同じ自前ディレクトリへのフォーク方式（`docs/DesignDoc-skills.md` §11 参照）で `wikicommit-properties` として取り込み、`quartz.config.yaml` テンプレートの参照を `github:quartz-community/note-properties` からこちらへ差し替えた。アップストリームからの実行時の挙動の変更点は次の1点のみ: `getVisibleProperties()`（表示対象プロパティの選定ロジック）が、選定後の値がプレーンオブジェクトであれば1階層だけ展開し、そのキーをトップレベルの行と同格で表示する。これにより `properties:` ブロック自体は1行の生 JSON ダンプとして表示されるのではなく、`description`/`affiliation`/`jobTitle` 等の個々のキーが他のトップレベルフィールドと見分けがつかない行として並ぶ。展開時に、同名のキーが既に選定済み（トップレベルフィールド、または `includedProperties` 内でより先に処理された別のオブジェクト）であれば上書きしない — カスタム型（`docs/DesignDoc-data.md` §5.3。標準型と異なり `domainIncludes` 検証の対象外）が誤って `properties.tags` のような WikiCommit 構造フィールドと同名のキーを宣言した場合に、ページの実際の `tags` を静かに破壊しないためのガード。WikiLink 由来の値（`[[Type/slug]]` 形式）・配列値の描画ロジックはアップストリームのものをそのまま使う（変更不要 — 展開後の値は文字列/配列として扱われ、既存のリンク描画がそのまま効く）。ネスト2階層以上のフラット化には対応しない（WikiCommit のスキーマ設計上、`properties:` の値がさらにオブジェクトになることは想定していない）。
+`wikicommit-properties`（`.claude/skills/wikicommit-init/scripts/templates/quartz-plugins/wikicommit-properties/`）はこの非対称を解消する。Quartz v5 の必須プラグイン `github:quartz-community/note-properties`（フロントマター解析そのものを担う。無効化不可）を、他の `wikicommit-*` プラグインと同じ自前ディレクトリへのフォーク方式（`docs/DesignDoc-skills.md` §11 参照）で `wikicommit-properties` として取り込み、`quartz.config.yaml` テンプレートの参照を `github:quartz-community/note-properties` からこちらへ差し替えた。アップストリームからの実行時の挙動の変更点は、下の「インフォボックスとして表示する」の表示の変更と、次の展開である: `getVisibleProperties()`（表示対象プロパティの選定ロジック）が、選定後の値がプレーンオブジェクトであれば1階層だけ展開し、そのキーをトップレベルの行と同格で表示する。これにより `properties:` ブロック自体は1行の生 JSON ダンプとして表示されるのではなく、`description`/`affiliation`/`jobTitle` 等の個々のキーが他のトップレベルフィールドと見分けがつかない行として並ぶ。展開時に、同名のキーが既に選定済み（トップレベルフィールド、または `includedProperties` 内でより先に処理された別のオブジェクト）であれば上書きしない — カスタム型（`docs/DesignDoc-data.md` §5.3。標準型と異なり `domainIncludes` 検証の対象外）が誤って `properties.tags` のような WikiCommit 構造フィールドと同名のキーを宣言した場合に、ページの実際の `tags` を静かに破壊しないためのガード。WikiLink 由来の値（`[[Type/slug]]` 形式）・配列値の描画ロジックはアップストリームのものをそのまま使う（変更不要 — 展開後の値は文字列/配列として扱われ、既存のリンク描画がそのまま効く）。ネスト2階層以上のフラット化には対応しない（WikiCommit のスキーマ設計上、`properties:` の値がさらにオブジェクトになることは想定していない）。
 
-`quartz.config.yaml` テンプレートの `includedProperties` に `properties` を追加し、この展開ロジックの対象に含めている。プロパティキー名の表示ラベル整形（`jobTitle` → "Job Title" のような人間可読化）は行わない — Schema.org 語彙自体が英語ベースであることは CLAUDE.md の既存方針（キーはすべて英語）と整合しており、無理に和訳・整形しない。
+`quartz.config.yaml` テンプレートの `includedProperties` に `properties` を追加し、この展開ロジックの対象に含めている。
+
+#### `properties:` はインフォボックスとして表示する
+
+`wikicommit-properties` の枠は、ページ見出しの直下に置くインフォボックス（キーと値の短い表）である。`properties:` は本文の要約として書かれ（data §5.2）、インフォボックスはそれを本文の前に一覧で見せる。本文と同じ事実が欄にもあるのは Wikipedia のインフォボックスと同じ形で、欄は短い値、本文はその文脈を持つ。JSON-LD（§8.3）は今までどおり `properties:` 全体から作り、表示の変更で機械向けの出力は変わらない。
+
+| 決めたこと | 内容 | 理由 |
+|---|---|---|
+| ラベル | 行の見出しはキー名ではなく、ページの言語の表示ラベルにする（`jobTitle` → 「職名」/ "Job title"）。配布テンプレートが持つキー（36 個）と `tags`・`aliases` のラベルを、プラグインのロケールファイルが 10 言語で持つ（§8.9.2 の UI 文字列と同じ扱い。部分的なロケールは置かない） | 英語のキー名の一覧は、読者にとって本文の前に置かれた識別子の列にすぎない。キー自体は言語中立の英語識別子のまま（フロントマター・JSON-LD）で、変えるのは表示だけである（§8.9.1 の境界の UI chrome 側） |
+| 辞書に無いキー | カスタム型や Pass 2b が足したキーは、Schema.org の名前を語に分けて英語で出す（`variableMeasured` → "Variable measured"） | ラベルを型ファイルに持たせる案は採らない。型ファイルは公開ツリーに入らないので、ビルドがそれを読む経路を足すことになり、型ファイルを書く 4 経路すべてに 10 言語のラベルを書かせることになる |
+| 空の値 | `null`・空文字列・空のリストは行にしない（「—」や空欄を出さない） | 不明・非該当の欄を並べると読者に何も伝えない。Pass 3 は埋められないキーを省くが、それ以前のページと手書きのページは `""` を持ちうる |
+| 散文のキー | `properties.description`・`properties.abstract` は枠に出さない（`proseProperties`。既定で 2 つ） | どちらも本文の要約を散文で持つキーで、枠に出すと本文の冒頭と同じ説明を 2 度読ませる。フロントマターには残るので、JSON-LD と `llms.txt` は今までどおり読む |
+| 位置 | `beforeBody` のまま、幅を抑えた表として見出しの直下に置く。折りたたみとページごとの上書き（`quartz-properties`・`quartz-properties-collapse`）も残す | 見出しの横に浮かせる配置は、Quartz の `beforeBody` と本文が別の要素なので本文を回り込ませられない |
+
+値の正しさは表示では担保しない。欄の値が出典と本文に照らして正しいかは Pass 4 が見る（`review-rules.md` check 1。data §5.2）。
 
 ### 8.9.1 公開サイトの言語の境界: 識別子は言語中立・UI chrome はローカライズ
 
@@ -839,13 +859,13 @@ WikiCommit 自身が書く UI 文字列（上表の自前プラグイン 4 つ�
 
 **graph の `controls.*` が 30 言語を持つのは例外である**。graph はコミュニティ版 fork から取り込んだプラグインで、その既存ロケール集合（30）に WikiCommit が操作 UI の文言を足した。ロケールファイルの集合が先に決まっていたので 30 言語すべてに足したのであり、自前プラグインの目標ではない。
 
-**対象の文字列**（英語で数えて 127）:
+**対象の文字列**（英語で数えて 165）:
 
 | 置き場 | キー数 |
 |---|---|
 | `wikicommit-banner` の `wikicommitBanner` | 29 |
 | `wikicommit-sources` の `wikicommitSources` | 8 |
-| `wikicommit-properties` の `wikicommitProperties` | 1 |
+| `wikicommit-properties` の `wikicommitProperties` | 39（枠の見出し 1 ＋ 表示ラベル 38） |
 | `wikicommit-language-switcher` の `wikicommitLanguageSwitcher` | 1 |
 | `ROOT_INDEX_LABELS` | 11 |
 | `SOURCE_TYPE_LABELS` | 3 |
@@ -860,9 +880,9 @@ WikiCommit 自身が書く UI 文字列（上表の自前プラグイン 4 つ�
 |---|---|
 | A 何もしない | README の実例（`decameron-wiki`、`primary_lang: it`）で原文ページの枠が英語のまま残る |
 | B `it` だけ足す | 「なぜ `it` か」の答えが「たまたまパイロットがあった」になり、次の言語で同じ判断を繰り返す |
-| C 30 言語に揃える | 127 文字列 × 28 言語は、使われる見込みに対して過大 |
+| C 30 言語に揃える | 165 文字列 × 28 言語は、使われる見込みに対して過大 |
 | D 公開ページで開示する | 読者は行動できず、公開ページにコストを掛ける。それを覆す新しい事実が無い |
-| E 各 Wiki がラベルを上書きする | 原理的には最もきれい（自前プラグインは `quartz.config.yaml` の `options:` を受け取れ、同ファイルと `config.yml` は `update: review` で上書きされないため置き場所は成立する）。ただし運用者に約 127 ラベルの記述を求め、上書きを読む処理を 5 箇所に足す必要があり、10 言語案より重い。将来の拡張として残す |
+| E 各 Wiki がラベルを上書きする | 原理的には最もきれい（自前プラグインは `quartz.config.yaml` の `options:` を受け取れ、同ファイルと `config.yml` は `update: review` で上書きされないため置き場所は成立する）。ただし運用者に約 165 ラベルの記述を求め、上書きを読む処理を 5 箇所に足す必要があり、10 言語案より重い。将来の拡張として残す |
 
 **既存の Wiki には `/wikicommit-update` で届く**。`quartz-plugins/` と `.wikicommit/scripts/` はどちらも `update: overwrite` なので、同期した次のビルドから原文ページの枠が `primary_lang` で描かれる。`quartz.config.yaml` の `locale`（上記）とは届き方が違う。
 
@@ -1017,7 +1037,7 @@ The lists below cover the N pages in `ja`; the site also has pages in `en`.
 | 並べるページ | Type 目次 ＋ 被リンク上位 50 件 ＋ `## Optional`（Overview・Sources） | 全ページを並べると慣習の大きさ（数 KB〜数十 KB）を超える。残りのページは Type 目次の先にある |
 | 説明文 | `properties.description` を 1 行の平文にする（WikiLink は slug に、300 字で切る） | `[[Type/slug]]` はこのビルドでしか解決できない |
 | 言語 | `primary_lang` のページだけ。他の言語は存在を 1 文で示す | 翻訳は原文と同じ問いに答えるので、並べても届く範囲は広がらず大きさだけが倍になる |
-| 信頼度 | 冒頭の説明だけに書き、各行には載せない | 各ページの上部に状態が出ており（§8.4）、リンクを辿った AI はそこを読む。行に載せると行が長くなる |
+| 信頼度 | 冒頭の説明だけに書き、各行には載せない。冒頭は「人が読んだページは上部のバナーにそう書いてある（ページの言語で。英語なら `Read by <name> — …` / `A person read this page …`）。LLM が生成した旨のバナーがあってその行が無いページは、まだ人が読んでいない（`pending`）」と述べる（生成の記録も `reviewed_by` も無い `reviewed` のページ — 手書きのページを経路 B でレビューしたもの・ビルドが生成する目次 — もバナーの分岐上「読んだ」行を出さないので、行が無いことの意味は生成の旨のバナーを持つページに限って言う） | 状態はページの上部のバナーに出ており（§8.4）、リンクを辿った AI はそこを読む。ただし `pending` のバナーは状態を文字で書かず、「読んだ」行が無いことでしか表さない（否定文は読者が読んでいる目の前で偽になるので出さない。§8.4）。1 ページだけを取りに来た AI は `reviewed` のページと見比べられないので、行が無いことの意味を冒頭で言う。行に載せると行が長くなる |
 | 文面の言語 | 固定の英語 | 宛先は AI であり読者向けの UI chrome（§8.9.1）ではない。サイト名と `site_description` はそのまま載せる |
 | `llms-full.txt` | 出さない | 全文は大きくなりすぎる |
 
@@ -1025,7 +1045,7 @@ The lists below cover the N pages in `ja`; the site also has pages in `en`.
 
 **実サイトで確かめたこと**: Pages のプロジェクトページで `/llms.txt` が取れ、名前は変わらず、並べたリンクはすべて公開ページに届く。GitMCP の Pages 指定（`<owner>.gitmcp.io/<repo>`）は、ホスト直下ではなくサブパスの `llms.txt` を読む。GitMCP 自身の検索は一覧に載っている語にも当たらないことがあり、その場合は `llms.txt` の本文をそのまま返す — 経路として効くのは検索ではなく一覧である。
 
-**既知の不足**: 上の表の「信頼度」の行は、各ページの上部の状態をリンクを辿った AI が読むことを前提にしている。しかし `pending` のページのバナーは状態を文字で書かない（§8.4。`reviewed` のページに「読んだ」行が足されることで区別する）ため、ページを読んだだけの AI は `pending` を言い当てられるとは限らない。`llms.txt` の冒頭の「Each page states its review status at the top」も、`pending` の側ではこの区別に依っている。
+**既知の不足**: AI は `pending` を「読んだ」行が無いことから読み取る必要がある — ページの HTML にも JSON-LD にも、状態そのものを機械向けに書いた面は無い。`llms.txt` を経ずにページだけを取りに来た AI には、冒頭の説明も届かない。機械向けの面（JSON-LD・`<meta>`）に状態を載せるかは、語彙の選定が要るので必要になってから決める。
 
 **未確認のこと**: `/wikicommit-ask` と同じ問いで答えを比べることはしていない（ask 自体の検証と合わせて扱う）。
 
@@ -1131,6 +1151,76 @@ search_wiki(query, lang=None, type=None, tags=None)
   → lang="ja": 日本語ページのみ
   → type="Person": 型でフィルタ
 ```
+
+### 9.5 ページの事実とつながりの索引
+
+全文検索（§9.1）は「この語を含むページは？」に答えるが、「この Dataset を使っている SoftwareApplication は？」「ライセンスが MIT の Dataset は？」のようにページをまたぐ問い合わせには答えない。公開サイトのグラフビュー（§8.7.1）は線に種類の無い描画用の絵であり、ページごとの JSON-LD（§8.3）は 1 ページずつ埋めるだけで全体を集めたものが無く、`relations.yml`・`groups/` はどちらにも流れていない。これらの材料を 1 か所に集めて問い合わせに使えるようにするのが、この索引である。クエリ型のビュー（一覧・年表・比較表）と、インフォボックスの逆向きの行（「このページを参照しているもの」）の土台になる。
+
+#### 正本はページ、索引は毎回作り直す派生物
+
+**索引は正本ではない。** `.wikicommit/entity/` のページ（と `relations.yml`・`groups/`）から決定論的に作り直す派生物であり、§9.1 の FTS5 索引と同じ扱いにする。壊れても消して作り直せば済み、Git のページが唯一の正本であること（GitOps）とレビューの単位（ページ 1 枚）は変わらない。
+
+**索引を正本にして、ページをそこから作る形（Wikidata を先に置く形）は採らない。** 事実が文にならない知識（なぜ・どう使う）から切り離され、レビューの単位がページではなく事実 1 つずつになる。事実の層の作り方は「本文が先・欄は本文から抜き出す」（data §5.2）であり、索引はその欄と本文をさらに集めるだけである。
+
+#### 材料 — 決定論的に取れるものだけ
+
+| 材料 | 索引の中での形 |
+|---|---|
+| `properties:` の値 | 事実（キーと値）。値が WikiLink なら、キーを種類とする線も作る |
+| 本文の WikiLink | 種類の無い線（`links_to`） |
+| `relations.yml` | 種類の付いた線（`same`・`broader`・`related`・`distinct`・`series`） |
+| `groups/<Type>.yml` | ページの所属グループ |
+| `type`・`tags`・`aliases`・`sources`・`review_status`・`status`・`translated_from` | ページの属性・事実 |
+
+**LLM で本文から事実を抜き出して索引に入れない。** その抜き出しはどのページの中にも書かれず、レビューされない。本文から欄への抜き出しは生成のときに行い、欄に書かれた時点でページの照合とレビューの対象になる（data §5.2）。同じ理由で、**文字列の値を推測でページに結ばない** — 「ByteDance」という文字列の `author` を `Organization/bytedance` に結ぶのは、どこにも書かれていない同定の判断である。結びたければ、ページの側で値を WikiLink にする。
+
+#### 置き方 — SQLite のテーブル
+
+| 案 | 判断 | 理由 |
+|---|---|---|
+| **SQLite のテーブル** | **採る** | Python 標準の `sqlite3` で追加依存が無い。§9.1 の FTS5 索引と同じ作り直しの仕組み（指紋の比較・一時ファイルへの書き込みと置き換え）がそのまま使える。問い合わせ（逆引き・型での絞り込み・集計）が SQL の結合と集計で書ける |
+| 全ページの JSON-LD を集めた 1 ファイル | 採らない | 集めても問い合わせの仕組みは別に要る。型ごとの対応が `wikicommit-jsonld` に決め打ちされている（§8.3）。必要になれば索引から書き出せる |
+| RDF（Turtle 等）と SPARQL | 採らない | 依存が増える。試した問い合わせ（使っている・作った・同じ型の比較）は SQL で足りた。キーは Schema.org の名前のままなので、後から RDF に書き出す道は閉じない |
+
+テーブルは次の 4 つ。ページの識別子は WikiLink・`relations.yml`・`groups/` と同じ言語中立の `<Type>/<slug>`（以下 node）で、言語ごとの版は `lang` で分ける。
+
+| テーブル | 1 行 | 列 |
+|---|---|---|
+| `pages` | 言語ごとのページ 1 枚 | node・lang・path・type・schema_type（frontmatter の `type`）・title・review_status・status・translated_from |
+| `facts` | 値 1 つ（リストは要素ごと） | node・lang・key・value・origin（`properties` / `frontmatter`） |
+| `edges` | 線 1 本 | src・dst（node）・kind（`properties` のキー / `links_to` / `relations.yml` の関係）・origin（`properties` / `body` / `relations`）・lang |
+| `groups` | 所属 1 つ | node・group_key |
+
+- **翻訳ページも入れ、`lang` で分ける。** 言語ごとの表示（インフォボックスの逆向きの行など）はその言語の行を読み、集計は原文（`translated_from` が空）の行を読む
+- **`status: removed` のページは `pages` にだけ入れ、事実と線は入れない。** 取り下げたページへの線が残っていることは `pages` との結合で分かる
+- **線の行き先が実在するかは索引では確かめない。** 行き先の無い線（wanted page）も入れる。確かめるのは `check_wikilinks.py` の役目である
+- **`relations.yml` の対称な関係（`same`・`related`・`distinct`）と `series` は、組の両向きに 1 本ずつ線を作る。** どちらの側からも src として引けるように
+- **`relations.yml` の統合・改名の項目（`merged_into` を持つ `same`）は線にしない。** 人の判断ではなく実行の記録であり、吸収・改名された側のページは `status: removed` で既に `pages` にしか無い。線にすると「人が同一と判断した組」を数える問い合わせに改名が混ざる
+- **本文の WikiLink に種類を付ける記法は今は無い。** 入れるなら、その種類は `edges` の `origin = body` の線の `kind` になる。テーブルの形は変わらない
+
+#### 置き場・作るとき・読み手
+
+- **置き場は `.wikicommit/.cache/`**（§9.1 の FTS5 索引の隣、別ファイル）。**コミットしない。** ページから作り直せるものをコミットすると、ページの変更のたびに差分と衝突を生むだけである。`.wikicommit/.cache/` は配布する `.gitignore` が既に除外している
+- **作るのは読み手**である。読み手が呼ぶたびに、§9.1 と同じく指紋を比べ、変わっていれば作り直す。指紋はページに加えて `relations.yml` と `groups/` も含める（§9.1 の指紋はページだけなので、そのまま使うとこの 2 つだけの変更で索引が古いまま残る）。生成・マージの工程は索引を作らない
+- **Quartz（TypeScript）は索引を直接読まない。** 公開側の読み手は、ビルド前に Python で索引を読み、Markdown か JSON を `content/` に書く（`convert_wikilinks.py` が `wikicommit-groups.json` を書くのと同じ形。data §4.5.3）。Node に SQLite の依存を足さないため
+
+| 読み手 | 読むもの | 状態 |
+|---|---|---|
+| クエリ型のビュー（一覧・年表・比較表） | `facts`・`edges` の集計 | view の `kind` の見直しで決める |
+| インフォボックス（§8.9） | 自分のページの `properties:` は索引を経ずにそのまま表示する。索引から足せるのは逆向きの行（このページを参照しているもの・このページを作り手に挙げているもの） | 逆向きの行は未定 |
+| `/wikicommit-ask` | 構造の問い（「〜を作った SoftwareApplication は？」）への答えの候補 | 未定 |
+
+**索引を作るスクリプトは、最初の読み手と一緒に入れる。** 読み手の無い受け皿を配らない（data §4.5.2 の `relations.yml` と同じ考え方）。試作と、パイロットでの問い合わせの結果は `dev/graph-index-2026-10/` にある。
+
+#### 試作で分かった、索引の外にある限界
+
+パイロット 2 つ（`ai-driven-dev-wiki`・`world-of-work-wiki`）で試した 15 の問い合わせのうち、索引だけで答えられたのは 6 つだった。答えられなかったものは、索引の作りを変えても答えられるようにならない — 原因は材料の側にある。
+
+- **種類の付いた線は、`properties:` の値が WikiLink のときにしか生まれない。** 本文の線は多いが種類が無いため、「参照している」には答えられても「使っている」には答えられない
+- **型が持たないキーは問い合わせられない**（例: 本文がライセンスを述べていても `license` キーが無い）
+- **自由な文字列の値は揃わない**（同じ分野が別の語で書かれ、比較表の行が揃わない）
+
+直す先は、型が押さえる事実（data §5.2）と、生成が値を WikiLink で書くかどうかである。
 
 ---
 

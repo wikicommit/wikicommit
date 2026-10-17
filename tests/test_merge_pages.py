@@ -158,6 +158,42 @@ def test_rewrite_follows_chains_and_leaves_a_still_live_page_alone(tmp_path):
     text = (tmp_path / ".wikicommit/entity/en/Person/p.md").read_text(encoding="utf-8")
     assert "[[DefinedTerm/c]] [[DefinedTerm/c]] [[DefinedTerm/d]]" in text
     assert "still live" in result.stderr
+    assert "ALSO_LINKED: .wikicommit/entity/en/Person/p.md ([[DefinedTerm/c]]" in result.stdout
+
+
+def test_rewrite_names_self_links_and_doubled_links_without_removing_them(tmp_path):
+    """Seen merging two pages of a pilot wiki (Issue #1131): the kept page's
+    translation linked to the absorbed page and now links to itself, and a page
+    that linked to both now lists the kept page twice. Removing either is an
+    edit to the text, so the script only says where they are."""
+    write(tmp_path, ".wikicommit/entity/en/DefinedTerm/old.md", "title: Old\nstatus: removed\n"
+          "merged_into: .wikicommit/entity/en/DefinedTerm/new.md\n")
+    write(tmp_path, ".wikicommit/entity/en/DefinedTerm/new.md", "title: New\n")
+    write(tmp_path, ".wikicommit/entity/ja/DefinedTerm/new.md", "title: 新\n", "- [[DefinedTerm/old]]\n")
+    write(tmp_path, ".wikicommit/entity/en/Person/p.md", "title: P\n",
+          "- [[DefinedTerm/new]]\n- [[DefinedTerm/old]]\n")
+    write(tmp_path, ".wikicommit/entity/en/Person/q.md", "title: Q\n", "[[DefinedTerm/old]]\n")
+    result = run(tmp_path, REWRITE)
+    assert "SELF_LINK: .wikicommit/entity/ja/DefinedTerm/new.md ([[DefinedTerm/new]]" in result.stdout
+    assert "ALSO_LINKED: .wikicommit/entity/en/Person/p.md ([[DefinedTerm/new]]" in result.stdout
+    assert "Person/q.md" not in result.stdout.replace("REWRITTEN: .wikicommit/entity/en/Person/q.md", "")
+    p = (tmp_path / ".wikicommit/entity/en/Person/p.md").read_text(encoding="utf-8")
+    assert p.count("[[DefinedTerm/new]]") == 2
+
+
+def test_rewrite_keeps_display_text_and_check_counts_it(tmp_path):
+    """`[[Type/slug|表示名]]` is a WikiLink (Issue #1304): live_links_to() counts
+    it, and the rewrite changes only the target."""
+    wiki(tmp_path)
+    write(tmp_path, ".wikicommit/entity/ja/Person/y.md", 'title: "Y"\ntype: "schema:Person"\nlang: ja\n',
+          "[[DefinedTerm/function-calling|関数呼び出し]]\n")
+    run(tmp_path, MERGE, "record", "--into", KEEP, "--absorb", ABSORB)
+    before = run(tmp_path, MERGE, "check", "--into", KEEP, "--absorb", ABSORB)
+    assert ".wikicommit/entity/ja/Person/y.md" in before.stdout, before.stdout
+    run(tmp_path, REMOVE, ABSORB, "--reason", "merged", "--merged-into", KEEP)
+    run(tmp_path, REWRITE)
+    y = (tmp_path / ".wikicommit/entity/ja/Person/y.md").read_text(encoding="utf-8")
+    assert "[[DefinedTerm/tool-use|関数呼び出し]]" in y
 
 
 def test_rewrite_dry_run_writes_nothing(tmp_path):
@@ -187,6 +223,40 @@ def test_merge_ready_only_after_the_kept_page_was_rebuilt(tmp_path):
     assert run(tmp_path, CHECKS, "merge-ready", "--run", str(_run_record(tmp_path, args, failed))).returncode == 1
     plain = _run_record(tmp_path, ["--regenerate", KEEP], rebuilt)
     assert run(tmp_path, CHECKS, "merge-ready", "--run", str(plain)).returncode == 1
+
+
+def test_merge_ready_and_check_merge_accept_type_slug_arguments(tmp_path):
+    """`--regenerate DefinedTerm/tool-use --merge DefinedTerm/function-calling` is
+    the form a person types. Compared as typed, it never matched the path the
+    review step logs, and `merge-absorb` was skipped as not ready (Issue #1131)."""
+    wiki(tmp_path)
+    (tmp_path / ".wikicommit" / "scripts").symlink_to(SCRIPTS.resolve(), target_is_directory=True)
+    args = ["--regenerate", "DefinedTerm/tool-use", "--merge", "DefinedTerm/function-calling"]
+    log = [{"step": "pass4-review", "item": KEEP, "outcome": "rebuilt"}]
+    record = tmp_path / "run.md"
+    record.write_text("---\n" + yaml.safe_dump(
+        {"args": args, "workflow": {"log": log, "lists": {"candidates": [KEEP]}}}) + "---\n",
+        encoding="utf-8")
+    assert run(tmp_path, CHECKS, "merge-ready", "--run", str(record)).returncode == 0
+    assert run(tmp_path, MERGE, "record", "--into", KEEP, "--absorb", ABSORB).returncode == 0
+    result = run(tmp_path, CHECKS, "check-merge", "--run", str(record))
+    # merge_pages.py was handed the resolved paths: it names what is missing on disk
+    # instead of refusing a page it cannot find.
+    assert f"{ABSORB}" in result.stdout, result.stdout
+    assert "not found" not in result.stdout.lower()
+
+
+def test_merge_ready_resolves_type_slug_without_a_single_candidate(tmp_path):
+    """With no single `candidates` entry to take the kept page from, a
+    `<Type>/<slug>` argument is looked up in `primary_lang`."""
+    wiki(tmp_path)
+    (tmp_path / ".wikicommit" / "scripts").symlink_to(SCRIPTS.resolve(), target_is_directory=True)
+    args = ["--regenerate", "DefinedTerm/tool-use", "--merge", "DefinedTerm/function-calling"]
+    log = [{"step": "pass4-review", "item": KEEP, "outcome": "rebuilt"}]
+    record = tmp_path / "run.md"
+    record.write_text("---\n" + yaml.safe_dump({"args": args, "workflow": {"log": log}}) + "---\n",
+                      encoding="utf-8")
+    assert run(tmp_path, CHECKS, "merge-ready", "--run", str(record)).returncode == 0
 
 
 def test_check_merge_delegates_to_merge_pages(tmp_path):

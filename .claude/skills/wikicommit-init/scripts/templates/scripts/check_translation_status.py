@@ -40,10 +40,9 @@ def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
     Returns ("", True) when git succeeds but the file has no commits yet
     (untracked / newly added), which the caller treats as STALE.
 
-    The pathspec is prefixed with `:(literal)` (Issue #369, same fix as
-    Issue #115) — without it, a translated_from path containing glob
-    metacharacters (`[`, `]`, `*`, `?`) could match an unrelated file
-    instead of failing cleanly.
+    The pathspec is prefixed with `:(literal)` — without it, a translated_from
+    path containing glob metacharacters (`[`, `]`, `*`, `?`) could match an
+    unrelated file instead of failing cleanly.
     """
     result = subprocess.run(
         ["git", "log", "-1", "--format=%H", "--", f":(literal){file_path}"],
@@ -57,9 +56,9 @@ def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
 
 
 def collect_translation_pages() -> list[Path]:
-    # View pages (Issue #675) are translated on the same terms as entity
-    # pages — they carry `lang`, and `translated_from` marks a translation
-    # of one the same way — so both trees are walked.
+    # View pages are translated on the same terms as entity pages — they carry
+    # `lang`, and `translated_from` marks a translation of one the same way —
+    # so both trees are walked.
     return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 
@@ -103,9 +102,9 @@ def check_translation_status(targets: list[str]) -> tuple[int, int, int]:
             source_commit_raw = fm.get("source_commit")
             source_commit = str(source_commit_raw) if source_commit_raw is not None else None
             # Query git log against the resolved (possibly prefix-migrated) path,
-            # not the literal translated_from string — a pre-Issue-#477 value
-            # still pointing at the old .wikicommit/wiki/ prefix is no longer
-            # tracked at that path after the directory rename, so `git log`
+            # not the literal translated_from string — a value written before the
+            # .wikicommit/wiki/ -> entity/ rename still points at the old prefix,
+            # which is not tracked at that path after the rename, so `git log`
             # against it would find only the rename commit itself (or nothing),
             # not the parent page's actual content history.
             parent_head, git_ok = _git_head_commit(str(parent_path))
@@ -146,7 +145,7 @@ def check_translation_status(targets: list[str]) -> tuple[int, int, int]:
             if target == lang:
                 continue
             # A view page's translation sits at <view>/<target>/<slug>.md —
-            # there is no Type directory to mirror (Issue #675).
+            # there is no Type directory to mirror.
             target_page = (
                 view_page_path(target, slug, VIEW_DIR)
                 if is_view

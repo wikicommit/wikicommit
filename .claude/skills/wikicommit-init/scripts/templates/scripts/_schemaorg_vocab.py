@@ -1,38 +1,35 @@
 """Shared Schema.org vocabulary loading/lookup for check_schema_org_type.py
-and validate_frontmatter.py (Issue #495), extended with rangeIncludes/
-DataType lookups for check_schema_org_type.py's entity-vs-scalar range query
-(Issue #496 — deciding whether a property's value should be written as a
-`[[Type/slug]]` WikiLink).
+and validate_frontmatter.py, with rangeIncludes/DataType lookups for
+check_schema_org_type.py's entity-vs-scalar range query (deciding whether a
+property's value should be written as a `[[Type/slug]]` WikiLink).
 
 Lazily builds .wikicommit/schemaorg-vocab.json the first time it's needed
 (same build-on-first-query pattern as search_index.py) by fetching the
 official machine-readable dump from
 https://schema.org/version/latest/schemaorg-current-https.jsonld. Unlike
-search_index.sqlite3, this file is committed to Git (Issue #319) rather than
-gitignored: it's semi-static reference data with a real network-fetch cost,
-not a disposable cache, so it lives at .wikicommit/schemaorg-vocab.json (not
-under .wikicommit/.cache/) and is expected to be added to a commit like any
-other WikiCommit output. No TTL/auto-refresh — Schema.org's vocabulary
-changes rarely, and the only cost of a stale copy is "a newer type isn't
-visible yet". As of Issue #512 this cost is no longer purely soft: a `type:`
-absent only because the cache predates that type's addition to Schema.org
-now makes validate_frontmatter.py's type-existence check (not just its
-`properties:` domainIncludes check) report a hard ERROR, blocking
-wikicommit-merge for every page of that type until the cache is rebuilt.
-Delete .wikicommit/schemaorg-vocab.json manually to force a rebuild against
-the latest vocabulary. A cache written by a pre-Issue-#496
-version of this module (missing the per-entry "is_datatype"/"range" keys
-_build_index() now writes) does not need manual deletion — load_or_build_index()
-detects the outdated shape itself via _is_well_shaped_index() and rebuilds
-automatically.
+search_index.sqlite3, this file is committed to Git rather than gitignored:
+it's semi-static reference data with a real network-fetch cost, not a
+disposable cache, so it lives at .wikicommit/schemaorg-vocab.json (not under
+.wikicommit/.cache/) and is expected to be added to a commit like any other
+WikiCommit output. No TTL/auto-refresh — Schema.org's vocabulary
+changes rarely, and the cost of a stale copy is "a newer type isn't visible
+yet". That cost is not purely soft: a `type:` absent only because the cache
+predates that type's addition to Schema.org makes validate_frontmatter.py's
+type-existence check (not just its `properties:` domainIncludes check) report
+a hard ERROR, blocking wikicommit-merge for every page of that type until the
+cache is rebuilt. Delete .wikicommit/schemaorg-vocab.json manually to force a
+rebuild against the latest vocabulary. A cache in an older shape (missing the
+per-entry "is_datatype"/"range" keys _build_index() writes) does not need
+manual deletion — load_or_build_index() detects the outdated shape itself via
+_is_well_shaped_index() and rebuilds automatically.
 
-Consolidated out of check_schema_org_type.py (Issue #495) so
-validate_frontmatter.py's new `properties:` domainIncludes check (verifying
-a page's properties: keys actually belong to its `type:`, per the same
+Lives in its own module rather than in check_schema_org_type.py so
+validate_frontmatter.py's `properties:` domainIncludes check (verifying a
+page's properties: keys actually belong to its `type:`, per the same
 domainIncludes + rdfs:subClassOf ancestry logic) can reuse the identical
-vocabulary-loading and ancestry-walking logic instead of a second, divergence-
-prone copy — the same "one implementation every script imports" precedent as
-_frontmatter.py/_wikilink.py.
+vocabulary-loading and ancestry-walking logic instead of a second,
+divergence-prone copy — the same "one implementation every script imports"
+precedent as _frontmatter.py/_wikilink.py.
 """
 
 import json
@@ -50,7 +47,7 @@ VOCAB_URL = "https://schema.org/version/latest/schemaorg-current-https.jsonld"
 # local file instead of fetching it over the network, and skip the on-disk
 # cache entirely. Never set in normal operation — this exists solely so
 # tests can exercise the parsing/verification logic offline and
-# deterministically (Issue #285).
+# deterministically.
 TEST_VOCAB_PATH_ENV = "WIKICOMMIT_TEST_SCHEMA_ORG_JSONLD"
 
 
@@ -100,9 +97,9 @@ def _build_index(jsonld: dict) -> dict:
     {"types": {name: {"parents": [name, ...], "comment": str, "is_datatype": bool}},
      "properties": {name: {"domain": [name, ...], "range": [name, ...], "comment": str}}}.
 
-    "range"/"is_datatype" (Issue #496) support deciding whether a property's
-    value should be written as a WikiLink: `schema:rangeIncludes` lists the
-    type(s) a property's value may be (e.g. `affiliation` -> `Organization`,
+    "range"/"is_datatype" support deciding whether a property's value should
+    be written as a WikiLink: `schema:rangeIncludes` lists the type(s) a
+    property's value may be (e.g. `affiliation` -> `Organization`,
     `description` -> `Text`/`TextObject`), and a range candidate is a
     DataType (Text/Number/Boolean/Date/... — plain scalar values, never a
     linkable WikiCommit page) if it or any ancestor in its rdfs:subClassOf
@@ -110,7 +107,7 @@ def _build_index(jsonld: dict) -> dict:
     tag but is `subClassOf: Text`, which does — see is_in_datatype_lineage()
     below, which walks the same ancestors() chain used for domainIncludes).
 
-    A property's own "comment" (Issue #497) supports check_schema_org_type.py's
+    A property's own "comment" supports check_schema_org_type.py's
     `--list-properties` mode — the same one-line-description contract
     `--describe` already has for types, via the same `_comment_text()`."""
     types: dict[str, dict] = {}
@@ -145,14 +142,13 @@ def _build_index(jsonld: dict) -> dict:
 
 def _is_well_shaped_index(cached: object) -> bool:
     """True if cached matches _build_index()'s current output shape,
-    including per-entry "is_datatype"/"range" keys (Issue #496) and
-    properties' "comment" key (Issue #497) — not just the outer
-    {"types": dict, "properties": dict} envelope. A cache written before one
-    of these Issues (or a partial hand-edit/bad-merge that dropped keys from
-    only some entries) has the right envelope but missing keys; without this
-    per-entry check it would be silently accepted, and
-    is_in_datatype_lineage()'s `.get("is_datatype")` would then treat every
-    missing key as `None`/falsy — indistinguishable from a confirmed
+    including per-entry "is_datatype"/"range" keys and properties' "comment"
+    key — not just the outer {"types": dict, "properties": dict} envelope. A
+    cache written before those keys existed (or a partial hand-edit/bad-merge
+    that dropped keys from only some entries) has the right envelope but
+    missing keys; without this per-entry check it would be silently accepted,
+    and is_in_datatype_lineage()'s `.get("is_datatype")` would then treat
+    every missing key as `None`/falsy — indistinguishable from a confirmed
     "not a DataType" — so a stale cache wouldn't just lose --show-range/
     --list-properties output, it could actively misclassify a DataType
     (e.g. URL) as an entity-linkable type. Rejecting the whole file here
@@ -175,9 +171,7 @@ def load_or_build_index() -> tuple[dict | None, str]:
     error_message) if the vocabulary could not be obtained at all (network
     failure and no usable cache).
 
-    Deliberately does not print anything itself (unlike the pre-Issue-#495
-    version of this logic, which lived directly in check_schema_org_type.py
-    and printed its own "ERROR: ..." line): the two callers need different
+    Deliberately does not print anything itself: callers need different
     presentation. check_schema_org_type.py's CLI treats a failed fetch as a
     hard failure (prints ERROR:, exits 1), while validate_frontmatter.py
     treats it as an expected, non-blocking degradation of `properties:`
@@ -191,12 +185,10 @@ def load_or_build_index() -> tuple[dict | None, str]:
     exception: a hand-edited/badly-merged/stale-checkout schemaorg-vocab.json
     that parses as valid JSON but has the wrong shape, a non-UTF-8 or
     malformed fetch response, or an @graph entry that isn't the expected
-    dict shape. validate_frontmatter.py now calls this on every
-    wikicommit-merge run that touches a page with type-specific frontmatter
-    (previously only the occasionally-invoked check_schema_org_type.py CLI
-    exercised this code path), so an uncaught exception here would crash the
-    blocking quality gate for the whole repository rather than just degrade
-    one script's optional check."""
+    dict shape. validate_frontmatter.py calls this on every wikicommit-merge
+    run that touches a page with type-specific frontmatter, so an uncaught
+    exception here would crash the blocking quality gate for the whole
+    repository rather than just degrade one script's optional check."""
     using_test_override = bool(os.environ.get(TEST_VOCAB_PATH_ENV))
 
     if VOCAB_PATH.exists() and not using_test_override:
@@ -240,7 +232,7 @@ def property_in_domain(prop_name: str, ancestry: set[str], properties: dict) -> 
     different domain, or None if prop_name isn't in the vocabulary at all.
 
     Shared by check_schema_org_type.py's --property verification and
-    validate_frontmatter.py's `properties:` checks (Issue #495) so the single
+    validate_frontmatter.py's `properties:` checks so the single
     domain-membership rule lives in one place rather than two independently
     maintained copies."""
     info = properties.get(prop_name)
@@ -253,7 +245,7 @@ def is_in_datatype_lineage(type_name: str, types: dict) -> bool:
     """True if type_name or any ancestor (via rdfs:subClassOf) is tagged
     `schema:DataType` — i.e. a plain scalar value (Text/Number/Boolean/
     Date/...), never a linkable WikiCommit page. `URL` is the motivating
-    case (Issue #496): it carries no `schema:DataType` tag of its own but is
+    case: it carries no `schema:DataType` tag of its own but is
     `subClassOf: Text`, which does — so DataType-ness has to be checked
     across the whole ancestor chain, not just the type itself."""
     return any(types.get(t, {}).get("is_datatype") for t in ancestors(type_name, types))
@@ -271,9 +263,8 @@ def properties_available_to(type_name: str, types: dict, properties: dict) -> di
     (e.g. a property declared on both `Thing` and a nearer ancestor
     redundantly), so this returns all matches rather than picking one
     arbitrarily. Used by check_schema_org_type.py's `--list-properties`
-    (Issue #497 — browsing "what can this type's `properties:` hold" when
-    writing a new schema file, now that Issue #495 removed the old
-    `recommended` field's role as a starting point)."""
+    (browsing "what can this type's `properties:` hold" when writing a new
+    schema file)."""
     ancestry = ancestors(type_name, types)
     result: dict[str, list[str]] = {}
     for prop_name, info in properties.items():
@@ -344,7 +335,7 @@ def installed_descendants(
 
     A descendant type is always *also* a correct answer's ancestor away from being
     wrong — writing a park as a Place is not an error, only coarser — which is why
-    an installed descendant has to be surfaced rather than inferred (Issue #565).
+    an installed descendant has to be surfaced rather than inferred.
     """
     return sorted(
         name

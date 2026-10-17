@@ -60,8 +60,10 @@ The steps (the table is here as well as in the workflow engine's answers so the 
 | `commit` | agent | `references/commit.md` | Steps 4–5: branch and commit |
 | `open-pr` | agent | `references/open-pr.md` | Step 6: push and open the PR |
 | `merge-pr` | agent | `references/merge-pr.md` | Step 7: wait for a mergeable state, merge, return to the default branch |
-| `tracking-issues` | agent | `references/tracking-issues.md` | Step 8: one review tracking Issue per pending page |
-| `failure-issues` | agent | `references/failure-issues.md` | Step 9: one Issue per source whose generation failed |
+| `review-targets` | script | — | Step 8: the pending pages that no open tracking Issue names yet (`review_targets`) |
+| `tracking-issues` | agent | `references/tracking-issues.md` | Step 8: one review tracking Issue per listed page; skipped when nothing needs one and the open Issues could be read |
+| `failure-targets` | script | — | Step 9: the failed sources that no open generation-failure Issue names yet (`failure_targets`) |
+| `failure-issues` | agent | `references/failure-issues.md` | Step 9: one Issue per listed source; skipped likewise |
 | `report` | agent | `references/completion-report.md` | Step 10: close the run and report |
 
 If `.wikicommit/scripts/skill_workflow.py`, `_workflow_checks.py` or `check_external_links.py` does not exist (`.wikicommit/scripts/` older than this Skill), the run cannot start (the first step halts on either of the latter two): tell the user to run `/wikicommit-update` first.

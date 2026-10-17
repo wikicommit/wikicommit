@@ -1,5 +1,6 @@
 """Tests for .wikicommit/scripts/check_raw_html.py"""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -141,6 +142,129 @@ def test_html_in_inline_code_is_not_flagged(tmp_path):
     write_page(tmp_path, "ja", "HowTo", "example", "Use `<script>` to add a script tag.\n")
     result = run([], tmp_path)
     assert result.returncode == 0
+
+
+# ── Code ranges follow CommonMark, not a regex (Issue #1322) ──────────────
+#
+# Each of these used to be blanked out as "code" by a regex that did not
+# follow CommonMark's rules for where code ends, so the <script> after it
+# passed the gate while micromark rendered it as live HTML.
+
+def test_script_after_four_backtick_fence_holding_three_backtick_line_is_flagged(tmp_path):
+    body = "````\n```\n````\n\n<script>alert(1)</script>\n\n```\n"
+    write_page(tmp_path, "ja", "HowTo", "example", body)
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    assert "<script>" in result.stdout
+
+
+def test_script_after_fence_closed_with_indented_marker_is_flagged(tmp_path):
+    body = "```\ncode\n   ```\n\n<script>alert(1)</script>\n\n```\n"
+    write_page(tmp_path, "ja", "HowTo", "example", body)
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    assert "<script>" in result.stdout
+
+
+def test_script_after_four_tilde_fence_holding_three_tilde_line_is_flagged(tmp_path):
+    body = "~~~~\n~~~\n~~~~\n\n<script>alert(1)</script>\n\n~~~\n"
+    write_page(tmp_path, "ja", "HowTo", "example", body)
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    assert "<script>" in result.stdout
+
+
+def test_script_after_double_backtick_code_span_is_flagged(tmp_path):
+    body = "Run ``a`b`` <script>alert(1)</script> now.\n"
+    write_page(tmp_path, "ja", "HowTo", "example", body)
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    assert "<script>" in result.stdout
+
+
+def test_howto_showing_a_fence_inside_a_longer_fence_passes(tmp_path):
+    body = (
+        "To show a code block, wrap it in a longer fence:\n\n"
+        "````markdown\n```python\nprint(1)\n```\n````\n\n"
+        "Then continue with prose.\n"
+    )
+    write_page(tmp_path, "ja", "HowTo", "example", body)
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_html_in_double_backtick_code_span_is_not_flagged(tmp_path):
+    write_page(tmp_path, "ja", "HowTo", "example", "Write ``<a href=`x`>`` for a link.\n")
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_html_after_unclosed_fence_is_code_and_not_flagged(tmp_path):
+    """CommonMark runs an unclosed fence to the end of the document, so the
+    renderer escapes the <script> — the old regex flagged it only because it
+    could not find a closing fence (Issue #1322 changed this expectation)."""
+    body = "```\n<script>alert(1)</script>\n"
+    write_page(tmp_path, "ja", "HowTo", "example", body)
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_hyphenated_tag_with_event_handler_is_flagged(tmp_path):
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "x <my-el onmouseover=alert(1)> y\n")
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    assert "<my-el onmouseover=alert(1)>" in result.stdout
+
+
+def test_script_in_block_quote_is_flagged(tmp_path):
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "> <script>alert(1)</script>\n")
+    result = run([], tmp_path)
+    assert result.returncode == 1
+
+
+def test_tag_in_table_cell_is_flagged_but_code_in_cell_is_not(tmp_path):
+    body = "| a | b |\n|---|---|\n| x<br>y | `<i>` |\n"
+    write_page(tmp_path, "ja", "Person", "yamada-taro", body)
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    assert "<br>" in result.stdout
+    assert "<i>" not in result.stdout
+
+
+def test_html_comment_without_tag_is_not_flagged(tmp_path):
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "<!-- note -->\n\ntext <!-- x --> y\n")
+    result = run([], tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_missing_markdown_it_fails_closed(tmp_path):
+    """Without the parser the gate must block, not pass pages unchecked."""
+    shadow = tmp_path / "shadow" / "markdown_it"
+    shadow.mkdir(parents=True)
+    (shadow / "__init__.py").write_text(
+        "raise ModuleNotFoundError(\"No module named 'markdown_it'\", name='markdown_it')\n",
+        encoding="utf-8",
+    )
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "Nothing here.\n")
+    env = {**os.environ, "PYTHONPATH": str(shadow.parent)}
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True, cwd=tmp_path, env=env, check=False,
+    )
+    assert result.returncode == 1
+    # On stderr, like validate_frontmatter.py's "could not run": stdout carries
+    # only page findings, so /wikicommit-status does not count this as one.
+    assert "ERROR:" not in result.stdout
+    assert "ERROR:" in result.stderr
+    assert "pip install markdown-it-py" in result.stderr
+
+
+def test_multiline_tag_is_reported_on_one_line(tmp_path):
+    write_page(tmp_path, "ja", "Person", "yamada-taro", "text <img src=x\nonerror=alert(1)> more\n")
+    result = run([], tmp_path)
+    assert result.returncode == 1
+    errors = [line for line in result.stdout.splitlines() if line.startswith("ERROR:")]
+    assert len(errors) == 1
+    assert errors[0].endswith("<img src=x onerror=alert(1)>")
 
 
 # ── File targeting ───────────────────────────────────────────────────────

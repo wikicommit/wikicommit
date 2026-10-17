@@ -38,8 +38,8 @@ if __name__ == "__main__":
             pass
 
 # The helpers every Skill's checks read the same way live in
-# `.wikicommit/scripts/_workflow_checks.py` (Issue #1219). A wiki whose scripts predate
-# it has none until `/wikicommit-update` is merged.
+# `.wikicommit/scripts/_workflow_checks.py`. A wiki whose scripts predate it has
+# none until `/wikicommit-update` is merged.
 # Exit 2, not 1, whatever is missing: a `when:` condition exiting 1 would read as
 # "skip this step", while 2 stops the engine. Only a module of `.wikicommit/scripts/`
 # is fixed by `/wikicommit-update`; a missing PyYAML is not, so it gets its own
@@ -124,20 +124,30 @@ def deferred_questions(state: dict) -> dict[str, str]:
 # --- conditions ---------------------------------------------------------------
 
 
-def cmd_has_source_argument(args) -> int:
-    """True when the run was given a source to register (Step 0 applies)."""
-    record, _ = read_run(args.run)
-    values = run_arguments(record)
+# Options of a registering run that take the next argument as their value.
+VALUE_OPTIONS = ("--include", "--license")
+
+
+def has_source(values: list[str]) -> bool:
+    """True when the arguments name a source to register (one not taken as an option's value)."""
     skip_next = False
     for value in values:
         if skip_next:
             skip_next = False
             continue
-        if value == "--include":
+        if value in VALUE_OPTIONS:
             skip_next = True
             continue
         if not value.startswith("--"):
-            return 0
+            return True
+    return False
+
+
+def cmd_has_source_argument(args) -> int:
+    """True when the run was given a source to register (Step 0 applies)."""
+    record, _ = read_run(args.run)
+    if has_source(run_arguments(record)):
+        return 0
     print("no source argument; Step 0 does not apply")
     return 1
 
@@ -146,8 +156,8 @@ def cmd_has_source_argument(args) -> int:
 
 
 # Scripts this Skill calls from `.wikicommit/scripts/` that used to live in a Skill's own
-# `scripts/` (Issue #1210). A wiki whose `.wikicommit/scripts/` predates the move has none
-# of them until `/wikicommit-update` is merged, and Step 0 would fail on the first command.
+# `scripts/`. A wiki whose `.wikicommit/scripts/` predates the move has none of them
+# until `/wikicommit-update` is merged, and Step 0 would fail on the first command.
 MOVED_SCRIPTS = ("add_source.py", "resolve_source_cache_path.py", "remove_page.py")
 
 
@@ -165,6 +175,15 @@ def cmd_preflight(args) -> int:
     if missing:
         print(f".wikicommit/scripts/{missing[0]} does not exist (.wikicommit/scripts/ is older "
               "than this Skill); run /wikicommit-update first")
+        return 1
+    # `--license` is recorded only by Step 0's registration. The queue run and
+    # `--regenerate` register nothing, so the value would be dropped without a word.
+    values = run_arguments(read_run(args.run)[0])
+    if any(v == "--license" or v.startswith("--license=") for v in values) and (
+            "--regenerate" in values or not has_source(values)):
+        print("--license is accepted only together with a source to register; the queue run "
+              "and --regenerate register nothing. To record a license on a source already "
+              "registered, edit source.license in its management file")
         return 1
     return 0
 
@@ -235,6 +254,28 @@ def cmd_collect_questions(args) -> int:
     _, state = read_run(args.run)
     for path in deferred_questions(state):
         print(f"ITEM: {path}")
+    return 0
+
+
+def cmd_halted_questions(args) -> int:
+    """The questions a run that stopped part-way set aside and never asked.
+
+    A halt ends the run at once, so `ask-deferred` is never reached; the deferrals stay
+    queued, and a later run asks them only if it picks the source again and reaches the
+    end of its loop. This lists them for the halt report, each with the first line of its
+    reason, so the person learns of them now. It reads the run's log and changes nothing.
+
+    A run that halts in `per-answered-source` has already been through `ask-deferred`:
+    its questions were put to the person, so there is nothing unasked to list.
+    """
+    _, state = read_run(args.run)
+    log = state.get("log")
+    if any(isinstance(e, dict) and e.get("step") == "ask-deferred"
+           for e in (log if isinstance(log, list) else [])):
+        return 0
+    for path in deferred_questions(state):
+        print(f"ITEM: {path}")
+        print(f"REASON: {_deferral_reason(path).splitlines()[0].strip()}")
     return 0
 
 
@@ -466,16 +507,63 @@ def merge_arguments(record: dict) -> tuple[str, list[str]]:
     return (keep, absorb) if absorb else ("", [])
 
 
+def page_in_lang_dir(value: str, lang_dir: str) -> str:
+    """`value` as a page path under `lang_dir` (`.wikicommit/entity/<lang>/`).
+
+    A merge names its pages the way the person typed them, and `<Type>/<slug>` is
+    what `/wikicommit-relate` and WikiLinks use. Compared as typed, that form never
+    matched the path the review step logs, and `merge-absorb` was skipped as "not
+    ready" — the merge stopped halfway while the run reported success.
+    """
+    if Path(value).is_file():
+        return norm(value)
+    if lang_dir:
+        candidate = lang_dir + value.removesuffix(".md").strip("/") + ".md"
+        if Path(candidate).is_file():
+            return candidate
+    return value
+
+
+def lang_dir_of(page: str) -> str:
+    m = re.match(r"(\.wikicommit/entity/[^/]+/)", norm(page))
+    return m.group(1) if m else ""
+
+
+def primary_lang_dir() -> str:
+    try:
+        from _wikilink import load_primary_lang
+    except ImportError:
+        return ""
+    return f".wikicommit/entity/{load_primary_lang()}/"
+
+
+def merge_pages_of(record: dict, state: dict) -> tuple[str, list[str]]:
+    """(kept page, absorbed pages) as repository paths.
+
+    The kept page is the one `choose-pages` added as the run's only candidate — the
+    path the agent resolved — or else the argument looked up in `primary_lang`
+    (`merge_pages.py plan` refuses a page outside it). The absorbed pages are in the
+    kept page's language for the same reason, so they are looked up beside it.
+    """
+    keep, absorb = merge_arguments(record)
+    if not absorb:
+        return "", []
+    candidates = listed(state, "candidates")
+    keep = norm(candidates[0]) if len(candidates) == 1 else page_in_lang_dir(keep, primary_lang_dir())
+    lang_dir = lang_dir_of(keep)
+    return keep, [page_in_lang_dir(page, lang_dir) for page in absorb]
+
+
 def cmd_merge_ready(args) -> int:
     """True when this is a merge run and the kept page was rebuilt and written."""
     record, state = read_run(args.run)
-    keep, absorb = merge_arguments(record)
+    keep, absorb = merge_pages_of(record, state)
     if not absorb:
         print("not a merge run")
         return 1
     for entry in state.get("log", []):
         if (isinstance(entry, dict) and entry.get("step") == "pass4-review"
-                and entry.get("outcome") == "rebuilt" and Path(str(entry.get("item", ""))) == Path(keep)):
+                and entry.get("outcome") == "rebuilt" and norm(str(entry.get("item", ""))) == keep):
             return 0
     print(f"{keep} was not rebuilt, so nothing is absorbed into it")
     return 1
@@ -483,8 +571,8 @@ def cmd_merge_ready(args) -> int:
 
 def cmd_check_merge(args) -> int:
     """The merge was carried through — delegated to merge_pages.py check."""
-    record, _ = read_run(args.run)
-    keep, absorb = merge_arguments(record)
+    record, state = read_run(args.run)
+    keep, absorb = merge_pages_of(record, state)
     command = [sys.executable, ".wikicommit/scripts/merge_pages.py", "check", "--into", keep]
     for page in absorb:
         command += ["--absorb", page]
@@ -519,6 +607,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("select", cmd_select, list="candidates", answer_step="batch-cap")
     add("check-register", cmd_check_register, outcome=True)
     add("collect-questions", cmd_collect_questions)
+    add("halted-questions", cmd_halted_questions)
     add("has-list", cmd_has_list, list="")
     add("check-answers", cmd_check_answers, answer="")
     add("check-pass1", cmd_check_pass1, run="optional", item=True, outcome=True)

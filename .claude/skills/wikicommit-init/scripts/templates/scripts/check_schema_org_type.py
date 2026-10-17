@@ -5,11 +5,11 @@ description for preloading into an LLM's context.
 
 Deterministic counterpart to the LLM judgment in wikicommit-generate's
 `better_type_candidate` / `better_type_rationale` (Pass 2) and
-wikicommit-schema-propose (Issue #285): this script can only confirm that a
-type/property *exists* and that a property really belongs to the given type
-(including its ancestor types). Whether the type is actually the *right*
-semantic fit for a Wiki's content is a judgment left to the LLM and to human
-PR review — this script does not attempt it.
+wikicommit-schema-propose: this script can only confirm that a type/property
+*exists* and that a property really belongs to the given type (including its
+ancestor types). Whether the type is actually the *right* semantic fit for a
+Wiki's content is a judgment left to the LLM and to human PR review — this
+script does not attempt it.
 
 Usage:
     python .wikicommit/scripts/check_schema_org_type.py --type <TypeName> [--property <PropertyName>]... [--show-range]
@@ -18,69 +18,66 @@ Usage:
     python .wikicommit/scripts/check_schema_org_type.py --describe <TypeName>...
     python .wikicommit/scripts/check_schema_org_type.py --list-installed-hierarchy
 
-`--list-type-names` and `--describe` are the two halves of type recall
-(Issue #798). The three Skills that propose a type (wikicommit-init's
-theme-driven step, wikicommit-collect's Type Proposal, wikicommit-generate
-Pass 2b) each hold a short piece of text and need the vocabulary to jog a
-candidate loose from it. That is *recall*, not verification — whether a type
-actually exists is settled afterwards by `--type`, deterministically.
+`--list-type-names` and `--describe` are the two halves of type recall. The
+three Skills that propose a type (wikicommit-init's theme-driven step,
+wikicommit-collect's Type Proposal, wikicommit-generate Pass 2b) each hold a
+short piece of text and need the vocabulary to jog a candidate loose from it.
+That is *recall*, not verification — whether a type actually exists is settled
+afterwards by `--type`, deterministically.
 
 Recall does not need every description. `--list-type-names` prints the 933
 type names alone (13 KB); the Skill picks a handful of candidates from them
 and calls `--describe Park Museum ...` for just those descriptions (under a
-kilobyte). Together that is ~14 KB against the 147 KB the old `--list-types`
-put into the main context on every run, unconditionally and regardless of how
-many sources were being processed.
+kilobyte). Together that is ~14 KB, against 147 KB for all 933 names with
+their descriptions.
 
-`--list-types` (name + description for all 933) **was removed**, not kept
-alongside. Once the three Skills moved to the two-stage form it had no caller,
-and shipping the expensive path while documenting that nothing should use it
-is the receptacle-without-a-consumer shape this project keeps out (Issue #553).
-`--describe` covers the same need on demand.
+There is no mode that prints name + description for all 933: none of the
+three Skills would call it, and shipping the expensive path while documenting
+that nothing should use it is the receptacle-without-a-consumer shape this
+project keeps out. `--describe` covers the same need on demand.
 
 `--describe` errors on a name that is not in the vocabulary rather than
 silently omitting it: stage one hands the model 933 real names, so a name that
 does not come back is an invention, and it is better caught here than carried
 into the approval step.
 
-`--list-installed-hierarchy` (Issue #565) prints one line per Schema.org type
-installed in `.wikicommit/schema/`, tab-separated: the type, then its
-*installed* ancestor types nearest-first (or `-`) — this is what
-wikicommit-generate Pass 2c uses to prefer the most specific installed type,
-since an ancestor type always fits and would otherwise win by familiarity.
-Like `--list-type-names` it takes no other arguments and ignores them if given.
+`--list-installed-hierarchy` prints one line per Schema.org type installed in
+`.wikicommit/schema/`, tab-separated: the type, then its *installed* ancestor
+types nearest-first (or `-`) — this is what wikicommit-generate Pass 2c uses
+to prefer the most specific installed type, since an ancestor type always
+fits and would otherwise win by familiarity. Like `--list-type-names` it
+takes no other arguments and ignores them if given.
 
-`--show-range` (Issue #496) adds one `RANGE:` line per verified `--property`,
-reporting whether that property's Schema.org `rangeIncludes` points at
-linkable entity type(s) (e.g. `affiliation` -> `Organization`), plain
-DataType scalar(s) (e.g. `description` -> `Text`/`TextObject`), or a mix of
-both (e.g. `jobTitle` -> `DefinedTerm` and `Text`) — this is what
-wikicommit-generate Pass 2c/Pass 3 uses to decide whether a `properties:`
-value should be written as a `[[Type/slug]]` WikiLink instead of a plain
-scalar. Purely informational: `RANGE:` lines never affect the exit code or
-`errors` count, and are only printed for a property that already verified OK
-(a property that failed --property verification has no range worth reporting).
+`--show-range` adds one `RANGE:` line per verified `--property`, reporting
+whether that property's Schema.org `rangeIncludes` points at linkable entity
+type(s) (e.g. `affiliation` -> `Organization`), plain DataType scalar(s)
+(e.g. `description` -> `Text`/`TextObject`), or a mix of both (e.g.
+`jobTitle` -> `DefinedTerm` and `Text`) — this is what wikicommit-generate
+Pass 2c/Pass 3 uses to decide whether a `properties:` value should be written
+as a `[[Type/slug]]` WikiLink instead of a plain scalar. Purely
+informational: `RANGE:` lines never affect the exit code or `errors` count,
+and are only printed for a property that already verified OK (a property that
+failed --property verification has no range worth reporting).
 
-`--type <TypeName> --list-properties` (Issue #497) prints every property
-available to that type — its own `domainIncludes` plus everything inherited
-via its `rdfs:subClassOf` ancestry — one per line, tab-separated: property
-name, declaring type(s) (which ancestor's domainIncludes it comes from),
-entity-type WikiLink candidates from `rangeIncludes` (or `-` if none), and a
-one-line description. This is the on-demand, per-type equivalent of
-`--list-type-names`: a reference for picking what to put in a new (or existing)
-type's `properties:` block, without pre-generating and maintaining a static
-per-type template file (rejected design, see the Issue's background — that
-would double-manage the same data schemaorg-vocab.json already holds and
-defeats the schema layer's whole point of narrowing the field, not listing
-everything). Takes priority over `--property`/`--show-range` when both
-`--type` and `--list-properties` are given; `--list-type-names`, `--describe`
-and then `--list-installed-hierarchy` take priority over everything if given
-alongside `--type`.
+`--type <TypeName> --list-properties` prints every property available to that
+type — its own `domainIncludes` plus everything inherited via its
+`rdfs:subClassOf` ancestry — one per line, tab-separated: property name,
+declaring type(s) (which ancestor's domainIncludes it comes from), entity-type
+WikiLink candidates from `rangeIncludes` (or `-` if none), and a one-line
+description. This is the on-demand, per-type equivalent of `--list-type-names`:
+a reference for picking what to put in a new (or existing) type's `properties:`
+block, without pre-generating and maintaining a static per-type template file
+(rejected design — that would double-manage the same data schemaorg-vocab.json
+already holds and defeats the schema layer's whole point of narrowing the
+field, not listing everything). Takes priority over `--property`/`--show-range`
+when both `--type` and `--list-properties` are given; `--list-type-names`,
+`--describe` and then `--list-installed-hierarchy` take priority over
+everything if given alongside `--type`.
 
 Vocabulary loading/caching (.wikicommit/schemaorg-vocab.json) and the
 domainIncludes/rangeIncludes/rdfs:subClassOf ancestry logic live in the
-shared _schemaorg_vocab.py module (Issue #495, extended by Issues #496/#497),
-also used by validate_frontmatter.py's `properties:` field validation.
+shared _schemaorg_vocab.py module, also used by validate_frontmatter.py's
+`properties:` field validation.
 
 Exit code: 0 = the type (and every given property) exists and, for
 properties, belongs to the type or one of its ancestor types; or
@@ -107,14 +104,13 @@ from _schemaorg_vocab import (
 
 
 def _list_type_names(types: dict[str, dict]) -> int:
-    """Print type names only — stage one of type recall (Issue #798).
+    """Print type names only — stage one of type recall.
 
-    The three Skills that propose a type were each handed all 933 names *and*
-    their descriptions, 147 KB, on every run. What that list actually did was
-    jog a candidate loose from a short piece of text; it never established that
-    a type exists, since `--type` settles that separately and deterministically
+    For the three Skills that propose a type, this list only has to jog a
+    candidate loose from a short piece of text; it never establishes that a
+    type exists, since `--type` settles that separately and deterministically
     after a candidate is approved. Recall does not need the descriptions of the
-    928 types nobody is considering, so they moved behind `--describe`.
+    types nobody is considering, so they are behind `--describe`.
     """
     for name in sorted(types):
         print(name)
@@ -123,7 +119,7 @@ def _list_type_names(types: dict[str, dict]) -> int:
 
 
 def _describe_types(names: list[str], types: dict[str, dict]) -> int:
-    """Print name + one-line description for the named types — stage two (Issue #798).
+    """Print name + one-line description for the named types — stage two.
 
     An unknown name is an ERROR rather than a silent omission. Stage one handed
     the model 933 real names, so a name that does not come back from it is an
@@ -143,7 +139,7 @@ def _describe_types(names: list[str], types: dict[str, dict]) -> int:
 
 
 def _list_installed_hierarchy(types: dict[str, dict]) -> int:
-    """Print the subClassOf relations that hold *among the installed types* (Issue #565).
+    """Print the subClassOf relations that hold *among the installed types*.
 
     wikicommit-generate Pass 2c is handed the installed type list and each type's
     granularity, and nothing in that tells it `Park` is a kind of `Place`. Writing a
@@ -171,12 +167,11 @@ def _list_installed_hierarchy(types: dict[str, dict]) -> int:
 
 
 def _entity_range_summary(prop_name: str, properties: dict, types: dict) -> str:
-    """Compact single-field WikiLink-ability summary for --list-properties
-    (Issue #497): the property's entity-type rangeIncludes candidates,
-    comma-joined, or "-" if there are none (DataType-only, or no
-    rangeIncludes declared at all). Deliberately terser than --show-range's
-    full RANGE: sentence — this is one column in a scannable list, not a
-    standalone message."""
+    """Compact single-field WikiLink-ability summary for --list-properties:
+    the property's entity-type rangeIncludes candidates, comma-joined, or
+    "-" if there are none (DataType-only, or no rangeIncludes declared at
+    all). Deliberately terser than --show-range's full RANGE: sentence —
+    this is one column in a scannable list, not a standalone message."""
     result = entity_range_candidates(prop_name, properties, types)
     if result is None:
         return "-"
@@ -197,9 +192,9 @@ def _list_properties(type_name: str, types: dict, properties: dict) -> int:
 
 def _print_range(prop_name: str, properties: dict, types: dict) -> None:
     """Print one RANGE: line classifying prop_name's rangeIncludes as
-    entity-only, DataType-only, or mixed (Issue #496). Silently no-ops if
-    the property declares no rangeIncludes at all (rare, but not every
-    Schema.org property has one) — there is nothing to report."""
+    entity-only, DataType-only, or mixed. Silently no-ops if the property
+    declares no rangeIncludes at all (rare, but not every Schema.org
+    property has one) — there is nothing to report."""
     result = entity_range_candidates(prop_name, properties, types)
     if result is None:
         return

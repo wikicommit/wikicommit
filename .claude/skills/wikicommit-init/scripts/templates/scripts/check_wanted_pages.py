@@ -3,18 +3,18 @@
 
 Counterpart to check_orphans.py: that script finds pages with zero backlinks;
 this one finds links with zero backing pages. check_wikilinks.py's "target
-page doesn't exist" case was downgraded from ERROR to WARNING (Issue #340) so
-authors would stop avoiding WikiLinks for not-yet-created concepts — but that
-also meant a concept referenced across many sources no longer surfaced
-anywhere on its own. This script restores that visibility as a non-blocking
-report, aggregated across the whole wiki (not just a changed-files diff).
+page doesn't exist" case is a WARNING, not an ERROR, so authors do not avoid
+WikiLinks for not-yet-created concepts — but that also means a concept
+referenced across many sources does not surface anywhere on its own. This
+script gives it that visibility as a non-blocking report, aggregated across the
+whole wiki (not just a changed-files diff).
 
 A link that names an existing page's slug under the wrong Type looks identical
 to a not-yet-written page from here, so it is separated out as TYPE_MISMATCH
-rather than counted as WANTED (Issue #563) — creating the "wanted" page would
+rather than counted as WANTED — creating the "wanted" page would
 duplicate one that already exists; the fix is to correct the link's Type.
 
-Known limitation (Issue #318): a concept that's only ever mentioned in plain
+Known limitation: a concept that's only ever mentioned in plain
 text (never inside a [[Type/slug]] WikiLink) is invisible to this script.
 
 Usage:
@@ -29,7 +29,7 @@ from pathlib import Path
 from _wikilink import (
     ENTITY_DIR,
     VIEW_DIR,
-    WIKILINK_RE,
+    extract_wikilinks,
     build_slug_type_index,
     collect_entity_pages,
     collect_view_pages,
@@ -41,11 +41,10 @@ from _wikilink import (
 
 def collect_pages() -> list[Path]:
     # include_index=True: a Type index is both a referrer and a backing file
-    # here, as it was before this walk was shared. Whether a stale index entry
-    # should count as "someone wants this page written" is a separate question
-    # from consolidating the walk, so it is left as it was (Issue #677).
+    # here. Whether a stale index entry should count as "someone wants this
+    # page written" is a separate question from how the pages are walked.
     #
-    # View pages (Issue #675) count on both sides: they link out like any
+    # View pages count on both sides: they link out like any
     # page, and `[[View/<slug>]]` resolves to one, so leaving them out would
     # report every existing view page as wanted.
     return collect_entity_pages(ENTITY_DIR, include_index=True) + collect_view_pages(
@@ -75,7 +74,7 @@ def main() -> int:
             continue
 
         ref_str = str(page)
-        for type_name, slug in WIKILINK_RE.findall(content):
+        for type_name, slug in extract_wikilinks(content):
             key = f"{type_name}/{slug}"
             refs = referrers.setdefault(key, [])
             if ref_str not in refs:
@@ -85,7 +84,7 @@ def main() -> int:
     # anyone should create — acting on a WANTED: line for it produces a second
     # page duplicating the first, which check_orphans.py's duplicate detection
     # (same lang, same title AND same type) does not catch either. Report it as
-    # its own kind of finding instead (Issue #563).
+    # its own kind of finding instead.
     #
     # Built on first use, and only once some link fails to resolve: the index
     # costs a second full walk of .wikicommit/entity/ (plus a frontmatter parse

@@ -196,8 +196,11 @@ def test_merge_raises_a_tracking_issue_for_a_pass_1_failure():
     """`failed_pages` is written by Pass 4, so keying only on it missed every failure
     that happened before a page was attempted — while `wikicommit-status` excluded
     those same sources *because* this Issue was supposed to exist."""
-    merge = _instructions("wikicommit-merge")
-    assert "elif fm.get('status') == 'failed':" in merge, (
+    # The scan moved from Step 9's instructions into the merge's script step (Issue
+    # #1266); test_merge_workflow.py drives it over a `status: failed` source too.
+    merge = (SKILLS / "wikicommit-merge" / "scripts" / "workflow_checks.py").read_text(
+        encoding="utf-8")
+    assert 'or front.get("status") == "failed"' in merge, (
         "Step 9's scan is back to `failed_pages` alone, so a source that failed in "
         "Pass 1 raises no tracking Issue and is excluded from wikicommit-status too"
     )

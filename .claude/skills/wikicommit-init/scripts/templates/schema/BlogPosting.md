@@ -23,7 +23,20 @@ properties:
   publisher: ""
 ---
 
-(2-3 paragraph overview: what the post argues or describes, and its significance)
+```text
+READER QUESTIONS (BlogPosting)
+Readers: someone deciding whether the post's argument or advice applies to them, or someone
+who met a link to it and wants to know what it says.
+1. What does the post argue or describe, and who writes it from what position — a
+   practitioner, a vendor about its own product, a researcher?
+2. What situation or question prompted it?
+3. What are its arguments, techniques, or claims? Answer this under the fixed `## Key Points`
+   heading below.
+4. What does it rest on — the author's own experience, measurements, or the vendor's own
+   documentation?
+5. When does its advice apply, and what caveats does the author state?
+6. What other writing does it respond to or build on, as the post itself says?
+```
 
 ## Key Points
 (one claim per bullet, each a single argument, technique, or claim the post itself
@@ -34,6 +47,3 @@ elsewhere is that source's claim, and its details are not established facts here
 Where the only backing is the author's own experience, or their employer's own product
 documentation, say so in the same bullet: a single-source recommendation must never
 read as established practice)
-
-## Context
-(how this relates to other writing on the same topic; the author's stated perspective or caveats)

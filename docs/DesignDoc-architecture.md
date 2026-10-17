@@ -74,7 +74,7 @@
 | 個人の LLM Wiki | 誰でも | 本人だけ（非公開） | LLM | 数百ページ | 弱い | 弱い（本人が気づけば直す） |
 | Grokipedia | 1 社だけ | 誰でも（公開） | LLM | 85 万記事超 | 主張はあるが不十分 | 弱い |
 | Wikipedia | 1 つの共同体 | 誰でも（公開） | 人（LLM 生成は G15 で削除対象） | 英語版で約 700 万記事 | — | ○（編集者） |
-| **WikiCommit** | **誰でも（Skill として配布）** | **誰でも（GitHub Pages で公開）** | LLM | パイロットの実測で最大 2,042 ページ（翻訳を含む。原文は約 1,000。下記） | ○（全件） | 一部（較正は準備中） |
+| **WikiCommit** | **誰でも（Skill として配布）** | **誰でも（GitHub Pages で公開）** | LLM | パイロットの実測で最大 2,190 ページ（entity。翻訳を含む。原文は 1,172。下記） | ○（全件） | 一部（較正は準備中） |
 
 **この表の中で「誰でも作れる」と「誰でも読める」の両方を満たすのは WikiCommit だけである。** ただし検索レベルの調査であり、公開している個人の LLM Wiki が無いことまでは確かめていない。
 
@@ -85,15 +85,18 @@
 
 公開はその代表例であって、根拠そのものではない。**誰が読むにせよ、内容を知らない読者に対しては、信頼をページ単位の記録で示す必要がある。** この前提はソースを集める段階にも及ぶ — 知らないテーマだからソースを把握できず、`/wikicommit-collect` が候補を出してそこを補う（何を取り込むかは人が決める）。
 
-**規模の実測**（いずれも翻訳を含むページ数）:
+**規模の実測**（ページ数は翻訳を含む。原文の数は内訳の列）:
 
 | パイロット | 言語（原文 → 翻訳） | ページ数 | 内訳 | 時点 |
 |---|---|---|---|---|
-| `decameron-wiki` | it → en, ja | 522 | 原文 174 ページ（2026-08-23）× 3 言語と一致する。内訳を数えた記録は無い（同日の翻訳を含むファイル数は 549） | 2026-09-29 |
-| `ai-driven-dev-wiki` | en → ja | 2,042（entity） → 2,121（entity ＋ view） | 原文と翻訳の内訳は記録に無い。全件が訳されていれば原文は約 1,000〜1,060 | 2026-09-29 → 2026-10-02 |
+| `ai-driven-dev-wiki` | en → ja | 2,190（entity） → 2,224（entity ＋ view） | entity は原文 1,172・翻訳 1,018（全件はまだ訳されていない）。view は 17 × 2 言語 | 2026-10-14 |
+| `world-of-work-wiki` | en → ja | 762（entity） → 766（entity ＋ view） | entity は原文 381・翻訳 381。view は 2 × 2 言語 | 2026-10-14 |
 | `saitama-city-wiki` | ja（翻訳なし） | 118 | すべて原文 | 2026-08-26 |
+| `decameron-wiki` | it → en, ja | 522 | 原文 174 ページ（2026-08-23）× 3 言語と一致する。内訳を数えた記録は無い（同日の翻訳を含むファイル数は 549） | 2026-09-29 |
 
-2,042 ページの Wiki に `validate_frontmatter.py`・`check_wikilinks.py`・`check_raw_html.py` を全ページに走らせて ERROR 0 だった（[history/DesignDoc-ScriptSpec.md](history/DesignDoc-ScriptSpec.md)「merge の blocking な 3 本は status が全ページに走らせる」）。
+いまの運用を表すのは `ai-driven-dev-wiki` と `world-of-work-wiki` の 2 つである。`saitama-city-wiki` は翻訳なしの 1 言語の例として、`decameron-wiki` は古い版で作った最初期の規模の記録として残しており、どちらも現在の状態は表さない。2026-10-14 の 2 行のページ数は、リポジトリの `.wikicommit/entity/<lang>/` と `.wikicommit/view/<lang>/` の Markdown ファイルを数えた値である。
+
+`ai-driven-dev-wiki` が 2,042 ページ（entity。2026-09-29）だった時点で `validate_frontmatter.py`・`check_wikilinks.py`・`check_raw_html.py` を全ページに走らせて ERROR 0 だった（[history/DesignDoc-ScriptSpec.md](history/DesignDoc-ScriptSpec.md)「merge の blocking な 3 本は status が全ページに走らせる」）。
 
 **規模について比べるときの書き方**:
 
@@ -359,7 +362,7 @@ WikiCommit は 6 つの伝統から部品を借りている。**それぞれが�
 
 製品の記録から gold set を作るにはこの障害を越える必要があるが、**試すだけなら越えなくてよい** — ラベルを製品の記録ではなく開発リポジトリ側の表に取れば、Close の仕掛けを待たずに始められる。§15.4.1 はそうして行った試行である。
 
-**規模は Wiki による。** gold set の標準サイズは 100〜300 件である。初期のパイロット（83 / 135 / 174 ページ）なら Wiki 1 つが gold set 1 つのサイズで、通常は抽出で行う較正を全件で行える。一方、§15.4.1 の `ai-driven-dev-wiki` は AI の判定を持つページだけで 1,103 件あり、抽出が要る — 抽出するなら、層（`RISKY:` か否か）ごとに抜いて層の比率で重み付けする。
+**規模は Wiki による。** gold set の標準サイズは 100〜300 件である。数えるのは原文のページである — 較正する Pass 4 の判定は原文のページに付き、翻訳の照合は別の判定なので、翻訳を含むページ数（§0.3 の表の「ページ数」）で比べると規模を約 2〜3 倍に見誤る（訳し終えていない `ai-driven-dev-wiki` は約 1.9 倍）。原文で数えると、初期のパイロット（`saitama-city-wiki` 118・`decameron-wiki` 174）は Wiki 1 つが gold set 1 つのサイズで、通常は抽出で行う較正を全件で行えた。いまの運用を表す 2 つはそうではない — `world-of-work-wiki`（原文 381）はすでに標準サイズを超え、`ai-driven-dev-wiki`（原文 1,172。§15.4.1 の時点で AI の判定を持つページは 1,103 件）はその数倍ある。**いまのパイロットでは抽出が前提になる** — 抽出するなら、層（`RISKY:` か否か）ごとに抜いて層の比率で重み付けする（§15.4.1 はそうしている）。
 
 **あわせて、judge のバイアス対策として「別系統のモデルによる交差チェック」が production-ready の条件に入っている**（position bias・verbosity bias・self-enhancement bias のため）。WikiCommit は既に 2 回これを行っており、**2 回とも Pass 4 が見つけていなかったものを見つけている** — Issue #451（別の LLM による指摘 3 件）と `dev/pilot-saitama-wiki.md`（別セッションの 4 体によるページ間矛盾 3 件）。どちらもアドホックだった。定例化するかは、人のラベル（§15.4.1、およびその次の手で直す記録）を材料に判断できる。
 
@@ -422,6 +425,9 @@ WikiCommit は 6 つの伝統から部品を借りている。**それぞれが�
 | ノートページ・編集履歴 | レビュー追跡 Issue・PR・`git log` |
 | 信頼できる二次資料から一次資料を当たる | `/wikicommit-collect --index` / `index_only:`（Wikipedia を登録せず、参考文献から一次資料を掘る） |
 | G15（読まずに貼った LLM 出力の即時削除） | 「誰にも読まれないまま出ている」を失敗として数える（§15.2） |
+| リード節（MOS:LEAD）・技術記事を分かるように書く（WP:TECHNICAL） | Pass 3 の共通の書き方の規則（リードは単独で成立させる・易しい順・用語は初出で説明する。2026-10-14 時点では Pass 3 に未実装で、移行の状況は [DesignDoc-data.md](DesignDoc-data.md) §5.2）。ただし WP:TECHNICAL の「リードで分野を言う」は、ソースが述べている場合に限る（[DesignDoc-data.md](DesignDoc-data.md) §5.2） |
+| 分野ごとの記事構成の指針（MEDMOS ほか。どれも推奨で、出典が扱わない節は省く） | 型ファイルの読者の問いの一覧（見出しを固定せず、答えの無い問いは節にしない。[DesignDoc-data.md](DesignDoc-data.md) §5.2） |
+| インフォボックスは本文の要約（MOS:INFOBOX） | `properties:` は本文を先に書いてから本文から埋める。留保が要る事実は欄に入れない（[DesignDoc-data.md](DesignDoc-data.md) §5.2） |
 
 **Wikipedia との違い**:
 
@@ -429,7 +435,15 @@ WikiCommit は 6 つの伝統から部品を借りている。**それぞれが�
 - **出典は利用者が登録したものに限られる。** ソースの信頼性は登録した人の責任になる — Pass 4 が照合するのは「ページがソースに忠実か」であって、ソースが正しいかではない
 - **1 つの巨大な百科事典ではなく、小さな百科事典がたくさんできる。** それぞれがテーマを持つ（§15.6）
 
-**Wikipedia 型の方向の先例**: Stanford の STORM（NAACL 2024）は、Web 検索から Wikipedia 風の記事を出典つきで一から書く研究システムである。1 主題 1 記事を書く点は同じだが、1 回の生成で記事を出すもので、ページを照合し続ける・読まれたことを記録する仕組みは持たない（2026-10-05、検索レベルで確認）。
+**採らなかった「どう書くか」の規則**: Wikipedia の分野別の節リストを、型ごとの固定見出しとしては取り込まない（Wikipedia 自身が推奨にとどめている）。Wikipedia が書けなかった点を明示する方法（トークページ・HTML コメント）は、生成メモへの記録に置き換え、読者向けの本文には書かない。
+
+**Wikipedia 型の方向の先例**: Stanford の STORM（NAACL 2024）は、Web 検索から Wikipedia 風の記事を出典つきで一から書く研究システムである。1 主題 1 記事を書く点は同じだが、1 回の生成で記事を出すもので、ページを照合し続ける・読まれたことを記録する仕組みは持たない。
+
+STORM から借りたのは、問いの作り方である。STORM は、関連する記事の目次から「誰がどんな関心で読むか」（視点）を作り、その視点から問いを出させる。問いは資料を読んでから 1 つずつ出す方が質が上がる、と報告している。WikiCommit は視点の発見を型ごとに一度だけ人が行い、その結果を型ファイルの問いの一覧にする。生成は、ソースを読んでから答えのある問いを選ぶ。
+
+採らなかったのは、ページごとの Web 検索と多ラウンドの会話である。WikiCommit は登録したソースからだけページを作るので、答えがソースに無ければ「無い」が正しい結果である。
+
+STORM の論文が最も多い誤りとして報告しているのは、捏造ではなく、無関係な事実の無理なつなぎ（red herring・improper inferential linking）である。STORM のコードは、節の見出しに当たる材料が無くても最も近い断片を渡し、「関連が薄くても最も関連する答えを」と指示する。答えの無い問いを節にしない WikiCommit の規則は、この形を避けるためにある（2026-10-14、論文とコードを原文で確認。`dev/research/28_type_template_external_practices.md` §2）。
 
 ### 15.6 テーマを持つ百科事典 — ファン wiki と専門事典
 
@@ -451,9 +465,15 @@ Wikipedia はテーマを持たないが、WikiCommit は持つ（`theme`）。*
 
 **ファン wiki から借りられそうなもの**（作品を扱う Wiki の規則を見直すときの材料。ここに書くだけで、規則は変えていない）:
 
-- **有効な出典の範囲を明文化する（canon policy）** — Memory Alpha は「canon」という語の論争を避け、どの資料を作中の事実の根拠にしてよいか（実写の TV・映画とアニメ版を有効とし、小説・ゲーム等の作中情報はその製品の記事でだけ扱う）を「valid resources」として定めている。`source-policy.md` と証拠拘束に近い発想で、作品を扱う Wiki での書き方の手本になる
-- **作中視点と作品外視点の書き分け** — Wookieepedia は作中の記事を「その世界が実在したかのように」過去形で書き、俳優・制作など現実側の情報は「Behind the scenes」節に分ける。「物語の中の事実」と「作品についての事実」を混ぜない規則が、作品を扱う型ファイルに要るかもしれない。**Wikipedia はこの点で逆の方針**を取り、架空の作品は主として現実世界の視点（受容・影響・意義）から書く — どちらに寄せるかは Wiki ごとに決める余地がある
-- **ネタバレの扱い** — Wookieepedia は発売から一定期間（原則 1 か月・映画は 2 か月）、新情報を含むページにネタバレ告知を付ける。**Wikipedia は告知を付けない**（ネタバレも他の内容と同じに扱い、それを理由に消さない）。勉強用でも、まだ読んでいない作品について読む場面では効くので、方針を決める価値がある
+- **有効な出典の範囲を明文化する** — Memory Alpha は「canon」という語の論争を避け（2013 年に Canon policy を Content policy に改名・統合した）、どの資料を作中の事実の根拠にしてよいかを Content policy と Resource policy で定めている。作中の内容と認めるのは、フランチャイズの権利者が制作し、非対話で、エンドクレジットがあり、公開された映像作品に限る（メディアの種類ではなくこの 4 条件で決まり、アニメも TAS・Lower Decks・Prodigy が入る）。小説・コミック・ゲームなどの外典は、作中の記事でも「apocrypha」節と背景注記には書けるが、外典だけを根拠に作中の独立した記事を立ててはならない。作中の出典には優先順位がある（台詞 > 映像 > 音）。`source-policy.md` と証拠拘束に近い発想で、作品を扱う Wiki での書き方の手本になる
+- **作中視点と作品外視点の書き分け** — Wookieepedia と Memory Alpha は、作中の記事を「その世界が実在したかのように」過去形で書き、俳優・制作など現実側の情報は「Behind the scenes」節（Memory Alpha は背景注記）に分ける。「物語の中の事実」と「作品についての事実」を混ぜない規則が、作品を扱う型ファイルに要るかもしれない。**Wikipedia はこの点で逆の方針**を取り、架空の作品は主として現実世界の視点（受容・影響・意義）から書く（MOS:WAF）。作中にしか無い生年月日などは、あらすじ・登場人物の節の外に書かない。現実の人物用のインフォボックスを架空の人物に使わない。どちらに寄せるかは Wiki ごとに決める余地がある
+- **ネタバレの扱い** — Wookieepedia は発売から一定期間（原則 1 か月・大型の映画公開は 2 か月）、新情報を含むページにネタバレ告知を付ける。**Wikipedia は告知を付けない**（ネタバレも他の内容と同じに扱い、それを理由に消すことも隠すこともしない。リードも例外にしない）。Memory Alpha は最低 2 か月タグを付ける。勉強用でも、まだ読んでいない作品について読む場面では効くので、方針を決める価値がある
 - **冒頭の一言とインフォボックス** — ファン wiki は記事の冒頭で「誰で、どの作品に出るか」を言い、要点を表で見せる型を練っている。§0.2 が目標に入れた読みやすさに直接効く手本になる
 
-確かめ方（2026-10-05）: Memory Alpha・Wookieepedia（Fandom）と Wikipedia の方針ページは、この作業の環境から直接開けなかった。上の記述は検索結果に引かれた各方針の要約と、方針ページを要約している二次資料で確かめたもので、方針の原文は読んでいない。規則に取り入れるときは原文を読む。参照: [Memory Alpha（Canon policy の要約）](https://www.liquisearch.com/memory_alpha/canon_policy)・[Wookieepedia:Spoilers](https://starwars.fandom.com/wiki/Wookieepedia:Spoilers)・[Wikipedia:Spoiler](https://en.wikipedia.org/wiki/Wikipedia:Spoiler)・[SEP Editorial Information](https://plato.stanford.edu/info.html)。
+**作品を扱うパイロットでの実態と、取り入れ方**: 作品を扱う 3 つのパイロット（朗読作品・明智小五郎・decameron）で 14 ページを読むと、ネタバレの位置と人物ページの書き方に問題が出ていた。結末や犯人の正体が、`description`・人物ページ・登場人物一覧という、あらすじだと名乗っていない場所に書かれていた。Person の型ファイルの節名（`## Works & Achievements`）が、作中の事件の置き場になっていた。Wiki ごとの `entity-policy.md` に「人物ページの最初の文で、どの作品の登場人物かを書く」と書いたパイロットでは、作中の事実の枠付けが目に見えて良かった。作中視点か現実視点かは外部でも方針が正反対なので配布型には固定しない。どちらの視点でも成り立つ 2 つの規則（最初の文で作品名と架空であることを言う・結末と犯人の正体はあらすじの節の外に書かない）を、作品を扱う配布型に入れる候補にする（Issue #1291）。有効な出典の範囲の規則は、翻案や外典をソースにするパイロットがまだ無く問題が観測されていないので、今は `source-policy.md` に足さない。
+
+**1 つの主題が現実と作中にまたがるときのページの切り方**は、視点とは別に決めた（Issue #1305・#1330）。作品が実在の人物・場所を**指している**なら実在の側に 1 ページにして作中の描かれ方は節に分け、実在を**モデルにして作った**なら作中の存在として別ページにする。どちらも最初の文で作品の描き方であること（指している側）、作品名と架空であること（作った側）を言う。この基準は作中視点・現実視点のどちらの Wiki でも成り立つ。規則は `Person.md`・`Place.md` の `granularity` にあり、決定の内容は [DesignDoc-data.md](DesignDoc-data.md) §5.2「作品と実在の分け方」にある。
+
+**作品を扱う配布型の 2 規則**は `ShortStory.md`・`Book.md` の `granularity` に入れた（Issue #1331）。最初の文で作品名と作り話であること（`Book` の非小説では作品の種類）を言い、結末と犯人の正体はあらすじだと分かる見出しの節にだけ書く。結末の規則は架空の人物のページ（`Person.md`）にも効かせた。決定の内容は [DesignDoc-data.md](DesignDoc-data.md) §5.2「作品を扱う型の 2 規則」にある。
+
+確かめ方: 2026-10-05 に二次資料で書いた要約を、2026-10-14 に原文で確かめて直した（Fandom は MediaWiki の API で取得した）。調査の記録は `dev/research/28_type_template_external_practices.md` §3。参照: [Memory Alpha:Content policy](https://memory-alpha.fandom.com/wiki/Memory_Alpha:Content_policy)・[Memory Alpha:Resource policy](https://memory-alpha.fandom.com/wiki/Memory_Alpha:Resource_policy)・[Wookieepedia:Manual of Style](https://starwars.fandom.com/wiki/Wookieepedia:Manual_of_Style)・[Wookieepedia:Spoilers](https://starwars.fandom.com/wiki/Wookieepedia:Spoilers)・[Wikipedia:Manual of Style/Writing about fiction](https://en.wikipedia.org/wiki/Wikipedia:Manual_of_Style/Writing_about_fiction)・[Wikipedia:Spoiler](https://en.wikipedia.org/wiki/Wikipedia:Spoiler)・[SEP Editorial Information](https://plato.stanford.edu/info.html)。

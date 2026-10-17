@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Detect wiki pages still resting on a source a human has retracted (Issue #737).
+"""Detect wiki pages still resting on a source a human has retracted.
 
 `status: retracted` says a human read a registered source, judged its content
 unreliable, and took it out of use. Doing that stops the source from being
@@ -8,28 +8,28 @@ it, and `check_ingest_freshness.py` never rewrites it back to `outdated` — but
 it does nothing to the pages that were already written from it. Those pages
 keep the source in their `sources[]`, unchanged and unremarked.
 
-This script closes that gap by reporting, not by acting. Issue #737 settled
-deliberately on "report and stop there", for two reasons:
+This script closes that gap by reporting, not by acting. It deliberately
+settles on "report and stop there", for two reasons:
 
-- Resetting `review_status` to `pending` does not fit the rule Issue #724 laid
-  down. That rule delegates "did the content actually change?" to a
-  deterministic script and keeps a non-deterministic judgment out of deciding
-  whether a human has to re-read a page. A retraction changes no content at
-  all — it changes the standing of the evidence behind it — so the same
-  machinery cannot express it.
+- Resetting `review_status` to `pending` does not fit the rule behind
+  `reset_review_on_content_change.py`. That rule delegates "did the content
+  actually change?" to a deterministic script and keeps a non-deterministic
+  judgment out of deciding whether a human has to re-read a page. A retraction
+  changes no content at all — it changes the standing of the evidence behind
+  it — so the same machinery cannot express it.
 - Even if a page were reset, `pending` says "read this again" and not "here is
   what is now unsupported". The tracking-Issue template does not ask about the
-  soundness of a page's sources, which is where Issue #737 started.
+  soundness of a page's sources.
 
 Which of the existing routes to take is a human's call:
 
 - `/wikicommit-generate --regenerate <page>` rebuilds from the sources that
-  remain, dropping the retracted one and its entry in `sources[]` (Issue #744).
-  This is the route that actually takes a retracted source out of a page's
-  evidence base, and it needs at least one surviving source. Two counts differ
-  here: Regeneration Mode excludes any page carrying a `type: manual` entry
-  outright, while the remaining count below deliberately counts one as a
-  surviving source, so a page whose only remainder is a human assertion is a
+  remain, dropping the retracted one and its entry in `sources[]`. This is the
+  route that actually takes a retracted source out of a page's evidence base,
+  and it needs at least one surviving source. Two counts differ here:
+  Regeneration Mode excludes any page carrying a `type: manual` entry outright,
+  while the remaining count below deliberately counts one as a surviving
+  source, so a page whose only remainder is a human assertion is a
   `/wikicommit-fix` rather than a rebuild.
 - `/wikicommit-fix` corrects the text by hand, for a page whose problem is
   narrower than a rebuild.
@@ -53,14 +53,14 @@ goes STALE); a grounding page still standing on a retracted source with nobody
 having done anything is not something it can see. The reason to leave the case
 alone is a different one: covering it would have `wikicommit-synthesize` read
 each grounding page's `sources[]` and interpret `status`, putting a third
-interpreter of that vocabulary on the reference side (Issue #553) for a
-two-hop indirection whose direct half this script already names.
+interpreter of that vocabulary on the reference side for a two-hop indirection
+whose direct half this script already names.
 
-`--list` serves a second caller entirely (Issue #928). `/wikicommit-review` and
+`--list` serves a second caller entirely. `/wikicommit-review` and
 `/wikicommit-fix` both re-fetch a page's `sources[]` and read the documents —
 the former to judge whether the page is faithful to them, the latter to ground
-a fix. Neither goes through `resolve_source_cache_path.py`, so the guard Issue
-#918 added there does not reach them, and a source a human withdrew was being
+a fix. Neither goes through `resolve_source_cache_path.py`, so the guard there
+does not reach them, and without `--list` a source a human withdrew would be
 read as ground truth. `--list` prints the same table step 1 builds and stops;
 the callers match their own `sources[]` against it, before fetching anything.
 
@@ -93,11 +93,11 @@ def collect_retracted_sources(source_dir: Path = SOURCE_DIR) -> dict[str, str]:
     """Map each retracted source's identity (`source.path` or `source.url`) to
     its management file path.
 
-    The identity key is the same one `add_source.py` matches on when it decides
-    whether a source is already registered (Issue #572 / #573), which is also
-    the value a page's `sources[]` entry carries. Keying on anything else —
-    the derived management-file name, say — would miss management files written
-    under an older naming rule, since those are never migrated.
+    The identity key is the same one `add_source.py` matches on when it
+    decides whether a source is already registered, which is also the value a
+    page's `sources[]` entry carries. Keying on anything else — the derived
+    management-file name, say — would miss management files written under an
+    older naming rule, since those are never migrated.
     """
     retracted: dict[str, str] = {}
     if not source_dir.exists():
@@ -146,7 +146,7 @@ def page_source_entries(fm: dict) -> list[list[str]]:
 
 
 def print_list(retracted: dict[str, str]) -> None:
-    """Print the retracted-source table for `--list` (Issue #928).
+    """Print the retracted-source table for `--list`.
 
     The line shape matches `resolve_source_cache_path.py`'s `RETRACTED:` so all
     three reference-side paths read one form, and it names the management file

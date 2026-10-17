@@ -6,14 +6,14 @@ Usage:
     python .wikicommit/scripts/build_survey_view.py --pages <path> [<path> ...]
 
 `/wikicommit-synthesize` run with no `<topic>` has to find the topic itself, by
-looking at the wiki as a whole (Issue #586). The wiki's full text does not fit
-in one context, so this script reduces every page to the few lines that carry
-its cross-cutting structure — title, type, tags, `properties.description`,
-its `##` section headings, and the WikiLinks it makes — and adds the aggregate
-rankings (hubs, tags, types) computed from the link graph.
+looking at the wiki as a whole. The wiki's full text does not fit in one
+context, so this script reduces every page to the few lines that carry its
+cross-cutting structure — title, type, tags, `properties.description`, its `##`
+section headings, and the WikiLinks it makes — and adds the aggregate rankings
+(hubs, tags, types) computed from the link graph.
 
 Why headings and the link graph, and not only `properties.description`:
-`description` is capped at two or three sentences by design (Issue #495), so a
+`description` is capped at two or three sentences by design, so a
 pattern that only shows up in a page's body would be invisible in a
 description-only digest. Section headings are the cheapest part of a body that
 still names what it covers. The graph matters even more: "several Place pages
@@ -27,7 +27,7 @@ one thing the survey is for. What the script does not do is judge — picking
 topics out of this digest is the LLM's job, and is non-deterministic by nature.
 
 `--pages` reduces only the named pages, in the order given, and omits the
-aggregate rankings (Issue #1075). `/wikicommit-synthesize` uses it to judge,
+aggregate rankings. `/wikicommit-synthesize` uses it to judge,
 before reading any body, which of its search candidates treat the topic as
 their subject: a candidate's title, description and headings are a few lines,
 while its body can be thousands of tokens, so reading bodies to decide which
@@ -49,7 +49,7 @@ from _frontmatter import parse_frontmatter_and_body_text
 from _wikilink import (
     ENTITY_DIR,
     VIEW_DIR,
-    WIKILINK_RE,
+    extract_wikilinks,
     collect_entity_pages,
     collect_view_pages,
     load_primary_lang,
@@ -58,7 +58,7 @@ from _wikilink import (
 )
 
 # Headings only; a "#" inside a fenced code block is not one, and neither is a
-# body-level H1 (pages are not supposed to have one at all — Issue #546).
+# body-level H1 (pages are not supposed to have one at all).
 HEADING_RE = re.compile(r"^#{2,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
 FENCE_RE = re.compile(r"^(?:```|~~~).*?(?:^(?:```|~~~)\s*$|\Z)", re.MULTILINE | re.DOTALL)
 
@@ -91,7 +91,7 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
     links are language-neutral (a WikiLink carries no lang), so counting only
     one language's outbound links would undercount every hub.
 
-    View pages (Issue #675) are included only when `view_dir` is given, which
+    View pages are included only when `view_dir` is given, which
     the CLI does only under `--include-view`. This view exists to be read for
     angles worth *writing about*, and a view page is already the write-up of
     one — surveying them proposes analysing the analysis, and the pages the
@@ -125,7 +125,7 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
         tags = fm.get("tags")
         sources = fm.get("sources")
         # A view page's path resolves only through parse_view_path; it carries
-        # derived_from, not sources (Issue #675).
+        # derived_from, not sources.
         is_view = view_dir is not None and parse_wiki_path(path, entity_dir) is None
         derived = fm.get("derived_from")
         pages.append({
@@ -137,9 +137,9 @@ def collect(entity_dir: Path, view_dir: Path | None = None) -> list[dict]:
             "tags": [str(t) for t in tags if isinstance(t, (str, int, float))] if isinstance(tags, list) else [],
             "description": str((props or {}).get("description") or "") if isinstance(props, dict) else "",
             "headings": page_headings(body),
-            "links": {f"{t}/{s}" for t, s in WIKILINK_RE.findall(content)},
-            # Issue #990: how many sources the page stands on. None — never 0 —
-            # for a translation (inherits from its parent) and a view page
+            "links": {f"{t}/{s}" for t, s in extract_wikilinks(content)},
+            # How many sources the page stands on. None — never 0 — for a
+            # translation (inherits from its parent) and a view page
             # (derived_from counts something else), so PAGE: drops the field.
             "translation": bool(fm.get("translated_from")),
             "synthesized": is_view or bool(derived),

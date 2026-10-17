@@ -42,8 +42,8 @@ if __name__ == "__main__":
             pass
 
 # The helpers every Skill's checks read the same way live in
-# `.wikicommit/scripts/_workflow_checks.py` (Issue #1219). A wiki whose scripts predate
-# it has none until `/wikicommit-update` is merged.
+# `.wikicommit/scripts/_workflow_checks.py`. A wiki whose scripts predate it has
+# none until `/wikicommit-update` is merged.
 # Exit 2, not 1, whatever is missing: a `when:` condition exiting 1 would read as
 # "skip this step", while 2 stops the engine. Only a module of `.wikicommit/scripts/`
 # is fixed by `/wikicommit-update`; a missing PyYAML is not, so it gets its own

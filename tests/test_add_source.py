@@ -1292,6 +1292,104 @@ def test_main_from_args_passes_license_through(tmp_path):
     assert fm["source"]["license"] == "PDL-1.0"
 
 
+# ── a --license that was not recorded is reported (Issue #1312) ─────────────
+#
+# add_source.py never rewrites an existing management file, so --license on a
+# source that is already registered records nothing. It used to say nothing
+# either, and the person who passed it believed it had been recorded.
+
+
+def test_license_on_a_new_source_prints_no_not_recorded_line(tmp_path, capsys):
+    _write_source(tmp_path, "raw/paper.pdf", b"pdf content\n")
+
+    add_source.main_from_args(["raw/paper.pdf", "--license", "CC-BY-4.0", "--repo-root", str(tmp_path)])
+
+    assert "LICENSE_NOT_RECORDED" not in capsys.readouterr().out
+
+
+def test_license_on_an_existing_path_source_is_reported_not_recorded(tmp_path, capsys):
+    _write_source(tmp_path, "raw/paper.pdf", b"pdf content\n")
+    add_source.main_from_args(["raw/paper.pdf", "--repo-root", str(tmp_path)])
+    capsys.readouterr()
+
+    assert (
+        add_source.main_from_args(
+            ["raw/paper.pdf", "--license", "CC-BY-4.0", "--repo-root", str(tmp_path)]
+        )
+        == 0
+    )
+
+    out = capsys.readouterr().out
+    mgmt_rel = ".wikicommit/source/path/raw/paper.pdf.md"
+    assert f"SKIP: {mgmt_rel}" in out
+    line = next(ln for ln in out.splitlines() if ln.startswith("LICENSE_NOT_RECORDED:"))
+    assert mgmt_rel in line and "CC-BY-4.0" in line and "source.license" in line
+    # The existing management file is still not rewritten.
+    fm = yaml.safe_load((tmp_path / mgmt_rel).read_text(encoding="utf-8").split("---")[1])
+    assert not fm["source"].get("license")
+
+
+def test_license_on_an_existing_url_source_is_reported_not_recorded(tmp_path, capsys):
+    url = "https://example.com/terms"
+    add_source.main_from_args([url, "--repo-root", str(tmp_path)])
+    mgmt = next((tmp_path / ".wikicommit" / "source" / "url").rglob("*.md"))
+    mgmt.write_text(mgmt.read_text(encoding="utf-8").replace("status: pending", "status: generated"),
+                    encoding="utf-8")
+    capsys.readouterr()
+
+    add_source.main_from_args([url, "--license", "CC-BY-4.0", "--repo-root", str(tmp_path)])
+
+    out = capsys.readouterr().out
+    assert "RECHECK:" in out
+    assert any(ln.startswith("LICENSE_NOT_RECORDED:") for ln in out.splitlines())
+
+
+def test_without_license_an_existing_source_prints_no_not_recorded_line(tmp_path, capsys):
+    _write_source(tmp_path, "raw/paper.pdf", b"pdf content\n")
+    add_source.main_from_args(["raw/paper.pdf", "--repo-root", str(tmp_path)])
+    add_source.main_from_args(["raw/paper.pdf", "--repo-root", str(tmp_path)])
+
+    assert "LICENSE_NOT_RECORDED" not in capsys.readouterr().out
+
+
+def test_license_already_recorded_with_the_same_value_prints_no_not_recorded_line(tmp_path, capsys):
+    _write_source(tmp_path, "raw/paper.pdf", b"pdf content\n")
+    add_source.main_from_args(["raw/paper.pdf", "--license", "CC-BY-4.0", "--repo-root", str(tmp_path)])
+    capsys.readouterr()
+
+    add_source.main_from_args(["raw/paper.pdf", "--license", "CC-BY-4.0", "--repo-root", str(tmp_path)])
+
+    assert "LICENSE_NOT_RECORDED" not in capsys.readouterr().out
+
+
+def test_license_with_a_line_break_stays_on_one_line(tmp_path):
+    _write_source(tmp_path, "raw/paper.pdf", b"pdf content\n")
+
+    add_source.main_from_args(
+        ["raw/paper.pdf", "--license", "CC-BY-4.0\nstatus: generated", "--repo-root", str(tmp_path)]
+    )
+
+    text = (tmp_path / ".wikicommit/source/path/raw/paper.pdf.md").read_text(encoding="utf-8")
+    assert add_source.parse_frontmatter_status(text) == "pending"
+    assert yaml.safe_load(text.split("---")[1])["source"]["license"] == "CC-BY-4.0 status: generated"
+
+
+def test_include_reports_only_the_files_that_already_existed(tmp_path, capsys):
+    _write_source(tmp_path, "raw/a.txt", b"a\n")
+    add_source.main_from_args(["raw/a.txt", "--repo-root", str(tmp_path)])
+    _write_source(tmp_path, "raw/b.txt", b"b\n")
+    capsys.readouterr()
+
+    add_source.main_from_args(
+        ["raw", "--include", "*.txt", "--license", "CC0-1.0", "--repo-root", str(tmp_path)]
+    )
+
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("LICENSE_NOT_RECORDED:")]
+    assert len(lines) == 1 and "raw/a.txt.md" in lines[0]
+    b = tmp_path / ".wikicommit" / "source" / "path" / "raw" / "b.txt.md"
+    assert yaml.safe_load(b.read_text(encoding="utf-8").split("---")[1])["source"]["license"] == "CC0-1.0"
+
+
 # ── share-alike notice (Issue #570) ──────────────────────────────────────────
 
 @pytest.mark.parametrize(
@@ -1689,6 +1787,142 @@ def test_partial_extraction_notice_coexists_with_the_share_alike_notice(tmp_path
     assert result == "CREATED"
     assert "copyleft license" in msg
     assert "partial extraction" in msg
+
+
+# ── arXiv /abs/ (abstract only) ──────────────────────────────────────────────
+#
+# arxiv.org/abs/<id> is the paper's landing page: title, authors, abstract,
+# history — never the full text. The URL shape alone says so, so it joins the
+# partial-extraction notice table; /html/ and /pdf/ carry the paper itself.
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("https://arxiv.org/abs/2510.17842v1", True),
+        ("https://arxiv.org/abs/2510.17842", True),
+        ("https://arxiv.org/abs/hep-th/9901001", True),
+        # Subdomains match through host_suffix_candidates().
+        ("https://export.arxiv.org/abs/2510.17842v1", True),
+        ("https://www.arxiv.org/abs/2510.17842v1", True),
+        # Full-text and listing shapes do not.
+        ("https://arxiv.org/html/2510.17842v1", False),
+        ("https://arxiv.org/pdf/2510.17842v1", False),
+        ("https://arxiv.org/list/cs.AI/recent", False),
+        ("https://arxiv.org/abs/", False),
+        ("https://arxiv.org/abs//", False),
+        ("https://example.com/abs/2510.17842", False),
+    ],
+)
+def test_partial_extraction_note_arxiv_abs_only(url, expected):
+    assert bool(add_source.partial_extraction_note(url)) is expected
+
+
+def test_created_note_on_arxiv_abs_names_the_full_text_urls(tmp_path):
+    result, _path, msg = add_source.process_url("https://arxiv.org/abs/2510.17842v1", tmp_path)
+
+    assert result == "CREATED"
+    assert "partial extraction" in msg
+    assert "https://arxiv.org/html/2510.17842v1" in msg
+    assert "https://arxiv.org/pdf/2510.17842v1" in msg
+    assert "versioned" not in msg
+
+
+def test_created_note_on_arxiv_abs_subdomain(tmp_path):
+    result, _path, msg = add_source.process_url(
+        "https://export.arxiv.org/abs/2510.17842v2", tmp_path
+    )
+
+    assert result == "CREATED"
+    assert "partial extraction" in msg
+    assert "https://arxiv.org/html/2510.17842v2" in msg
+
+
+def test_arxiv_abs_note_recommends_a_version_when_missing():
+    note = add_source.partial_extraction_note("https://arxiv.org/abs/2510.17842")
+    assert "versioned" in note
+    assert "https://arxiv.org/html/2510.17842 " in note
+
+
+def test_arxiv_abs_note_keeps_an_old_style_id_whole():
+    note = add_source.partial_extraction_note("https://arxiv.org/abs/hep-th/9901001")
+    assert "https://arxiv.org/html/hep-th/9901001 " in note
+    assert "https://arxiv.org/pdf/hep-th/9901001 " in note
+
+
+@pytest.mark.parametrize("url", ["https://arxiv.org/html/2510.17842v1", "https://arxiv.org/pdf/2510.17842v1"])
+def test_created_note_is_silent_for_arxiv_full_text(tmp_path, url):
+    result, _path, msg = add_source.process_url(url, tmp_path)
+    assert result == "CREATED"
+    assert "partial extraction" not in msg
+
+
+def test_arxiv_candidate_url_prefers_html_when_it_exists():
+    seen = []
+
+    def exists(u):
+        seen.append(u)
+        return True
+
+    assert add_source.arxiv_candidate_url("https://arxiv.org/abs/2510.17842v1", exists) == (
+        "FULLTEXT",
+        "https://arxiv.org/html/2510.17842v1",
+    )
+    assert seen == ["https://arxiv.org/html/2510.17842v1"]
+
+
+def test_arxiv_candidate_url_falls_back_to_pdf_without_html():
+    assert add_source.arxiv_candidate_url(
+        "https://arxiv.org/abs/hep-th/9901001", lambda _u: False
+    ) == ("FULLTEXT", "https://arxiv.org/pdf/hep-th/9901001")
+
+
+def test_arxiv_candidate_url_falls_back_to_pdf_when_the_check_fails():
+    def boom(_u):
+        raise OSError("network down")
+
+    assert add_source.arxiv_candidate_url("https://arxiv.org/abs/2510.17842v1", boom) == (
+        "FULLTEXT",
+        "https://arxiv.org/pdf/2510.17842v1",
+    )
+
+
+def test_arxiv_candidate_url_leaves_other_urls_alone():
+    def never(_u):
+        raise AssertionError("must not probe")
+
+    for url in ("https://arxiv.org/pdf/2510.17842v1", "https://example.com/a"):
+        assert add_source.arxiv_candidate_url(url, never) == ("UNCHANGED", url)
+
+
+@pytest.mark.parametrize(
+    ("status", "final_url", "expected"),
+    [
+        (200, "https://arxiv.org/html/2510.17842v1", True),
+        (200, "https://arxiv.org/abs/2510.17842v1", False),  # redirected back to the abstract
+        (404, "https://arxiv.org/html/2510.17842v1", False),
+    ],
+)
+def test_arxiv_html_exists_requires_landing_on_html(monkeypatch, status, final_url, expected):
+    import requests
+
+    class _Resp:
+        status_code = status
+        url = final_url
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(requests, "get", lambda *_a, **_k: _Resp())
+    assert add_source._arxiv_html_exists("https://arxiv.org/html/2510.17842v1") is expected
+
+
+def test_fulltext_url_for_cli(monkeypatch, capsys):
+    monkeypatch.setattr(add_source, "_arxiv_html_exists", lambda _u: True)
+    assert add_source.main_from_args(["--fulltext-url-for", "https://arxiv.org/abs/2510.17842v1"]) == 0
+    assert capsys.readouterr().out.strip() == "FULLTEXT: https://arxiv.org/html/2510.17842v1"
+    assert add_source.main_from_args(["--fulltext-url-for", "https://example.com/a"]) == 0
+    assert capsys.readouterr().out.strip() == "UNCHANGED: https://example.com/a"
 
 
 # ── retracted sources (Issue #737) ────────────────────────────────────────────

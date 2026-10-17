@@ -39,18 +39,18 @@ DB_PATH = CACHE_DIR / "search_index.sqlite3"
 
 # bm25() takes one weight per column in table-definition order (path, title,
 # lang, type, tags, review_status, body, aliases), including UNINDEXED columns.
-# Title hits are weighted far above body hits per the Issue #126 spec; UNINDEXED
-# columns take a placeholder 0.0 since they are never part of the MATCH.
-# `aliases` weighs like the title (Issue #1078): an alias is another name for
-# the page, and where the source's own wording is kept only as an alias — a
-# language the wiki has no translation into — it is the one place that wording
-# can be found at all. It comes last so `body` keeps column index 6, which
-# snippet() is called with.
+# Title hits are weighted far above body hits; UNINDEXED columns take a
+# placeholder 0.0 since they are never part of the MATCH.
+# `aliases` weighs like the title: an alias is another name for the page, and
+# where the source's own wording is kept only as an alias — a language the wiki
+# has no translation into — it is the one place that wording can be found at
+# all. It comes last so `body` keeps column index 6, which snippet() is called
+# with.
 BM25_WEIGHTS = (0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 1.0, 10.0)
 
 # snippet()'s max_tokens counts trigram tokens (3-char, overlapping by 2), so
 # N tokens span roughly N+2 characters. 64 gives a "~32 chars either side of
-# the match" snippet as called for by the Issue #126 spec.
+# the match" snippet.
 SNIPPET_MAX_TOKENS = 64
 
 # Mixed into the fingerprint so an index written by a version of this script
@@ -60,10 +60,10 @@ INDEX_FORMAT = "2"
 
 
 def collect_pages() -> list[Path]:
-    # View pages are indexed alongside entity pages (Issue #675). They are
-    # readable wiki content and the whole point of writing one is that a
-    # reader can find it; the exclusion Issue #674 introduced applies only to
-    # the grounding set a synthesis is built from, not to search.
+    # View pages are indexed alongside entity pages. They are readable wiki
+    # content and the whole point of writing one is that a reader can find it;
+    # keeping view pages out applies only to the grounding set a synthesis is
+    # built from, not to search.
     return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 
@@ -193,7 +193,7 @@ def _build(pages: list[Path], fingerprint: str) -> int:
                     str(page),
                     str(fm.get("title") or ""),
                     str(fm.get("lang") or ""),
-                    # A view page has no `type:` (Issue #675); show the reserved
+                    # A view page has no `type:`; show the reserved
                     # `View` segment instead, which is both what a reader would
                     # write in a WikiLink to it and non-empty in the result line.
                     (VIEW_TYPE_SEGMENT if page in view_pages else str(fm.get("type") or "")),
@@ -285,7 +285,7 @@ def _fts5_group_query(groups: list[list[str]]) -> str:
     """Build an FTS5 MATCH expression from groups of synonymous terms.
 
     Terms inside a group are OR-ed; the groups are AND-ed. That is the shape a
-    query expansion needs (Issue #581): the expanded terms are alternative
+    query expansion needs: the expanded terms are alternative
     wordings of one concept, so adding them must widen the match, whereas
     appending them to the flat implicitly-AND-ed list `_fts5_query` builds
     would narrow it to pages containing every wording at once.
@@ -329,7 +329,7 @@ def parse_expand_groups(values: list[str]) -> list[list[str]]:
 
 
 # The trigram tokenizer can only form tokens from runs of 3+ characters, so a
-# query term shorter than this can never match anything (Issue #274) — it
+# query term shorter than this can never match anything — it
 # silently drops that term's contribution to the AND-ed match instead of
 # raising an error. Surfacing this lets callers (wikicommit-search /
 # wikicommit-ask) explain an unexpected hits=0 instead of it looking like a
@@ -344,7 +344,7 @@ def _short_terms(terms: list[str]) -> list[str]:
 def _prune_short_group_terms(groups: list[list[str]]) -> list[list[str]]:
     """Warn about sub-trigram terms in expansion groups and drop them.
 
-    Two distinct outcomes, hence two distinct messages (Issue #581). A group
+    Two distinct outcomes, hence two distinct messages. A group
     that keeps at least one usable term still matches through that term, so a
     short term there is only noise being removed — expansion rescuing a short
     original via a longer synonym is a feature, and reporting it in the same

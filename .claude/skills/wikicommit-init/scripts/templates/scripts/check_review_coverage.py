@@ -1,147 +1,33 @@
 #!/usr/bin/env python3
-"""check_review_coverage.py — read the review records back (Issue #750).
+"""check_review_coverage.py — read the review records back.
 
-`record_review.py` writes one immutable file per review under
-`.wikicommit/review/`. This is the consumer that makes that tree worth having:
-without it the records would be a receptacle with nothing reading it, which is
-the shape Issue #553 rules out.
-
-It answers four questions a wiki cannot otherwise ask:
-
-- **How much of the wiki has actually been reviewed, and by what?**
-  `SUMMARY:` and `COVERAGE:`. The point is the *denominator*. The Completion
-  Notice reports failures, so a reader sees "3 findings" with no way to know
-  whether that is out of 3 pages or 300; and reporting per model is what makes
-  it possible to notice later that one model finds a certain defect and
-  another does not.
-- **What has nothing standing behind it?** `UNREVIEWED:` — no record judges the
-  page as it now stands. Almost always that means no record at all; it also
-  covers a page whose every record was `result: discarded`, which judged a draft
-  that was thrown away and therefore says nothing about the text on disk
-  (Issue #766). Those two are one list rather than two because they call for the
-  same thing — someone has to look at this page — and the line says which of the
-  two it is, so nothing is hidden by putting them together.
-- **What is most worth a human reading?** `RISKY:` — a page whose *standing*
-  review took more than one attempt, or raised findings. This is the sampling
-  blueprint, and it is exactly what evaporated when the verdict was discarded.
-  "Standing" means the newest record that judged the page as it now stands, of
-  either kind; the list therefore shrinks when a later review comes back clean,
-  rather than accumulating every page that ever had a bad day (Issue #760).
-- **Which verdicts no longer apply?** `STALE_REVIEW:`, in both of the two ways
-  a verdict can go stale: the page's own text changed after the review, or the
-  evidence under it did.
-
-The second staleness case is the one nothing else covers. A `/wikicommit-fix`
-edit sends `review_status` back to `pending` (Issue #724) so the *human* side
-self-corrects, but the machine's verdict was made against text that no longer
-exists and, before this tree, nothing recorded that it had been made at all.
-
-`STALE_REVIEW:` does not become noise, and that follows from the structure
-rather than from a threshold: Pass 4 re-runs on every regeneration, so the
-only ways a verdict outlives its page are a `/wikicommit-fix` edit and a source
-that changed underneath it.
-
-A merge's link rewrite is not counted as a change. `rewrite_merged_links.py`
-turns `[[Type/old]]` into `[[Type/new]]` in every page that linked to an
-absorbed page, and those pages keep their `review_status` — the link now names
-the page a person decided is the same concept. So when the hash does not match,
-the page is hashed again with each recorded merge (`merged_into` in
-`.wikicommit/relations.yml`) undone, one full replacement per merge; a match
-means the verdict still stands. Partial replacements are not tried, so a page
-that linked to both the kept and the absorbed page before the merge still
-reports `STALE_REVIEW:`.
-
-A rename carries the old slug's records with it (Issue #1162). `rename_page.py`
-leaves the records under the old path — they are immutable and name the page
-they judged — and records the rename in `relations.yml` as a merge item with
-`renamed_at`. The AI records of every earlier slug down that chain are read as
-the renamed page's own (`load_page_records()`; a human sign-off does not carry
-over), so the page does not read as never
-reviewed when Pass 4's check of its unchanged text still exists. The title did
-change, so the verdict is measured like any other and normally comes out as
-`STALE_REVIEW:` — the line names the old slug, and `/wikicommit-review` on the
-new page clears it. A rename that changed only the slug leaves the original
-page's text as the review judged it, and its verdict stands. A translation's
-does not: its `translated_from` now names the new path, so it reads as
-`STALE_REVIEW:`, and `check_translation_status.py` reports the translation as
-`STALE:` as well — `/wikicommit-translate` redoes it (Issue #1246). Only renames are followed: a merge
-regenerates the kept page, and Pass 4 writes a new record for it.
-
-## Which records each line reads
-
-Every per-page line and every count reads the *standing* record: the newest one
-that actually judged the page as it now stands. Only the kind it has to be
-differs:
-
-- `SUMMARY: ai_reviewed` / `COVERAGE:` — the standing **AI** record, so a model
-  is credited with its latest surviving verdict for a page rather than with
-  every verdict it ever wrote for it.
-- `SUMMARY: human_reviewed` — the standing **human** record.
-- `SUMMARY: human_notes` — how many of those left a prose note (Issue #952).
-  It counts **presence, not content**: a one-word note and a paragraph are both
-  one, so this measures whether the ask reached anyone, not whether the page was
-  read. Closing with no comment is a legitimate way to close (Issue #762) and is
-  not reported as a defect anywhere — this number is the only place the
-  difference shows at all.
-- `UNREVIEWED:` — printed when there is no standing record of either kind.
-- `RISKY:` — the standing record of **any** kind (Issue #760).
-- `STALE_REVIEW:` / `RETRACTED_EVIDENCE:` — the standing **AI** record
-  (`standing_verdict()`), because staleness is measured against the machine's
-  evidence list.
-
-That single definition is the whole of Issue #766. Before it, the counts and
-`UNREVIEWED:` used a different rule from the three per-page verdict lines: they
-read the newest AI record whether or not it had judged anything, and treated
-"has a record" as "has been reviewed". A page whose only records were
-`result: discarded` therefore appeared in **no** per-page line at all while
-`SUMMARY:` and `COVERAGE:` counted it as reviewed — `COVERAGE:` could report a
-page with `attempts>=2` that `RISKY:` stayed silent about, and a model could be
-credited with covering a page it never successfully judged. That is not a
-contrived state: Pass 4 records a discarded review for an `action: update`
-entity that exhausts `max_retries`, and a page generated before this tree
-existed has no earlier record to fall back on.
-
-Discarded attempts are still visible, in two places rather than folded into a
-number that overstates coverage. Each `COVERAGE:` line carries its own count of
-the pages whose **newest AI record** is a discarded one that model wrote — which
-is what makes a quiet `RISKY:` legible instead of contradictory — and
-`SUMMARY: findings=` still totals their findings.
-
-That column is keyed on the page's newest AI record rather than on each model's
-own newest, and deliberately so: it exists to explain a `RISKY:` line that is
-missing, and once *any* later review has judged the current text there is no
-missing line left to explain. A model whose discarded attempt was superseded by
-another model's verdict therefore gets no count here.
-
-`SUMMARY: findings=` is the deliberate exception to the standing rule: it is a
-running tally of how much reviewing has caught over the wiki's life, which is a
-historical quantity and correctly cumulative, so it counts discarded reviews
-too (Issue #760, reaffirmed as out of scope by Issue #766).
-
-## No thresholds, no automation
-
-Nothing here decides anything. There is no pass mark, no percentage a wiki has
-to reach, and no action taken. A human reads `RISKY:` and `COVERAGE:` and
-decides whether to read a page or run `/wikicommit-generate --regenerate`
-(Issue #578); that closes the loop by hand, which is the right place for it
-until there is real data to set a threshold from. A number invented before the
-measurement exists is a guess wearing a decimal point.
-
-## Orphaned records are deliberately not reported
-
-Records outlive their pages by design, so a deleted page leaves a directory
-behind. Whether that is worth reporting is a question to answer once real
-repositories have accumulated some — reporting it now would add a line to
-every run in exchange for nothing anyone has asked for (Issue #750 検討事項 3).
+Reads what `record_review.py` wrote under `.wikicommit/review/` and reports how
+much of the wiki has been reviewed and which pages need a look. Every per-page
+line and count reads the *standing* record — the newest one that judged the
+page as it now stands (non-empty `page_content_hash`); `SUMMARY: findings=` is
+the one cumulative exception.
 
 Usage:
     python .wikicommit/scripts/check_review_coverage.py
     python .wikicommit/scripts/check_review_coverage.py --discarded-reason <page>...
 
-The second form answers one narrow question for `/wikicommit-merge` Step 9 —
-why a page in `failed_pages` was thrown away — and reports nothing else.
+Output (default mode):
+    SUMMARY: pages=<N>, ai_reviewed=<N>, human_reviewed=<N>, human_notes=<N>, findings=<N>, models=<N>
+    COVERAGE: <model> <N> pages, <N> findings, <N> pages with attempts>=2, <N> discarded
+    UNREVIEWED: <page> [(<why no record stands>)]
+    RISKY: <page> (attempts=<N>, findings=<N>)
+    STALE_REVIEW: <page> (<reason>)
+    RETRACTED_EVIDENCE: <page> (the review of <date> rested on <source>, since retracted)
+    WARNING: <record file>: <why it could not be read>
+    NOTE: .wikicommit/review/ does not exist yet; no reviews have been recorded.
+
+Output (`--discarded-reason`): `REASON:` with indented findings, `NO_RECORD:`,
+`ERROR:` for a path outside the page trees, and `SUMMARY: pages=, with_reason=`.
 
 Exit code: always 0 (informational, non-blocking).
+
+The full specification is the `check_review_coverage.py` section of the
+WikiCommit script specification (ScriptSpec).
 """
 
 import argparse
@@ -156,7 +42,14 @@ from _frontmatter import (
     parse_frontmatter_and_body_text,
     parse_frontmatter_or_warn,
 )
-from _wikilink import ENTITY_DIR, VIEW_DIR, WIKILINK_RE, collect_entity_pages, collect_view_pages
+from _wikilink import (
+    ENTITY_DIR,
+    VIEW_DIR,
+    WIKILINK_RE,
+    collect_entity_pages,
+    collect_view_pages,
+    retarget_wikilink,
+)
 from record_review import (
     ACCEPTED_PREFIXES,
     REVIEW_DIR,
@@ -180,17 +73,10 @@ def load_records(page_rel: str) -> list[dict]:
     name, so plain lexical order would hand back the oldest record of that second
     as the newest.
 
-    Each record is read **once**, through `parse_frontmatter_and_body_text()`
-    rather than `parse_frontmatter_or_warn()`, because `human_notes` (Issue #952)
-    needs the prose body as well as the frontmatter — and returning both from one
-    split is the whole reason that function exists. Reaching for the body in a
-    second pass would open and YAML-parse the same file twice on every run,
-    including `--discarded-reason`, which never looks at a body at all; worse, a
-    read that succeeded the first time and failed the second would drop the note
-    silently and undercount, because there is nothing at that point that could
-    tell an absent body from an unreadable one. The warning text below is
-    `parse_frontmatter_or_warn()`'s, character for character, so a malformed
-    record still reports exactly as it did.
+    Each record is read **once**, frontmatter and body together, because
+    `human_notes` needs the body: a second read could fail where the first
+    succeeded and silently undercount. The warning text matches
+    `parse_frontmatter_or_warn()`'s.
     """
     directory = record_dir_for(page_rel)
     if not directory.is_dir():
@@ -209,11 +95,8 @@ def load_records(page_rel: str) -> list[dict]:
         if fm:
             fm["_file"] = str(record_file)
             if fm.get("kind") == "human":
-                # Kept only for `kind: human`, and that restriction is about
-                # meaning rather than cost: a `kind: ai` body holds Pass 4's
-                # non-blocking observations (Issue #834), which are not a trace of
-                # a person having read the page. Counting both would make one
-                # number stand for two different things.
+                # Only `kind: human`: an AI body holds Pass 4's observations,
+                # not a trace of a person having read the page.
                 fm["_body"] = body.strip()
             records.append(fm)
     return records
@@ -222,10 +105,8 @@ def load_records(page_rel: str) -> list[dict]:
 def latest_by_kind(records: list[dict], kind: str) -> dict | None:
     """The most recent record of one kind, or None — judged page or not.
 
-    Coverage and the per-page lines all read `standing_review()` instead
-    (Issue #766). The one thing left that has to see a discarded record is the
-    `discarded` column of `COVERAGE:`, whose whole subject is the attempt that
-    was thrown away.
+    Coverage and the per-page lines all read `standing_review()` instead. Only
+    the `discarded` column of `COVERAGE:` has to see a discarded record.
     """
     matching = [r for r in records if r.get("kind") == kind]
     return matching[-1] if matching else None
@@ -238,10 +119,8 @@ def standing_review(records: list[dict], kind: str | None = None) -> dict | None
     written for it to hash — so it says nothing about the page on disk and is
     skipped here whatever its kind.
 
-    `kind=None` accepts a human record as readily as a machine one. That matters
-    for `RISKY:` (Issue #760): `/wikicommit-review` can write `--result fail` with
-    findings, so restricting the search to `kind: ai` would drop a human's findings
-    on the floor instead of surfacing them.
+    `kind=None` accepts a human record as readily as a machine one, so `RISKY:`
+    surfaces a human's `--result fail` findings too.
     """
     for record in reversed(records):
         if kind is not None and record.get("kind") != kind:
@@ -259,13 +138,10 @@ def standing_verdict(records: list[dict]) -> dict | None:
     about the page now on disk, and must not be the record staleness is measured
     against.
 
-    That distinction is not theoretical. Pass 4 step 5 records a discarded review
-    for an `action: update` entity too, and there the pre-existing page *stays* on
-    disk untouched while `reviewed_sources` is built from `--sources-from` — the
-    source that was being ingested, which is precisely the source the page does not
-    carry. Measured against the page, that record reports `source no longer on the
-    page` on every run forever, and, by being the newest AI record, it also hides
-    the earlier verdict that does still stand behind the page's text.
+    For an `action: update` entity the old page stays on disk while the
+    discarded record's `reviewed_sources` names the source being ingested, so
+    measuring against it would report `source no longer on the page` forever and
+    hide the verdict that still stands.
     """
     return standing_review(records, kind="ai")
 
@@ -273,7 +149,7 @@ def standing_verdict(records: list[dict]) -> dict | None:
 def source_identity(entry: dict) -> str | None:
     """The identity a source entry is matched on: its `url` or its `path`.
 
-    Same key `add_source.py` matches registration on (Issue #572 / #573) and
+    Same key `add_source.py` matches registration on and
     `check_retracted_sources.py` matches retraction on, so a management file
     written under an older naming rule still lines up.
     """
@@ -305,13 +181,13 @@ def source_versions(entries: list) -> dict[str, str]:
 
 def page_source_entries(fm: dict) -> list:
     # The same function record_review.py snapshots with, so a translation's
-    # `translated_from` / `source_commit` (Issue #1031) is compared like any
-    # other evidence entry instead of reading as "no longer on the page".
+    # `translated_from` / `source_commit` is compared like any other evidence
+    # entry instead of reading as "no longer on the page".
     return page_evidence_entries(fm)
 
 
 def collect_retracted_identities(source_dir: Path = SOURCE_DIR) -> set[str]:
-    """Identities of sources a human has retracted (Issue #737)."""
+    """Identities of sources a human has retracted."""
     retracted: set[str] = set()
     if not source_dir.exists():
         return retracted
@@ -436,7 +312,7 @@ def load_page_records(page_rel: str) -> list[dict]:
 
     The records stay where they were written (they name the page they judged), so
     a renamed page would otherwise have none and read as `UNREVIEWED:` although
-    Pass 4 checked its text (Issue #1162). Each inherited record carries
+    Pass 4 checked its text. Each inherited record carries
     `_renamed_from` (the old Type/slug) so a staleness line can say why the text
     differs. Only `kind: ai` records are inherited: the rename withdraws a
     person's sign-off. Only entity pages are renamed; a view page reads its own
@@ -469,8 +345,10 @@ def load_page_records(page_rel: str) -> list[dict]:
 
 
 def _undo_rewrite(text: str, old: str, new: str) -> str:
+    # Mirrors rewrite_merged_links.py's swap(), which keeps the display text of
+    # `[[Type/slug|表示名]]` and changes only the target.
     return WIKILINK_RE.sub(
-        lambda m: f"[[{old}]]" if f"{m.group(1)}/{m.group(2)}" == new else m.group(0), text
+        lambda m: retarget_wikilink(m, old) if f"{m.group(1)}/{m.group(2)}" == new else m.group(0), text
     )
 
 
@@ -564,16 +442,14 @@ def _where(finding: dict) -> str:
     `source_file` itself is never printed: for a source document it holds a path
     under `.wikicommit/.cache/`, which is gitignored and machine-local, so it
     means nothing in another clone or after the cache is cleared. Which *kind* of
-    file it names is still worth saying, and that is decided the same way Issue
-    #566 decided it — a path inside the entity or view tree is another page,
-    anything else is the source text.
+    file it names is decided as Pass 4 check 8 does — a path inside the entity or
+    view tree is another page, anything else is the source text.
     """
     lines = finding.get("source_lines")
     if not lines:
         return ""
     source_file = str(finding.get("source_file") or "")
-    # `ACCEPTED_PREFIXES` already carries the pre-Issue-#477 `.wikicommit/wiki/`
-    # prefix as its third entry, so this one test covers the legacy path too.
+    # `ACCEPTED_PREFIXES` includes the legacy `.wikicommit/wiki/` prefix.
     if source_file.startswith(ACCEPTED_PREFIXES):
         return f" at lines {_one_line(lines)} of another page"
     return f" at lines {_one_line(lines)} of the extracted source text"
@@ -583,15 +459,12 @@ def print_discarded_reasons(page_rels: list[str]) -> int:
     """Print why each page was discarded, for `/wikicommit-merge` Step 9.
 
     The management file's `## Failure Reason` section is deleted on the `partial`
-    branch by design, and `partial` is the ordinary shape of a failure — so on
-    the tracking Issues Step 9 creates most often, that section is structurally
-    absent and the reason reads `unknown` (Issue #969). The reason does exist; it
-    is in the review record this same run wrote (Issue #750).
+    branch, the ordinary shape of a failure, so the reason has to come from the
+    `result: discarded` review record the same run wrote.
 
-    Reported separately from having no reason at all: `NO_RECORD:` says the
-    record tree holds nothing for this page, which is the normal state for a
-    failure that predates Issue #750 or a repository without `.wikicommit/review/`.
-    Collapsing the two into one silent `unknown` is what this mode exists to stop.
+    `NO_RECORD:` says the record tree holds nothing for this page (a failure
+    from before the tree existed, or no `.wikicommit/review/`) — "no reason was
+    recorded", which is not the same as "reason unknown".
     """
     with_reason = 0
     for page_rel in page_rels:
@@ -630,11 +503,9 @@ def print_discarded_reasons(page_rels: list[str]) -> int:
             # is more than `unknown` said.
             print("  (the record names no finding)")
             continue
-        # A discarded record holds every round flattened together (Issue #571: each
-        # round can raise a *different* defect), so without the round number a page
-        # thrown away after three attempts reads as three simultaneous problems.
-        # Only said when there is more than one, so the ordinary single-round
-        # record stays as short as it was.
+        # A discarded record holds every round flattened together, and each round
+        # can raise a different defect; without the round number three attempts
+        # read as three simultaneous problems. Single-round records omit it.
         rounds = {f.get("round", 1) for f in findings if isinstance(f, dict)}
         multi_round = len(rounds) > 1
         for finding in findings:
@@ -656,12 +527,9 @@ def main() -> int:
         "--discarded-reason",
         dest="discarded_reason",
         metavar="<page>",
-        # `*` rather than `+`: Step 9 also targets a source caught in Pass 1, whose
-        # `failed_pages` is empty (Issue #910), and there the caller's expansion
-        # leaves the flag with no values. `+` answers that with an argparse usage
-        # error and exit 2 — breaking the always-0 contract on a path the caller
-        # cannot distinguish from "this build has no such mode". Zero pages is a
-        # question with a real answer, and it is `pages=0`.
+        # `*` rather than `+`: for a source that failed in Pass 1 `failed_pages` is
+        # empty and the flag arrives with no values. `+` would exit 2, which the
+        # caller cannot tell from "no such mode"; the real answer is `pages=0`.
         nargs="*",
         help=(
             "Print why each named page was discarded, taken from the newest "
@@ -713,22 +581,19 @@ def main() -> int:
         page_rel = page.as_posix()
         records = load_page_records(page_rel)
 
-        # The one deliberate exception to the standing rule (Issue #760, kept out
-        # of scope by Issue #766): a running tally over the whole history, so a
-        # finding a discarded review caught still counts toward what reviewing has
-        # caught over this wiki's life.
+        # The one deliberate exception to the standing rule: a running tally over
+        # the whole history, discarded reviews included.
         total_findings += sum(len(r.get("findings") or []) for r in records)
 
         # Credited before the `continue` below, because the page this matters most
-        # for is the one with nothing but discarded records — the case that used to
-        # fall through every line silently.
+        # for is the one with nothing but discarded records.
         newest_ai = latest_by_kind(records, "ai")
         if newest_ai is not None and newest_ai.get("result") == "discarded":
             model = str(newest_ai.get("model") or "(unrecorded)")
             by_model.setdefault(model, [0, 0, 0, 0])[3] += 1
 
         # Everything below reads the standing record — the newest one that judged
-        # the page as it now stands (Issue #766). A page can hold records and still
+        # the page as it now stands. A page can hold records and still
         # have none standing: every one of them may have been discarded, and a
         # discarded review judged a draft that was thrown away.
         standing_ai = standing_verdict(records)
@@ -739,12 +604,9 @@ def main() -> int:
             # told the second exists can go and look at why the reviews kept being
             # thrown away.
             #
-            # The reason is read off `result`, not off the empty hash that made the
-            # record non-standing: those two coincide for everything
-            # `record_review.py` writes, but a record a human wrote by hand — which
-            # this tree is explicitly meant to allow (Issue #750) — can simply lack
-            # `page_content_hash`, and telling its author it "was discarded" would
-            # send them looking for a discarded review that never existed.
+            # The reason is read off `result`, not off the empty hash: a record a
+            # human wrote by hand can lack `page_content_hash` without having been
+            # discarded.
             note = ""
             if records:
                 if all(r.get("result") == "discarded" for r in records):
@@ -771,30 +633,15 @@ def main() -> int:
         standing_human = standing_review(records, kind="human")
         if standing_human is not None:
             human_reviewed += 1
-            # The note a closer left is the only artefact that backs up
-            # `Read by <login>` (Issue #952). Route A's close records
-            # `reviewed_by` and a `Reviewed-by:` trailer, but both say only who
-            # closed the Issue — neither is a trace of the page having been
-            # read, and §6.3 states outright that a delegated close cannot be
-            # vouched for by machine. What is counted here is presence, not
-            # content: a one-word note and a paragraph are both one.
+            # The note is the only trace that the page was read rather than just
+            # closed. Presence, not content: a one-word note counts as one.
             if standing_human.get("_body"):
                 human_notes += 1
 
-        # `RISKY:` reads exactly one record: the newest review that judged the page
-        # as it now stands (Issue #760). Summing over the whole history instead —
-        # what this did originally — meant a page that was ever retried or ever drew
-        # a finding stayed on the list forever, because records are immutable and
-        # never deleted (Issue #750). In a wiki that keeps ingesting, the sampling
-        # list therefore converged on the whole wiki, and at that point it selects
-        # nothing; Issue #562 already recorded what happens to a finding that is
-        # always lit.
-        #
-        # The "it took two rounds to pass" signal Issue #750 called the one most
-        # worth having is *not* lost by this: that review is the standing one, and
-        # it carries its own `attempts: 2`. It only stops being reported once a
-        # later review has judged the current text, which is exactly when it stops
-        # describing the page.
+        # `RISKY:` reads exactly one record, the standing one. Summing over the
+        # immutable history would keep every page that was ever retried on the
+        # list forever, until it selects nothing. A page that passed on round two
+        # still shows: its standing record carries `attempts: 2`.
         attempts = int(standing_any.get("attempts") or 1)
         standing_findings = len(standing_any.get("findings") or [])
         if attempts >= 2 or standing_findings:
@@ -810,9 +657,8 @@ def main() -> int:
             for reason in stale_reasons(page, fm, standing_ai):
                 stale.append(f"STALE_REVIEW: {page_rel} ({reason})")
 
-            # Issue #750 検討事項 7. `check_retracted_sources.py` already reports
-            # pages that still name a retracted source, so repeating that here
-            # would be a second copy of the same finding. What only a review
+            # `check_retracted_sources.py` already reports pages that still name a
+            # retracted source. What only a review
             # record can say is whether the retracted source was *evidence for a
             # verdict* — that the review rested on material since withdrawn,
             # rather than the source merely having been added afterwards.
@@ -832,7 +678,7 @@ def main() -> int:
     for model in sorted(by_model):
         page_count, finding_count, retried, discarded = by_model[model]
         # `discarded` is what keeps a quiet `RISKY:` legible rather than
-        # contradictory (Issue #766): the first three numbers describe verdicts
+        # contradictory: the first three numbers describe verdicts
         # that stand, this one counts the pages whose newest AI record is a
         # discarded one this model wrote, and so describes nothing on disk. It is
         # keyed on the page's newest AI record, not on this model's own newest —

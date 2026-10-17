@@ -27,14 +27,14 @@ from _frontmatter import parse_frontmatter_text
 SOURCE_DIR = Path(".wikicommit/source")
 
 # Only used to locate the frontmatter block for the status: rewrite below —
-# out of scope for the _frontmatter.py consolidation (Issue #231), which
-# covers read-side parsing only; this write-side logic is a separate concern.
+# out of scope for _frontmatter.py, which covers read-side parsing only; this
+# write-side logic is a separate concern.
 FRONTMATTER_RE = re.compile(r"^---\r?\n(.*?)\r?\n---\r?\n?", re.DOTALL)
 
-# `retracted` (Issue #737) is deliberately absent, the way `outdated` is absent
-# from reconcile_ingest_status.py's targets (Issue #474): a human retracted that
-# source, and rewriting it to `outdated` on a hash mismatch would put it back in
-# Pass 1's collection list — touching the source file by one byte would lift the
+# `retracted` is deliberately absent, the way `outdated` is absent from
+# reconcile_ingest_status.py's targets: a human retracted that source, and
+# rewriting it to `outdated` on a hash mismatch would put it back in Pass 1's
+# collection list — touching the source file by one byte would lift the
 # retraction, silently. Only a human can set or clear this status.
 CHECKABLE_STATUSES = {"generated", "partial", "outdated"}
 

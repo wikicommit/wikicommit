@@ -24,6 +24,14 @@ Then report the run record's path and elapsed time along with the following. The
 - The warning total Step 3 carried forward, and that it was written into the PR body (omit if there were none)
 - The list of `<new source files>` included in the bulk update PR from Step 2 item 3 (omit if none)
 - The list of tracking Issues newly created in Step 8 (page path, Issue number)
-- Any pages skipped in Step 8, with reasons (frontmatter YAML parse failed during the extraction scan / an open tracking Issue already exists / issue creation error)
+- Any pages skipped in Step 8, with reasons (frontmatter YAML parse failed during the scan / issue creation error), and whether the open tracking Issues could not be read (then nothing was filed and the next merge picks the pages up)
 - The list of generation-failure tracking Issues newly created in Step 9 (source management file path, Issue number)
-- Any management files skipped in Step 9, with reasons (frontmatter YAML parse failed during the extraction scan / an open tracking Issue already exists / issue creation error)
+- Any management files skipped in Step 9, with reasons (frontmatter YAML parse failed during the scan / issue creation error), and whether the open generation-failure Issues could not be read
+
+The scans' `WARNING:` lines (a file whose frontmatter could not be parsed, open Issues that could not be read) came in the workflow engine's `notes`, and a step with nothing to file was skipped without being handed to you. If they are no longer in front of you, print them again:
+
+```bash
+python <this Skill's directory>/scripts/workflow_checks.py target-warnings --run <run>
+```
+
+A step that was skipped filed nothing because nothing needed an Issue: count it as 0.

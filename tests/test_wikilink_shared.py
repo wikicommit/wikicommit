@@ -263,3 +263,40 @@ def test_collect_entity_pages_returns_empty_for_a_missing_tree(tmp_path):
 
 def test_template_copy_matches_canonical_module():
     assert TEMPLATE_SCRIPT.read_text(encoding="utf-8") == SCRIPT.read_text(encoding="utf-8")
+
+
+# ── Display text and malformed `[[...]]` (Issue #1304) ─────────────────────────
+
+def test_wikilink_re_accepts_display_text_as_group_3():
+    m = _wikilink.WIKILINK_RE.search("x [[custom/Decision/adopt-quartz|Quartz を採用]] y")
+    assert m.groups() == ("custom/Decision", "adopt-quartz", "Quartz を採用")
+    m = _wikilink.WIKILINK_RE.search("| [[Person/a\\|A]] |")
+    assert m.groups() == ("Person", "a", "A")
+    assert _wikilink.extract_wikilinks("[[Person/a|A]] [[Person/b]]") == [("Person", "a"), ("Person", "b")]
+
+
+def test_wikilink_re_rejects_empty_or_bracketed_display_text():
+    for text in ("[[Person/a|]]", "[[Person/a| ]]", "[[Person/a|b|c]]", "[[Person/a|x\ny]]"):
+        assert _wikilink.WIKILINK_RE.search(text) is None, text
+
+
+def test_retarget_wikilink_keeps_everything_after_the_slug():
+    out = _wikilink.WIKILINK_RE.sub(
+        lambda m: _wikilink.retarget_wikilink(m, "Person/new"),
+        "[[Person/old]] [[Person/old|旧]] [[Person/old\\|旧]]",
+    )
+    assert out == "[[Person/new]] [[Person/new|旧]] [[Person/new\\|旧]]"
+
+
+def test_find_malformed_wikilinks_lists_what_wikilink_re_rejects():
+    text = textwrap.dedent("""\
+        [[Person/a]] [[Person/a|A]] [[a]] [[Person/a#h]] [[knows::Person/a]] [[Person//a]]
+        `[[inline]]`
+
+        ```
+        [[fenced]]
+        ```
+        """)
+    assert _wikilink.find_malformed_wikilinks(text) == [
+        "[[a]]", "[[Person/a#h]]", "[[knows::Person/a]]", "[[Person//a]]",
+    ]

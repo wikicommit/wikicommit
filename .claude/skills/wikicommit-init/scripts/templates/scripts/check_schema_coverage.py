@@ -7,12 +7,12 @@ whether a matching file exists under .wikicommit/schema/
 (schema:Person -> Person.md, schema:custom/Decision -> custom/Decision.md).
 Falling back to default.md does not count as "covered" — a type that only
 resolves via the default.md fallback is exactly the coverage gap
-wikicommit-schema-propose (Issue #285) exists to detect and fill.
+wikicommit-schema-propose exists to detect and fill.
 
 Type strings are aggregated by exact match only — no normalization or fuzzy
-matching (kept deterministic and simple; a known limitation documented in
-Issue #285's design notes: the same real-world concept can end up split
-across multiple slightly different type strings over time).
+matching (kept deterministic and simple; a known limitation: the same
+real-world concept can end up split across multiple slightly different type
+strings over time).
 
 Usage:
     python .wikicommit/scripts/check_schema_coverage.py

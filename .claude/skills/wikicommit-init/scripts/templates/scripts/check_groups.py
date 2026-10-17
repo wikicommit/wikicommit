@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report on group files: unclassified pages, stale members, invalid files (Issue #1035).
+"""Report on group files: unclassified pages, stale members, invalid files.
 
 Usage:
     python .wikicommit/scripts/check_groups.py
@@ -8,7 +8,7 @@ Usage:
 Without --type: one `TYPE:` line per group file under `.wikicommit/groups/`, plus
 an `ERROR:` line for each file that cannot be used. `/wikicommit-status` reads
 this. A Type with no group file is not reported at all — reporting it would light
-every Type all the time, and a line that is always on stops being read (Issue #562).
+every Type all the time, and a line that is always on stops being read.
 
 With --type: the detail `/wikicommit-organize` needs — each group, each slug the
 file names that no longer has a page (`STALE_MEMBER:`), and each page no group

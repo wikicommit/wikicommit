@@ -61,6 +61,9 @@ PR の種別（追加 / 削除）によって挙動が異なる。
 | 追加・変更：存在しないページへの WikiLink（同じ slug が別 Type に実在する） | blocking（Issue #563。参照先の実体は在り、正しい対処はリンクの Type セグメント 1 語の修正であるため、下記 Issue #340 の緩和理由が当てはまらない。ERROR メッセージが実在する Type を名指しする） |
 | 追加・変更：存在しないページへの WikiLink（どの Type にも実体なし） | warning のみ（Issue #340 で blocking から緩和。ブロックすると書き手が「まだ無い概念は WikiLink 化せず地の文で書く」を選びがちになり、繰り返し言及される概念がページ化されないまま埋もれるため。集計は `check_wanted_pages.py` が別途担う。なお同一コミット内で新規追加されるページへのリンクはそもそもリンク先候補として扱い、この行の対象にならない） |
 | 削除フロー：削除対象ページへの被リンクが残っている | warning のみ |
+| 追加・変更：`[[...]]` だが WikiLink の形に合わない（Type の無い `[[slug]]`・`#見出し`・`Prop::`・空の表示名など） | warning のみ（Issue #1304。どのチェックも解決・集計せず、書かれたまま公開されるため報告だけはする。直し方は 1 語の書き換えで、ブロックすると地の文に逃げる点は Issue #340 と同じ。コードフェンス・インラインコードの中は対象外。引数なしの実行でも全ページについて出るが、`wikicommit-status` は `check_wikilinks.py` の `ERROR:` 行しか拾わないため status の報告には載らない） |
+
+別名付きの `[[Type/slug|表示名]]`（表の中の `[[Type/slug\|表示名]]` も）は WikiLink であり、上の各行を `[[Type/slug]]` と同じに受ける（Issue #1304）。
 
 ---
 
@@ -72,7 +75,7 @@ PR の種別（追加 / 削除）によって挙動が異なる。
 |---|---|
 | ページ本文に生 HTML タグ（`<tag ...>` / `</tag>`）が含まれる | blocking（Issue #377） |
 
-frontmatter は対象外。コードフェンス・インラインコードで囲まれた範囲、および CommonMark のオートリンク（`<https://example.com>`）は除外する。
+frontmatter は対象外。判定は CommonMark パーサ（`markdown-it-py`）の生 HTML のトークンで行い（Issue #1322）、パーサがコードとして読む範囲（コードフェンス・インラインコード）と CommonMark のオートリンク（`<https://example.com>`）は検出されない。`markdown-it-py` が無ければ ERROR で止まる（検査できないときは通さない）。
 
 **許可リストは持たない**（「危険なタグだけ禁止」ではなく「生 HTML 自体を禁止」）。画像・動画・YouTube の埋め込みは標準 Markdown 構文 `![alt](path-or-url)` だけで足りるため、ページ本文が生 HTML を必要とする正当なケースが存在しない。一方 Quartz コアは `allowDangerousHtml` を常時有効にしており、経路 A では `review_status: pending` の LLM 生成ページが人間のレビュー前に公開されるため、ソース文書由来の `<script>` / `<iframe>` がそのまま実行されうる。詳細は [DesignDoc-publish.md](DesignDoc-publish.md) §8.6 参照。
 

@@ -18,10 +18,11 @@ from check_skill_md_lines import instruction_files  # noqa: E402
 
 SKILLS = Path(__file__).parent.parent / ".claude" / "skills"
 FETCH_SITES = [
-    ("wikicommit-merge", "labels=wikicommit-review&state=open&per_page=100"),
-    ("wikicommit-merge", "labels=wikicommit-generation-failure&state=open&per_page=100"),
     ("wikicommit-review", "labels=wikicommit-review&state=open&per_page=100"),
 ]
+# wikicommit-merge fetches from its script step rather than from its instructions
+# (Issue #1266): one f-string serves both labels.
+MERGE_CHECKS = SKILLS / "wikicommit-merge" / "scripts" / "workflow_checks.py"
 
 
 def _instruction_files():
@@ -52,3 +53,15 @@ def test_each_fetch_site_uses_the_paginated_rest_list(skill, query):
     assert "select(.pull_request | not)" in text[start:start + 200], (
         f"{skill}: the REST issues list also returns PRs; the {query} fetch must drop them"
     )
+
+
+def test_merge_fetches_both_labels_with_the_paginated_rest_list():
+    text = MERGE_CHECKS.read_text(encoding="utf-8")
+    query = 'f"repos/{{owner}}/{{repo}}/issues?labels={label}&state=open&per_page=100"'
+    assert query in text
+    start = text.index(query)
+    assert "--paginate" in text[start:start + 200]
+    assert "select(.pull_request | not)" in text[start:start + 200]
+    assert "gh\", \"issue\", \"list" not in text.replace("'", '"')
+    for label in ("review", "generation-failure"):
+        assert f'f"{{_W}}-{label}"' in text, label

@@ -67,6 +67,24 @@ name: Sync review_status on tracking-issue close
 # deploy.yml explicitly — `workflow_dispatch` is the documented exception to
 # that guard, and deploy.yml already declares it. Dispatching needs
 # `actions: write`, added to the permissions block below.
+#
+# Issue #1323: GitHub's close dialog offers more than one reason, and only
+# "completed" can mean "read it, nothing looked wrong" — the two things
+# `reviewed` asserts. "Not planned" usually means "won't fix" or "this page
+# should not exist", and "duplicate" says nothing about whether anyone read
+# the page. The "Resolve target page" step therefore proceeds only when
+# github.event.issue.state_reason is exactly "completed" (checked after the
+# missing-page and `status: removed` skips, which stay silent); any other value,
+# including an empty one (closed through the API with no reason), writes
+# nothing and leaves the page `pending`. The check lives in that step rather
+# than in the job's `if:` so the skip and its reason show up in the run log,
+# the same way the `status: removed` skip does. `gh issue close` without
+# `--reason` still lands as "completed", so an operator's ordinary CLI close
+# is unaffected. Because the person who closed it cannot see that nothing
+# happened, the "Explain a skipped close" step comments on the Issue once per
+# such close, which needs `issues: write` (previously `read`). Reopening and
+# closing again as "completed" then runs this workflow again normally;
+# reopening by itself still does nothing (the Issue #313 known gap above).
 
 on:
   issues:
@@ -75,7 +93,7 @@ on:
 permissions:
   actions: write
   contents: write
-  issues: read
+  issues: write
   pull-requests: write
 
 jobs:
@@ -101,6 +119,7 @@ jobs:
         id: resolve
         env:
           ISSUE_BODY: ${{ github.event.issue.body }}
+          STATE_REASON: ${{ github.event.issue.state_reason }}
         run: |
           python3 - <<'PY'
           import os
@@ -139,6 +158,22 @@ jobs:
               emit(proceed="false")
               sys.exit(0)
 
+          # A page taken down by /wikicommit-remove or by a merge stays on disk at
+          # `status: removed`. Its tracking Issue is closed because the page is gone,
+          # not because a person read it, so recording it as `reviewed` with a human
+          # review record would claim a reading that never happened (Issue #1131).
+          import yaml
+          with open(path, encoding="utf-8") as f:
+              fm = re.match(r"^\ufeff?---\r?\n(.*?)\r?\n---", f.read(), re.DOTALL)
+          try:
+              front = yaml.safe_load(fm.group(1)) if fm else None
+          except yaml.YAMLError:
+              front = None
+          if isinstance(front, dict) and front.get("status") == "removed":
+              print(f"{path} is at status: removed; skipping (closing its Issue is not a review).")
+              emit(proceed="false")
+              sys.exit(0)
+
           # An entity page's path is .wikicommit/entity/<lang>/<Type>/<slug>.md
           # (<Type> may itself contain a "/" for custom types, e.g. custom/Decision).
           # A view page's is .wikicommit/view/<lang>/<slug>.md with no Type segment at
@@ -164,8 +199,43 @@ jobs:
           # (e.g. custom/Decision) — flatten it, same as wikicommit-merge Step 8.
           type_slug = type_.replace("/", "-")
 
+          # Only "completed" can stand for "read it and nothing looked wrong".
+          # "not_planned", "duplicate", and no reason at all leave the page
+          # pending: `reviewed` is an assertion, so without grounds it is not made.
+          # This runs after the skips above on purpose: an Issue for a page that
+          # is gone or at `status: removed` (typically closed as "not planned" or
+          # "duplicate" after /wikicommit-remove or a merge) must stay a quiet
+          # skip, not get a comment telling the closer to reopen it.
+          # The value is reduced to [a-z_] before it reaches GITHUB_OUTPUT.
+          state_reason = os.environ.get("STATE_REASON") or ""
+          if state_reason != "completed":
+              shown = re.sub(r"[^a-z_]", "", state_reason.lower()) or "none"
+              print(f"Issue was closed with state_reason={shown}, not completed; "
+                    "skipping (only a close as completed marks the page reviewed).")
+              emit(proceed="false", not_completed="true", state_reason=shown)
+              sys.exit(0)
+
           emit(proceed="true", path=path, lang=lang, type=type_, type_slug=type_slug, slug=slug)
           PY
+
+      - name: Explain a skipped close
+        # The closer cannot see that nothing happened, so say so on the Issue.
+        if: steps.resolve.outputs.not_completed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          STATE_REASON: ${{ steps.resolve.outputs.state_reason }}
+        run: |
+          case "${STATE_REASON}" in
+            not_planned) label="not planned" ;;
+            duplicate) label="duplicate" ;;
+            none) label="no reason given" ;;
+            *) label="${STATE_REASON}" ;;
+          esac
+          # A comment that cannot be posted (a locked Issue, say) must not turn
+          # a correct skip into a failed run: nothing was meant to be written.
+          gh issue comment "${ISSUE_NUMBER}" --body "This Issue was closed as \"${label}\", so the page stays \`review_status: pending\` and no review was recorded. Only closing as \"completed\" marks the page reviewed. If you have read the page and nothing looked wrong, reopen this Issue and close it again as \"completed\"." \
+            || echo "::warning::Could not comment on Issue #${ISSUE_NUMBER}; the page was left pending as intended."
 
       - name: Rewrite review_status
         id: rewrite
@@ -219,7 +289,7 @@ jobs:
           # github.event.issue.closed_by.login (the issues-webhook payload snapshot)
           # was found to always come back empty on this event in practice (Issue
           # #403) — re-resolve it via a live API call instead of trusting the
-          # payload. Requires the `issues: read` permission declared above.
+          # payload. Requires read access to issues (`issues: write` above covers it).
           CLOSER_LOGIN=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '.closed_by.login // empty')
           if [ -z "${CLOSER_LOGIN}" ]; then
             echo "::error::Could not resolve the closer's login via the GitHub API (closed_by was empty)."

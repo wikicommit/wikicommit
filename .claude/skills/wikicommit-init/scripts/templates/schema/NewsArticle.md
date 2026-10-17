@@ -23,7 +23,19 @@ properties:
   publisher: ""
 ---
 
-(2-3 paragraph overview: what the article reports and why it matters)
+```text
+READER QUESTIONS (NewsArticle)
+Readers: someone who wants to know what happened, or someone who met the article cited and
+wants to know what it reported and on what basis.
+1. What does it report — what happened, who was involved, and when and where?
+2. Why does it matter, as the article explains it?
+3. What facts, figures, and claims does it carry? Answer this under the fixed `## Key Points`
+   heading below.
+4. Who are its sources — named people, the subject's own statements, documents — and what
+   does it say is unconfirmed or disputed?
+5. What led up to it, and what does the article say comes next?
+6. Which outlet published it, and when?
+```
 
 ## Key Points
 (one claim per bullet, each a single fact, figure, or claim the article itself reports.
@@ -33,6 +45,3 @@ each bullet to what this article states — something it only attributes to anot
 outlet is that outlet's claim, and its dates and details are not established facts
 here. Where the only backing is one named source, or the subject's own statement, say
 so in the same bullet)
-
-## Context
-(how this relates to other reporting or events; limitations of a single-source account)

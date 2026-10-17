@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Determine Quartz v5 setup status for wikicommit-init step 3.d (#229).
+"""Determine Quartz v5 setup status for wikicommit-init step 3.d.
 
 Runs `npm install` when needed and reports a single status via JSON on stdout.
 The caller (SKILL.md) maps the status to the appropriate next-steps message —
-this script only makes the (previously agent-read) state-machine decision so it
-can't be misread by the agent walking a multi-branch prose description.
+this script only makes the state-machine decision so it can't be misread by the
+agent walking a multi-branch prose description.
 
 Statuses:
   fully_set_up                        - node_modules/ and quartz/node_modules/ already exist; npm install skipped
@@ -15,10 +15,10 @@ Statuses:
 
 Whenever quartz/ already exists (fully_set_up, npm_install_completed_fully_set_up,
 npm_install_failed_submodule_exists), `npm run install-plugins` is also attempted
-best-effort and its outcome reported as the `install_plugins_ok` field (Issue #380 —
-without this, a `--no-overwrite --quartz` re-init that finds Quartz already set up
-silently drops the `npm run install-plugins` guidance entirely, since the
-"Set up Quartz v5" next-steps step that normally carries it is omitted in that case).
+best-effort and its outcome reported as the `install_plugins_ok` field. Without
+this, a `--no-overwrite --quartz` re-init that finds Quartz already set up silently
+drops the `npm run install-plugins` guidance entirely, since the "Set up Quartz v5"
+next-steps step that normally carries it is omitted in that case.
 It cannot run when quartz/ does not exist yet (first-time init, before the user has
 run `git submodule add`) — `install_plugins_ok` is absent from the JSON in that case.
 """

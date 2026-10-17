@@ -37,10 +37,9 @@ def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
     Returns ("", True) when git succeeds but the file has no commits yet
     (untracked / newly added), which the caller treats as STALE.
 
-    The pathspec is prefixed with `:(literal)` (Issue #369, same fix as
-    Issue #115) — without it, a derived_from path containing glob
-    metacharacters (`[`, `]`, `*`, `?`) could match an unrelated file
-    instead of failing cleanly.
+    The pathspec is prefixed with `:(literal)` — without it, a derived_from
+    path containing glob metacharacters (`[`, `]`, `*`, `?`) could match an
+    unrelated file instead of failing cleanly.
     """
     result = subprocess.run(
         ["git", "log", "-1", "--format=%H", "--", f":(literal){file_path}"],
@@ -54,11 +53,11 @@ def _git_head_commit(file_path: str) -> tuple[str | None, bool]:
 
 
 def collect_pages() -> list[Path]:
-    # The view tree is where `derived_from` pages are written from Issue #675
-    # on, so it is this script's main subject. The entity tree is still walked:
-    # synthesized pages written before the view tree existed stay where they
-    # are (migration is manual, old and new coexist), and dropping them here
-    # would silently stop checking the very pages this script was written for.
+    # The view tree is where `derived_from` pages are written, so it is this
+    # script's main subject. The entity tree is still walked: synthesized pages
+    # written before the view tree existed stay where they are (migration is
+    # manual, old and new coexist), and dropping them here would silently stop
+    # checking the very pages this script was written for.
     return collect_entity_pages(ENTITY_DIR) + collect_view_pages(VIEW_DIR)
 
 

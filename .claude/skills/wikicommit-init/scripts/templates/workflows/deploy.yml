@@ -39,6 +39,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          # Caches ~/.npm (the download cache), not node_modules: `npm install`
+          # still runs, it just stops re-downloading every package (Issue #1310).
+          # The root package-lock.json is not listed because a wiki repository
+          # need not commit one; the submodule's and the local plugins' are
+          # always present after the recursive checkout above.
+          cache: npm
+          cache-dependency-path: |
+            quartz/package-lock.json
+            quartz-plugins/*/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -47,6 +56,74 @@ jobs:
 
       - name: Install Python dependencies
         run: pip install pyyaml
+
+      # Quartz community plugins (Issue #1310). Without this, every deploy
+      # starts from "no plugin installed" and `npm run install-plugins` clones
+      # and builds every `source:` in quartz.config.yaml (minutes, not seconds,
+      # and `enabled: false` entries included — the installer ignores
+      # `enabled`). The installer skips a plugin when quartz.lock.json has an
+      # entry for it AND quartz/.quartz/plugins/<name> exists, so restoring
+      # both makes the remote plugins a no-op.
+      #
+      # The key is the plugin list (every plugin's `source:`, string or
+      # `{repo, subdir, name}` object, read with PyYAML so a re-pinned or
+      # re-pointed object source changes it too, while comments do not) plus
+      # the Quartz submodule commit (a Quartz update can change how plugins
+      # build) and the Node.js major the plugins were built with. No restore-keys: a
+      # partial hit would hand plugins built for another Quartz or another
+      # list to the installer, which would keep them. A `github:` source with
+      # no `#ref` stays at the commit it was cloned at for as long as the key
+      # holds — the same commit for every deploy, until the list or Quartz
+      # changes (or GitHub evicts the cache after 7 days without a deploy).
+      - name: Compute Quartz plugin cache key
+        id: plugin-key
+        run: |
+          echo "quartz=$(git -C quartz rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "node=$(node -p 'process.versions.node.split(".")[0]')" >> "$GITHUB_OUTPUT"
+          python - >> "$GITHUB_OUTPUT" <<'EOF'
+          import hashlib, json, yaml
+          with open("quartz.config.yaml", encoding="utf-8") as f:
+              config = yaml.safe_load(f) or {}
+          sources = [p.get("source") for p in (config.get("plugins") or []) if isinstance(p, dict)]
+          digest = hashlib.sha256(json.dumps(sources, sort_keys=True).encode()).hexdigest()
+          print(f"plugins={digest[:16]}")
+          EOF
+
+      - name: Restore Quartz plugins
+        uses: actions/cache@v4
+        with:
+          path: |
+            quartz/.quartz/plugins
+            quartz/quartz.lock.json
+          key: quartz-plugins-${{ runner.os }}-node${{ steps.plugin-key.outputs.node }}-${{ steps.plugin-key.outputs.quartz }}-${{ steps.plugin-key.outputs.plugins }}
+
+      # Local plugins (`source: ../quartz-plugins/<name>`) are only symlinked
+      # into quartz/.quartz/plugins (by absolute path) and can change on any
+      # commit without changing the key. Forget them so the installer re-links
+      # them on every deploy, which also regenerates quartz/.quartz/plugins/
+      # index.ts from their current exports; only the remote plugins come
+      # from the cache. Re-linking a plugin that ships a built dist/ takes
+      # about a second.
+      - name: Drop local plugins from the restored cache
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const path = require("path");
+          const lockPath = path.join("quartz", "quartz.lock.json");
+          if (!fs.existsSync(lockPath)) process.exit(0);
+          const lock = JSON.parse(fs.readFileSync(lockPath, "utf-8"));
+          const plugins = lock.plugins || {};
+          for (const [name, entry] of Object.entries(plugins)) {
+            if (!entry || entry.commit !== "local") continue;
+            const dir = path.join("quartz", ".quartz", "plugins", name);
+            try {
+              if (fs.lstatSync(dir).isSymbolicLink()) fs.unlinkSync(dir);
+              else fs.rmSync(dir, { recursive: true, force: true });
+            } catch {}
+            delete plugins[name];
+          }
+          fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + "\n");
+          EOF
 
       - name: Install dependencies
         run: npm install

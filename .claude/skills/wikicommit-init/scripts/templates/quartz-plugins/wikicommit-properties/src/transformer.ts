@@ -31,6 +31,9 @@ const defaultOptions: WikiCommitPropertiesOptions = {
   // below for how a nested-object value like this one gets flattened.
   includedProperties: ["description", "tags", "aliases", "properties"],
   excludedProperties: [],
+  // Issue #1292: prose summaries of the body, not facts for the box. See
+  // WikiCommitPropertiesOptions.proseProperties.
+  proseProperties: ["description", "abstract"],
   hidePropertiesView: false,
   delimiters: "---",
   language: "yaml",
@@ -154,6 +157,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+// A value with nothing to show: null/undefined, a blank string, or a list
+// whose every entry is itself empty. Issue #1292: an unknown or
+// inapplicable field is left out of the box rather than shown as "—" or a
+// blank row (Wikipedia's MOS:INFOBOX makes the same call — "Infobox
+// templates that contain many blank fields, question marks, or 'Unknown's
+// present an unprofessional appearance"). Pass 3 already omits a key it
+// cannot fill, but older pages and hand-written ones still carry `""`.
+export function isEmptyValue(value: unknown): boolean {
+  if (value === null || value === undefined) return true
+  if (typeof value === "string") return value.trim() === ""
+  if (Array.isArray(value)) return value.every((item) => isEmptyValue(item))
+  return false
+}
+
 // Exported (unlike upstream, which keeps this private) so build.test.ts can
 // exercise the flattening logic directly instead of driving the full
 // gray-matter + remark markdownPlugins pipeline just to reach it.
@@ -195,16 +212,33 @@ export function getVisibleProperties(
   // processed before `properties` in the default includedProperties order,
   // the guard keeps the real tags and drops the colliding nested one
   // instead of the reverse.
+  //
+  // Two more filters (Issue #1292): an empty value is never a row (see
+  // isEmptyValue()), and a nested key listed in opts.proseProperties is not
+  // flattened out — it is the body's own summary in prose, which the box
+  // would only repeat at length above the body that says it.
+  //
+  // A field that is empty still claims its key: an empty top-level
+  // `tags: []` must not let a custom type's `properties.tags` take the row
+  // (and be rendered as the page's tag links) in its place. Entries of a
+  // list that are themselves empty are dropped from the row, so `["a", ""]`
+  // does not render with a dangling separator.
+  const prose = new Set(opts.proseProperties ?? [])
   const result: Record<string, unknown> = {}
+  const claimed = new Set<string>()
+  const put = (key: string, value: unknown) => {
+    if (claimed.has(key)) return
+    claimed.add(key)
+    if (isEmptyValue(value)) return
+    result[key] = Array.isArray(value) ? value.filter((item) => !isEmptyValue(item)) : value
+  }
   const flattenInto = (key: string, value: unknown) => {
     if (isPlainObject(value)) {
       for (const [nestedKey, nestedValue] of Object.entries(value)) {
-        if (!excluded.has(nestedKey) && !(nestedKey in result)) {
-          result[nestedKey] = nestedValue
-        }
+        if (!excluded.has(nestedKey) && !prose.has(nestedKey)) put(nestedKey, nestedValue)
       }
-    } else if (!(key in result)) {
-      result[key] = value
+    } else {
+      put(key, value)
     }
   }
 

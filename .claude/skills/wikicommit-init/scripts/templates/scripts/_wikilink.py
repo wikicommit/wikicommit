@@ -1,12 +1,10 @@
 """Shared WikiLink parsing helpers for check_orphans.py, check_wikilinks.py,
-and convert_wikilinks.py (Issue #114).
+and convert_wikilinks.py.
 
-Previously each script carried its own copy of WIKILINK_RE and its own
-path→(Type, slug) conversion function, which had drifted out of sync (e.g.
-convert_wikilinks.py's regex was missing the double-slash-rejection fix that
-check_orphans.py / check_wikilinks.py picked up in PR #109). Consolidating
-here means the three scripts (and their templates/ mirrors) can only drift by
-skipping the shared import, not by editing divergent logic in place.
+WIKILINK_RE and the path→(Type, slug) conversion live only here: per-script
+copies drift out of sync. With one copy, the scripts (and their templates/
+mirrors) can only drift by skipping the shared import, not by editing
+divergent logic in place.
 
 Sibling-imports _frontmatter (build_slug_type_index needs each page's status:),
 so anything loading this module — including a test that exec_module()s it
@@ -28,16 +26,44 @@ from _frontmatter import parse_frontmatter_cached
 # the Type segment character class intentionally excludes "-" (only the slug
 # segment allows it). Each nested segment requires 1+ chars so "[[Person//foo]]"
 # (double slash) is rejected instead of being parsed as type="Person/".
-WIKILINK_RE = re.compile(r"\[\[([A-Za-z][A-Za-z0-9_]*(?:/[A-Za-z0-9_]+)*)/([A-Za-z0-9_-]+)\]\]")
+#
+# An optional display text follows a `|`: `[[Type/slug|表示名]]`.
+# Generation and translation write this Obsidian-style form unprompted — a
+# translation wants the translated term as the visible text — so it is accepted
+# rather than forbidden: a form that matches nothing here passes every gate
+# (removed-page ERROR, orphan count, merge rewrite, Pass 4's one-hop set)
+# without a word. `\|` is accepted as the separator too, which is
+# how Obsidian writes the form inside a Markdown table cell. The display text
+# must hold a non-space character and may not contain `[`, `]`, `|` or a
+# newline. It is group 3 — appended last, so every caller that reads only
+# group(1)/group(2) is unaffected. `findall()` returns 3-tuples because of it:
+# use `extract_wikilinks()` (or `finditer`) to get (Type, slug) pairs.
+WIKILINK_RE = re.compile(
+    r"\[\[([A-Za-z][A-Za-z0-9_]*(?:/[A-Za-z0-9_]+)*)/([A-Za-z0-9_-]+)"
+    # The lookahead checks for a non-space character once, instead of a
+    # `*[^\s]*` sandwich that backtracks quadratically on a long unclosed run.
+    r"(?:\\?\|((?=[^\[\]|\n]*[^\[\]|\s])[^\[\]|\n]+))?\]\]"
+)
 
-# Was independently redefined as `ENTITY_DIR = Path(".wikicommit/entity")` in
-# 9 scripts (plus their templates/ mirrors) before being consolidated here
-# (Issue #487, found during Issue #477's code review). Relative to the
-# process's cwd, same as before — callers running from the repo root keep
-# resolving to .wikicommit/entity/ unchanged.
+# Anything written as `[[...]]` on one line, used only to find the ones
+# WIKILINK_RE does not accept (`find_malformed_wikilinks()`).
+_BRACKETED_RE = re.compile(r"\[\[[^\[\]\n]*\]\]")
+# A closing fence is the opening fence's character, at least as many times
+# (CommonMark): "```" opened and "````" closed is one block.
+_FENCED_CODE_RE = re.compile(
+    r"^ {0,3}(?P<fence>(?P<ch>[`~])(?P=ch){2,})[^\n]*\n.*?(?:^ {0,3}(?P=fence)(?P=ch)*[ \t]*$|\Z)",
+    re.M | re.S,
+)
+# A code span closes on a backtick run of exactly the opening run's length,
+# so "``a`b``" is one span.
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)[^\n]*?(?<!`)\1(?!`)")
+
+# Import this rather than redefining it in each script. Relative to the
+# process's cwd — callers running from the repo root resolve it to
+# .wikicommit/entity/.
 ENTITY_DIR = Path(".wikicommit/entity")
 
-# The view tree (Issue #675) holds second-order pages: ones grounded in this
+# The view tree holds second-order pages: ones grounded in this
 # wiki's own pages (`derived_from`) rather than in an external document
 # (`sources` + hash). `/wikicommit-synthesize` writes here.
 #
@@ -45,9 +71,8 @@ ENTITY_DIR = Path(".wikicommit/entity")
 # `<lang>/<Type>/<slug>.md`. A view page carries no `type:` at all: Schema.org
 # is a vocabulary for modelling things, and what separates these pages is not
 # their subject but what they can be checked against. Making them pick a type
-# anyway is what produced Issue #545, where two runs on one topic resolved to
-# `custom/Practice/…` and `Practice/…` and one of them was reachable by no
-# WikiLink at all.
+# anyway has let two runs on one topic resolve to `custom/Practice/…` and
+# `Practice/…`, one of them reachable by no WikiLink at all.
 VIEW_DIR = Path(".wikicommit/view")
 
 # `View` is a reserved Type segment: `[[View/<slug>]]` in a WikiLink, and
@@ -59,8 +84,8 @@ VIEW_TYPE_SEGMENT = "View"
 
 # What a view page *does* with several pages at once, as opposed to what it is
 # about. Optional: a page may carry no kind, and pages accumulating without one
-# is the evidence that a kind is missing (Issue #553's rule against shipping an
-# empty slot — here the slot earns itself). `lineage` (chains of cause and
+# is the evidence that a kind is missing (the rule against shipping an empty
+# slot — here the slot earns itself). `lineage` (chains of cause and
 # derivation) and `process` (a procedure running across pages) are held back
 # because neither violates an existing kind's Boundary, which is the bar for
 # adding one.
@@ -70,8 +95,8 @@ VIEW_KINDS = ("comparison", "debate", "landscape", "pattern", "practice", "timel
 def normalize_name(value: str) -> str:
     """Fold a page name for comparison — NFKC, case, and runs of whitespace.
 
-    Shared by check_recurring_characters.py (Issue #560) and
-    check_unlinked_entity_mentions.py (Issue #561), which between them split
+    Shared by check_recurring_characters.py and
+    check_unlinked_entity_mentions.py, which between them split
     one question — is this plain-text `properties:` value a page that exists?
     — into two mutually exclusive findings: "no page anywhere, promote it"
     (RECURRING) and "a page exists, link it" (UNLINKED). That split is only
@@ -107,7 +132,7 @@ def parse_wiki_path(path: Path, entity_dir: Path = ENTITY_DIR) -> tuple[str, str
     return lang, type_name, slug
 
 
-# A page written before the Issue #477 .wikicommit/wiki/ -> entity/ rename may
+# A page written before the .wikicommit/wiki/ -> entity/ rename may
 # still carry the old prefix verbatim in a stored path field (translated_from,
 # derived_from[].path) — old and new forms are allowed to coexist rather than
 # being auto-migrated. normalize_entity_prefix()/resolve_stored_entity_path()
@@ -169,7 +194,7 @@ def is_entity_asset(page: Path, entity_dir: Path = ENTITY_DIR) -> bool:
     builds `Path.cwd() / ENTITY_DIR`), and testing the full path also matches a
     repository that merely lives somewhere under a directory named `assets` —
     skipping every page, silently, with no error and only a smaller count to
-    show for it (Issue #677).
+    show for it.
 
     A path that cannot be resolved against `entity_dir` at all is reported as
     not-an-asset: it is outside the tree this rule describes, and the caller's
@@ -186,23 +211,23 @@ def collect_entity_pages(
     entity_dir: Path = ENTITY_DIR, *, include_index: bool = False
 ) -> list[Path]:
     """Every wiki page under `entity_dir`, sorted, minus the two things that
-    are never graph or aggregate material (Issue #677).
+    are never graph or aggregate material.
 
     Excluded: files under the top-level `assets/` (attachments, not pages) and
     `index.md` (generated per-Type navigation, which states no facts of its
     own). Pass `include_index=True` where the index pages themselves are the
     subject: `rebuild_index.py` needs them to find Type directories that no
     longer hold any page, `check_wikilinks.py`'s backlink walk counts a link
-    from one as a real remaining reference, and `check_wanted_pages.py` keeps
-    them because that is what it did before this walk was shared. Those three
-    are the only callers that pass it.
+    from one as a real remaining reference, and `check_wanted_pages.py` walks
+    them too (whether a stale index entry is a wanted page is a separate
+    question this argument does not decide), and `build_onehop_context.py`
+    walks them so that its skip can name them. Those four are the only callers
+    that pass it.
 
-    This condition had been written out independently in 18 places, and the
-    `assets/` half of it had drifted into three different meanings. One copy
-    was outright wrong (see `is_entity_asset()`), and it was wrong in the way
-    that does not announce itself: the check it fed simply found nothing.
-    Nothing here is new behaviour — it is the same walk those copies did,
-    with the strictest and best-documented reading of each rule.
+    Callers use this rather than writing the walk out themselves: independent
+    copies drift on what `assets/` means, and the wrong reading (see
+    `is_entity_asset()`) does not announce itself — the check it feeds simply
+    finds nothing.
 
     Deliberately *not* the right helper for `validate_frontmatter.py` and
     `check_raw_html.py`: those verify every `.md` on disk, `assets/` and
@@ -271,9 +296,9 @@ def view_page_path(lang: str, slug: str, view_dir: Path = VIEW_DIR) -> Path:
 # "target does not exist" to every gate, even though the page is right there
 # under another Type — check_wikilinks.py reports the same WARNING it uses for
 # a genuinely not-yet-written concept, and check_wanted_pages.py lists it as a
-# page that ought to be created, which is the opposite of the correct fix
-# (Issue #563). Both scripts need the same "is this slug used by some other
-# Type?" lookup to tell the two apart, so it lives here rather than being
+# page that ought to be created, which is the opposite of the correct fix.
+# Both scripts need the same "is this slug used by some other Type?" lookup
+# to tell the two apart, so it lives here rather than being
 # implemented twice (this module's whole reason for existing — see the module
 # docstring).
 def build_slug_type_index(
@@ -298,7 +323,7 @@ def build_slug_type_index(
       is that no usable page backs the slug, which is what the unchanged
       WARNING / `WANTED:` path already says.
 
-    View pages are indexed too, under the reserved `View` Type (Issue #675).
+    View pages are indexed too, under the reserved `View` Type.
     A wiki that moves a synthesized page out of `custom/Practice/` and into the
     view tree leaves every `[[custom/Practice/<slug>]]` link behind it pointing
     at nothing; without this the link reads as "nobody has written that page",
@@ -331,9 +356,9 @@ def other_types_for_slug(
     """Types other than `type_name` that have a page for `slug`, sorted.
 
     Empty when the slug is unused elsewhere — i.e. the link really does point
-    at a page nobody has written yet, and Issue #340's non-blocking treatment
-    still applies. All matching Types are returned rather than one best guess:
-    the script cannot know which one the author meant, and naming them all is
+    at a page nobody has written yet, which stays non-blocking. All matching
+    Types are returned rather than one best guess: the script cannot know
+    which one the author meant, and naming them all is
     what lets a human pick in one step.
     """
     return sorted(t for t in slug_index.get(slug, set()) if t != type_name)
@@ -341,26 +366,18 @@ def other_types_for_slug(
 
 # ── Page-identity and link-resolution helpers ─────────────────────────────
 #
-# These six moved here from check_wikilinks.py when build_onehop_context.py
-# needed the same resolution (Issue #947). Three of them already had copies
-# elsewhere — load_primary_lang() had three, in check_wikilinks.py,
-# build_survey_view.py and convert_wikilinks.py — and a fourth copy is exactly
-# the cost Issue #677 consolidated this module to stop paying. The fallback
-# *order* was not a function at all: it lived inline in check_wikilinks.py's
-# main() loop, so a second caller could only reproduce it by reading that loop
-# and writing it out again, which is how the Type/slug extraction in Pass 4's
-# one-hop assembly came to be written from scratch (and wrong) in the first
-# place.
+# Every script that resolves a WikiLink imports these six rather than keeping
+# its own copy, for the same reason as the walk above. The fallback *order* is
+# a function too (resolve_wikilink()), so no caller re-derives it in its own
+# loop.
 
 
 def load_primary_lang(repo_root: Path = Path(".")) -> str:
     """`.wikicommit/config.yml`'s `translation.primary_lang`, or "en".
 
-    The fallback matches init.py's --primary-lang default (Issue #159 changed
-    the tool-wide default from "ja"; Issue #376 brought this in line with it).
-    It is only reached for a config.yml missing, unreadable, or malformed
-    enough to lack an explicit primary_lang — every config.yml init.py
-    generates has one.
+    The fallback matches init.py's --primary-lang default. It is only reached
+    for a config.yml missing, unreadable, or malformed enough to lack an
+    explicit primary_lang — every config.yml init.py generates has one.
     """
     config_path = repo_root / ".wikicommit" / "config.yml"
     try:
@@ -410,7 +427,7 @@ def link_target_path(
 ) -> Path:
     """Where `[[<type_name>/<slug>]]` in `lang` would live on disk.
 
-    `View` is a reserved Type segment naming the view tree (Issue #675), whose
+    `View` is a reserved Type segment naming the view tree, whose
     pages have no Type directory: `<view_dir>/<lang>/<slug>.md`. Everything
     else keeps the entity layout. Resolving both here means existence,
     removed-page and cross-language-fallback checks stay one code path.
@@ -433,11 +450,10 @@ def resolve_wikilink(
     The order is the cross-language fallback: the linking page's own language
     first, then `primary_lang`, then unresolved. Returns None when neither
     exists — a link to a page nobody has written yet is a normal, non-blocking
-    state (Issue #340), so the caller decides what to say about it.
+    state, so the caller decides what to say about it.
 
-    This is the piece that was never a function: check_wikilinks.py ran the
-    same two attempts inline in its main() loop, which left a second caller
-    with nothing to import and the order to re-derive by reading that loop.
+    Callers import this rather than running the two attempts inline, so the
+    order is written once.
     """
     lang_path = link_target_path(type_name, slug, lang, entity_dir, view_dir)
     if lang_path.exists():
@@ -455,7 +471,7 @@ def type_slug_from_wiki_path(
     """Derive (Type, slug) from a page path in either tree.
 
     Type may contain "/" for nested custom types (e.g. custom/Decision), and is
-    the reserved `View` segment for a page in the view tree (Issue #675) — the
+    the reserved `View` segment for a page in the view tree — the
     same key a `[[View/<slug>]]` link builds, which is what a backlink index
     keyed off this is keyed by.
     """
@@ -478,3 +494,36 @@ def extract_wikilinks(content: str) -> list[tuple[str, str]]:
     a version that is not the one being reviewed.
     """
     return [(m.group(1), m.group(2)) for m in WIKILINK_RE.finditer(content)]
+
+
+def wikilink_display(match: re.Match) -> str | None:
+    """The display text of a matched `[[Type/slug|表示名]]`, stripped, or None."""
+    text = match.group(3)
+    return text.strip() if text is not None else None
+
+
+def retarget_wikilink(match: re.Match, target: str) -> str:
+    """The matched WikiLink pointing at `target` (`Type/slug`) instead.
+
+    Everything after the slug — the display text and its `|` or `\\|`
+    separator — is kept exactly as written, so a rewrite and its reversal
+    (rewrite_merged_links.py / check_review_coverage.py) change only the target.
+    """
+    return "[[" + target + match.group(0)[match.end(2) - match.start():]
+
+
+def find_malformed_wikilinks(content: str) -> list[str]:
+    """Every `[[...]]` in `content` that WIKILINK_RE does not accept, in order.
+
+    These are the links no gate sees: a `[[slug]]` with no Type, a
+    `[[Type/slug#見出し]]`, a `[[Prop::Type/slug]]`, an empty display text.
+    Nothing resolves, counts, rewrites or publishes them, so the only report
+    they can get is this one.
+
+    Fenced code blocks and inline code spans are skipped: a page documenting
+    the syntax itself writes `[[...]]` there on purpose, and convert_wikilinks.py
+    leaves it as written either way.
+    """
+    text = _FENCED_CODE_RE.sub("", content)
+    text = _INLINE_CODE_RE.sub("", text)
+    return [m.group(0) for m in _BRACKETED_RE.finditer(text) if not WIKILINK_RE.fullmatch(m.group(0))]

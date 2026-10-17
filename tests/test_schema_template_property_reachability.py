@@ -12,9 +12,11 @@ and none carried a value.
 
 The check below re-derives that reachability judgement from the Schema.org
 vocabulary rather than hard-coding a key list, so a newly added template key
-with the same shape fails here instead of quietly shipping. Two base-type keys
-match the shape and are deliberately kept — see KEPT_UNFILLABLE — because their
-range, while entity-only, has a conformant form that needs no wiki-local type.
+with the same shape fails here instead of quietly shipping. A key whose range,
+while entity-only, has a conformant form that needs no wiki-local type may be
+kept by listing it in KEPT_UNFILLABLE; none is kept now (`Event.eventStatus` and
+`Organization.numberOfEmployees` were, until Issues #1332 and #1330 dropped them
+from their templates: no pilot page had a value for either).
 
 Runs off the committed .wikicommit/schemaorg-vocab.json, so it is network-free.
 """
@@ -35,19 +37,11 @@ import _schemaorg_vocab as vocab  # noqa: E402
 from _frontmatter import parse_frontmatter  # noqa: E402
 
 # Entity-only keys that survive the reachability rule by exception, with the
-# reason each is still writable. Both are documented in docs/DesignDoc-data.md
+# reason each is still writable. Documented in docs/DesignDoc-data.md
 # section 5.2 ("配布テンプレートの properties: に「埋められないキー」を置かない").
-KEPT_UNFILLABLE = {
-    ("Event", "eventStatus"): (
-        "EventStatusType is a Schema.org Enumeration; its members are published, "
-        "fixed IRIs (https://schema.org/EventCancelled, ...), so a conformant "
-        "value exists without any wiki-local type."
-    ),
-    ("Organization", "numberOfEmployees"): (
-        "QuantitativeValue is a structured value that JSON-LD expresses as a "
-        "nested object with a known shape, not as a page to link to."
-    ),
-}
+# Empty since Event.eventStatus left the template: a new entry needs the
+# conformant value form that makes the key writable without a wiki-local type.
+KEPT_UNFILLABLE: dict[tuple[str, str], str] = {}
 
 
 def _frontmatter(path: Path) -> dict:

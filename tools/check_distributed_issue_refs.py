@@ -8,7 +8,7 @@ Design history belongs in `docs/`; the distributed files keep the instruction an
 where it stops an agent from taking a plausible wrong turn, a short reason
 (Issue #1054).
 
-Two scopes, with different strengths:
+Three scopes, with different strengths:
 
 * **Script output** (blocking at zero). String literals in the distributed
   scripts that reach stdout / stderr or `--help` — everything except comments and
@@ -21,6 +21,12 @@ Two scopes, with different strengths:
   Skill, so the count is capped per Skill at its current value: it may only go
   down. Lower the cap in `CAPS` in the same change that removes references; when
   every cap is zero the table collapses to "none allowed".
+* **Script comments and docstrings** (blocking at zero). The same distributed
+  scripts, but only what the first scope skips: `#` comments and docstrings. They
+  are read by whoever opens the script — in the user's repository too — and the
+  history they would carry belongs in `docs/history/DesignDoc-ScriptSpec.md`
+  under the script's heading (Issue #1329). Every distributed script is at zero,
+  so any reference is an error, reported with its line.
 
 Only the number is checked. A history sentence without a number ("previously this
 was X") cannot be detected mechanically.
@@ -32,8 +38,10 @@ Exit code: 1 if any ERROR, else 0.
 """
 
 import ast
+import io
 import re
 import sys
+import tokenize
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -48,6 +56,9 @@ TEMPLATE_INSTRUCTIONS = [
 ]
 
 ISSUE_RE = re.compile(r"Issue #\d+")
+# Comments and docstrings are hard-wrapped, so "Issue" can end one line and
+# "#NNN" start the next; `ISSUE_RE` alone would miss those and let them through.
+WRAPPED_ISSUE_RE = re.compile(r"Issue\s+#\d+")
 
 # Per-Skill ceiling on `Issue #NNN` in instruction files. May only be lowered.
 CAPS = {
@@ -114,6 +125,39 @@ def script_output_refs(path: Path) -> list[tuple[int, str]]:
     return sorted(hits)
 
 
+def script_comment_refs(path: Path) -> list[tuple[int, str]]:
+    """`Issue #NNN` in the comments and docstrings of a script — what
+    `script_output_refs()` deliberately skips."""
+    text = path.read_text(encoding="utf-8-sig")
+    tree = ast.parse(text, filename=str(path))
+    docs = _docstring_nodes(tree)
+    hits = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in docs:
+            hits += [(node.lineno + node.value.count("\n", 0, m.start()), " ".join(m.group(0).split()))
+                     for m in WRAPPED_ISSUE_RE.finditer(node.value)]
+    # Consecutive comment lines are joined (without their `#`) so a reference
+    # wrapped across two of them is still one reference.
+    runs: list[list[tuple[int, str]]] = []
+    for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+        if tok.type != tokenize.COMMENT:
+            continue
+        entry = (tok.start[0], tok.string.lstrip("#").strip())
+        if runs and runs[-1][-1][0] == entry[0] - 1:
+            runs[-1].append(entry)
+        else:
+            runs.append([entry])
+    for run in runs:
+        starts, joined = [], ""
+        for lineno, body in run:
+            starts.append((len(joined), lineno))
+            joined += body + " "
+        for m in WRAPPED_ISSUE_RE.finditer(joined):
+            lineno = max(line for offset, line in starts if offset <= m.start())
+            hits.append((lineno, " ".join(m.group(0).split())))
+    return sorted(hits)
+
+
 def main() -> int:
     errors = 0
 
@@ -122,6 +166,14 @@ def main() -> int:
         for lineno, ref in script_output_refs(path):
             print(f"ERROR: {path}:{lineno}: {ref!r} in a string the script prints "
                   f"— readers of the output cannot look it up")
+            errors += 1
+
+    script_total = 0
+    for path in scripts:
+        for lineno, ref in script_comment_refs(path):
+            print(f"ERROR: {path}:{lineno}: {ref!r} in a comment or docstring "
+                  f"— keep the history in docs/history/DesignDoc-ScriptSpec.md")
+            script_total += 1
             errors += 1
 
     missing = sorted(set(DISTRIBUTED_SKILLS) - set(CAPS))
@@ -149,7 +201,8 @@ def main() -> int:
         elif n < cap:
             print(f"NOTE: {name}: {n} reference(s), below the cap of {cap}; lower CAPS[{name!r}] to {n}")
 
-    print(f"SUMMARY: scripts={len(scripts)}, instruction_refs={total}, errors={errors}")
+    print(f"SUMMARY: scripts={len(scripts)}, instruction_refs={total}, "
+          f"script_comment_refs={script_total}, errors={errors}")
     return 1 if errors else 0
 
 

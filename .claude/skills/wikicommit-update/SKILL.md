@@ -145,7 +145,16 @@ Do this even if the user declined some of Step 5. Those are optional settings an
 
 ### Step 7: Verify
 
-Run these in order:
+**First make sure the refreshed scripts can run.** A refresh can bring a script that needs a Python package the repository never needed before — `check_raw_html.py` needs `markdown-it-py`, and without it stops every `/wikicommit-merge` that changes a page. Check with the same `python` that runs `.wikicommit/scripts/`, and install what is missing (a local package install, touching neither Git nor any branch, so no confirmation is needed):
+
+```bash
+python -c "import yaml" || python -m pip install pyyaml
+python -c "import markdown_it" || python -m pip install markdown-it-py
+```
+
+Install through `python -m pip`, not a bare `pip`, so the package lands in that interpreter, and judge success by re-running the import check, not by the install's exit code. If an install fails, carry on, but put the `pip install` command in the report (Step 9) and the PR body (Step 8) as something the user must run: until they do, every merge that changes a page stops on that check.
+
+Then run these in order:
 
 ```bash
 python .wikicommit/scripts/rebuild_index.py
@@ -163,6 +172,8 @@ The last one is the confirmation that this run did what it set out to do: what r
 #### Deciding whether a blocking failure is this update's
 
 Only `validate_frontmatter.py`, `check_wikilinks.py`, `check_raw_html.py` and `check_orphans.py` need this. `rebuild_index.py` and `check_distribution_freshness.py` always exit 0, and the second of those measures the update itself, so "pre-existing" is not even defined for it. Warnings are out of scope — plenty of those are normal.
+
+**Stage 0 — did the check run at all?** An exit 1 with none of the script's finding lines on stdout — `ERROR:` for the first three, `DUPLICATE:` for `check_orphans.py`, which reports its blocking finding that way and never prints `ERROR:` — means the script could not run — a missing Python package, for one, is reported on stderr only (the same reading `/wikicommit-status` uses). That is neither this update's finding nor a pre-existing one, and stages 1–2 would misread it as pre-existing. Read its stderr: when it names a package, install it as above and re-run the check, then judge what it prints now. When it still cannot run, do not call it pre-existing — report the check as not run with its stderr, and say that until it is fixed `/wikicommit-merge` stops on every batch that changes a page.
 
 **Stage 1 — did this run write anything those checks read?**
 
