@@ -89,12 +89,14 @@ LLM Wiki ツールの実装には大きく 2 種類がある（出典: `dev/rese
 | 工程の性質 | 形 | 理由 |
 |---|---|---|
 | コマンドだけで決まる（版ずれの確認・デフォルトブランチ・変更の検出・他の実行の検出） | `script` | エンジンが自分で実行し、出力を `notes` で利用者に渡す。止める必要の無いものは常に exit 0 にする |
+| generate が書いた未レビューのページ（今の本文を判定した AI レビュー記録が無いもの）と、それを `generated_pages` に持つ管理ファイル | `script`（`unreviewed`、`produces: skipped`。`detect` の前） | 判定（generation フィールドの HEAD との比較・`check_review_coverage.py` の関数による記録の突き合わせ・`generated_pages` の正規化）は決定的なのでスクリプトが行う。`detect`・`classify-*`・`check-commit`・`targets`・`pr-body` が一覧を引き、`commit` 工程は `git add` の後に `unstage-held` で外す（詳細は pipeline §6.2） |
 | 変更の分類（Step 2: 検査するページ・削除へ移るページ・新しいソースファイル・新しい型ファイル・語彙ファイル・ポリシーファイル・`relations.yml`） | `script`（`classify-*`。一覧 1 つにつき 1 工程、`produces`） | porcelain の解析・`D` の除外・`:(literal)`・存在確認を `--ignored` の前に置く順序は散文では即興で誤る。一覧が実行記録に残るので、再開した `commit` 工程は計算し直さず読む（`show_lists`）。エンジンの `produces` は 1 工程 1 一覧なので工程を分けた — 1 工程で複数の一覧を出す形をエンジンに足すより、工程が 7 つ並ぶほうが変更が小さい |
 | 速い品質検査（frontmatter・WikiLink・生 HTML・孤立/重複ページ） | `script`（`quality-checks`） | blocking（`ERROR:` / `DUPLICATE:`）は exit 1 で、その所見を理由に halt する（ブランチを作る前）。所見ではなく終了コードで決めない規則・空の一覧で per-file 検査を飛ばす規則・コマンド行の長さの分割をスクリプトが持つ。長さの見積もりは各呼び出しに繰り返す `--deleted` の分を含み、削除が多くて 1 行に収まらなければ削除の一覧も分けて、変わったページの組ごとに削除の組の数だけ呼ぶ。0/1 以外で終わり blocking 行を出さなかった検査は「走らなかった」として止める（黙って通さない） |
 | lychee（変わったページだけ）と markdownlint-cli2 | `agent` ＋確認（`link-and-style-checks`） | lychee はラッパー（`workflow_checks.py links`）が数ページずつ `--cache` 付きで実行し、約 100 秒で必ず返して続きを実行記録の横のファイルに残す。エージェントは `LINKS: done` まで同じコマンドを呼び直す。markdownlint は `npx`（Windows では `npx.cmd`）をシェルから `xargs` で起動し、出力をパイプで記録スクリプトに渡す。確認は「lychee が変わったページを全部見た・markdownlint の出力が記録された」。`changed_md` が空の実行（アセット・ポリシーファイル・記録だけ）では `when:`（`has-list --list changed_md`）でエンジンが工程ごと飛ばし、エージェントに渡さない |
 | 子プロセスの出力の文字コード | エンジンの `run_command` が子の出力を UTF-8 で読み（`errors="replace"`。`surrogateescape` は孤立サロゲートが実行記録の JSON と表示で落ちるので採らない）、Python の子には `PYTHONIOENCODING=utf-8` を渡す。共有モジュール（`_workflow_checks.py`）はこの関数を `run` として配り、`git()` もそれを使う。4 本の `workflow_checks.py` は子を `run` だけで起動し、`subprocess` を自分で呼ばない。エンジン自身の標準入出力も UTF-8 に固定する（応答の JSON は `ensure_ascii=False` のまま）。エンジンの `changed_files()` は merge の `porcelain()` と同じく `git status --porcelain -z` で読む | git はパスを格納したバイト（UTF-8。Windows でも）のまま出し、gh・lychee も UTF-8 で出す。ロケールの文字コード（cp932 / cp1252）で読むと非 ASCII のパスが存在しないパスに化けて `changed_md` や `produces` の一覧から黙って落ちるか、`UnicodeDecodeError` で工程ごと止まる。Python の子は UTF-8 を指定しなければ cp1252 では子自身が日本語のパスで `UnicodeEncodeError` になる（エンジンの JSON も同じ）。4 本の `workflow_checks.py` は `references/*.md` から直接実行される経路（環境変数を渡すエンジンを経ない）もあるため、直接実行時（`__name__ == "__main__"`）に限り共有モジュールの読み込みより前に自分の標準入出力を `use_utf8_streams()` と同じ設定で UTF-8 に固定する（共有モジュールに置かないのは、それを持たない古い `.wikicommit/scripts/` でも読み込み失敗の案内を出せるようにするため）。ページの slug は英語識別子なので、実際に非 ASCII で現れるのは日本語名の生ソースとそれを映した管理ファイルである。`-z` 無しの `git status` は、ロケールと無関係に非 ASCII のパスを 8 進エスケープの引用符付きで出す（`core.quotePath`）ため、実行記録の `touched` と一致せず、`check-merge` を `--changed` 無しで呼ぶ経路（merge の `check-merged`）と `abandon` の `left_behind` から漏れる。Skill の外の配布スクリプトのうち、非 ASCII を含みうる出力を読むもの（`resolve_source_cache_path.py` が読む `add_source.py`・`check_external_links.py` が読む lychee・`check_actions_pr_permission.py` が読む gh・`check_distribution_freshness.py` が読む `git remote`）も UTF-8 で読む。`resolve_source_cache_path.py` は読んだ行（と管理ファイル・キャッシュのパス）を自分の標準出力に書き直すので、直接実行時に自分の標準出力・標準エラーも UTF-8 に固定する — 子が成功した後に親の `print` が `UnicodeEncodeError` で落ちると、`--include-source` が非 ASCII のソースで止まる。標準出力は OS がファイル名に使うエラー処理（`sys.getfilesystemencodeerrors()`。POSIX では `surrogateescape`、Windows では `surrogatepass`）にする（POSIX の `C` ロケールではディスクから読んだ名前の復号できないバイトがサロゲートで運ばれ、それを同じバイトで書き戻すため）。標準入力の識別子は UTF-8 ではなく OS がファイル名を復号する文字コード（`sys.getfilesystemencoding()`。Windows と UTF-8 ロケールでは UTF-8）で読む — 識別子はパスとして開かれ `add_source.py` の argv にも載るので、`C` ロケールで非 ASCII の識別子を UTF-8 で読むと argv に符号化できず `subprocess` が落ちる。管理ファイルの `source.url` / `source.path` は UTF-8 で読むので、照合はその値をファイル名と同じ復号に通した形とも比べる（比べないと UTF-8 でないロケールで登録済みの非 ASCII のソースが `UNREGISTERED` になり、`path` 経路では取り下げを越えて生ファイルが読まれる）。ページの `sources` から読んだ URL（`--obtain-sources`）が argv に符号化できないときは、トレースバックではなくその 1 件の `UNAVAILABLE:` 行にする。`git log --format=%H` だけを読む `check_translation_status.py`・`check_derivation_freshness.py` は 16 進のハッシュしか読まないので直さない。`reset_review_on_content_change.py` はバイトで読んで自分で復号する。UTF-8 でない名前のパスは U+FFFD 入りで届き、ディスク上のどのファイルも指さないので、パスを読む呼び出し側はそれを明示的に扱う（存在確認で黙って落とさない）: merge の `classify-pages` / `classify-removing` はそのページで止め（commit 工程は pathspec でステージするので、一覧から落ちたページは品質チェックを通らずにコミットされる。ページのファイル名は英語識別子なので正当な使い方では出会わない）、`classify-sources` はディレクトリ型 `source.path` の中のそのファイルを WARNING を出して運ばない（Linux で Shift_JIS の zip を展開した等で起きうるが、merge 全体を止めるほどではない） |
 | warning の集約と PR 本文 | `script`（`collect-warnings`、`produces: warnings`）と `pr-body` | 所見はツールごとのファイル（`.wikicommit/.cache/merge/<run>/`）に置き、一覧にはツールごとの `<tool> (<件数>)` だけを入れる（一覧の値は 1 行なので所見の束を入れられない）。PR 本文はスクリプトが組み立てて `gh pr create --body-file -` にパイプで渡す — 自由文の所見がシェルの引用を通らない |
 | 長い外部の待ち（`mergeStateStatus` のポーリング。最大 300 秒） | `agent` ＋確認 | エンジンは `script` 工程を同期実行するので、1 回の呼び出しがエージェントのシェルの時間制限を超える。待ちはエージェントが短いコマンドの繰り返しで行い、完了は確認（GitHub が `MERGED` と言い、デフォルトブランチに戻っている）で決める |
+| 必須レビュー待ちの PR（人のマージ待ち） | `merge-pr` の `awaiting-merge`（`finishes_on`）＋確認、次の実行の `awaited` 工程（`script`、`produces: awaited_prs`） | 必須レビューを選んだ利用者には PR が `BLOCKED` で残るのが期待どおりなので、halt にせず finished で終える。確認は GitHub が PR を `OPEN`・`reviewDecision` を `REVIEW_REQUIRED` / `CHANGES_REQUESTED` と言い、デフォルトブランチにいること。人がマージした後の実行は、`awaited` が実行記録から待ち PR を集めて GitHub でマージ済みのものをデフォルトブランチの pull の後に一覧にし、`work` 工程（`changes` と `awaited_prs` を合わせた一覧が空なら終了）を経て、変更を運ぶ工程（`quality-checks`・`commit`・`open-pr`・`merge-pr`）を `when:`（`has-list --list changes`）で飛ばして Step 8・9 へ進む。エンジンに機能は足していない |
 | Git 操作（ブランチ・コミット・push） | `agent` ＋確認 | 確認はディスクと remote を見る — `wikicommit/merge-*` 上にいて既定のブランチより先のコミットがある・検出した変更が 1 つも未コミットで残っていない・ブランチが `origin` にある |
 | warning の続行確認 | `human`（`when` で warning があるときだけ） | 非対話時の既定は `proceed`（warning は常にマージ可であり、PR 本文に残る）。blocking は `quality-checks` 工程の exit 1 で halt するので、非対話でも止まる |
 | 工程をまたいで使う値（デフォルトブランチ・warning・PR 番号） | 実行記録の一覧（`produces` / `adds`） | エージェントの記憶に置くと compaction で失われ、再開した工程が別の PR を見る |
@@ -494,6 +496,7 @@ trigger eval と behavioral eval は別の機構である — 前者は `[{"quer
 │   │   ├── pass4-review.md           # Pass 4
 │   │   ├── completion-notice.md      # 実行の終わりに読む（record_run.py end を持つ）
 │   │   ├── regenerate.md             # --regenerate のときだけ読む
+│   │   ├── writing-rules.md          # 本文の書き方の規則（Pass 3 と wikicommit-synthesize Step 5 が読む）
 │   │   └── text-extraction-routing.md # Pass 1 が読む拡張子別ルーティング表
 │   └── scripts/
 │       └── workflow_checks.py # 工程の条件・一覧・完了の確認
@@ -595,6 +598,7 @@ Skill が別の Skill のファイルを読む・実行する関係を、Skill �
 | `wikicommit-collect` | `wikicommit-init` | テンプレート（`schema-authoring.md`） | init が配る物の予備 |
 | `wikicommit-review` | `wikicommit-generate` | `references/`（`text-extraction-routing.md`） | `--obtain-sources` が `EXTRACT:` を返したとき、抽出 Skill の選び方を generate の表に委ねている |
 | `wikicommit-fix` | `wikicommit-generate` | `references/`（`text-extraction-routing.md`） | 同上 |
+| `wikicommit-synthesize` | `wikicommit-generate` | `references/`（`writing-rules.md`） | view ページの本文を entity ページと同じ書き方の規則で書くため。規則を 2 か所に持つと片方だけが直る（data §4.5.1「本文の書き方」） |
 
 - **依存の向きは循環しない。** `wikicommit-init` は何にも依存しない。循環があると、どの Skill から先に部分インストールしても片方が欠ける
 - **各 Skill の `SKILL.md` は依存する Skill を frontmatter の `metadata.requires` に空白区切りで宣言する**（例: `requires: "wikicommit-generate wikicommit-init"`）。agentskills.io 標準の `metadata` は文字列から文字列への対応なので、一覧ではなく 1 つの文字列にする
@@ -719,6 +723,7 @@ Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論�
 | `wikicommit-generate` | `check_schema_org_type.py --list-type-names` / `check_schema_org_type.py --describe` / `check_schema_org_type.py --list-installed-hierarchy` / `check_schema_coverage.py` / `rebuild_index.py` / `check_extraction_quality.py` / `reconcile_ingest_status.py` | 前 2 つと `check_schema_coverage.py` は Pass 2b の型の要否判断用で、`--list-type-names` が約 933 型の**名前だけ**をプリロードし、そこから絞り込んだ候補の説明文を `--describe` が引く（2 段階にするのは、この一覧が果たしているのが想起であって存在保証ではなく〈実在は候補承認後の `--type` が決定論的に確かめる〉、想起には検討しない型の説明文が要らないため）。あわせて未スキーマ化 type 文字列一覧で収束を誘導する。`--list-installed-hierarchy` は Pass 2c にインストール済み型同士の祖先／子孫関係を渡すため（祖先型は常に当てはまるため、関係を示さないと粗い型が既定で選ばれる — 語彙から決定論的に導ける情報なのでモデルの記憶に委ねない）。`rebuild_index.py` は全ソース処理後の `index.md` 更新を決定論的スクリプトに委譲し、長い多段生成の末尾でLLMが更新を忘れるリスクを排除するため。`check_extraction_quality.py` は「非空だが無意味」な抽出結果（既知JS-shellドメイン・低情報密度）および「取得能力の不足による partial extraction」の判定を、LLMの主観的判断ではなく決定論的ロジックに委ねるため（判定結果の扱いは3ガードで異なり、既知JS-shellドメインはそのソースをブロック、取得能力の不足は処理全体を停止、低情報密度は人間に続行可否を確認する警告である）。`reconcile_ingest_status.py` は `status: pending` の管理ファイルのうち内容が既に公開ページの `sources` に使われているものを検出・是正するため（§11.6「パス 4 の後処理と書き戻し」） |
 | `wikicommit-generate` | `match_existing_names.py` | Pass 2c が抽出したエンティティの名前を、既存ページの `title` / `aliases` と照合するため（`action: update` の判定を「型と slug が同じ」だけにすると、既存ページが別名として持つ名前で呼ばれた概念に新しいページが作られる）。照合は正規化後の文字列一致だけで、意味の近さは扱わない（同義かどうかは人の判断）。型が違う一致・複数ページへの一致は `update` にせず Completion Notice に出し、一致したのに別物として新しいページを作った場合はその判断を `## Generation Notes` と Completion Notice に残す |
 | `wikicommit-generate` | `build_onehop_context.py` | Pass 4 の check 8 が要る 1 ホップ近傍を、散文ではなくスクリプトで組み立てるため。使い捨ての正規表現は文字クラスの誤り（`-` を含まない等）でケバブケース slug に**例外にならず集合が静かに縮む**形で外れる。`WIKILINK_RE` は `_wikilink.py` に 1 つだけ置く。抽出だけでなく 3 つの skip 判定・クロス言語フォールバック・outbound 優先の dedup・5 件上限まで委譲する — いずれも**集合を縮める操作**であり同じ性質を持つため。`--regenerate` も同じスクリプトを呼ぶ |
+| `wikicommit-generate` / `wikicommit-merge` | `check_source_overlap.py` | ページがソースの言い回しをどれだけそのまま写しているかを、LLM に判定させずに数えるため。Pass 4 は「ソースに忠実か」を照合するので写したページはむしろ通り、「言い回しが近すぎるか」を LLM に判定させると判定がぶれて照合の範囲も増える。n 語以上連続する一致は機械的に数えられる。generate は書き出しの後（抽出テキストのキャッシュが確実にある時点）に Skill の `workflow_checks.py source-overlap` が呼び、merge は Step 3 の品質チェックで変更ページにだけ warning として呼ぶ |
 | `wikicommit-update` | `check_distribution_freshness.py` / `rebuild_index.py` / `validate_frontmatter.py` / `check_wikilinks.py` / `check_raw_html.py` / `check_orphans.py` | 前者はドリフト検出そのものを担い（`wikicommit-status` と共有）、残りは更新後の検証に使う。`wikicommit-init/scripts/init.py` も`--no-overwrite`（`overwrite` の適用）・`--update-version`（版の刻印）・`--add-config-keys`（欠落キーの加算）の3 経路で呼ぶ — Skill 内スクリプトへの越境呼び出しにあたるが、**同じ Skill が持つ設定ファイル生成のロジックそのもの**であり、複製すると `_root_outputs.py` の `update` 列が唯一の情報源であるという前提が崩れる |
 | `wikicommit-reconcile` | `set_frontmatter_field.py` | 管理ファイルの `status` を `pending` に書き戻す。同スクリプトはパス非依存（frontmatter ブロックを持つ任意のファイルを受ける）であり、`--require KEY=VALUE` で現在値を確認してから書く冪等な経路を持つ。**検出用のスクリプトは置かない** — ポリシー変更の判定器は Pass 2c 自身であり、もう一度呼べないことだけが問題だった |
 | `wikicommit-relate` / `wikicommit-status` | `check_name_collisions.py` / `record_relation.py`（relate のみ）/ `rename_page.py`（relate のみ）/ `build_survey_view.py --pages`（relate のみ） | 名前の衝突の検出（判断済みの組を外す）と判断の記録は、網羅性と再現性が要る決定論的な操作であり、指示に書くと「1 つ漏れても出力は成功に見える」形になる。status は衝突を 1 行として数え、relate はその組を順に人に尋ねる |
@@ -740,7 +745,7 @@ Skill のプロンプト（SKILL.md）は LLM への指示であり、決定論�
 - **「init.py が書き出す ＝ ユーザーがコミットする」に収まらない例外は一覧上で表現する**（呼び出し側の特殊分岐にしない）: (1) `.gitmodules` / `quartz` は案内には出るが誰も生成しない（ユーザーが `git submodule add` する。`origin="submodule"`）、(2) `.wikicommit/schemaorg-vocab.json` は型提案ステップが実際にネットワークへ出たときにしか存在しない（`condition="vocab_cache"`。`git add` は存在しない pathspec でコマンド全体が異常終了するため、無条件に並べると基盤ファイルのコミットごと落ちる）、(3) `package-lock.json` は `npm install` の副産物であり、`git add` 行から意図的に外して別コマンドとして案内する（`in_git_add=False`）
 - **印字される `git add` の既定は `-A` であり、一覧はその横に置くフォールバックである。** 列挙には誰も生成しないパス（`.gitmodules` / `quartz`）が載り、`git add` は存在しない pathspec を渡されるとコマンド全体を中断する（exit 128・staged 0 件）ため、列挙をそのまま既定にすると Quartz を後回しにした利用者の基盤コミットが丸ごと落ちる。`.gitignore` は `init.py` 自身が書く（`--quartz` では Quartz セクションを追記する）ため、**新規リポジトリでは列挙と `-A` の結果が一致する**
 - **列挙が効く場面は既存リポジトリへの後入れだけ**（`docs/DesignDoc-data.md` §3.1）なので、「WikiCommit と無関係な未追跡ファイルがあるなら `git status --short` で確認するか、以下を個別に stage する」という注記として `build_git_add()` の出力を再利用する。`condition="vocab_cache"` と `in_git_add=False` は既定の経路では不要だが**どちらも機構ごと残す** — 注記側の列挙では依然として abort しうるうえ、後者は「これは決定であって漏れではない」を記録するフィールドである
-- **`-A` が列挙と一致するのは「この Wiki のために作ったリポジトリ」に限る。** `.gitignore` は `_root_outputs.py` 上 `update="review"`（＝`always_skip_existing`）であり、既にあるリポジトリに後入れした場合 `init.py` はこれを書かない。したがって `node_modules/`・`.wikicommit/.cache/`・`.wikicommit/run/` が ignore されておらず、`npm install` の後に `-A` を打つと `node_modules/` が丸ごとコミットに入る。`print_next_steps.py` はリポジトリではなくフラグだけを受け取る設計なので、分岐ではなく**注記で伝える** — 併せて、後入れ向けの列挙が `.gitmodules` / `quartz` を含む以上そちらは依然 abort しうることもその場で明示する（`wikicommit-update` SKILL.md も同じ注記を出す）
+- **`-A` が列挙と一致するのは「この Wiki のために作ったリポジトリ」に限る。** `.gitignore` は `_root_outputs.py` 上 `update="review"`（＝`always_skip_existing`）であり、既にあるリポジトリに後入れした場合 `init.py` はこれを書かない。したがって `node_modules/`・`.wikicommit/.cache/`・`.wikicommit/run/` が ignore されておらず、`npm install` の後に `-A` を打つと `node_modules/` が丸ごとコミットに入る。`print_next_steps.py` の `build_selective_add_note()` は、init.py を向けたリポジトリ（`--repo-root`）の `.gitignore` を読み（`_root_outputs.missing_gitignore_patterns()`）、**足りないパターンがあるかどうかで `-A` の下の注記を 2 種類に出し分ける** — 揃っていれば「`-A` は WikiCommit の生成物だけを stage する（ただしリポジトリ自身の未追跡ファイルがあれば `git status --short` で確かめる）」と述べ、足りなければ足りないパターンを列挙し、`-A` の前にそれらを足すよう求める。「この実行が `.gitignore` を書いたか」というフラグではなくファイルの中身を見るのは、効くのはどのパターンが入っているかであり、このスクリプトは init.py が書き終えた後に走るからである。テンプレートが読めないとき（インストールが壊れている）は、`.gitignore` が足りている側ではなく足りない側の注記を出す — 併せて、後入れ向けの列挙が `.gitmodules` / `quartz` を含む以上そちらは依然 abort しうることもその場で明示する（`wikicommit-update` SKILL.md も同じ注記を出す）
 - **submodule**: 作業ツリーが汚れているだけ（submodule 内に未追跡ファイルがある）でポインタが動いていない場合、リポジトリルートの `git add -A` は何も stage しない。ポインタが実際に動いている場合のみ `quartz` が stage される（初回コミットではそれが望ましい）
 - **テスト**: `tests/test_smoke_local.py` は注記側の列挙どおりに add した後に未追跡ファイルが残らないことを検証し（ドリフトが残りうるのは列挙の側）、既定が `-A` であること自体は別のテストが固定する。`tests/test_root_outputs.py` は Quartz 限定の生成物が `wikicommit-init/SKILL.md` の散文にすべて現れることを検証する（SKILL.md は静的な指示書で生成する主体が無いため、散文は自動生成の対象にしない。全変種で生成されるエントリ〈`.gitignore`・`.wikicommit/entity/`・`review-issue-close-sync.yml`〉は SKILL.md 中でパスとして現れないので対象外）
 - **`init.py` の生成処理そのものを一覧から駆動するのは verbatim コピーに限る。** `config.yml` と `quartz.config.yaml` はプレースホルダー置換、`schema`/`scripts`/`quartz-plugins` はディレクトリツリー、`entity`/`source` は `.gitkeep` 付きディレクトリ作成であり、いずれも一覧には載るが（`template=None`）生成コードは `init.py` に残る
@@ -901,7 +906,7 @@ SKILL.md での記述例（`wikicommit-status`）:
 |---|---|---|
 | **決めない**（情報提供のみ） | そもそも判断を要さない。報告するだけ | 言語不一致・partial extraction |
 | **自動で決める** | 証拠が最も強く、かつ事後の確認経路が**実在する** | **現在は実例が無い**。ここへ入れる判断は、この 2 つの条件を実際に満たしているかを先に確かめること — `wikicommit-merge` の PR は数秒後に自動マージされ誰も読まないので、事後の確認経路にはならない。とくに型ファイルは編集できず、ページを再分類する Skill も無いので、誤った承認は取り返しがつかない |
-| **既定を決めておく** | 待つ先が無いか、既定が明らかに安全側で、かつ取り返しがつく | Step 0 のポリシー確認（登録せず報告）・5 件ガード（(b) 先頭 5 件）・`wikicommit-merge` の warning 続行確認（中断）・`wikicommit-synthesize` の既存 view ページの上書き確認（上書きしない） |
+| **既定を決めておく** | 待つ先が無いか、既定が明らかに安全側で、かつ取り返しがつく | Step 0 のポリシー確認（登録せず報告）・5 件ガード（(b) 先頭 5 件）・`wikicommit-merge` の warning 続行確認（続行。warning は常にマージ可で、PR 本文に残る）・`wikicommit-synthesize` の既存 view ページの上書き確認（上書きしない） |
 | **保留する** | **人間が見れば答えが変わりうる**判断で、かつ保留したものが後から拾われる経路がある | ガード A の `LOW_DENSITY:`・Pass 2b の型候補（この 2 つは対話実行でも保留し、繰り返しの後にまとめて尋ねる。下記）・`ambiguous`・`action: update` の既存ソースが取得できない（下記） |
 | **失敗にする** | 決定論的な判定。人間が見ても答えが変わらない | ガード B・抽出結果が空／読み取り不能・YouTube の URL 形式違い |
 | **処理全体を停止する** | 環境の問題であってソースの問題ではない | ガード C・`rules_version` 不一致・`NETWORK_UNAVAILABLE:` の連続 2 件（1 件目は下記） |
@@ -912,7 +917,7 @@ SKILL.md での記述例（`wikicommit-status`）:
 
 ```
 [1] per-source           全ソースを Pass 1〜4 で処理。ガード A・Pass 2b で判断が要るソースは保留して次へ
-[2] collect-questions    この実行が質問のために保留したソースを一覧にする（script）
+[2] collect-questions    この実行が質問のために保留したソースと、ambiguous を残したソースを一覧にする（script）
     ask-deferred         一覧が空でなければ、まとめて尋ねる（human。非対話の既定は later）
 [3] per-answered-source  答えたソースだけを Pass 1〜4 でもう一度処理する（for_each）
 ```
@@ -921,18 +926,32 @@ SKILL.md での記述例（`wikicommit-status`）:
 |---|---|
 | 尋ねる理由 | バッチの途中の質問のために人が張り付く必要が無くなり、対話か否かの判定が工程の中の自己申告に依らなくなる（サブエージェントの中から呼ばれると、人がいても非対話と判定しうる）。1 件だけの実行では [1] の保留の直後に [2] が来るので、その場で尋ねるのと同じ位置になる |
 | 対話性の判定 | エンジンの `start --non-interactive` に一本化する。Pass 1・2b は判定しない（どちらの実行でも保留する）。判定に依存するのは [2] を尋ねるかどうかだけである |
-| 質問の対象 | Pass 1 の保留のうち `## Deferred Reason` が `LOW_DENSITY:` で始まるもの（`NETWORK_UNAVAILABLE:` は人ではなくネットワークを待つので含めない）と、Pass 2b の保留。Pass 2c の保留（既存ソースが取得できない）も人を待つものではないので含めない |
+| 質問の対象 | Pass 1 の保留のうち `## Deferred Reason` が `LOW_DENSITY:` で始まるもの（`NETWORK_UNAVAILABLE:` は人ではなくネットワークを待つので含めない）と、Pass 2b の保留。Pass 2c の保留（既存ソースが取得できない）も人を待つものではないので含めない。加えて、[1] の Pass 4 が `ambiguous_entities` を書いたソース（下の「`ambiguous` なエンティティの型」） |
 | 質問の見せ方 | 材料は `## Deferred Reason` と管理ファイルの `source.url` / `source.path`。ガード A は `LOW_DENSITY:` の行（`non-prose breakdown:` を含む）を逐語で、Pass 2b は型名（`schema:<Type>`）・動機のエンティティ・既存の型より合う理由を、保留を書く時点で書いておく |
 | 同じ型候補を持つ複数のソース | 型ごとに 1 回だけ尋ね、答えを同じ候補の全ソースに当てる。[3] で最初のソースが型ファイルを書けば、後のソースはそれをインストール済みの型として使う |
-| 答えの渡し方 | `human` 工程の `done --answer answered --add <一覧>=<値>` で実行記録の一覧に置き、[3] の工程が `show_lists` で受け取る。一覧は `continue-low-density` / `fail-low-density`（管理ファイル）・`approved-types` / `declined-types`（型名）・`reprocess`（[3] で処理し直すソース）。答えは同じ実行の中で使い切るので、管理ファイルに新しいフィールドを足さない |
+| 答えの渡し方 | `human` 工程の `done --answer answered --add <一覧>=<値>` で実行記録の一覧に置き、[3] の工程が `show_lists` で受け取る。一覧は `continue-low-density` / `fail-low-density`（管理ファイル）・`approved-types` / `declined-types`（型名）・`entity-types`（`<管理ファイル>#<title>=<schema:Type>`）・`reprocess`（[3] で処理し直すソース）。答えは同じ実行の中で使い切るので、管理ファイルに新しいフィールドを足さない |
 | 答えの確認 | `ask-deferred` の `check`（`check-answers`）が、答えが尋ねた質問に合っているかを確かめる — `reprocess` がこの実行で質問のために保留したソースであること、低密度のソースには続行・失敗のどちらかの答えがあること、答えた型がこの実行の保留理由に現れること、`later` には一覧を足さないこと。[3] の `check-pass1` は、`fail-low-density` のソースが `failed` で終わり、`continue-low-density` のソースが同じ警告で再び保留されないことを確かめる |
 | 処理済みのソースへの影響 | [1] で先に処理したソースのうち、承認された型を Pass 2c で使えたはずのものは、祖先型のまま書かれる。その場で尋ねていたときも「承認より前に処理したソース」には同じことが起きていたので、悪化の幅は処理順による差に限られる。受け入れ、Completion Notice が `/wikicommit-reconcile --source` を案内する |
 | [3] で同じ質問に当たった場合 | 尋ねない。答えの無い候補（Pass 2b が [3] で別の型候補を出した等）はそのソースを再び保留し、キューに残す。2 回目の質問の工程は置かないので、実行は必ず終わる |
-| 範囲外 | 5 件ガード（処理を始める前に答えが要る）・Step 0 のポリシー確認（登録前のソースには保留の受け皿が無い）・Pass 4 の再試行の延長（生成途中のページを持ち越す必要がある）・`ambiguous`（エンティティ単位で形が違う）。他の Skill への適用もしていない |
+| 範囲外 | 5 件ガード（処理を始める前に答えが要る）・Step 0 のポリシー確認（登録前のソースには保留の受け皿が無い）・Pass 4 の再試行の延長（生成途中のページを持ち越す必要がある）。他の Skill への適用もしていない。`ambiguous` は乗せる（下の「`ambiguous` なエンティティの型」） |
 | [1] の途中で実行が止まった場合 | 止まる理由はガード C（`MISSING_PACKAGE:`）・Pass 2c の `NETWORK_UNAVAILABLE` の連続・Pass 4 の `rules_version` の不一致など。halt は即座に実行を閉じるので [2] に届かず、それまでに保留した質問はその実行では尋ねられない。**止まったときの報告に、それまでに保留した質問を列挙する** — SKILL.md の手順が halt を報告する前に `workflow_checks.py halted-questions --run <run>` を実行させ、出力された管理ファイル（`ITEM:`）と `## Deferred Reason` の 1 行目（`REASON:`）を、尋ねずに残った質問として伝える。halt した実行記録もログを持つので、このコマンドは [2] と同じ `deferred_questions()` で読め、エンジンは変えない。[3] の途中で止まった実行は [2] を経ている（質問は尋ね済み）ので、ログに `ask-deferred` があれば何も出力しない |
 | 止まる前に質問の工程を挟むか | 挟まない。halt は「環境の問題で、これ以上進めない」ときの即時停止であり、その前に人への質問を差し込むと、環境が直らないまま答えを取り、[3] で処理し直すこともできない（同じ halt に当たる）。エンジンに halt 時のフックも足さない |
 | 保留を書いた時点で表示する・`check_run_records.py` に併記する | どちらも採らない。前者は 30 件の実行の途中で質問を表示しても答える工程が無く、[2] でもう一度同じものを見せることになる。後者は halt した実行を後から拾う経路として働くが、止まったその時点の報告で足りる |
 | 列挙した質問のその後 | 尋ねられずに残った保留は持ち越されない — ソースは `pending` / `outdated` のまま `## Deferred Reason` 付きでキューに残り、次の対話実行がそのソースを選び、Pass 1 から処理し直して再び保留にし、その実行が [1] の最後まで進んだときに初めて尋ねられる。同じ tier の中では保留付きのソースが後ろに並ぶので、5 件ガードで「先頭 5 件」を選ぶと漏れうる。実行の間は `/wikicommit-status` が保留中のソースの件数・パス・理由の 1 行目を報告する |
+
+###### `ambiguous` なエンティティの型
+
+Pass 2c が型を決められなかったエンティティ（`ambiguous: true`）も [2] で尋ね、型を答えたエンティティのソースを [3] で処理し直す。ソース単位の保留と違い、このソースは保留されず [1] の Pass 4 まで進む（他のエンティティはページになる）ので、収集元と答えの形が別になる。
+
+| 論点 | 決定 |
+|---|---|
+| 収集元 | `collect-questions` の 2 つ目の収集元として、この実行の [1] の `pass4-review` のログに出た管理ファイルのうち `ambiguous_entities` を持つものを `questions` に加える（`deferred_questions()` が拾うのは `QUESTION_STEPS` の `deferred` だけで、`ok` で終わるこのソースは現れない。別の収集元にするほうが既存の判定を崩さない）。質問の材料は `ambiguous_entities` の `title`・`type`・`alternatives` とソース |
+| 答えの形 | run list `entity-types` に `<管理ファイル>#<title>=<schema:Type>` を 1 エンティティ 1 件で置く。管理ファイルは `.md#` で、型は最後の `=` で切るので、`title` が `#` や `=` を含んでもよい。管理ファイルには書かない（ソース単位の答えと同じく同じ実行の中で使い切る） |
+| `check-answers` | `entity-types` の各件が、この実行で `ambiguous_entities` を残したソースの、その `title` のエンティティを名指しすること・型がそのエンティティの `type` / `alternatives` か、導入済みの型（`.wikicommit/schema/` にファイルがある）であること（同じ答えの `approved-types` で承認した型は、候補に無ければ受け付けない — その型ファイルは保留したソースを処理し直す Pass 2b で初めて書かれ、`reprocess` の中でそちらが先に通る保証が無いので、ページが型ファイルの無いまま生成されうる。そのエンティティは次の実行で答える）・同じエンティティに 2 回答えないこと・答えたソースが `reprocess` にあること。`reprocess` に入れた ambiguous のソースは、少なくとも 1 件のエンティティに型の答えが要る。全件に答える必要は無い — 答えなかったエンティティは [3] でも `ambiguous: true` のまま残り、ソースは再び `partial` になる |
+| 処理し直す単位 | ソース全体（既存の `per-answered-source`）。エンティティだけを処理し直す繰り返しは、Pass 3・4 と管理ファイルの書き込みを別に持つことになり重い。ソース全体なら他のエンティティは `unchanged` / `update` に落ちる。Pass 2c は `show_lists` で `entity-types` を受け取り、自分の管理ファイルを名指しする答えのエンティティを `ambiguous: false`・答えの型で返す |
+| `partial` との順序 | [1] の Pass 4 は今のとおり `partial` ＋ `ambiguous_entities` を書き、[3] の Pass 4 が全面的に書き直す（`ambiguous_entities` は毎回書き直し、無ければ消す規則のまま）。途中で halt しても `later` でも管理ファイルは今と同じ正しい状態で残り、「`failed_pages` が空の `partial` は ambiguous」という意味は保たれる。[3] の `check-pass4` は `--run` を受け取り、型を答えたエンティティが `ambiguous_entities` に残っていれば受け付けない |
+| 非対話実行 | 変えない。`ask-deferred` が `later` を返し、ソースは `partial` ＋ `ambiguous_entities` のまま |
+| Pass 2c の即時表示 | 残す。halt で [2] に届かないときの受け皿であり、`halted-questions` は `deferred` だけを並べる（ambiguous は即時表示と `/wikicommit-status` が知らせる）。Completion Notice は、この実行の中で型を答えて書き直したエンティティを型の確認の一覧から外す |
 
 エンジンに足した機能は 3 つで、どれも WikiCommit 固有の知識を持たない — `human` 工程も `adds` と `check` を持てる（答えに添えた一覧を確認してから受け付ける）、工程の `show_lists` に挙げた一覧を工程とともに返す、同じ一覧を 2 つの `for_each` が回るとき、項目の早期終了（`ends_item_on`）をその `for_each` の中に限る。2 つ目の繰り返しの工程は ID が別になるので、`stamp` に打点の名前を書けるようにし、実行記録の `passes` には 1 つ目と同じ名前で打つ（`check_run_records.py` はそのまま読める）。
 
@@ -1070,6 +1089,8 @@ pending / outdated な .wikicommit/source/**/*.md を 1 件ずつ順次処理
 
 **compaction の壊れ方**: 上限を超える運用は避ける。Claude Code では compaction 後に再添付されるのは**各 Skill の先頭 5,000 トークンだけ**である（`code.claude.com/docs/en/skills`）。**これは Claude Code というハーネスの挙動であって、モデルの性質でも agentskills.io 標準の一部でもない** — 標準が共有するのは SKILL.md の形式と frontmatter までで、コンテキスト管理は各ハーネスの実装である。したがってバージョンで変わりうるし、他エージェントでは別の壊れ方をする。**この数字を配布物の設計閾値や CI のガードに焼き込まないこと**（根拠だけが残って前提が消えるのは、§11.9 が扱っているのと同じ失敗である）。窓の外に落ちた手順はエージェントの手元から消え、**エージェントは残りの手順を持たないまま実行を続け、出力は一見正常に見える。** SKILL.md 本体を小さく保ち、Pass ごとの手順と checkpoint の打点指示を `references/` の各ファイルに置いているのは、再添付の窓が本体のほぼ全体を覆うようにするためである（§11.3「`references/` に置く条件」）。
 
+**Skill ワークフローエンジン（§11.0）が守るものと守らないもの。** compaction を越えて守られるのは**次にどの工程を行うか**と**工程をまたぐ値**である — どちらも実行記録のログにあり、エンジンは呼ばれるたびにそれをリプレイする。ただしこれには前提がある: compaction の後にエージェントが `skill_workflow.py next` を呼び直すことである。その指示は `wikicommit-generate/SKILL.md` の冒頭（「Processing Flow」の第 1 段落と、ループの直後の `next` の段落）にあり、Claude Code が再添付する先頭 5,000 トークンに収まる（`next` の段落までが先頭から約 10KB。本体は約 16KB）。守られないのは**工程の中の手順**である — 手順は工程ごとの手順ファイルから読むもので、工程の途中で落ちればエージェントは残りを持たないまま続け、出力は一見正常に見える（工程の完了確認はディスク上に在るはずのものを見るので、拾えるのはその一部に留まる）。したがって上限を超える運用を避けるという結論は変わらず、README もエンジンを「超えても大丈夫」の根拠として書かない。他のエージェントで Skill の手順が何割残るか（＝ `next` を呼び直す指示が残るか）は未確認なので、README は Claude Code についてだけ具体的に書き、他は「エージェントによる」に留める。
+
 **窓を超えたときの挙動はハーネスごとに違う。** Copilot CLI は窓の約 80% で背景で要約を始め、履歴を要約と「元のユーザーの指示」・計画の状態に置き換える（`github/docs` の `content/copilot/concepts/agents/copilot-cli/context-management.md`）。Skill の本文を再添付するとは書かれていない。Codex は `models.json` に窓を使い切ったときの手順（メモを残して新しい窓へ移る）を持つ。**どちらでも Skill の手順が何割残るかは未確認**であり、README は Claude Code の挙動だけを具体的に書いて他は「エージェントによる」に留める。
 
 **利用者向けの式・推奨件数・公式ドキュメントへのリンクは `README.md` / `README_ja.md` が正本である**（`CLAUDE.md` は公開スナップショットに含まれないため、公開側だけを読む利用者に届く場所を正本にした）。README 側は 1 節で完結する — Requirements → Context window が、式・1 件あたりを変数として見せる表・5 件ガードの位置づけ・compaction で何が起きるか・モデル設定ドキュメントへのリンクを持つ。**固定分の内訳を持つのは本節である。** README の書き方の規則:
@@ -1129,6 +1150,28 @@ Pass 2b が親に来るのは、summary だけで判断でき本文が要らな�
 | **SKILL.md 本体の肥大化** | (1) 公式ガイダンス（`skill-creator` の Skill Writing Guide）は超過時の処方として進行的開示を名指ししており（「500 行に近づいたら、階層をもう 1 層足し、次にどこを読めばよいかのポインタを明示せよ」。progressive disclosure は Metadata / SKILL.md body `<500 lines ideal` / Bundled resources の 3 層）、サブエージェント化は肥大化への対処としてどこにも現れない。進行的開示は同じ区画を同じだけ削り、本体はむしろ小さくなる（振り付けがポインタより高いため）、(2) ループ／バッチ処理は呼び出し側の責務であり、1 回の呼び出しは 5 件ガードの範囲に収まるので、固定オーバーヘッドの削減（サブエージェント化の唯一の測れる便益）は拘束しない、(3) 残る便益（工程分担の構造的強制、暗黙の結合が受け渡し契約として表に出ること）は実在するが測れず、コストは確実である — とくに単位 B の契約漏れは黙って劣化する（効果を測る手段が無い一方でコスト増が確実なものは採らない、という `chain_of_thought` と同じ基準） | (1) 呼び出し側の解決が**同一コンテキストでのループ**に落ち着いた場合、(2) 進行的開示の後も SKILL.md が 500 行を超えて**再び成長した**場合、(3) 暗黙の結合 2 件（ガード A の対話性が自己申告であること・Pass 2c → Pass 3 の受け渡しが分析 JSON に載っていないこと）が実害として現れた場合 |
 
 **対話性の判定は親が 1 回行って渡す形にする必要がある**（どの構成でも）。ガード A と Pass 2b はもう対話性を判定せず常に保留し、尋ねるかどうかはエンジンの `start --non-interactive` だけが決める（§11.5「保留した質問は繰り返しの後にまとめて尋ねる」）。Pass を素朴にサブエージェント化しても質問は親の `human` 工程に残るので、内側が非対話と自己判定して型候補を全部保留にする形は起きない。
+
+#### 所要時間（実測）
+
+**1 回の実行にかかる時間は、ソースの抽出量ではなくページ単位の作業の回数に比例する。** 生成の単位は「分 / 試行」（試行 ＝ ページ 1 枚の Pass 3 ＋ Pass 4 の 1 周。初回と再生成を数える）、翻訳の単位は「分 / ペア」（原文ページ 1 枚 × 訳す言語 1 つ）である。トークンや文字数あたりの値は使わない — 生成では分 / 1K トークンがソースごとに 1.36〜9.72 と 7 倍散らばり、翻訳ではペアの所要と原文の文字数の相関が −0.25 だった。
+
+| | 単位 | いまの値 | 範囲 | 条件 |
+|---|---|---|---|---|
+| 生成 | 分 / 試行 | **2.14** | 1.72〜2.42（ソースごと） | 2026-09-10・Claude Code・`claude-opus-5[1m]`・ソース 5 件（抽出 1.2〜14K トークン）・28 ページ・40 試行。人の応答待ちは除いていない |
+| 翻訳 | 分 / ペア | **0.99** | 0.5〜2.6（ペアごと） | 2026-10-21・Claude Code・`claude-opus-5-5`・en → ja・`DefinedTerm` 15 ペア（原文 3,113〜11,471 文字）・全ペアが 1 試行で通過。5 件ガードの回答待ちは除いた |
+
+- **生成の試行はページの約 1.43 倍**（40 試行 / 28 ページ）。Pass 4 の FAIL による再生成の分である
+- **翻訳はセッションの最初の 1 ペアだけ約 1.7 分長い**（153 秒。それ以外の 14 ペアの平均は 52.7 秒、同じセッションの 2・3 回目の実行の 1 ペア目は 77・52 秒）。ペア以外にかかる時間は 1 実行 6〜15 秒で、無視できる
+- **利用者が事前に数えられるのはソース件数なので、換算には「1 件あたりのページ数」を挟む。** これが最も大きく揺れる項であり、上の 5 件では 5.6 ページ / 件（延べ 28 / 5）、同じテーマの以前の Wiki の 124 件全体では約 3.7 ページ / 件（延べ 460 / 124）だった（どちらも更新を含む延べ数）。README は 4〜6 ページ / 件の幅で換算する
+
+**未測定の範囲**: 抽出量が 1 桁大きいソース（121K トークン級の PDF。ページ数に依らない固定費がどれだけ乗るか）、`DefinedTerm` 以外の型と長い原文（28K 文字級）の翻訳、Claude Code 以外のエージェント。いずれも README に条件として範囲を書き、その外で外れた報告が来たら測る。
+
+**測り方**（モデル・エージェントが変わったら測り直す。値が変わったら README・README_ja の Requirements → How long a run takes も直す）:
+
+1. **所要**: 実行記録 `.wikicommit/run/<YYYYMMDD>-<HHMMSS>-<skill>.md` の `ended_at − started_at`（`/wikicommit-status` の直近の実行の行にも出る）
+2. **人の応答待ちを引く**: `workflow.log` で `answered_by: person` を持つエントリと、その直前のエントリとの差を引く。この差にはエージェントが確認を出すまでの時間も含まれるので、引く量は上限である。`answered_by: person` は `skill_workflow.py answer` が呼ばれれば必ず書かれ、エージェントが前の回答を使い回した場合も同じ値になるので、人が実際に答えたかどうかの印にはならない（使い回しの区間は 1 秒程度で、引いても結果はほぼ変わらない）。その他の待ち（エージェントが工程の外で人に尋ねたもの）は記録からは分けられない。`workflow.log` を持たない実行記録では引けない
+3. **分母**: 生成はその実行で書かれた Pass 4 のレビュー記録（`.wikicommit/review/entity/...` の `-ai.md` と、同じ秒に重なったときの `-ai-<n>.md`。`result: discarded` のページを含む）の `attempts` の合計。翻訳は `workflow.log` の `translate` エントリのうち `outcome` が `translated` か `discarded` のものの数（`halted` はそのペアを終えていない）
+4. **ばらつきを見る**: `workflow.log` の隣り合う `at` の差が工程ごと・ページごとの所要である
 
 #### パス設計
 

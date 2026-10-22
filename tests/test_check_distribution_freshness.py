@@ -26,7 +26,7 @@ INIT_SCRIPTS = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts"
 SCRIPT_REL = Path(".wikicommit") / "scripts" / "check_distribution_freshness.py"
 
 # The fourth place that copies this tree, and the last one to prune it. install.sh
-# (`find ... -not -path '*/node_modules/*'`), copy_tree() in init.py (Issue #211, and
+# (`find ... \( -name node_modules -o -name __pycache__ \) -prune`), copy_tree() in init.py (Issue #211, and
 # __pycache__ since Issue #577) and check_distribution_freshness.py itself (_PRUNED_DIRS)
 # all skip these two, so neither can reach a user's wiki repository. A fixture that
 # carries them anyway is not just slow — once `npm install` has been run under a template

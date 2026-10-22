@@ -4,6 +4,8 @@ pass_token: "a78a97ea"
 
 # Steps 5–9: synthesize, review, record and write (`write`)
 
+> **Paths in this file.** `references/…` and `../<other-skill>/…` are relative to the Skill's directory (the parent of this `references/` directory), not to the repository root — the Skills may be installed under `.claude/skills/` or `.agents/skills/`. Paths starting with `.wikicommit/` are repository-root paths.
+
 Write the page from the grounding pages the `ground` step read — they are in the run record's `workflow.lists.grounding`; if their bodies are no longer in front of you (a resumed run), read them again first. The `kind`, if one was chosen at the survey, is the last entry of `workflow.lists.kind`. Read `generate.max_retries` (default: 2) from `.wikicommit/config.yml`.
 
 Report one outcome when this step is done, passing the view page's path (`.wikicommit/view/<lang>/<slug>.md`, Steps 6–7) as `--add page=` in every case but `halted`:
@@ -34,17 +36,47 @@ forcing a page into a kind whose Boundary it then breaks is worse than leaving
 it off. Pages piling up without a kind is the signal that a kind is missing, so
 leaving it off is a real answer, not a failure.
 
-| kind | What the page does | Boundary — what it must not do |
-|---|---|---|
-| `practice` | Sets several accounts of one practice against each other: when it applies, what it assumes, how it fails, what kind of evidence stands behind it | **Never write normative advice.** Report what the grounding pages record about a practice; do not tell the reader to adopt it. An invented insight costs more than an absent one |
-| `landscape` | Maps an area and points at its hubs and main pages, as a way in | Make no new claim, and **write no counts**. The overview page recomputes totals, reviewed ratios, per-type tallies and gaps on every build; a number written into prose here is wrong by tomorrow with nothing to catch it. Link there instead |
-| `comparison` | Puts a few entities of the same kind side by side and draws out where they differ | Do not rank them or declare one better. Differences, not verdicts |
-| `pattern` | Describes a shape that recurs across many pages | **Always give the count and name the pages.** A pattern with no cases behind it is an assertion |
-| `timeline` | Orders events drawn from several pages along time | Leave each event's detail on its own `Event` page; this page carries the ordering |
-| `debate` | Lays out how one question is answered differently, and what backs each answer | Reach no conclusion. Where the grounding pages disagree, that disagreement is the content |
+| kind | What the page does | The opening answers | Boundary — what it must not do |
+|---|---|---|---|
+| `practice` | Sets several accounts of one practice against each other, and lays out the conditions, the ways of doing it and the recorded results that the grounding pages themselves state | What practice is recorded, and under what conditions? | **Never write normative advice.** Report what the grounding pages record about a practice; do not tell the reader to adopt it. Conditions, ways of doing it and results are only the ones a grounding page states |
+| `landscape` | Maps an area and points at its hubs and main pages, as a way in | What does the area cover, and where should a reader start? | Make no new claim, and **write no counts**. The overview page recomputes totals, reviewed ratios, per-type tallies and gaps on every build; a number written into prose here is wrong by tomorrow with nothing to catch it. Link there instead. Do not say that a part of the area with no pages "needs more research" |
+| `comparison` | Puts a few entities of the same kind side by side and draws out where they differ | What is compared, along which axes? | Do not rank them or declare one better. Each axis is one characteristic, and its values exclude each other. State a difference only where the grounding pages of both sides state their own side |
+| `pattern` | Describes a shape that recurs across many pages | What shape recurs, and in which named cases? Say what the shape is in the cases' own terms, and leave its features to the sections | **Always give the count and name the pages.** Give the shape a name only where the grounding pages' own wording supports that name, and do not raise an interpretive theme above the cases |
+| `timeline` | Orders events drawn from several pages along time | What period is covered, from when to when? | Leave each event's detail on its own `Event` page; this page carries the ordering. Do not write the chronology as running prose. Write a vague date at the precision it is written, and do not estimate one |
+| `debate` | Lays out how one question is answered differently, and what backs each answer | What is asked, and how many answers are given to it? | Reach no conclusion. Use only the question, the positions and what backs each; put in nothing that would settle it |
 
-Write the body to fit the chosen kind, and keep inside its Boundary — Step 5.5
-checks the Boundary as well as the grounding.
+**Every kind, and a page with none, has one more Boundary — juxtaposition can be a claim.** Do not set two statements next to each other so that they plainly imply a conclusion no grounding page states ("X was meant to do A, but afterwards B happened"). Summarising, setting side by side and explaining are what this page does; a juxtaposition that makes an obvious new inference is a claim with no grounding.
+
+Write the body to fit the chosen kind, and keep inside its Boundary and the one every kind shares — Step 5.5 checks both as well as the grounding.
+
+### How to write the body
+
+**Read `../wikicommit-generate/references/writing-rules.md` and follow it**, reading "the source" as "the grounding pages' body content". Those are the writing rules every entity page follows (lead, own words, main point first, headings, tables, examples, terms, reported findings, which remarks stay out). A view page is written by the same rules so that entity and view pages read alike; **do not restate them here**, and do not grow separate writing rules for view pages — kept in two places, one copy gets fixed and the other does not.
+
+Then add the rules only a view page needs:
+
+- **The subject is not the grounding pages.** Write about the practice, concept,
+  institution or positions the grounding pages describe. Do not open with "Several
+  pages in this wiki…" or "This page…", and do not make a grounding page the
+  grammatical subject of a sentence; put its `[[Type/slug]]` link at the end of
+  the sentence or in parentheses. The exception is a sentence whose content *is*
+  who said it — where a position comes from in a `debate`. A page whose subject
+  is the pages reads as an annotated reading list, not as an account of anything.
+- **Name every case, and say what makes it a case.** Do not write a
+  generalisation that no named case stands behind.
+- **The lead does not widen the cases.** On top of "The lead summarises the
+  body", do not turn something true of some of the cases into something true of
+  all of them.
+- **Only body content counts.** Facts that appear only in a grounding page's
+  frontmatter (an author list, `properties:` values) are not in its body content;
+  do not use them. Step 5.5's reviewer is given the grounding pages' bodies
+  alone, so such a fact reads to it as a claim with no grounding and fails the
+  page.
+- **The opening answers the kind's question** (the "The opening answers" column
+  above). An opening that sums the whole up in one characterisation tends to
+  spread what is true of some cases to all of them — which is why a `pattern`
+  opens with the shape and the names of its cases, and nothing more. A page with
+  no kind opens as the lead rule says.
 
 **Do not open the body with an H1 (`# <topic>`), or any other top-level title line**. The page's title lives in the `title` frontmatter field (Step 9) and Quartz renders that as the page heading, so a body H1 duplicates it on the published page. No schema template's body uses an H1 (each starts with a paragraph, a `##` heading, or a `READER QUESTIONS` block that is never copied into the page), which is why `/wikicommit-generate` and `/wikicommit-translate` never produce one — this Skill is the only one that builds a body without going through a template, so it is the only place the convention has to be stated outright.
 
@@ -59,7 +91,7 @@ This path needs a check most: a synthesized page carries `derived_from` and no `
    1. **The path label `synthesize-step5.5`**, stated as the path this review is running on. The rules file scopes several checks by path ("a check that does not name your path is not yours to run") and has a section per path — including the one that says `MISSING_SOURCE` means something different here — so a subagent left to guess which one it is on may run the cited-document check that does not apply here, or miss the Boundary check that only applies here.
    2. **The generated body from step 5.**
    3. **The full body of each grounding page**, each wrapped in a block marked `SOURCE`.
-   4. **`.wikicommit/review-rules.md`**, with an instruction to follow it, plus the page's chosen `kind` and the one Boundary line for it from Step 5's table.
+   4. **`.wikicommit/review-rules.md`**, with an instruction to follow it, plus the page's chosen `kind` (or that it has none), the Boundary cell for that kind from Step 5's table, and the juxtaposition Boundary that every kind shares — passed even when the page has no kind, since it holds for every view page.
 
    **Do not include anything else** — not your reasoning for how the synthesis was assembled, not the search results that selected the grounding set, and not a previous round's findings. You are the agent that wrote this page, and handing over your own reading of the grounding makes the review agree with you exactly where that reading was wrong.
 
@@ -86,7 +118,7 @@ This path needs a check most: a synthesized page carries `derived_from` and no `
    <the view page path, .wikicommit/view/<lang>/<slug>.md>
    EOF
    )" --kind ai --stage synthesize-step5.5 \
-     --model "<the model ID this run's runtime reports for itself>" \
+     --model "<the model ID the review subagent ran on — this run's own, as its runtime reports it, unless you launched the subagent on another model>" \
      --skill-blob "$(git hash-object .wikicommit/review-rules.md)" \
      --attempts <how many review rounds this took> --result <pass|discarded> --json - <<'JSON'
    <the review subagent's JSON, with every round's issues merged into one `issues`

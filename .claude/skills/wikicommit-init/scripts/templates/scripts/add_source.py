@@ -19,7 +19,7 @@ import hashlib
 import re
 import sys
 from pathlib import Path, PurePosixPath
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urljoin, urlsplit
 
 # type: url / type: wikicommit ソースの markitdown フェッチに使う User-Agent。
 # 既定の python-requests UA は Wikimedia 系ドメイン（Wikipedia/Wikisource 等）に
@@ -205,6 +205,11 @@ PARTIAL_EXTRACTION_URL_NOTES = (
 )
 
 
+def url_host(url: str) -> str:
+    """URL のホスト（小文字・userinfo とポートを除く）。ホストを引く箇所はすべてこれを共有する。"""
+    return urlsplit(url).netloc.lower().split("@")[-1].split(":")[0]
+
+
 def host_suffix_candidates(url: str) -> list[str]:
     """URL のホストを、左ラベルを順に落とした接尾辞の列（具体的な順）で返す。
 
@@ -213,7 +218,7 @@ def host_suffix_candidates(url: str) -> list[str]:
     `partial_extraction_note()`）はすべてこれを共有する — 同じ導出を各所に複製
     すると、片方だけホスト解析の端ケースを直したときに黙ってずれるため。
     """
-    host = urlsplit(url).netloc.lower().split("@")[-1].split(":")[0]
+    host = url_host(url)
     if not host:
         return []
     labels = host.split(".")
@@ -240,6 +245,80 @@ def partial_extraction_note(url: str) -> str:
         if match:
             return note(match) if callable(note) else note
     return ""
+
+
+# 取得元の差し替え表。画面の取得結果に、本文と無関係に毎回変わる行（スター数・
+# コミット数・ファイル一覧の最終コミット等）が入るため、`source.hash` が本文の変化を
+# 表さなくなる URL の形について、画面の代わりに取得する URL の候補を引く。
+#
+# 差し替えは取得結果そのものを差し替える — hash を取るためだけの抽出にはしない。
+# `source.hash` ＝ スクラッチファイルの SHA-256 という不変条件を保ち、`--check-hash`
+# 等の照合側を変えずに済ませるため。候補は順に試し、最初に取れたものを書く。
+# 全候補が 404 のとき（差し替え先が存在しない）だけ元の URL の取得に戻る。それ以外の
+# 失敗では戻らない — 戻ると、取れた経路によって同じソースの hash の意味が変わる。
+#
+# ホストは完全一致で照合する（`host_suffix_candidates()` は使わない —
+# `docs.github.com`・`gist.github.com` を巻き込むため）。
+
+# `github.com/<owner>/<repo>` だけ（末尾の `/`・`.git` は許す）。2 区画でもリポジトリで
+# ない GitHub 自身のページは除く — 外さなくても全候補が 404 で元の取得に戻るが、
+# 余計な取得を毎回するため。
+_GITHUB_REPO_TOP_RE = re.compile(r"^/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$")
+_GITHUB_NON_REPO_OWNERS = frozenset(
+    {
+        "about", "account", "apps", "codespaces", "collections", "customer-stories",
+        "enterprise", "events", "explore", "features", "login", "marketplace",
+        "notifications", "organizations", "orgs", "pricing", "readme", "security",
+        "settings", "site", "solutions", "sponsors", "topics", "trending", "users",
+    }
+)
+# README の候補。順序は固定（同じリポジトリでは常に同じファイルを取るため）。
+# `HEAD` は raw.githubusercontent.com で既定ブランチに解決される。
+_GITHUB_README_NAMES = (
+    "README.md", "README.markdown", "README.rst", "README.txt", "README",
+    "readme.md", "Readme.md", "README.MD",
+)
+_GITHUB_README_DIRS = ("", ".github/", "docs/")
+
+
+def _github_readme_urls(match: re.Match) -> list[str]:
+    owner, repo = match.group("owner"), match.group("repo")
+    if owner.lower() in _GITHUB_NON_REPO_OWNERS:
+        return []
+    return [
+        f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/{d}{name}"
+        for d in _GITHUB_README_DIRS
+        for name in _GITHUB_README_NAMES
+    ]
+
+
+# (ホスト, パス判定, 候補の URL を返す関数, 取得元の名前)
+FETCH_SOURCE_OVERRIDES = (
+    (
+        frozenset({"github.com", "www.github.com"}),
+        _GITHUB_REPO_TOP_RE,
+        _github_readme_urls,
+        "the repository's README (raw)",
+    ),
+)
+
+
+def fetch_source_override(url: str) -> tuple[list[str], str]:
+    """取得元の差し替え表を引く。当たれば (候補の URL の列, 取得元の名前)、無ければ ([], "")。"""
+    try:
+        host = url_host(url)
+        path = urlsplit(url).path or "/"
+    except ValueError:
+        return ([], "")
+    for hosts, path_re, candidates, label in FETCH_SOURCE_OVERRIDES:
+        if host not in hosts:
+            continue
+        match = path_re.match(path)
+        if match:
+            urls = candidates(match)
+            if urls:
+                return (urls, label)
+    return ([], "")
 
 
 def is_share_alike(license_id: str) -> bool:
@@ -1039,6 +1118,12 @@ def process_url(url: str, repo_root: Path, license_override: str = "") -> tuple[
                 f"{license_id} is a copyleft license: a page written from this source alone "
                 f"may have to be offered under it too — check before publishing",
             )
+        _override_urls, override_label = fetch_source_override(url)
+        if override_label:
+            # hash と生成に使うテキストが画面ではなくなることを、登録時に一度だけ知らせる。
+            created_note = append_note(
+                created_note, f"fetched as {override_label}, not the rendered page"
+            )
         partial_note = partial_extraction_note(url)
         if partial_note:
             # 取得は成功するが一部が黙って落ちる URL 形。ブロックはせず、
@@ -1273,7 +1358,7 @@ def check_path_cache(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str, str
             "ERROR",
             mgmt_rel,
             "the management file is not under .wikicommit/source/path/, so no cache path "
-            "can be derived for it (a pre-Issue-#476 .wikicommit/ingest/ tree is never "
+            "can be derived for it (a legacy .wikicommit/ingest/ tree is never "
             "auto-migrated)",
             extract,
         )
@@ -1341,7 +1426,7 @@ def print_path_cache_path(mgmt_rel: str, repo_root: Path) -> tuple[str, str, str
             "ERROR",
             mgmt_rel,
             "the management file is not under .wikicommit/source/path/, so no cache path "
-            "can be derived for it (a pre-Issue-#476 .wikicommit/ingest/ tree is never "
+            "can be derived for it (a legacy .wikicommit/ingest/ tree is never "
             "auto-migrated)",
         )
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1467,6 +1552,9 @@ def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
     自動判定はそのまま保ったまま UA だけを差し替える（curl 等でいったんローカルファイルに
     落としてから変換する方式は、この charset ヘッダの情報が失われ文字化けを起こすため採用しない）。
 
+    URL が取得元の差し替え表（`FETCH_SOURCE_OVERRIDES`）に当たるときは、画面の代わりに
+    表が返す候補を取得し、その本文をそのまま output に書く（`_fetch_first_found()`）。
+
     Returns:
         (result_code, output_path_str, message)
         result_code: "FETCHED" | "NETWORK_UNAVAILABLE" | "ERROR"
@@ -1487,20 +1575,83 @@ def fetch_url(url: str, output: str, repo_root: Path) -> tuple[str, str, str]:
 
     session = _session_with_timeout(requests, FETCH_TIMEOUT)
     session.headers.update({"User-Agent": USER_AGENT})
-    md = MarkItDown(requests_session=session)
 
-    try:
-        result = md.convert_url(url)
-    except Exception as e:  # noqa: BLE001 - surfaced verbatim as an extraction failure
-        code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e, url) else "ERROR"
-        return (code, output, f"{type(e).__name__}: {e}")
+    text = None
+    candidates, _label = fetch_source_override(url)
+    if candidates:
+        code, text, msg = _fetch_first_found(session, candidates)
+        if code != "FOUND" and code != "NOT_FOUND":
+            return (code, output, msg)
+
+    if text is None:
+        md = MarkItDown(requests_session=session)
+        try:
+            text = md.convert_url(url).text_content
+        except Exception as e:  # noqa: BLE001 - surfaced verbatim as an extraction failure
+            code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e, url) else "ERROR"
+            return (code, output, f"{type(e).__name__}: {e}")
 
     out_path = Path(output)
     if not out_path.is_absolute():
         out_path = repo_root / out_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(result.text_content, encoding="utf-8")
+    out_path.write_text(text, encoding="utf-8")
     return ("FETCHED", str(out_path), "")
+
+
+def _fetch_first_found(session, candidates: list[str]) -> tuple[str, str | None, str]:
+    """候補の URL を順に取得し、最初に 200 を返したものの本文を返す。
+
+    Returns:
+        ("FOUND", 本文, "") | ("NOT_FOUND", None, "") | ("ERROR" | "NETWORK_UNAVAILABLE", None, 理由)
+
+    404 だけを「無い」として次の候補へ進む。それ以外の失敗（レート制限・5xx・
+    接続の失敗）はその場で返す — 次の候補や元の URL の取得に進むと、同じソースが
+    取れた経路によって別の hash を持つことになる。
+    """
+    for candidate in candidates:
+        try:
+            resp = session.get(candidate, allow_redirects=True)
+        except Exception as e:  # noqa: BLE001 - classified like the markitdown fetch
+            code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e, candidate) else "ERROR"
+            return (code, None, f"{type(e).__name__}: {e} ({candidate})")
+        if resp.status_code == 404:
+            continue
+        if resp.status_code != 200:
+            return ("ERROR", None, f"HTTP {resp.status_code} for {candidate}")
+        body = resp.content
+        target = _symlink_target(candidate, body)
+        if target:
+            # raw.githubusercontent.com serves a symlinked README as the link's target
+            # path, not the file GitHub renders. Follow it once; a 404 means the body
+            # was a one-line README after all, so keep it.
+            try:
+                linked = session.get(target, allow_redirects=True)
+            except Exception as e:  # noqa: BLE001 - classified like the markitdown fetch
+                code = "NETWORK_UNAVAILABLE" if _is_connection_failure(e, target) else "ERROR"
+                return (code, None, f"{type(e).__name__}: {e} ({target})")
+            if linked.status_code == 200:
+                body = linked.content
+            elif linked.status_code != 404:
+                return ("ERROR", None, f"HTTP {linked.status_code} for {target}")
+        # Decode as UTF-8 regardless of the Content-Type charset: raw.githubusercontent.com
+        # serves text/plain, and requests' fallback for that is ISO-8859-1. `utf-8-sig`
+        # drops a leading BOM, as markitdown's own decoding does.
+        return ("FOUND", body.decode("utf-8-sig", errors="replace"), "")
+    return ("NOT_FOUND", None, "")
+
+
+_SYMLINK_TARGET_RE = re.compile(rb"\A[\w.\-/]*[./][\w.\-/]*\Z")
+
+
+def _symlink_target(candidate: str, body: bytes) -> str:
+    """本文が symlink の参照先パス（1 行・空白なし・255 バイト以下）に見えるなら、解決した URL を返す。"""
+    if not body or len(body) > 255 or not _SYMLINK_TARGET_RE.match(body):
+        return ""
+    resolved = urljoin(candidate, body.decode("ascii"))
+    if resolved == candidate or url_host(resolved) != url_host(candidate):
+        return ""
+    return resolved
 
 
 # `/html/<id>` の有無を確かめる取得のタイムアウト（connect, read）秒。
@@ -1635,7 +1786,7 @@ def main_from_args(argv: list[str] | None = None) -> int:
         "--fetch-url",
         metavar="URL",
         help="Fetch URL with markitdown using a WikiCommit User-Agent (avoids the 403s that "
-        "Wikimedia domains return for markitdown's default User-Agent, #527) and write the "
+        "Wikimedia domains return for markitdown's default User-Agent) and write the "
         "converted Markdown to --output. Ignores the positional 'source' argument.",
     )
     parser.add_argument(

@@ -629,7 +629,13 @@ def test_pass4_refuses_a_write_back_left_undone(wiki):
 
     page = wiki / ".wikicommit/entity/en/Person/x.md"
     page.parent.mkdir(parents=True)
-    page.write_text("---\ntitle: x\n---\n", encoding="utf-8")
+    # The page copies its (raw text) source, so the `source-overlap` step before
+    # `completion` has something to report.
+    copied = " ".join(f"w{i}" for i in range(120))
+    (wiki / "raw").mkdir()
+    (wiki / "raw/a.txt").write_text(copied, encoding="utf-8")
+    page.write_text("---\ntitle: x\nlang: en\nsources:\n  - type: path\n    path: raw/a.txt\n"
+                    f"---\n\n{copied}\n", encoding="utf-8")
     source.write_text(
         "---\nsource:\n  type: path\n  path: raw/a.txt\nstatus: generated\n"
         "extracted_tokens: 10\nlast_generated_at: '2026-09-29'\n"
@@ -648,6 +654,8 @@ def test_pass4_refuses_a_write_back_left_undone(wiki):
     assert accepted["accepted"] is True and accepted["step"] == "completion"
     touched = front(wiki / run)["workflow"]["touched"]
     assert ".wikicommit/entity/en/Person/x.md" in touched
+    assert any(note.startswith("OVERLAP: .wikicommit/entity/en/Person/x.md 100%")
+               for note in accepted["notes"]), accepted.get("notes")
 
 
 def test_pass4_accepts_an_all_excluded_source(wiki):
@@ -1051,3 +1059,163 @@ def test_halted_questions_is_silent_once_the_questions_were_asked(wiki):
     assert resp["step"] is None and resp["state"] == "halted", resp
     result = _halted_questions(wiki, run)
     assert result.returncode == 0 and result.stdout == "", result.stdout
+
+
+# --- ambiguous entities asked once the loop is over (Issue #1235) -------------
+
+
+AMBIGUOUS = ("---\nsource:\n  type: path\n  path: raw/a.txt\nstatus: partial\n"
+             "extracted_tokens: 10\nlast_generated_at: '2026-10-18'\n"
+             "generated_pages: []\nfailed_pages: []\n"
+             "ambiguous_entities:\n"
+             "  - title: 'A=B #1'\n    type: schema:Organization\n"
+             "    alternatives: [schema:Person]\n"
+             "  - title: Other\n    type: schema:Place\n    alternatives: [schema:Event]\n"
+             "---\n\n## Summary\n\nx\n")
+
+
+def _through_pass4(wiki: Path, run: str, prefix: str = "") -> dict:
+    """Take SOURCE through Pass 1-3 with what each check needs on disk, and leave it
+    as the first Pass 4 writes an ambiguous source; return Pass 4's answer."""
+    (wiki / SOURCE).write_text(
+        "---\nsource:\n  type: path\n  path: raw/a.txt\nstatus: pending\n"
+        "extracted_tokens: 10\n---\n\n## Summary\n\nx\n", encoding="utf-8")
+    for step, outcome in (("pass1-extract", "extracted"), ("pass2b-type", "ok"),
+                          ("pass2c-entities", "ok"), ("pass3-generate", "ok")):
+        resp = _done(wiki, run, prefix + step, SOURCE, outcome)
+        assert resp["accepted"] is True, resp
+    (wiki / SOURCE).write_text(AMBIGUOUS, encoding="utf-8")
+    return _done(wiki, run, prefix + "pass4-review", SOURCE, "ok")
+
+
+def _answer(wiki: Path, run: str, *adds: str) -> dict:
+    args = ["done", run, "--step", "ask-deferred", "--answer", "answered"]
+    for add in adds:
+        args += ["--add", add]
+    return json.loads(gen(wiki, *args).stdout)
+
+
+ENTITY = f"entity-types={SOURCE}#A=B #1=schema:Person"
+
+
+def test_an_ambiguous_source_is_asked_at_the_end_of_the_loop(wiki):
+    _, run = _start(wiki)
+    resp = _through_pass4(wiki, run)
+    assert resp["step"] == "ask-deferred" and resp["lists"] == {"questions": [SOURCE]}, resp
+    assert "entity-types" in resp["then"]
+
+
+def test_an_answered_entity_is_written_in_the_same_run(wiki):
+    """The answer reaches Pass 2c the second time round, and the second Pass 4 may not
+    leave the answered entity in ambiguous_entities; an entity left unanswered keeps the
+    source `partial` with an empty `failed_pages`, which still means ambiguous."""
+    _, run = _start(wiki)
+    _through_pass4(wiki, run)
+    resp = _answer(wiki, run, f"reprocess={SOURCE}", ENTITY)
+    assert resp["accepted"] is True, resp
+    assert (resp["step"], resp["item"]) == ("reprocess-pass1-extract", SOURCE)
+    resp = _done(wiki, run, "reprocess-pass1-extract", SOURCE, "extracted")
+    resp = _done(wiki, run, "reprocess-pass2b-type", SOURCE, "ok")
+    assert resp["step"] == "reprocess-pass2c-entities", resp
+    assert resp["lists"] == {"entity-types": [ENTITY.removeprefix("entity-types=")]}
+    _done(wiki, run, "reprocess-pass2c-entities", SOURCE, "ok")
+    _done(wiki, run, "reprocess-pass3-generate", SOURCE, "ok")
+
+    refused = _done(wiki, run, "reprocess-pass4-review", SOURCE, "ok")
+    assert refused["accepted"] is False and "'A=B #1'" in refused["reason"], refused
+
+    page = ".wikicommit/entity/en/Person/a-b.md"
+    (wiki / page).parent.mkdir(parents=True)
+    (wiki / page).write_text("---\ntitle: A=B #1\n---\n", encoding="utf-8")
+    record = wiki / ".wikicommit/review/entity/en/Person/a-b/20261018-000000-ai.md"
+    record.parent.mkdir(parents=True)
+    record.write_text("---\n---\n", encoding="utf-8")
+    text = AMBIGUOUS.replace("generated_pages: []", f"generated_pages: [{page}]")
+    text = text.replace("  - title: 'A=B #1'\n    type: schema:Organization\n"
+                        "    alternatives: [schema:Person]\n", "")
+    (wiki / SOURCE).write_text(text, encoding="utf-8")
+    resp = _done(wiki, run, "reprocess-pass4-review", SOURCE, "ok")
+    assert resp["accepted"] is True and resp["step"] == "completion", resp
+    source = front(wiki / SOURCE)
+    assert source["status"] == "partial" and source["failed_pages"] == []
+    assert [e["title"] for e in source["ambiguous_entities"]] == ["Other"]
+
+
+def test_a_non_interactive_run_leaves_the_ambiguous_source_partial(wiki):
+    _, run = _start(wiki, "--non-interactive")
+    resp = _through_pass4(wiki, run)
+    assert resp["accepted"] is True and resp["step"] == "completion", resp
+    state = front(wiki / run)["workflow"]
+    asked = [e for e in state["log"] if e["step"] == "ask-deferred"]
+    assert asked and asked[0]["answer"] == "later"
+    assert "reprocess" not in state["lists"] and "entity-types" not in state["lists"]
+    source = front(wiki / SOURCE)
+    assert source["status"] == "partial" and source["failed_pages"] == []
+    assert len(source["ambiguous_entities"]) == 2
+
+
+@pytest.mark.parametrize("adds,reason", [
+    ([ENTITY], "not in reprocess"),
+    ([f"reprocess={SOURCE}"], "none of its ambiguous entities"),
+    ([f"reprocess={SOURCE}", f"entity-types={SOURCE}#Nobody=schema:Person"], "'Nobody'"),
+    ([f"reprocess={SOURCE}", f"entity-types={SOURCE}#Other=schema:VideoGame"],
+     "neither one of its candidates"),
+    ([f"reprocess={SOURCE}", f"entity-types={SOURCE}#Other"], "expects"),
+    ([f"reprocess={SOURCE}", ENTITY, f"entity-types={SOURCE}#A=B #1=schema:Organization"],
+     "more than once"),
+    ([f"reprocess={SECOND}", f"entity-types={SECOND}#Other=schema:Place"],
+     "no ambiguous entity"),
+])
+def test_a_type_answer_must_fit_an_ambiguous_entity(wiki, adds, reason):
+    _, run = _start(wiki)
+    _through_pass4(wiki, run)
+    refused = _answer(wiki, run, *adds)
+    assert refused["accepted"] is False and reason in refused["reason"], refused
+
+
+def test_a_type_answer_may_name_an_installed_type(wiki):
+    _, run = _start(wiki)
+    _through_pass4(wiki, run)
+    schema = wiki / ".wikicommit/schema/custom/VideoGame.md"
+    schema.parent.mkdir(parents=True)
+    schema.write_text("---\n---\n", encoding="utf-8")
+    refused = _answer(wiki, run, f"reprocess={SOURCE}",
+                      f"entity-types={SOURCE}#Other=schema:VideoGame")
+    assert refused["accepted"] is False, refused
+    resp = _answer(wiki, run, f"reprocess={SOURCE}",
+                   f"entity-types={SOURCE}#Other=schema:custom/VideoGame")
+    assert resp["accepted"] is True, resp
+
+
+def test_a_type_approved_in_the_same_answer_waits_for_the_next_run(wiki):
+    """Issue #1378: a type approved in this answer has no file until the source deferred
+    on it goes through Pass 2b again, and the ambiguous source may reach Pass 3 first,
+    so the page would be generated from default.md. The answer is refused."""
+    _queue(wiki, SECOND)
+    _, run = _start(wiki)
+    resp = _through_pass4(wiki, run)
+    assert (resp["step"], resp["item"]) == ("pass1-extract", SECOND), resp
+    (wiki / SECOND).write_text("---\nsource:\n  type: path\n  path: raw/b.txt\n"
+                               "status: pending\nextracted_tokens: 10\n---\n", encoding="utf-8")
+    assert _done(wiki, run, "pass1-extract", SECOND, "extracted")["accepted"] is True
+    _queue(wiki, SECOND, "schema:VideoGame was considered; it fits better than schema:Thing")
+    resp = _done(wiki, run, "pass2b-type", SECOND, "deferred")
+    assert resp["step"] == "ask-deferred", resp
+    assert set(resp["lists"]["questions"]) == {SOURCE, SECOND}
+
+    answer = (f"reprocess={SOURCE}", f"reprocess={SECOND}", "approved-types=schema:VideoGame")
+    refused = _answer(wiki, run, *answer, f"entity-types={SOURCE}#Other=schema:VideoGame")
+    assert refused["accepted"] is False, refused
+    assert "approved in this answer" in refused["reason"], refused
+    assert not (wiki / ".wikicommit/schema/VideoGame.md").exists()
+
+    resp = _answer(wiki, run, *answer, f"entity-types={SOURCE}#Other=schema:Event")
+    assert resp["accepted"] is True, resp
+
+
+def test_later_takes_no_type_answers(wiki):
+    _, run = _start(wiki)
+    _through_pass4(wiki, run)
+    refused = json.loads(gen(wiki, "done", run, "--step", "ask-deferred", "--answer", "later",
+                             "--add", ENTITY).stdout)
+    assert refused["accepted"] is False

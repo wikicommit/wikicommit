@@ -94,7 +94,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="TEXT",
         help="Rewrite only the theme field of an already-existing .wikicommit/config.yml "
-        "(#374 — --theme has no effect on a repeat run, since --no-overwrite always skips "
+        "(--theme has no effect on a repeat run, since --no-overwrite always skips "
         "an existing config.yml wholesale; this is the explicit, single-field alternative). "
         "Runs standalone and ignores every other flag except --repo-root; config.yml must "
         "already exist.",

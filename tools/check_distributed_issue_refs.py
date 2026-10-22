@@ -28,6 +28,8 @@ Three scopes, with different strengths:
   under the script's heading (Issue #1329). Every distributed script is at zero,
   so any reference is an error, reported with its line.
 
+In the two script scopes a reference is `Issue #NNN`, `Issue-#NNN` or a bare
+`#NNN` (two or more digits); in instruction files it is `Issue #NNN` only.
 Only the number is checked. A history sentence without a number ("previously this
 was X") cannot be detected mechanically.
 
@@ -55,10 +57,17 @@ TEMPLATE_INSTRUCTIONS = [
     TEMPLATES_DIR / "schema-authoring.md",
 ]
 
+# Instruction files (Markdown) are counted on the `Issue #NNN` form only: a bare
+# `#NNN` there collides with headings and anchors.
 ISSUE_RE = re.compile(r"Issue #\d+")
-# Comments and docstrings are hard-wrapped, so "Issue" can end one line and
-# "#NNN" start the next; `ISSUE_RE` alone would miss those and let them through.
-WRAPPED_ISSUE_RE = re.compile(r"Issue\s+#\d+")
+# Scripts: `Issue #NNN`, `Issue-#NNN`, and a bare `#NNN` of two or more digits.
+# The bare form excludes a `#` preceded by a word character, `&`, `#` or `/`
+# (`&#123;`, `##12`, URL fragments) and one followed by a word character (hex
+# colours such as `#123abc`), and a single digit (`#1` as an ordinal). Comments
+# and docstrings are hard-wrapped, so "Issue" can end one line and "#NNN" start
+# the next; `\s+` covers that. ASCII-only, so a CJK character next to the number
+# (`参照#374で`) does not hide it the way a Unicode `\w` would.
+SCRIPT_ISSUE_RE = re.compile(r"Issue(?:\s+|-)#\d+|(?<![\w&#/])#\d{2,}(?!\w)", re.ASCII)
 
 # Per-Skill ceiling on `Issue #NNN` in instruction files. May only be lowered.
 CAPS = {
@@ -120,13 +129,13 @@ def script_output_refs(path: Path) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if (isinstance(node, ast.Constant) and isinstance(node.value, str)
                 and id(node) not in docs):
-            for match in ISSUE_RE.finditer(node.value):
-                hits.append((node.lineno, match.group(0)))
+            for match in SCRIPT_ISSUE_RE.finditer(node.value):
+                hits.append((node.lineno, " ".join(match.group(0).split())))
     return sorted(hits)
 
 
 def script_comment_refs(path: Path) -> list[tuple[int, str]]:
-    """`Issue #NNN` in the comments and docstrings of a script — what
+    """Issue references in the comments and docstrings of a script — what
     `script_output_refs()` deliberately skips."""
     text = path.read_text(encoding="utf-8-sig")
     tree = ast.parse(text, filename=str(path))
@@ -135,7 +144,7 @@ def script_comment_refs(path: Path) -> list[tuple[int, str]]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) in docs:
             hits += [(node.lineno + node.value.count("\n", 0, m.start()), " ".join(m.group(0).split()))
-                     for m in WRAPPED_ISSUE_RE.finditer(node.value)]
+                     for m in SCRIPT_ISSUE_RE.finditer(node.value)]
     # Consecutive comment lines are joined (without their `#`) so a reference
     # wrapped across two of them is still one reference.
     runs: list[list[tuple[int, str]]] = []
@@ -152,7 +161,7 @@ def script_comment_refs(path: Path) -> list[tuple[int, str]]:
         for lineno, body in run:
             starts.append((len(joined), lineno))
             joined += body + " "
-        for m in WRAPPED_ISSUE_RE.finditer(joined):
+        for m in SCRIPT_ISSUE_RE.finditer(joined):
             lineno = max(line for offset, line in starts if offset <= m.start())
             hits.append((lineno, " ".join(m.group(0).split())))
     return sorted(hits)

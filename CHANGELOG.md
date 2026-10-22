@@ -84,357 +84,246 @@ deviation Django and Node.js make, for the same reason. Do not "restore" it to o
 
 ## [Unreleased]
 
-## [0.11.0] - 2026-10-17
+## [0.12.0] - 2026-10-22
 
 ### Added
 
-- **Two new distributed types, `SoftwareApplication` and `Dataset`** (Issue #1291). Both
-  were added by hand in pilot wikis that write about software and research, and readers'
-  complaints about generated pages clustered on them: a `SoftwareApplication` section
-  called "Adoption & Ecosystem" filled with a survey's classification of the tool, and
-  `Dataset` pages that never said what one record holds. `/wikicommit-init` now installs
-  both (`schema.base_types` lists them). A wiki that already has its own
-  `SoftwareApplication.md` or `Dataset.md` keeps it: `/wikicommit-update` shows the
-  difference and applies only what you accept. `SoftwareApplication` has no
-  `softwareVersion` or `operatingSystem` key — they were empty on almost every pilot page;
-  the body says which version a behavior was observed in instead. Existing values of those
-  keys stay valid and are kept on regeneration.
-- **A source's license can be given when it is registered** (Issue #1312).
-  `/wikicommit-generate <path|url> --license <id>` records the value (an SPDX identifier, or
-  a short phrase such as `Saitama City website terms of use`) as `source.license`, so the
-  pages the same run writes carry it in `sources[].license`. Until now a license was
-  recorded at registration only for the Wikimedia sites in the known-domain table, and a
-  local file never got one. With `--include`, every newly registered file gets the same
-  value. `/wikicommit-collect` asks once, after you pick candidates, whether you know the
-  terms of any picked candidate that shows no license, and registers only those you answer
-  with `--license`. `add_source.py` now prints a `LICENSE_NOT_RECORDED:` line when
-  `--license` is given for a source that is already registered — it still never rewrites
-  an existing management file; edit `source.license` there instead.
-
-- **WikiLinks with display text, `[[Type/slug|display text]]`, are accepted** (Issue #1304).
-  The published link shows the display text instead of the target page's title; inside a
-  Markdown table cell, `[[Type/slug\|display text]]` works too. Until now this form matched
-  nothing: it was published as written, and no check (the removed-page error, orphan and
-  wanted-page counts, link rewriting on `--merge`, Pass 4's neighbouring-page check) saw it.
-  Existing pages that already use it need no change; they become ordinary links on the next
-  build. Generation and translation are told they may use it. Any other `[[...]]`
-  (`[[slug]]` without a Type, `#heading`, an empty display text) is now reported by
-  `check_wikilinks.py` as a `WARNING: ... → not a WikiLink` line, which `/wikicommit-merge`
-  lists in the pull request.
+- **A wiki can use its own image for link cards** (Issue #1371). Since the `og-image`
+  plugin was dropped, every page shared on social media or in a chat showed the Quartz
+  logo as its card image. Put a PNG at `.wikicommit/assets/og-image.png` (1200x630 suits
+  most sites) and the GitHub Pages deploy now copies it over Quartz's
+  `static/og-image.png` after the build, so every page's card shows it; the `quartz/`
+  submodule is not touched. Without the file nothing changes and the card stays the
+  Quartz logo. Only the published site is affected — a local preview still shows the
+  Quartz logo. No default image is shipped. Existing wikis get the step through
+  `/wikicommit-update` (`.github/workflows/deploy.yml`).
+- **A check that measures how much of a page repeats its source's wording**
+  (`check_source_overlap.py`, Issue #1380). It counts the share of a page's words that sit
+  in a run of six or more words (twelve characters on a Japanese or Chinese page) also
+  found in the extracted text of the page's sources, leaving out quotations, code,
+  blockquotes, tables and `## Generation Notes`, and reports a page over 20% with its
+  share and longest copied run (`OVERLAP:`). The review against the sources checks that a
+  page is faithful to them, so a page that copies them passes it, and nothing found copied
+  wording before. `/wikicommit-generate` (and `--regenerate`) runs it over the pages it
+  wrote and lists them in the Completion Notice; `/wikicommit-merge` runs it over the
+  changed pages as a warning that never blocks. A page none of whose sources has
+  extracted text on the machine (the cache is gitignored) is reported as `NO_SOURCE_TEXT`
+  rather than passed — in `/wikicommit-merge` as a count in the notes, not a warning — and
+  a page written from a source in another language is skipped. The threshold was set by
+  measuring three wikis: pages written under the own-words rule above measured 0–11%, the
+  same pages under the earlier rules 20–37%.
 
 ### Changed
 
-- **A `/wikicommit-generate` run that stops part-way now names the questions it set aside**
-  (Issue #1236). Guard A's low-density warnings and Pass 2b's type candidates are asked
-  once the loop is over, so a run that halted before then (a missing package, the network
-  lost twice, a review-rules mismatch) used to end without ever mentioning them. The halt
-  report now lists each such source with the first line of its deferred reason
-  (`workflow_checks.py halted-questions`). They stay queued as before, and a later run asks
-  them only if it picks those sources again and reaches the end of its loop.
-- **`/wikicommit-merge` skips its Issue-filing steps when there is nothing to file**
-  (Issue #1266). Finding the pages still waiting for a tracking Issue, and the failed
-  sources still waiting for a generation-failure Issue, is now done by the merge's own
-  script (`workflow_checks.py targets`), which scans the default branch and matches the
-  open Issues' markers. When nothing needs an Issue, the step is skipped and its
-  instructions are not handed to the agent — most merges carry no failed source, so Step 9
-  is usually skipped. The Issues filed, and what they say, are unchanged. When the open
-  Issues cannot be read, the step is not skipped: nothing is filed, the failure is shown
-  and reported, and the next merge picks the pages up.
-- **Text taken from a source is treated as data, not instructions** (Issue #1324). Every
-  step that hands fetched or extracted text to a model now says so in the same words:
-  `/wikicommit-generate` (Passes 1-4 and `--regenerate`), `/wikicommit-ask
-  --include-source`, `/wikicommit-review`, `/wikicommit-fix`, `/wikicommit-relate` and
-  `/wikicommit-collect`. An instruction written inside a source — to run a command, add a
-  link, or judge the page a certain way — is not followed and not written onto a page; it
-  is reported instead. `.wikicommit/review-rules.md` (`rules_version` 9) fails a page that
-  carries content the source holds only as such a directive (`HALLUCINATION`), ignores a
-  verdict the source asks for, and has the reviewer note each passage as an observation
-  beginning `Embedded instruction in SOURCE:`, which lands in the review record's body.
-  `/wikicommit-generate`'s Completion Notice lists them. `SOURCE` blocks handed to a review
-  subagent (generate Pass 4, `/wikicommit-synthesize`, `/wikicommit-translate`) are now
-  delimited by a random token drawn for each launch, so a source cannot close its own block.
-  Run `/wikicommit-update` to pick up the new rules file. A model can still disregard the
-  rule; this states what is expected, it does not enforce it.
-- **The GitHub Pages deploy keeps the Quartz community plugins between runs** (Issue
-  #1310). `deploy.yml` used to clone and build every `source:` in `quartz.config.yaml` on
-  every deploy (about 3m40s of a 10-minute build on a 3,117-page wiki, `enabled: false`
-  entries included). It now restores `quartz/.quartz/plugins` and `quartz/quartz.lock.json`
-  from the Actions cache, keyed on each plugin's `source:`, the Quartz submodule commit and
-  the Node.js major, so only the first deploy after you add, remove or re-pin a plugin or
-  update Quartz pays that cost. Your local `quartz-plugins/` are still re-linked on every
-  deploy. One consequence:
-  a `github:` plugin without a `#ref` now stays at the commit it was first cloned at until
-  the key changes, instead of following its default branch on each deploy. `setup-node`
-  also caches the npm download cache. `deploy.yml` is overwritten by `/wikicommit-update`.
-- **New wikis no longer generate a social-card image for every page** (Issue #1310). The
-  `og-image` Quartz plugin is gone from the `quartz.config.yaml` template. In a local build
-  of a 3,117-page wiki it took about 4m45s of the 5 minutes spent writing the site, and the
-  fonts it draws with have no Japanese glyphs, so Japanese text and tags came out as rows
-  of boxes. Without it, a link shared on social media shows Quartz's own site-wide image
-  (the Quartz logo) with the page's title and description as text. An existing wiki keeps
-  the entry:
-  `/wikicommit-update` does not edit `quartz.config.yaml` for you and reports only settings
-  the template gained, not ones it dropped. To get the shorter build, delete the
-  `github:quartz-community/og-image` entry yourself; keep it if your pages are in a
-  language the plugin's fonts cover. Setting it to `enabled: false` does not save the
-  time — the entry has to be removed.
+- **`/wikicommit-merge` leaves out pages `/wikicommit-generate` wrote that no AI review
+  has judged** (Issue #1328). Before anything is checked or committed, a new step looks
+  at the changed entity pages that generate wrote (their `generated_at`,
+  `generated_by` or `generated_with` differs from the last commit, or the page is new) and
+  holds back each one that no AI review record judges as it now stands — the same reading
+  as `check_review_coverage.py`'s `UNREVIEWED:` and `STALE_REVIEW:`. A source management
+  file whose `generated_pages` names a held-back page is held back with it. Both stay in
+  the working tree, uncommitted, get no review tracking Issue, and are listed in the run's
+  notes, the PR body ("Not included") and the completion report;
+  `/wikicommit-generate --regenerate <page>` reviews such a page so the next merge carries
+  it. Pages fixed with `/wikicommit-fix`, written by hand or translated are never held
+  back. Today generate writes a page only after its review passes, so this normally holds
+  back nothing; it keeps what is published reviewed when generate stops writing pages
+  only after review.
+- **`/wikicommit-generate` no longer takes a type approved in the same answer for an
+  entity whose type was ambiguous** (Issue #1378). When you answer the deferred questions,
+  an entity whose type could not be settled can be given one of its candidate types or a
+  type already installed; a type you approve in that same answer is refused for it, with
+  a reason, and you give that entity its type in the next run. The type's file is written
+  only when the source that proposed it is processed again, and nothing made that happen
+  first, so the entity's page could be generated without the type file.
+- **`/wikicommit-merge` leaves a PR for a person when the default branch requires a
+  review** (Issue #1377). A PR blocked on a required review used to end the run as
+  failed, with a cleanup that told you to close the PR and delete its branch, and no
+  review tracking Issue was ever filed for its pages. Now, once no required status check is
+  still running or failed and GitHub reports the review as required, the run finishes as
+  `awaiting-merge` with the PR left open and the default branch checked out. After a
+  person merges the PR on GitHub, run `/wikicommit-merge` again: it finds the merged PR in
+  its run records, pulls the default branch and files the review tracking Issues (and any
+  generation-failure Issues) even when there is nothing new to merge; while the PR is
+  still open it says so (`AWAITING_MERGE:`). A `BLOCKED` PR whose required checks are
+  still running is now waited on instead of failed at once.
+- **Closing a review tracking Issue reaches `reviewed` when the default branch requires a
+  review** (Issue #1396). The PR that `review-issue-close-sync.yml` opens to mark the page
+  `reviewed` was blocked by the required review too, and the workflow failed, leaving the
+  page `pending` and the PR open with nobody told. Now, once no required check is still
+  running or failed, a PR blocked on a required review is left open and the workflow
+  comments on the Issue with a link to it: approve and merge it, and the page becomes
+  `reviewed` and the published site is rebuilt by `deploy.yml` on that push. The PR is
+  opened by `github-actions[bot]`, so the person who closed the Issue can approve it
+  themselves. A required check that never starts — a `pull_request` workflow does not run
+  for a PR opened by GitHub Actions — is named in the comment instead of being waited on
+  for five minutes; close and reopen the PR yourself to run it. Existing wikis get the
+  change through `/wikicommit-update` (`.github/workflows/review-issue-close-sync.yml`).
+- **A GitHub repository's top page is fetched as its README** (Issue #1374). For a URL
+  of the form `github.com/<owner>/<repo>`, `add_source.py --fetch-url` now fetches the
+  README's raw text from `raw.githubusercontent.com` instead of the rendered page, and
+  that text is what `source.hash` is taken from and what generation reads. The rendered
+  page carries star, fork and commit counts and each file's last commit, so its hash
+  changed on nearly every fetch even when the README had not, which made a forced
+  recheck rerun Passes 2–4 every time and stopped `--regenerate`. Other GitHub URLs
+  (`blob`, `tree`, issues, pull requests) and every other host are fetched as before. If
+  the repository has no README the rendered page is fetched instead; any other failure
+  (a rate limit, a 5xx) is reported as an error rather than falling back, so the same
+  source never hashes differently depending on which route worked. Registering such a URL
+  says so once. **The first recheck after upgrading reports every repository-top source
+  as changed and regenerates its pages once.** Facts that only the page's sidebar shows
+  (the license badge, the description, topics) are not in the README; register the
+  repository's `LICENSE` file as a separate source if a page needs the license.
+- **A paper's own account of its versions is checked as a claim, not as a missing
+  document** (Issue #1373). When a source says what it is a version of or where it was
+  published ("an extended version of *Title*, published at Venue '26", "accepted at",
+  "to appear in", "the camera-ready version for") and the page repeats that as the
+  source's bibliography, the review against the sources now checks it as an ordinary
+  claim (check 1) and passes it if the source states it — even when the other version is
+  named by title and date, and even when the source says so only in a footnote or a
+  running head. Before, the generation review passed such a sentence while
+  `/wikicommit-review` could fail it as a cited document the wiki does not hold
+  (`MISSING_SOURCE`), so the same page passed or failed depending on which review read it.
+  A page that takes a finding from the other version ("the conference version found …")
+  still fails as before (`review-rules.md` `rules_version` 12). Run `/wikicommit-update`
+  so the wiki has the new `review-rules.md`; no page needs regenerating.
+- **A translation copies the source's declared `keywords` unchanged** (Issue #1372).
+  `properties.keywords` holds the list the source declares about itself, in the source's
+  own wording, and the published page shows it among the bibliographic fields, so
+  `/wikicommit-translate` now copies it entry for entry from the original page instead of
+  translating it, the same way a paper's title is not translated; subject terms in the
+  target language stay in `tags:`. The review of a translation (`translate-check`) now
+  fails an entry that is translated, reworded, dropped, added or reordered
+  (`review-rules.md` `rules_version` 11). Translations made earlier carry translated
+  entries and do not show up as `STALE`, since their original pages have not changed: to
+  fix them, list the translation pages that have a `keywords` value
+  (`grep -rl '^  keywords:' .wikicommit/entity/<target language>/`) and re-run
+  `/wikicommit-translate <original page> --lang <target language>` for the page each one's
+  `translated_from` names — single-page mode re-translates whether or not the pair is stale.
+  Run `/wikicommit-update` first so the wiki has the new `review-rules.md`.
+- **An edition of a recurring event is related to the event's own page as broader, not
+  series** (Issue #1370). When a page with a year collides with a page carrying the bare
+  name, `/wikicommit-relate` now asks what the bare-name page is about: one edition whose
+  name lacks the year is still a series, but a page about the whole that recurs (a
+  recurring event's own page) is the broader page, and the Skill proposes broader —
+  series would rename the event's page with a year. Pass 2c of `/wikicommit-generate`
+  still qualifies the edition by its year and keeps the bare name as an alias, and now
+  notes in `## Generation Notes` and the Completion Notice that the existing page is the
+  event's own page, to be related as broader.
+- **View pages are written by the same writing rules as entity pages, and open by
+  answering their kind's question** (Issue #1381). The writing rules every entity page
+  follows (lead, own words, main point first, headings, tables, examples, terms, reported
+  findings) now live in one file, `wikicommit-generate`'s `references/writing-rules.md`;
+  Pass 3 reads them from there with the wording unchanged, and `/wikicommit-synthesize`
+  Step 5 reads the same file, with "the source" read as the grounding pages. Step 5 adds
+  the rules only a view page needs: the subject is never the grounding pages (no "Several
+  pages in this wiki…" opening, no page as the subject of a sentence), every case is
+  named, the lead does not turn what holds for some cases into what holds for all, facts
+  that appear only in a grounding page's frontmatter (such as an author list) are not
+  used — the review sees only the bodies, so they failed the page — and the opening
+  answers the kind's own question (a `pattern` opens with the shape and the names of its
+  cases). The kind table gains that question and fuller Boundaries (a `comparison`'s
+  axes, how a `pattern`'s shape may be named, no running-prose `timeline` and no
+  estimated dates, nothing in a `debate` that settles it), and a Boundary every view page
+  keeps: a juxtaposition that plainly implies a conclusion no grounding page states.
+  `.wikicommit/review-rules.md` (`rules_version` 10) checks all of these in check 9,
+  including the shared one on a page with no kind. The survey now proposes a kind only
+  when the opening question it would have to answer can already be answered, so angles
+  stop defaulting to `comparison`. `wikicommit-synthesize` now needs `wikicommit-generate`
+  installed alongside it. Existing view pages are unchanged.
+- **A review record that says a round failed must carry what that round found, and every
+  record names the model that wrote the page** (Issue #1384). `record_review.py` now
+  refuses a record in which a round that failed — every round before the last, and the
+  last too under `result: discarded` — has no finding of its own (one whose
+  `page_at_fault` is not `other`): a retry only follows a failed review, so such a call
+  has dropped that round,
+  and a record cannot be corrected once written — in the pilot wikis 75 records had lost
+  their findings this way, and `wikicommit-status` listed those pages for a person to read
+  with nothing to say what to look for. Records also gain `generated_by`, copied from the
+  page's own `generated_by` (`translated_by` for a translation), beside `model`, the model
+  that reviewed it — so a model whose pages draw few findings can be told apart from one
+  whose reviews are lenient. A discarded page has no `generated_by`. Existing records are
+  unchanged and still read.
+- **Generated pages are written in their own words, and `## Key Points` keeps to the
+  main claims** (Issue #1379). Measured against their source articles, generated pages
+  carried the source's sentences and turns of phrase without quotation marks (12–37% of a
+  BlogPosting page's words sat in runs of six or more words shared with the source), and
+  their Key Points followed the source's order point by point. A new Pass 3 writing rule
+  for every type says: write in your own sentences; do not carry a run of more than about
+  six of the source's words into the body unquoted; quote only wording that matters (a
+  coined term or definition, a claim whose exact words are the point), briefly, in
+  quotation marks and attributed; names, terms, figures and code do not count; order the
+  body by what the reader needs (the type's reader questions or headings, what most
+  readers need first), not by the source's sections; and keep every
+  qualifier when rewording. The `## Key Points` instruction in `ScholarlyArticle`,
+  `NewsArticle` and `BlogPosting` now asks for at most seven bullets, ordered by
+  importance rather than by where the source raises them. `BlogPosting`'s granularity line
+  "not restate it verbatim" is removed (the common rule replaces it), and in
+  `ScholarlyArticle` and `NewsArticle` "not restate the full abstract/article verbatim"
+  becomes "not walk through the full abstract/article". Existing pages are unchanged until
+  regenerated; `--regenerate --type BlogPosting` (and the other two types) applies both
+  rules.
 
-- **Registering an arXiv `/abs/` URL now says the paper's full text is not in it**
-  (Issue #1311). `arxiv.org/abs/<id>` is the paper's landing page — title, authors, abstract,
-  history — so a page written from it was silently written from the abstract alone. On
-  `CREATED:`, `add_source.py` now adds a `partial extraction:` line naming the full-text
-  URLs to register instead (`https://arxiv.org/html/<id>`, or `https://arxiv.org/pdf/<id>`
-  when the paper has no HTML version), and suggests a versioned URL when the one given has
-  none. Registration still goes ahead. `/wikicommit-collect` now offers an arXiv search
-  result by its full-text URL in the first place — `/html/<id>` when that exists, else
-  `/pdf/<id>` — through the new read-only `add_source.py --fulltext-url-for <url>`, and
-  treats either form as a duplicate of the other when checking what is already registered.
-- **The published page shows `properties:` as an infobox of key facts** (Issue #1292). The
-  panel under the page title used to be headed "Properties" and list the raw Schema.org
-  key names (`variableMeasured`, `jobTitle`). Each row is now labelled in the page's
-  language ("Variables measured", 「職名」) for the keys the distributed type templates
-  use, in all ten UI languages; any other key is shown as its name split into words. An
-  empty value (`""`, `[]`, null) is no longer shown as a blank row or "—", and
-  `properties.description` and `properties.abstract` are left out of the box because the
-  body's opening already says them. JSON-LD is unchanged — it still reads all of
-  `properties:`. Existing wikis get this through `/wikicommit-update`; to show
-  `description` again, set the new `proseProperties` option of `wikicommit-properties` in
-  `quartz.config.yaml` to `[]`.
-
-- **Review checks `properties:` values as claims, and against the body** (Issue #1292).
-  `.wikicommit/review-rules.md` (`rules_version` 8) now says that every `properties:`
-  value is checked against the sources like a body sentence. Pass 4 and `/wikicommit-review`
-  also compare each value with the page's body: a value that disagrees with the body fails
-  as `CONTRADICTION`, and the field is corrected to match the body. A value the body does
-  not state at all fails in Pass 4, and is reported as an observation, not a finding, by
-  `/wikicommit-review`, since pages written before Pass 3 filled `properties:` from the
-  body can carry such values. Identifiers and a list the source declares about itself
-  (`keywords`) are exempt.
-
-- **`DefinedTerm`, `SoftwareApplication` and `Dataset` list reader questions instead of
-  headings** (Issue #1291). Their body template is now a `READER QUESTIONS` block: the
-  questions a reader of that type usually comes with, in a recommended order. Pass 3 picks
-  the questions the source answers, builds sections from those under headings it chooses,
-  and writes nothing — no section, no sentence — for a question the source does not answer;
-  it lists such questions at the end of the run instead. `DefinedTerm` loses its
-  `## Related Terms` section (related terms are linked where they come up) and its
-  `## When It Applies` section becomes question 6. The other types keep their headings.
-  To bring existing pages of these three types into the new shape, accept the template
-  change through `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type
-  <Type>`.
-
-- **Pass 3 writes the body first and fills `properties:` from it** (Issue #1291). Every key
-  the template offers is now filled from what the body states, after the body is written:
-  on a pilot wiki, about half the `Dataset` pages with an empty `variableMeasured` described
-  the fields of a record in the body. A value that needs a qualifier stays in the body only,
-  and identifiers (URL, DOI, repository) and a list the source declares about itself
-  (`keywords`) are the only values allowed in `properties:` without the body saying them.
-  An identifier is copied exactly as the source writes it, never assembled from parts. Keys
-  left out are reported at the end of the run as "not in source" or "does not apply to
-  this subject". `Dataset.md` now says what `variableMeasured` holds — the fields one record
-  carries, not an evaluation metric.
-
-- **Writing rules that apply to every type** (Issue #1291). Pass 3's lead must stand on its
-  own, names a field only when the source places the subject in one, and keeps every
-  qualifier the body keeps. Sections open with their main point; items described along the
-  same dimensions become a table; a term is explained only with the source's own
-  explanation; and a finding the source reports from another work is written as that work's
-  finding.
-
-- **`ScholarlyArticle`, `BlogPosting` and `NewsArticle` list reader questions instead of
-  headings** (Issue #1309). Their body template is now a `READER QUESTIONS` block, like the
-  three types above. `## Key Points` stays, as a fixed section after the block that answers
-  one of its questions: one claim per bullet, under that heading on every page, as before.
-  The `## Notes` (`ScholarlyArticle`) and `## Context` (`BlogPosting`, `NewsArticle`)
-  sections are gone; what they held — limitations, what the claims rest on, related work —
-  is now asked by separate questions. `ScholarlyArticle` no longer offers `abstract` or
-  `citation` in `properties:`: `abstract` copied the paper's own summary, which the body
-  already gives, and `citation` — in Schema.org, the works the paper cites — was mostly
-  filled with the paper's own bibliographic reference. Existing values of both keys stay
-  valid and are kept on regeneration. To bring existing pages into the new shape, accept
-  the template change through `/wikicommit-update`, then run
-  `/wikicommit-generate --regenerate --type <Type>`.
-
-- **Reader questions a page leaves unanswered are kept in the source management file**
-  (Issue #1309). Until now they were listed only at the end of the run, so they were lost
-  once the output scrolled away, and a `--non-interactive` run showed them to nobody. Pass 4
-  now also adds them to the source's `## Generation Notes`, one sentence per page and
-  question, for the pages that passed review. The section is not published. Regeneration
-  still lists them only at the end of the run, since it never writes management files.
-
-- **New type files are written with reader questions too** (Issue #1309). When
-  `/wikicommit-init`, `/wikicommit-collect`, `/wikicommit-generate` or
-  `/wikicommit-schema-propose` adds a type, `.wikicommit/schema-authoring.md` now has it
-  write the body as a `READER QUESTIONS` block, built from what readers of that kind of
-  thing want to know rather than from how the source at hand is organized, and with no
-  `##` headings. Custom types written by `/wikicommit-schema-propose` follow the same rule.
-  Accept the updated `schema-authoring.md` through `/wikicommit-update` to get this in an
-  existing wiki.
-
-- **`Person`, `Organization` and `Place` list reader questions instead of headings**
-  (Issue #1330). Their body template is now a `READER QUESTIONS` block. Some questions apply
-  only to a real person or place, or only to a character or a place made up for a work;
-  generation skips those for the other kind instead of reporting them unanswered, so a
-  fictional character no longer gets a "background" or "works and achievements" section
-  filled with the plot, and an invented place no longer gets "geography and access".
-  `Person.md` and `Place.md` gain a rule for subjects that a work of fiction shares with the
-  real world: a real person or place the work refers to keeps a single page, with the
-  work's portrayal in its own section and, while the work is the only source, a first
-  sentence that presents it as the work's portrayal rather than as history; a person or
-  place the author made up — even one modelled on a real one — gets its own page, whose
-  first sentence names the work and says it is fictional. A character page describes who
-  the character is in the work rather than retelling the plot. Keys that no pilot page had
-  a value for are no longer offered in `properties:` — `affiliation` and `birthDate`
-  (`Person`), `foundingLocation` and `numberOfEmployees` (`Organization`), `address`,
-  `latitude`, `longitude` and `url` (`Place`). Existing values of these keys stay valid and
-  are kept on regeneration. To bring existing pages into the new shape, accept the template
-  change through `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type
-  <Type>`.
-
-- **`ShortStory` and `Book` list reader questions instead of headings, and keep endings in
-  the plot section** (Issue #1331). Their body template is now a `READER QUESTIONS` block,
-  so a page no longer gets the fixed `## Plot Summary` and `## Characters & Publication`
-  sections. Two rules for works of fiction come with it: the page's first sentence names
-  the work and says what kind of work it is — for fiction, that it is fiction — and what the work keeps back until late —
-  how it ends, a twist, who the culprit is — is written only in the section whose heading
-  says it is the plot. It no longer appears in `description` (shown in search results and
-  link previews), the opening paragraphs, or the account of the characters; inside the plot
-  section the plot is told to its end without a spoiler warning. `Person.md` gains the same
-  rule for a character's page, which leaves the ending to the work's page. `Book` no longer
-  offers `isbn` in `properties:` — an ISBN identifies an edition, and a work's page covers
-  all its editions; existing values stay valid and are kept on regeneration. A `Book` that
-  is not a work of fiction skips the plot and character questions. To bring existing pages
-  into the new shape, accept the template change through `/wikicommit-update`, then run
-  `/wikicommit-generate --regenerate --type ShortStory` (and `--type Book`, `--type
-  Person`).
-
-- **`Event`, `HowTo` and `default.md` list reader questions instead of headings**
-  (Issue #1332). Every distributed type template now has a `READER QUESTIONS` body, so an
-  `Event` page no longer gets the fixed `## Overview` and `## Outcomes` sections, a `HowTo`
-  page no longer gets `## Prerequisites`, `## Steps` and `## Notes`, and a page generated
-  for a type with no schema file of its own no longer puts everything under `## Details`.
-  `default.md` asks questions that hold for any subject, and asks generation to add the
-  ones readers of that kind of thing come with. `HowTo.md` gains a rule that keeps the
-  steps a numbered list in the order the reader performs them, divided as the source
-  divides them, whatever the section is called (and unnumbered when the source gives no
-  order). Keys that pilot pages almost never filled are no longer
-  offered in `properties:` — `eventStatus` (`Event`), `totalTime` and `supply` (`HowTo`).
-  Existing values of these keys stay valid and are kept on regeneration. Type files that
-  an older wiki already holds in the heading form keep working: generation reads both
-  forms. To bring existing pages into the new shape, accept the template change through
-  `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type Event` (and
-  `--type HowTo`).
-
-- **A recurring `Event` gets one page for the event, not one per year** (Issue #1344).
-  `Event.md` now names a recurring event without a year ("Urawa Matsuri") and gives one
-  year's edition a page of its own — qualified by its year like any other edition — only
-  when a source is about that edition. The event's page and an edition's page are broader
-  and narrower pages, not a series. An event is treated as recurring only when the source
-  says it recurs. A name that gathers several separate events gets one page that lists
-  them. Pages for a recurring event or such a name leave `startDate` and `endDate` out and
-  keep this year's schedule in the body, with `expires_at` set to the schedule's first date.
-  To apply this to existing pages, accept the template change through
-  `/wikicommit-update`, then run `/wikicommit-generate --regenerate --type Event`.
-
-### Fixed
-
-- **`llms.txt` now says how to tell that a page has not been read by a person yet**
-  (Issue #1183). Its opening paragraph claimed that every page states its review status at
-  the top, but a `pending` page's banner says nothing in words — it simply lacks the
-  "Read by …" line — so an AI that fetched one page could not tell it was `pending`. The
-  paragraph now says that a page a person has read says so in the banner (in the page's
-  language), and that a page whose banner says it was generated by an LLM but lacks that
-  line has not been read yet. The banner itself is unchanged.
-
-- **A source language written as `off` or `false` is no longer published as Norwegian**
-  (Issue #1248). YAML reads an unquoted `lang: no` as false, and the publish step turned
-  every false back into `no` — including `off` and `false`, which YAML reads the same way.
-  Such a value now shows no language line on the source page and is counted as not
-  recorded on the overview page, like `yes` and `on` already were; an unquoted `no` (in
-  any case) is still Norwegian, so existing management files need no change.
-  `/wikicommit-generate` now writes the code in quotes (`lang: 'ja'`).
-- **`/wikicommit-init` and `/wikicommit-update` now install `markdown-it-py`** (Issue
-  #1342). The raw-HTML check needs it since the change below, but nothing installed it, so
-  a wiki without the package could not merge any page. Both Skills now install it when it
-  is missing and, when the install fails, print `pip install markdown-it-py` as a step to
-  run. `/wikicommit-update` no longer reports a check that could not run for lack of a
-  package as a problem already present in the pages.
-- **The raw-HTML gate no longer lets `<script>` through after certain code blocks**
-  (Issue #1322). `check_raw_html.py` decided where code ends with a pattern that did not
-  follow CommonMark, so HTML placed after a four-backtick fence holding a three-backtick
-  line, after a fence closed with an indented marker, after a `~~~~` fence holding `~~~`, or
-  after a double-backtick code span passed `/wikicommit-merge` and was rendered as live HTML
-  on the published site. The check now parses the page with a CommonMark parser and flags
-  exactly the HTML the site would render. It needs the Python package `markdown-it-py`
-  (`pip install markdown-it-py`); without it the check stops every merge with an `ERROR:`
-  naming the package. Two results change: HTML after a fence that is never closed is now
-  treated as code (as the site renders it) and passes, and a tag name with a hyphen
-  (`<my-el ...>`) is now caught. Run `/wikicommit-update` to get the new script, and
-  `/wikicommit-status` to recheck existing pages.
-- **`/wikicommit-generate --regenerate <page> --merge <page>` now finishes the merge when
-  the pages are named as `<Type>/<slug>`** (Issue #1131). Given that short form, the run
-  rebuilt the kept page and then skipped the step that takes the absorbed pages down,
-  records the merge and rewrites the links, while reporting success. Full paths worked.
-- **Closing the tracking Issue of a removed page no longer marks it reviewed** (Issue
-  #1131). `review-issue-close-sync.yml` now skips a page at `status: removed`; before, closing
-  the Issue of a page taken down by a merge or by `/wikicommit-remove` set it to `reviewed`
-  and wrote a human review record for a page nobody read. Run `/wikicommit-update` to get the
-  new workflow, and check `.wikicommit/review/` for `issue-close` records on removed pages
-  written before it.
-- **A merge now names the links it could not tidy** (Issue #1131). `rewrite_merged_links.py`
-  prints `SELF_LINK:` for a page that now links to itself (usually the kept page's
-  translation) and `ALSO_LINKED:` for a page that now names the kept page twice, and the
-  merge's report says how to fix each. The merge's report also names the other
-  `.wikicommit/relations.yml` items that still name an absorbed page (they stay valid), and
-  a merge stopped by a changed source now says to take the source in first, as its own
-  pull request.
-- **A URL source whose management file name contains a dot no longer reads another
-  source's cached text** (Issue #1326). `resolve_source_cache_path.py` dropped everything
-  after the last `.` of the name, so `pdf-2606.05608.md` and `pdf-2606.17799.md` (two arXiv
-  papers) both resolved to `pdf-2606.md`. `/wikicommit-ask --include-source`,
-  `/wikicommit-review` and `/wikicommit-fix` could then hand the other paper's text to the
-  check, and storing a fresh fetch could overwrite the other source's cache. The cache path
-  now keeps the management file's name whole, as Pass 1 already wrote it. A file left at a
-  truncated path such as `pdf-2606.md` is no longer read for either paper, but it would
-  still be read as the cache of a source whose management file has exactly that name, so
-  delete `.wikicommit/.cache/ingest-fetch/` if such a file may be there (it is re-fetched
-  as needed). Run `/wikicommit-update` to get the new script.
-- **Closing a tracking Issue as "not planned" or "duplicate" no longer marks the page
-  reviewed** (Issue #1323). `review-issue-close-sync.yml` now acts only on a close as
-  "completed"; any other reason, or none, leaves the page `pending`, writes no review
-  record, and comments on the Issue to say so (the workflow now needs `issues: write`).
-  Reopen and close as "completed" to record the reading. `/wikicommit-review` closes Route A
-  Issues with `--reason completed`. Run `/wikicommit-update` to get the new workflow, and
-  check `gh issue list --label wikicommit-review --state closed --json number,stateReason`
-  for pages marked `reviewed` by an earlier close of another kind.
+- **`/wikicommit-generate` asks for the type of an ambiguous entity at the end of the run
+  and writes it in the same run** (Issue #1235). An entity whose type could not be settled
+  used to be listed in the Completion Notice and left for `/wikicommit-reconcile --source`
+  or a named re-run, which read the source again and came back just as unsure. Now, in an
+  interactive run, the question asked once every source has been through the passes also
+  asks for the type of each such entity; a source whose entities were given a type goes
+  through the passes again straight away, with the answer handed to entity extraction, and
+  the page is written in that run. The source is still recorded as `partial` with
+  `ambiguous_entities` until then, so a `--non-interactive` run, an answer of "later" or a
+  run that stops part-way leaves it exactly as before.
+- **`Person`: a living person whom a work of fiction portrays gets no page while the work is
+  the only source** (Issue #1341). The rule for a real person a work refers to used to allow
+  a page holding only the work's portrayal, which clashed with the rule that a living
+  person's page carries only what they made public themselves. For a living person the
+  portrayal now stays on the work's own page, where it tells its characters; the person's
+  page is created once a source about them comes in, and the portrayal is added to it then
+  as a section framed as the work's. Historical figures are unchanged. Whether a living
+  person gets a page at all is still decided by `.wikicommit/entity-policy.md`. Accept the
+  template change through `/wikicommit-update`. A page already generated for a living person
+  from a work alone is not removed for you; remove it with `/wikicommit-remove` if you want
+  it gone. `Book` and `ShortStory` now list such a person in `character` as plain text
+  rather than linking a page that is not created yet.
+- **A source language written with a region or script is counted under its language**
+  (Issue #1247). A management file's `source.lang` written as `zh-Hans` or `pt-BR` used to
+  appear on the public source page and the overview page's per-language table as
+  `zh-hans` / `pt-br`, a row apart from `zh` / `pt`. Only the leading language subtag is now
+  shown and counted (`zh`, `pt`). A value that still is not one two-letter code — a language
+  name such as `japanese`, or a list such as `ja, en` — shows no language line on the source
+  page and is counted as not recorded (or not processed yet) on the overview page, like a
+  non-string value already was. Existing management files need no change.
+- **Three messages no longer cite development tracker numbers** (Issue #1376). The
+  `--help` of `init.py --update-theme` and of `add_source.py --fetch-url`, and the `ERROR:`
+  that `add_source.py --check-path-cache` / `--path-cache-path` print for a management file
+  outside `.wikicommit/source/path/`, carried issue numbers a user cannot look up. They now
+  give only the reason (the `ERROR:` calls the tree a legacy `.wikicommit/ingest/` tree).
 
 ### Notes
 
-- **Every distributed type template changed, and so did the page generation rules**
-  (Issues #1291, #1309, #1330, #1331, #1332, #1344, above). Each type file's body is now a
-  `READER QUESTIONS` block instead of fixed headings, Pass 3 writes the body before it fills
-  `properties:`, and `.wikicommit/review-rules.md` is at `rules_version` 9 (Issues #1292,
-  #1324).
-  `/wikicommit-update` shows each type file's difference and applies only what you accept;
-  a type file you keep in the heading form keeps working, because generation reads both
-  forms. Existing pages keep their shape until regenerated, and regenerating a whole type
-  costs about as much as generating it did, so this is not a reason to regenerate a wiki —
-  regenerate the types or pages you are about to review instead.
-- **Run `/wikicommit-update` and merge its PR before generating again.** The review rules
-  live in the wiki, not in the Skill: until the update is merged, Pass 4 and
-  `/wikicommit-review` keep reviewing with the wiki's older `review-rules.md`, so the checks
-  on `properties:` values and on instructions written inside a source do not apply, and
-  nothing says so. The update also brings the new raw-HTML check and installs the Python
-  package `markdown-it-py` it needs.
-- **Four things the update does not do for you**, each described above: delete the
-  `github:quartz-community/og-image` entry from `quartz.config.yaml` if you want the
-  shorter build (Issue #1310); look for pages marked `reviewed` by closing a removed page's
-  tracking Issue or by a close that was not "completed" (Issues #1131, #1323); delete
-  `.wikicommit/.cache/ingest-fetch/` if a URL source's management file name contains a
-  dot (Issue #1326); and run `/wikicommit-status` to recheck existing pages for raw HTML
-  the old check let through (Issue #1322).
-- **No new Skills.** `npx skills add` brings the changed Skill files; nothing needs to be
-  installed for the first time.
+- **Six distributed type templates changed, and so did the page generation rules**
+  (Issues #1341, #1379, #1381, above). `Person`, `Book` and `ShortStory` changed how a
+  living person portrayed in a work is handled; `ScholarlyArticle`, `NewsArticle` and
+  `BlogPosting` changed their `## Key Points` instruction. Every type is now written by the
+  own-words rule, and view pages by the same writing rules as entity pages.
+  `.wikicommit/review-rules.md` is at `rules_version` 12 (Issues #1372, #1373, #1381).
+  `/wikicommit-update` shows each type file's difference and applies only what you accept.
+  Existing pages keep their shape until regenerated; regenerate the types or pages you are
+  about to review rather than the whole wiki.
+- **Run `/wikicommit-update` and merge its PR before generating again.** Until it is
+  merged, Pass 4, `/wikicommit-review` and `/wikicommit-translate` keep reviewing with the
+  wiki's older `review-rules.md`, and nothing says so. The update also brings the changed
+  `.github/workflows/deploy.yml` (Issue #1371) and
+  `.github/workflows/review-issue-close-sync.yml` (Issue #1396).
+- **The first recheck after upgrading regenerates every source that is a GitHub
+  repository's top page, once** (Issue #1374), because its hash is now taken from the
+  README rather than the rendered page.
+- **Things the update does not do for you**, each described above: re-translate
+  translation pages whose `keywords` were translated (Issue #1372), and put an image at
+  `.wikicommit/assets/og-image.png` if you want your own link card image (Issue #1371).
+- **No new Skills**, but `/wikicommit-synthesize` now needs `/wikicommit-generate`
+  installed alongside it (Issue #1381). `npx skills add` brings the changed Skill files.
 
 ## Earlier versions
 
@@ -443,6 +332,7 @@ bounded and a reader only opens the versions between theirs and the latest.
 
 | Version | Date | Entry |
 |---|---|---|
+| 0.11.0 | 2026-10-17 | [changelog/0.11.0.md](changelog/0.11.0.md) |
 | 0.10.0 | 2026-10-08 | [changelog/0.10.0.md](changelog/0.10.0.md) |
 | 0.9.0 | 2026-10-03 | [changelog/0.9.0.md](changelog/0.9.0.md) |
 | 0.8.0 | 2026-09-26 | [changelog/0.8.0.md](changelog/0.8.0.md) |

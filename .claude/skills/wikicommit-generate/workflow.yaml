@@ -19,6 +19,12 @@
 # deferrals stay queued, exactly as before. The answers reach the second loop as
 # run lists, handed to the passes with the step (`show_lists`), so nothing about
 # them is written to a management file.
+#
+# An entity whose type Pass 2c could not settle (`ambiguous: true`) is asked in the
+# same step. Its source is not deferred: the first loop's Pass 4 writes `partial` with
+# `ambiguous_entities` as before, `collect-questions` finds it from that field, and an
+# answered source goes through the passes again with the answer in `entity-types`, so
+# the second Pass 4 rewrites the field in full. Nobody to ask leaves it `partial`.
 
 skill: wikicommit-generate
 record_sources: sources
@@ -112,6 +118,7 @@ steps:
           halted: "a second NETWORK_UNAVAILABLE in a row (counting Pass 1's); pass --reason"
         ends_item_on: [deferred]
         halts_on: [halted]
+        show_lists: [entity-types]
         check_on_halt: true   # `halted` writes a deferral first; hold it to the same check
         check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass2c, --item, "{item}", --outcome, "{outcome}"]
 
@@ -134,7 +141,7 @@ steps:
           halted: "the review could not be run as specified (rules_version mismatch twice); pass --reason"
         halts_on: [halted]
         non_interactive: "a page still failing after max_retries goes to failed_pages; retries are never extended"
-        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass4, --item, "{item}"]
+        check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pass4, --item, "{item}", --run, "{run}"]
 
   - id: collect-questions
     type: script
@@ -157,14 +164,21 @@ steps:
       or `--add fail-low-density=<management file>` for each low-density answer,
       `--add approved-types=<schema:Type>` or `--add declined-types=<schema:Type>` for
       each type answer, and `--add reprocess=<management file>` for every source whose
-      questions were all answered. If the person wants to leave them for later, answer
+      questions were all answered. A source in `lists.questions` whose management file
+      has `ambiguous_entities` holds entities whose type could not be settled: for each,
+      name its `title`, its `type` and `alternatives` and the source, and ask which type
+      to write it as (its `type`, an `alternatives` entry, or an installed type — a type
+      approved in this same answer that is none of these has no file yet, so leave that
+      entity for the next run); answer with `--add entity-types=<management file>#<title>=<schema:Type>`
+      for each entity given a type, and `--add reprocess=<management file>` for its source
+      when at least one was. If the person wants to leave them for later, answer
       `later` with no `--add`.
     choices:
       answered: "the person answered; the sources named in reprocess go through the passes again in this run"
       later: "nothing was answered; every deferral stays queued"
     non_interactive: later
     show_lists: [questions]
-    adds: [reprocess, continue-low-density, fail-low-density, approved-types, declined-types]
+    adds: [reprocess, continue-low-density, fail-low-density, approved-types, declined-types, entity-types]
     check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-answers, --run, "{run}", --answer, "{outcome}"]
 
   # The answered sources, through the same passes once more. A question these
@@ -196,6 +210,13 @@ steps:
   - id: reconcile
     type: script
     run: ["{python}", .wikicommit/scripts/reconcile_ingest_status.py]
+
+  # After every page is on disk and while Pass 1's extracted text is still certain
+  # to be there: how much of each page repeats its source word for word. Never
+  # stops the run; its lines reach the report as notes.
+  - id: source-overlap
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", source-overlap, --run, "{run}"]
 
   - id: completion
     type: agent

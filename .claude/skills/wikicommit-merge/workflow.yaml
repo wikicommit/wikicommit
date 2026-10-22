@@ -20,10 +20,35 @@ steps:
     run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", default-branch]
     produces: default_branch
 
+  # A PR an earlier run left open for a person (a default branch that requires a
+  # review: `merge-pr` ended with `awaiting-merge`) and that a person has merged
+  # since. Its pages reached the default branch without Steps 8 and 9, so this run
+  # goes on to them even when it has nothing new to carry. The step pulls the
+  # default branch first, because Step 8 scans the working tree.
+  - id: awaited
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", awaited, --run, "{run}"]
+    produces: awaited_prs
+
+  # A page generate wrote that no AI review record judges as it now stands is held
+  # back, with the management files naming it: what is published must have been
+  # checked against its sources. Before `detect`, so that every list after it —
+  # the changes, Step 2's lists, the commit, Steps 8 and 9 — leaves these out.
+  - id: unreviewed
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", unreviewed]
+    produces: skipped
+
   - id: detect
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", detect]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", detect, --run, "{run}"]
     produces: changes
+
+  # Nothing to carry and no merged PR to follow up: the run ends here.
+  - id: work
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", work, --run, "{run}"]
+    produces: work
     finish_if_empty: "No changes to merge"
 
   - id: open-runs
@@ -34,43 +59,46 @@ steps:
   # run record under its own name and the `commit` step reads it from there.
   - id: classify-pages
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, pages]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, pages, --run, "{run}"]
     produces: changed_md
 
   - id: classify-removing
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, removing]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, removing, --run, "{run}"]
     produces: removing
 
   - id: classify-sources
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, sources]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, sources, --run, "{run}"]
     produces: new_sources
 
   - id: classify-schema
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, schema]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, schema, --run, "{run}"]
     produces: new_schema
 
   - id: classify-vocab
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, vocab]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, vocab, --run, "{run}"]
     produces: new_vocab
 
   - id: classify-policy
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, policy]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, policy, --run, "{run}"]
     produces: policy_files
 
   - id: classify-relations
     type: script
-    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, relations]
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", classify, --kind, relations, --run, "{run}"]
     produces: relations_file
 
   # Step 3, the fast checks: a blocking finding exits 1, which halts the run with
   # that finding as its reason, before anything is branched or committed.
+  # The steps from here to `merge-pr` carry the change; a run that only follows up
+  # a PR a person merged (`changes` empty) skips them and goes on to Steps 8 and 9.
   - id: quality-checks
     type: script
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, changes]
     run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", checks, --run, "{run}"]
 
   # Step 3, lychee and markdownlint-cli2: never blocking, and an agent step because
@@ -110,8 +138,9 @@ steps:
 
   - id: commit
     type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, changes]
     instructions: references/commit.md
-    show_lists: [new_sources, new_schema, new_vocab, policy_files, relations_file]
+    show_lists: [new_sources, new_schema, new_vocab, policy_files, relations_file, skipped]
     outcomes:
       committed: "a wikicommit/merge-* branch holds one commit carrying every change detect found"
       halted: "the branch or the commit could not be made; pass --reason"
@@ -120,6 +149,7 @@ steps:
 
   - id: open-pr
     type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, changes]
     instructions: references/open-pr.md
     outcomes:
       opened: "the branch was pushed and the PR opened; pass --add pr=<PR number>"
@@ -128,14 +158,20 @@ steps:
     adds: [pr]
     check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-pr, --run, "{run}"]
 
+  # `awaiting-merge`: the default branch requires a review, so the PR is left open
+  # for a person to merge. The run ends normally there (not a halt — nothing failed),
+  # and the next /wikicommit-merge files the Issues once the PR is merged (`awaited`).
   - id: merge-pr
     type: agent
+    when: ["{python}", "{skill_dir}/scripts/workflow_checks.py", has-list, --run, "{run}", --list, changes]
     instructions: references/merge-pr.md
     outcomes:
       merged: "the PR was squash-merged and the default branch checked out and pulled"
+      awaiting-merge: "the PR waits for a person's required review; it was left open and the default branch checked out"
       failed: "the PR was closed, conflicted, blocked, or never became mergeable; the cleanup was shown; pass --reason"
     halts_on: [failed]
-    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-merged, --run, "{run}"]
+    finishes_on: [awaiting-merge]
+    check: ["{python}", "{skill_dir}/scripts/workflow_checks.py", check-merged, --run, "{run}", --outcome, "{outcome}"]
 
   # Steps 8 and 9 each start with a script step that scans the default branch and
   # matches the open Issues' markers, producing only what still needs an Issue. A

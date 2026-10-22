@@ -93,6 +93,13 @@ steps:
     type: script
     run: ["{python}", .wikicommit/scripts/rebuild_index.py]
 
+  # After every page is on disk and while Pass 1's extracted text is still certain
+  # to be there: how much of each page repeats its source word for word. Never
+  # stops the run; its lines reach the report as notes.
+  - id: source-overlap
+    type: script
+    run: ["{python}", "{skill_dir}/scripts/workflow_checks.py", source-overlap, --run, "{run}"]
+
   - id: report
     type: agent
     instructions: references/regenerate.md

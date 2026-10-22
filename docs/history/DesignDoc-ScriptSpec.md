@@ -856,6 +856,8 @@ docstring・コメントにあって本文に無かった経緯は次のとお�
 
 **「相手が悪い」（`other`）の行き先は本節の対象外**である。同じ調査で、告発した側が `RISKY:` に載り、最も告発された側は載らないことが分かっている（`RISKY:` は findings を `page_at_fault` を見ずに数える）。ただし告発先を引くには `page_at_fault` と `source_file` が信頼できる必要があり、いまはどちらも満たさないので、rule 4 の効果が出た後の実データで判断する。
 
+**効果の測定（Issue #1384）**: パイロット 2 つ（ai-driven-dev-wiki・world-of-work-wiki）の記録を配布版ごとに数えた。`page_at_fault` の仕様外の値（`this` 52・`self` 23）、`type` の欠落 57 件、語彙外の `type` 6 件は、すべて 0.6.1・0.7.0 の記録だった。rule 4 を直した後の 0.8.0 以降の記録 756 件（0.8.0 が 687、0.9.0 が 8、0.10.0 が 61）では、どれも 0 件だった。正規化の表を持つ理由は無くなったので、本節の判断を維持した。同じ Issue で findings の欠落だけを拒むようにしたが、あちらは orchestrator 自身の誤りであり、エラーが直せる者に届く（`docs/DesignDoc-data.md` §4.8）。
+
 ## check_review_coverage.py
 
 **docstring・コメントから経緯を移した（Issue #1329）**: 移す前後の行数は、総行数 851 → 687、コード 383 → 383、docstring 288 → 155、コメント 115 → 84、空行 65 → 65（docstring 内の空行は docstring に数える）。`Issue #` はコメント・docstring で 40 → 0。冒頭 docstring にあった仕様（各行がどの記録を読むか・閾値を持たないこと・孤児の記録を報告しないこと・改名と統合の扱い）は本文の同じ節にすべてあったため、docstring 側を消すだけにした。docstring・コメントにあって本節に無かった経緯は次のとおり:
@@ -1448,6 +1450,7 @@ docstring・コメントにあって本文に無かった経緯は次のとお�
 - `config.yml` を YAML の読み書きではなく文字列で書き換える理由（コメントにしか書かれていない例が失われる）は Issue #713。その例として挙げた `site_description` の言語別の例は Issue #671 で足したもの。`entity-policy.md` のスイッチ（`--exclude-living-persons`）も同じ理由で文字列で書き換える（Issue #837）。`--update-version`・`--add-config-keys`・プレースホルダの既定値（`_CONFIG_PLACEHOLDER_DEFAULTS`）も Issue #713。`{VERSION}` を引用符で二重に包んで `wikicommit_version: ""0.2.0""` を書いた不具合が実際にあり、`check_distribution_freshness.py` が自身の置換について同じ罠を記録している（Issue #712）
 - `re.sub` の置換に文字列ではなく lambda を渡す理由は `set_frontmatter_field.py` の Issue #371
 - `--update-theme`（`--theme` は再 init では効かない）は #374、`theme` フィールドは #160 で足した。`theme` を持たない `config.yml` はそれより前のもの
+- `--update-theme` の `--help` に残っていた `(#374 — ...)` は Issue #1376 で番号を外し、理由（再実行では `--no-overwrite` が既存の `config.yml` を丸ごと飛ばすので `--theme` は効かない）だけを残した。同じ Issue で `tools/check_distributed_issue_refs.py` の配布スクリプトの検査が素の `#NNN`（2 桁以上）と `Issue-#NNN` も数えるようになった
 - `.claude/settings.json` の `skillOverrides` を鍵ごとにマージするのは Issue #953。テンプレートが名指す 3 つの Skill は Issue #945 で `disable-model-invocation` を外し（無人実行の経路を開くため）、通りすがりの依頼で起動されうるようになった
 - README は Issue #1034。init が README.md を編集しないと決めたのは Issue #282 で、README が無いときはその理由が成り立たないので書く。LLM が書いた文を含まないことが基盤コミット（Issue #843）に載せられる理由。英語だけなのは、ja / en 以外の言語も予定しているため `primary_lang` で切り替えていない
 - `.wikicommit/guides/` は Issue #846。配布物が開発リポジトリの `docs/` を指してはならないのは `docs/DesignDoc-skills.md` §11.9
@@ -1465,6 +1468,7 @@ docstring・コメントにあって本文に無かった経緯は次のとお�
 
 - スクリプトを Skill 内ではなく `.wikicommit/scripts/` に置くのは Issue #1210（wikicommit-collect・wikicommit-ask・`resolve_source_cache_path.py` も `--fetch-url` 等を呼ぶため）。`resolve_source_cache_path.py` が `add_source.py` を隣から呼ぶのも同じ Issue
 - 独自 User-Agent（`USER_AGENT`）と `--fetch-url` が `markitdown` の Python API に UA 付きの `requests.Session` を渡す形は Issue #527（既定の python-requests UA が Wikimedia 系ドメインに 403 で拒否された）
+- 出力する文字列に残っていた 3 か所の番号は Issue #1376 で外した。`--fetch-url` の `--help` の `#527` は外すだけで意味が通る。`--check-path-cache` / `--path-cache-path` の `ERROR:` の理由の `a pre-Issue-#476 .wikicommit/ingest/ tree` は `a legacy .wikicommit/ingest/ tree` にした — Issue #476 は管理ファイルの置き場を `.wikicommit/ingest/` から `.wikicommit/source/` へ改名したもので、それより前に作られたツリーを自動では移行しない
 - `KNOWN_SOURCE_LICENSES` と `source.license` の初期値（明示指定 > 既知ドメイン対応表 > 空欄）は Issue #558。`--license-for-url`（登録より 1 歩前に同じ表を引く読み取り専用モード）は Issue #646
 - `SHARE_ALIKE_LICENSE_PREFIXES` と登録時の ShareAlike 通知は Issue #570（Creative Commons ほか）。強い・弱いコピーレフトを足したのは Issue #951 で、弱いコピーレフトも一律で入れるのはその検討事項 1、通知を「負いうる」と書いて断定しないのは検討事項 2 の結論。`eupl`・`cpl`・`ms-rl` を足し CeCILL を意図的に入れなかったのは Issue #958。「評判ではなく条項で判定する」「確認済みのものだけを持つ」はこの表の規律として Issue #425 で決めたもの
 - `PARTIAL_EXTRACTION_URL_NOTES` と登録時の partial extraction 通知は Issue #715。partial extraction という失敗クラスは Issue #574 が YouTube（字幕が黙って落ちる。ガード C）について定義したもので、GitHub の Issue / PR スレッドはその 2 例目だった
@@ -1701,6 +1705,23 @@ docstring・コメントにあって本文に無かった経緯は次のとお�
 docstring・コメントにあって本文に無かった経緯は次のとおり:
 
 - 各 Skill の検査が同じように読むヘルパーを `.wikicommit/scripts/_workflow_checks.py` に置いたのは Issue #1219
+
+## check_source_overlap.py
+
+**新設（Issue #1380。生成側の規則は Issue #1379）**: 2026-10-18 に `ai-driven-dev-wiki` の BlogPosting 26 枚と DefinedTerm 10 枚を元記事と比べたところ、6 語以上一致する語の割合は 3〜39%（中央値 約 19%）で、BlogPosting の型には以前から「逐語で言い直さない」規則があったのに効いていなかった（`dev/source-overlap-2026-10/results.md`）。Issue #1379 が Pass 3 に「自分の言葉で書く・ソースの順に追わない」を足して 8 枚を作り直すと平均 32% → 7% に下がり、対照（旧規則で作り直したもの）は 32% のまま変わらなかった（`dev/source-overlap-2026-10/results-regenerate-2026-10-19.md`）。規則が効いているかはこうした測り方が無いと分からないため、同じ数え方を配布スクリプトにした。
+
+試作の `dev/source-overlap-2026-10/measure.py` との違い:
+
+- **比べる相手**: 試作は元記事の HTML をタグを剥がしただけで読んでいた（ナビゲーション等のページの外枠が混ざる）。本スクリプトは Pass 1 が残した抽出テキストのキャッシュ（markitdown の出力）を読む。生成が実際に読んだ本文と比べるためである
+- **ページ側の除外**: 試作は frontmatter・`## Generation Notes`・WikiLink の記法を除くだけだった。引用符・コード・引用ブロック・表を除き、除いた箇所で本文を切るようにした。そのため同じページでも値が下がる（`ai-driven-dev-wiki` 全体の中央値は 10%。試作で測った 36 枚の中央値 約 19% と直接は比べられない）。作り直した 8 枚の対照・新規則の値は試作とほぼ同じだった（対照 20〜37% ／ 試作 22〜39%、新規則 0〜11% ／ 試作 2〜12%）
+- **Key Points の並び順**: 試作は Key Points が元記事の順に並ぶ率も出していたが、位置が取れる項目が少ないと率が粗く（Issue #1379 の計測でも 3〜7 項目）、閾値を置ける量にならないので入れなかった
+- **日本語・中国語**: 試作は `[a-z0-9']+` だけを語にしていたので、かな・漢字の本文は 0 語だった。1 文字を 1 トークンとし、一致の長さを別に持つ（`--cjk-n`）。Issue #1380 が名指しした 3 つの Wiki には ja のソースから書かれた ja のページが無かった（`ai-driven-dev-wiki` の ja ページで `translated_from` を持たない 13 枚はすべて `index.md`）ので、`saitama-city-wiki` で決めた
+
+閾値を決めるときに退けたもの:
+
+- **15%**: Issue の草案の時点の目安（試作の中央値 約 19% の少し下）。本スクリプトの数え方では `ai-driven-dev-wiki` の 354 / 1,076 枚が報告され、新しい規則のページの最大 11% との間に余裕も無い
+- **ページの語数による下限を大きく取る**: 草案では「固有名詞・術語が多い短いページは割合が上がりやすい」と見ていたが、`ai-driven-dev-wiki` では 150 語未満のページ（24 枚）の中央値 14%、150〜300 語 14%、300〜600 語 10%、600 語以上 9% で、差は小さかった。100 語未満は 9 枚しかなく、1 つの一致で割合が大きく動く範囲だけを外した
+- **`--cjk-n 16`**: 偶然の一致は 90% 点・99% 点とも 3% 以下に下がるが、写したページの割合も下がる（中央値 41% → 34%）。12 文字で偶然の一致は 90% 点 1% であり、報告されたページの最長一致は 100〜240 文字だった
 
 ## 付録: 本文の行に付いていた Issue 番号と書き換えた表・図の行（移行時点）
 

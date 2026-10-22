@@ -2,6 +2,8 @@
 name: wikicommit-synthesize
 description: Synthesize a new view page about a topic from existing wiki content, written directly to .wikicommit/view/. Use this only when someone explicitly asks for a new synthesized or overview page in the wiki. It writes a page into the repository, so do not use it to answer a question or to summarize a topic in the conversation — wikicommit-ask does that without writing.
 disable-model-invocation: true
+metadata:
+  requires: "wikicommit-generate"
 ---
 
 # wikicommit-synthesize
@@ -46,7 +48,7 @@ Then **loop**:
 2. If `notes` is present, report every line of it to the user.
 3. If `step` is `null`, the run is over — `finished` (say `finished_because` if present), or halted (say `halted_reason`). Stop.
 
-   The first step is a check the workflow engine runs itself, **at the start of the run, before any search**: if `.wikicommit/config.yml` does not exist it halts and you tell the user to run `/wikicommit-init` first; if `.wikicommit/review-rules.md` does not exist it halts and you tell the user to run `/wikicommit-init --no-overwrite`. Do not review without the rules and do not fall back to a looser check: without them Step 5.5 degrades to a bare "is this supported" pass while still writing a record that a review happened. Their absence is knowable before anything is searched and does not depend on the topic, so finding out at the review would discard the whole grounding search and body generation that was never going to be reviewable. This is an installation problem, not a defect in any page.
+   The first step is a check the workflow engine runs itself, **at the start of the run, before any search**: if `.wikicommit/config.yml` does not exist it halts and you tell the user to run `/wikicommit-init` first; if `.wikicommit/review-rules.md` does not exist it halts and you tell the user to run `/wikicommit-init --no-overwrite`; if the `wikicommit-generate` Skill is not installed beside this one (Step 5 follows its `../wikicommit-generate/references/writing-rules.md`), it halts and you tell the user to install it. Do not review without the rules and do not fall back to a looser check: without them Step 5.5 degrades to a bare "is this supported" pass while still writing a record that a review happened. Their absence is knowable before anything is searched and does not depend on the topic, so finding out at the review would discard the whole grounding search and body generation that was never going to be reviewable. This is an installation problem, not a defect in any page.
 4. If `blocked` is true, the completion check for this step has failed repeatedly: stop and report the last `reason` to the user. Do not work around a check.
 5. An `agent` step: **read the file named in `instructions` now and follow it**. When it is done, run the `then` command with one of the `outcomes`, `--token` set to the `pass_token` in the instructions file's frontmatter, and the `--add`, `--reason`, `--page` or `--count` that step's instructions ask for. If the response has `when_nobody_can_answer`, that is the rule for any question the step would ask.
 6. `done` prints the next step in the same form. If it prints `"accepted": false`, the step is **not** complete: read `reason`, fix what it names, and run `done` again. It never skips ahead, and it refuses a step other than the current one.
@@ -62,7 +64,7 @@ The steps (the table is here as well as in the workflow engine's answers so the 
 | `preflight` | script | — | the checks above, and that `--max-grounding` is a positive whole number |
 | `survey` | agent | `references/survey.md` | Step 0, only when no topic was given: propose angles, let the person choose; nothing chosen → the run finishes |
 | `ground` | agent | `references/ground.md` | Steps 1–4: search `primary_lang`, choose the grounding pages from title, description and headings, read them, warn about unreviewed ones; none → the run finishes |
-| `write` | agent | `references/write-page.md` | Steps 5–9: synthesize, review (`synthesize-step5.5`), record the verdict, write the view page |
+| `write` | agent | `references/write-page.md` (it sends you on to `../wikicommit-generate/references/writing-rules.md`) | Steps 5–9: synthesize, review (`synthesize-step5.5`), record the verdict, write the view page |
 | `rebuild-index` | script | — | Step 10, only when the page was written |
 | `report` | agent | `references/completion-report.md` | Step 11: close the run and report |
 

@@ -1,5 +1,5 @@
 ---
-rules_version: 9
+rules_version: 12
 wikicommit:
   # Machine-readable header only. The rules themselves are the prose below.
   # `rules_version` is bumped whenever any rule in this file changes; a review
@@ -281,6 +281,14 @@ space of "the page mentions another document"; which one applies turns on
 whether the evidence is *about* that fact or merely mentions it, and on whether
 the page states the fact or cites a document for it.
 
+**A source's own bibliographic record is its own subject.** What a document
+says about itself — which venue published or accepted it, which earlier or
+shorter version it extends, which conference version it is the preprint of —
+is a fact about that document, stated by that document, so it is checked here
+and not under check 4, even when it names the other version by title and date.
+Check 4's half stays with it: a page that takes a *finding* from that other
+version is citing a document it does not hold.
+
 ### 2. Granular fact verification — all paths
 
 "Key claims" includes individually-checkable concrete details embedded in body
@@ -372,6 +380,25 @@ on the other — a split that no later check catches, because two pages where
 only one carries a fact do not *contradict* each other (check 8) and are not
 duplicates of each other either. It is normally invisible only because the same
 claim usually appears on just one page.
+
+**A source describing itself is the evidence being about its own subject, not
+a passing mention.** When the source states its own provenance — "this article
+is an extended version of *Title*, published at Venue 2026", "accepted at",
+"to appear in", "the camera-ready version for" — and the page repeats that as
+the source's bibliography ("The paper is an extended version of *Title*,
+published at Venue '26"), the page is stating a fact about the document in
+front of you, not citing another document as where a fact came from. Judge it
+under check 1: it passes if the evidence states it (a footnote, a running head
+or a title-page line is enough), and check 2 applies to the title, venue and
+date as written. Do not fail it here because the other version's title and
+date appear in the page, or because the self-description sits in a footnote
+rather than the body — a document's account of its own versions is about that
+document wherever it is printed. It turns back into this check's case the
+moment the page uses the other version as a source: "the AIware version found
+that …", or any result attributed to it, cites a document that is not here —
+even when the evidence in front of you reports the same result, as the
+carve-out above already says of any cited document. The test is whether the page names
+the other version *to describe this document* or *to take a fact from it*.
 
 **The boundary does not loosen what this check was written to catch.** A page
 citing "the March 19 post" while the evidence holds only a later article by the
@@ -469,16 +496,24 @@ Route what comes back by which page is wrong. Both fields must be set:
 
 ### 9. Boundary breach — `synthesize-step5.5`
 
-You will be given the page's declared `kind` and the one Boundary line for it.
+You will be given the page's declared `kind` (or that it has none), the
+Boundary for that kind — which may hold several rules, and every one of them is
+yours to check — and the Boundary every view page shares: **juxtaposition can
+be a claim**. Two statements set next to each other so that they plainly imply
+a conclusion no grounding page states ("X was meant to do A, but afterwards B
+happened") breach it, even when each statement on its own is supported. Check
+the shared Boundary on a page with no `kind` too.
+
 Report a breach as an `issues` entry with `type: "CONTRADICTION"`, an empty
 `source_file` (nothing in the grounding contradicts it — the page contradicts
-its own declared kind) and an `instruction` saying what to remove or rewrite.
-A breach makes `result` `"FAIL"`.
+its own declared kind, or the rule every view page keeps) and an `instruction`
+saying what to remove or rewrite. A breach makes `result` `"FAIL"`.
 
-Without this check the kind is a label nobody reads, and it drifts. The four
+Without this check the kind is a label nobody reads, and it drifts. The ones
 that go wrong quietly: a `landscape` that states counts, a `pattern` with no
 case count and no pages named, a `comparison` that ranks, a `practice` that
-tells the reader what to do.
+tells the reader what to do, a `timeline` written as running prose, a `debate`
+that settles the question, and a juxtaposition that draws a conclusion.
 
 ---
 
@@ -553,7 +588,9 @@ drawing a stated connection between two grounding pages is the point of the
 exercise. The line is whether the claim's *content* is carried by the grounding
 text: a comparison, ordering, or grouping of facts each grounding page states
 is supported; a new fact none of them states (a date, a name, a quantity, a
-causal claim) is not.
+causal claim) is not — and neither is a conclusion that two supported
+statements, set side by side, plainly imply when no grounding page states it
+(check 9's shared Boundary).
 
 **Grounding pages that disagree with each other are reported, not failed** —
 `page_at_fault: "other"`, exactly as in check 8, and for the same reason: this
@@ -599,9 +636,16 @@ translation is a **FAIL**. Name what is missing in `instruction`.
 | Meaning drift — a negation, condition, quantity or tense that differs from the original | `CONTRADICTION` |
 | Omission (above) | `CONTRADICTION` |
 | Structural breakage — a WikiLink slug, an identifier, or a `properties:` key that differs from the original | `CONTRADICTION` |
+| A `properties.keywords` entry that is not the original's entry word for word — translated, reworded, dropped, added or reordered | `CONTRADICTION`, with the original's list in `instruction` |
 | A term rendered differently from the term table (below) | `CONTRADICTION`, with the table's rendering in `instruction` |
 
 `source_file` is the original page's path on every entry.
+
+`properties.keywords` is the list the source declared about itself, in the
+source's own wording, so a translation copies it unchanged; a faithful
+rendering of an entry into the target language is still a defect here, unlike
+everywhere else on this path, because the reader takes each entry as the
+source's own term. Neither the term table nor `translator_notes` changes this.
 
 **The term table and `translator_notes` are reference material, not
 `SOURCE`.** Your prompt marks them separately. They say *how to write* a term,

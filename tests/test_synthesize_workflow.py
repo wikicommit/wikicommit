@@ -23,6 +23,7 @@ REPO = Path(__file__).parent.parent
 SCRIPTS = REPO / ".claude/skills/wikicommit-init/scripts/templates/scripts"
 RULES = REPO / ".claude/skills/wikicommit-init/scripts/templates/review-rules.md"
 SYNTHESIZE = REPO / ".claude/skills/wikicommit-synthesize"
+WRITING_RULES = "wikicommit-generate/references/writing-rules.md"
 WORKFLOW = ".claude/skills/wikicommit-synthesize/workflow.yaml"
 VIEW = ".wikicommit/view/ja/loop.md"
 A = ".wikicommit/entity/ja/Person/a.md"
@@ -30,6 +31,8 @@ B = ".wikicommit/entity/ja/Person/b.md"
 
 sys.path.insert(0, str(SCRIPTS))
 
+
+DISCARDED_ROUND = '{"issues":[{"type":"HALLUCINATION","claim":"c","instruction":"i","round":1}]}'
 
 def _steps(workflow: dict):
     for step in workflow["steps"]:
@@ -61,6 +64,11 @@ def wiki(tmp_path: Path):
     shutil.copytree(SYNTHESIZE, work / ".claude" / "skills" / "wikicommit-synthesize",
                     ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copy(RULES, work / ".wikicommit" / "review-rules.md")
+    # Step 5 reads the sibling Skill's writing rules (metadata.requires); preflight
+    # checks that it is installed.
+    (work / ".claude" / "skills" / WRITING_RULES).parent.mkdir(parents=True)
+    shutil.copy(REPO / ".claude" / "skills" / WRITING_RULES,
+                work / ".claude" / "skills" / WRITING_RULES)
     (work / ".wikicommit" / "config.yml").write_text(
         "translation:\n  primary_lang: ja\n  targets: [en]\n", encoding="utf-8")
     (work / ".gitignore").write_text(".wikicommit/run/\n", encoding="utf-8")
@@ -123,8 +131,12 @@ def synthesize(wiki, *, grounding=(A, B), commits=None, result="pass", write=Tru
                                       generated_by="m", derived_from=derived, **extra))
     out = subprocess.run(
         [sys.executable, ".wikicommit/scripts/record_review.py", VIEW, "--kind", "ai",
-         "--stage", "synthesize-step5.5", "--model", "m", "--result", result],
+         "--stage", "synthesize-step5.5", "--model", "m", "--result", result,
+         "--json", "-"],
         cwd=wiki["dir"], env=wiki["env"], capture_output=True, text=True, check=False,
+        # A discard's rounds all failed, and record_review.py refuses one without
+        # their findings (Issue #1384).
+        input=DISCARDED_ROUND if result == "discarded" else "",
     )
     assert out.returncode == 0, out.stderr
 
@@ -168,6 +180,13 @@ def test_a_missing_rules_file_halts_before_any_search(wiki):
     resp, run = start(wiki, "--arg=loop")
     assert resp["step"] is None and resp["state"] == "halted"
     assert "--no-overwrite" in front(wiki["dir"] / run)["halted_reason"]
+
+
+def test_a_missing_generate_skill_halts_before_any_search(wiki):
+    (wiki["dir"] / ".claude" / "skills" / WRITING_RULES).unlink()
+    resp, run = start(wiki, "--arg=loop")
+    assert resp["step"] is None and resp["state"] == "halted"
+    assert "wikicommit-generate" in front(wiki["dir"] / run)["halted_reason"]
 
 
 def test_a_bad_max_grounding_halts(wiki):

@@ -34,12 +34,15 @@ Usage:
 Exit code: 1 if any ERROR, else 0.
 """
 
+import os
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from check_distributed_path_refs import DISTRIBUTED_SKILLS, SKILLS_DIR  # noqa: E402
+from check_distributed_path_refs import DISTRIBUTED_SKILLS, SKILLS_DIR, SKIP_DIRS  # noqa: E402
+
+PRUNED_DIRS = SKIP_DIRS | {"changelog"}
 
 FIXED_SKILL_PATH_RE = re.compile(r"\.claude/skills/[A-Za-z0-9_-]")
 
@@ -50,15 +53,19 @@ def collect_files() -> list[Path]:
         root = SKILLS_DIR / name
         if not root.exists():
             continue
-        for path in root.rglob("*.md"):
-            rel_parts = path.relative_to(root).parts
-            if path.name == "CHANGELOG.md" or "node_modules" in rel_parts:
-                continue
-            if "changelog" in rel_parts:
-                continue
-            if rel_parts[:3] == ("scripts", "templates", "guides"):
-                continue
-            files.append(path)
+        # Prune during the walk rather than filtering an rglob() afterwards:
+        # quartz-plugins/*/node_modules/ alone made the traversal take ~40 s
+        # (Issue #1400), the same cause check_distributed_path_refs.py notes.
+        for dirpath, dirnames, filenames in os.walk(root):
+            rel_dir = Path(dirpath).relative_to(root).parts
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in PRUNED_DIRS
+                and (*rel_dir, d) != ("scripts", "templates", "guides")
+            ]
+            for name in filenames:
+                if name.endswith(".md") and name != "CHANGELOG.md":
+                    files.append(Path(dirpath) / name)
     return sorted(files)
 
 

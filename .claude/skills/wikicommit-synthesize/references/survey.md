@@ -75,13 +75,22 @@ in it should get few. For each, give:
 structure, and the view's own output lines up with the kinds well enough to be
 read that way — each row below says where in the view to look:
 
-| Look at | Suggests |
-|---|---|
-| A `TYPE:` holding a handful of pages of one type | `comparison` — put them side by side and draw out the differences |
-| A `TAG:` recurring across many pages | `pattern` — a shape repeating often enough to describe |
-| A `HUB:` with many backlinks, or a type barely touched | `landscape` — the entry point into an area |
-| Several `Event` pages, or pages whose headings carry dates | `timeline` |
-| One `##` heading repeating across pages about one thing | `practice` (several accounts of the same thing) or `debate` (the same question answered differently) |
+| Look at | Suggests | Propose it only if you can already answer |
+|---|---|---|
+| A `TYPE:` holding a handful of pages of one type | `comparison` — put them side by side and draw out the differences | What is compared, and along which axes? (Name the axes; "how they differ" is not one) |
+| A `TAG:` recurring across many pages | `pattern` — a shape repeating often enough to describe | What shape recurs, and in which named cases? |
+| A `HUB:` with many backlinks, or a type barely touched | `landscape` — the entry point into an area | What does the area cover, and where should a reader start? |
+| Several `Event` pages, or pages whose headings carry dates | `timeline` | What period is covered, from when to when? |
+| One `##` heading repeating across pages about one thing | `practice` (several accounts of the same thing) or `debate` (the same question answered differently) | `practice`: what practice is recorded, and under what conditions? `debate`: what is asked, and how many answers are given? |
+
+The last column is the question the page's opening has to answer (Step 5's
+kind table in `references/write-page.md`). If the view does not yet let you
+answer it, the angle is not ready for that kind: propose it as another kind
+whose question you can answer, or with no kind. **Do not fall back on
+`comparison`** because pages of one type sit together — a handful of pages
+with no axis to set them along makes a list, not a comparison, and `TYPE:`
+lines make it the easiest angle to propose from this view. Run the check for
+every angle, not only the `comparison` ones.
 
 This is a way in, not a rule: an angle the view supports but no row above
 predicted is still worth proposing. Propose only angles the view actually

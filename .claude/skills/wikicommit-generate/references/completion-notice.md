@@ -3,7 +3,7 @@
 ## Contents
 
 - Report `completion` to the workflow engine **first** — that is what closes the run record
-- The notice itself: the counts, then the conditional blocks — `ambiguous` entities, `exclude` decisions with their reasons, name matches left for a person, `failed_pages`, `properties:` keys left out and reader questions not answered, types added by Pass 2b, deferred sources, types declined, source-language mismatches, extraction warnings, ShareAlike sources, and the checkpoint roll-up
+- The notice itself: the counts, then the conditional blocks — `ambiguous` entities, `exclude` decisions with their reasons, name matches left for a person, `failed_pages`, `properties:` keys left out and reader questions not answered, types added by Pass 2b, deferred sources, types declined, source-language mismatches, extraction warnings, ShareAlike sources, pages that repeat their source's wording, and the checkpoint roll-up
 
 What to report when a run ends, and how. Most of it is conditional branches, and none of it
 is needed until a run is ending.
@@ -61,6 +61,8 @@ If any entities were skipped for `ambiguous: true` (Pass 2), list them explicitl
 The following entities were skipped because their type could not be determined. Please confirm the type:
 - "Taro Yamada" (candidates: schema:Person, schema:Organization) — source: .wikicommit/source/path/raw/paper-2024.pdf.md
 ```
+
+List only what is still waiting: an entity the person gave a type to in this run's `ask-deferred` step was written in the same run (its source went through the passes again), so it is reported with the pages written, not here. What remains is an entity the person was not asked about (a `--non-interactive` run, or the answer `later`) or did not give a type to.
 
 Confirming a type does not by itself re-queue the source. That run left its management file at `status: partial` with an empty `failed_pages`, which a bare `/wikicommit-generate` does not collect (Pass 1 step 1) — re-reading it would return the same `ambiguous: true` every run. So tell the user what does re-queue it: **`/wikicommit-reconcile --source <the source path or URL shown above>`**, which puts the management file back to `status: pending` for the next run. Naming the source directly (`/wikicommit-generate <the source path or URL shown above>`) also works — the argument branch processes a source whatever its state.
 
@@ -161,6 +163,20 @@ of the page itself.
 ```
 
 Say "may have to" rather than "must", as above. Whether a prose summary of a copyleft document is a derivative work is an open question and WikiCommit does not answer it — what this list reports is which pages are in the position where it has to be asked.
+
+If the `source-overlap` step's notes have any `OVERLAP:` line, list those pages with the share and the longest copied run, as the line gives them. The workflow engine ran `check_source_overlap.py` over every page this run wrote, after the writes, while the extracted text Pass 1 kept is still on disk; it counts the page's words that sit in a run of six or more words (twelve characters on a `ja`/`zh` page) shared with the source, leaving out quotations, code and tables. If those notes are no longer in view, run it again: `python <this Skill's directory>/scripts/workflow_checks.py source-overlap --run <the run path>`.
+
+```
+The following page(s) repeat their source's wording word for word in more than 20% of their text.
+The review against the sources checks that a page is faithful to them, not that it is written in
+its own words:
+- .wikicommit/entity/en/BlogPosting/steering-claude-code.md 32% (682 words; longest: 14 words "…")
+
+Rewrite them in the page's own words with /wikicommit-fix <page>, or rebuild them with
+/wikicommit-generate --regenerate <page>.
+```
+
+**Report it and stop there** — it is never a failure, whatever the source's license: rewording a CC BY-SA source closely is as much a writing problem as rewording any other, and whether to act is the person's call. List `NO_SOURCE_TEXT:` pages (none of their sources has extracted text on this machine, so they were not measured) under the same heading in one line, so a page that was not measured is not read as one that passed. Leave `SKIPPED_CROSS_LANG:` out: a page written from a source in another language cannot be measured this way, and saying so on every run would only be noise.
 
 If Pass 4 found a page that contradicts an **existing** page and judged the existing one to be the one at fault (Pass 4 step 3's routing rule), list every such pair. This run deliberately changed nothing about them — it regenerates a page against that page's own sources, and has neither the other page's sources nor any mandate over it — so this Notice is the only place the conflict is recorded at all:
 

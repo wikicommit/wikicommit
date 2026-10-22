@@ -155,3 +155,20 @@ def test_old_heading_is_gone_from_every_template():
         assert "## Key Contributions" not in _body_of(path), (
             f"{path.name} に旧見出し `## Key Contributions` が残っています（Issue #673）"
         )
+
+
+@pytest.mark.parametrize("name", sorted(ARTICLE_TYPES))
+def test_article_template_caps_and_orders_key_points(name):
+    """Key Points keep to the main claims, at most seven, ordered by importance
+    (Issue #1379). Without the cap the section walked every point in the
+    source's own order — 6 to 19 bullets — which is a second copy of the
+    source, not a summary."""
+    body = _body_of(TEMPLATE_SCHEMA_DIR / name)
+    instruction = body.split(f"\n{HEADING}\n", 1)[-1].split("\n## ", 1)[0]
+    flat = " ".join(instruction.split())
+    assert "at most seven bullets" in flat, (
+        f"{name} の `{HEADING}` の指示に「7 項目まで」がありません（Issue #1379）"
+    )
+    assert "ordered by importance" in flat, (
+        f"{name} の `{HEADING}` の指示に「重要な順」がありません（Issue #1379）"
+    )

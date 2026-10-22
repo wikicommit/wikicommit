@@ -111,6 +111,9 @@ DEFAULT_BODY_LINE_LIMIT = 500
 # Not instructions: a distribution payload, and files expanded elsewhere.
 EXCLUDED_NAMES = {"CHANGELOG.md"}
 EXCLUDED_DIRS = {"changelog", "templates"}
+# Never hold instructions; pruned so a stray one cannot cost a full descent.
+WALK_SKIP_DIRS = {"node_modules", "__pycache__", ".git"}
+_PRUNED_DIRS = EXCLUDED_DIRS | WALK_SKIP_DIRS
 
 
 def collect_skill_dirs() -> list[Path]:
@@ -128,13 +131,16 @@ def instruction_files(skill_dir: Path) -> list[Path]:
     blocking scanners cannot come to disagree about what they are looking at.
     """
     found = []
-    for path in sorted(skill_dir.rglob("*.md")):
-        rel = path.relative_to(skill_dir)
-        if path.name in EXCLUDED_NAMES:
-            continue
-        if EXCLUDED_DIRS & set(rel.parts):
-            continue
-        found.append(path)
+    # Prune excluded directories during the walk instead of filtering an
+    # rglob() afterwards: templates/quartz-plugins/*/node_modules/ (created
+    # whenever the plugins' own tests run) holds tens of thousands of files,
+    # and descending into them made every caller take ~40 s (Issue #1400).
+    for dirpath, dirnames, filenames in os.walk(skill_dir):
+        dirnames[:] = [d for d in dirnames if d not in _PRUNED_DIRS]
+        for name in filenames:
+            if name.endswith(".md") and name not in EXCLUDED_NAMES:
+                found.append(Path(dirpath) / name)
+    found.sort()
     entry = skill_dir / "SKILL.md"
     return [entry] + [p for p in found if p != entry]
 

@@ -40,6 +40,8 @@ The other four are relations *between* pages. They are written to `.wikicommit/r
 
 **Editions of one series are not distinct.** Unrelated things that share a name are distinct; editions, volumes or yearly issues of one series share a name because they belong together, and series records that. The series itself gets no page — no source describes it, so its page would rest on nothing — it is the `series` item alone. Before recording one, the editions' names are qualified by year so a reader can tell them apart (step 5).
 
+**A page about the whole that recurs is broader, not a series.** When a page with a year (`<slug>-<year>`) collides with a page that carries the bare name, decide by what the bare-name page is about, not by its type. If it is one edition whose name lacks the year (its sources speak of one year's report or meeting), the pages are editions: series. If it is about the thing that recurs as a whole — a recurring event's own page, whose sources describe the event and not one year of it — it stands on its own sources, so it is the broader page and the dated page is an instance of it: broader, with the bare-name page as `--broader`. Series would rename that page with a year and the page about the event would be gone.
+
 ## Processing Flow
 
 ### 1. Check the wiki
@@ -89,7 +91,7 @@ How do these relate?
 
 **When unsure between same and broader, do not choose same.** Treating a narrower concept as the same as a wider one loses what was particular to it once the pages are merged; two pages kept apart only stay duplicated. Say this if the person hesitates.
 
-For broader, ask which page is the broader one. For series, ask each edition's year (take it from the sources and show where; ask when they do not say), and list the editions oldest first. For any relation, ask whether there is a reason worth keeping; record it in the person's words, or leave it out.
+When a group pairs a dated page with a bare-name page about the whole that recurs (above), propose broader with the bare-name page as the broader one and every dated page the group lists as a narrower `--page` — one record settles the dated pages' pairs with each other too, which are left open if only one of them is recorded — and say why series does not fit. For broader, ask which page is the broader one. For series, ask each edition's year (take it from the sources and show where; ask when they do not say), and list the editions oldest first. For any relation, ask whether there is a reason worth keeping; record it in the person's words, or leave it out.
 
 ### 5. Record
 

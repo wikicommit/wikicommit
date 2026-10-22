@@ -69,3 +69,39 @@ def test_a_reference_wrapped_across_lines_is_counted(tmp_path):
         encoding="utf-8",
     )
     assert guard.script_comment_refs(script) == [(1, "Issue #566"), (3, "Issue #647")]
+
+
+def test_a_bare_or_hyphenated_number_in_a_printed_string_is_caught(tmp_path):
+    script = tmp_path / "x.py"
+    script.write_text(
+        'print("help (#374 — no effect on a repeat run)")\n'
+        'print("ERROR: a pre-Issue-#476 tree is never migrated")\n'
+        'print("avoids the 403s, #527) and writes")\n',
+        encoding="utf-8",
+    )
+    assert guard.script_output_refs(script) == [
+        (1, "#374"), (2, "Issue-#476"), (3, "#527")]
+
+
+def test_hash_forms_that_are_not_issue_numbers_pass(tmp_path):
+    script = tmp_path / "x.py"
+    script.write_text(
+        'COLOURS = ["#123abc", "#000000ff"]\n'
+        'print("## 12 heading", "##12", "item #1", "&#123;", "page.html#42", "#a1")\n'
+        "# noqa: E402 — see step #3\n",
+        encoding="utf-8",
+    )
+    assert guard.script_output_refs(script) == []
+    assert guard.script_comment_refs(script) == []
+
+
+def test_a_bare_number_in_a_comment_or_docstring_is_caught(tmp_path):
+    script = tmp_path / "x.py"
+    script.write_text('"""Kept since #1343."""\n# see Issue-#476\n', encoding="utf-8")
+    assert guard.script_comment_refs(script) == [(1, "#1343"), (2, "Issue-#476")]
+
+
+def test_a_bare_number_next_to_cjk_text_is_caught(tmp_path):
+    script = tmp_path / "x.py"
+    script.write_text('print("参照#374で直した")\n', encoding="utf-8")
+    assert guard.script_output_refs(script) == [(1, "#374")]

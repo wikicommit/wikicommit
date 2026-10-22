@@ -1459,6 +1459,30 @@ def test_source_page_renders_norwegian_lang_read_as_false(tmp_path):
     assert "**Language**: no" in out
 
 
+@pytest.mark.parametrize(
+    ("lang_line", "code"),
+    [
+        ("lang: zh-Hans", "zh"), ("lang: pt-BR", "pt"), ("lang: pt_BR", "pt"), ("lang: EN-us", "en"),
+        ("lang: 'pt - BR'", "pt"), ('lang: "ja\\n-en"', "ja"),
+    ],
+)
+def test_source_page_keeps_language_subtag_of_a_tag_with_region_or_script(tmp_path, lang_line, code):
+    """Issue #1247: a BCP 47 tag names its language unambiguously, so the page
+    shows the leading language subtag rather than the whole tag."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, lang_line)
+    assert f"**Language**: {code}\n" in out
+
+
+@pytest.mark.parametrize("lang_line", ["lang: japanese", "lang: 'ja, en'", "lang: x-klingon"])
+def test_source_page_omits_lang_line_for_a_string_that_is_not_one_code(tmp_path, lang_line):
+    """Issue #1247: a language name or a comma-separated list is not one
+    ISO 639-1 code; like a non-string value, it is not recorded."""
+    write_config(tmp_path, primary_lang="en")
+    out = _write_lang_source(tmp_path, lang_line)
+    assert "**Language**" not in out
+
+
 @pytest.mark.parametrize("lang_line", ["lang: NO", "lang: No"])
 def test_source_page_renders_capitalized_norwegian_lang_read_as_false(tmp_path, lang_line):
     """Issue #1248: YAML 1.1 also reads `No` / `NO` as False; the written text
@@ -2917,6 +2941,48 @@ def test_overview_source_language_table_counts_non_string_lang_as_not_recorded(t
     assert "| `no` |" not in section
 
 
+def _overview_lang_section_for(tmp_path, lang_line: str, *, ran: bool = True) -> str:
+    write_config(tmp_path, primary_lang="en")
+    run_line = "status: generated\nlast_generated_at: '2026-10-01T00:00:00Z'\n" if ran else "status: pending\nlast_generated_at:\n"
+    write_source(
+        tmp_path, "url/example.com/n.md",
+        "---\nsource:\n  type: url\n  url: https://example.com/n\n  hash: sha256:x\n"
+        f"  {lang_line}\n{run_line}"
+        "generated_pages: []\n---\n\n## Summary\n\nS.\n",
+    )
+    write_page(tmp_path, "en", "Person", "p", "---\ntitle: P\nlang: en\ntype: schema:Person\n---\n\nBody.\n")
+    assert run(["--source", "entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
+    out = read_overview(tmp_path)
+    return out[out.index("### By language"):out.index("### Source type x generated page type")]
+
+
+@pytest.mark.parametrize(("lang_line", "code"), [("lang: zh-Hans", "zh"), ("lang: pt-BR", "pt")])
+def test_overview_source_language_table_counts_tag_with_region_under_its_language(tmp_path, lang_line, code):
+    """Issue #1247: `zh-Hans` / `pt-BR` are counted as `zh` / `pt`, the same
+    value the public source page shows."""
+    section = _overview_lang_section_for(tmp_path, lang_line)
+    assert f"| `{code}` | 1 |" in section
+    assert "hans" not in section.lower()
+    assert "-br" not in section.lower()
+
+
+@pytest.mark.parametrize("lang_line", ["lang: japanese", "lang: 'ja, en'"])
+def test_overview_source_language_table_counts_string_that_is_not_one_code_as_not_recorded(tmp_path, lang_line):
+    """Issue #1247: a language name or a comma-separated list gets no row of
+    its own; it follows the not-recorded rule (the source has run)."""
+    section = _overview_lang_section_for(tmp_path, lang_line)
+    assert "| Not recorded | 1 |" in section
+    assert "japanese" not in section
+    assert "ja, en" not in section
+
+
+def test_overview_source_language_table_counts_string_that_is_not_one_code_without_run_as_unprocessed(tmp_path):
+    """Issue #1247: the same split by last_generated_at as a missing value."""
+    section = _overview_lang_section_for(tmp_path, "lang: japanese", ran=False)
+    assert "| Not processed yet | 1 |" in section
+    assert "| Not recorded |" not in section
+
+
 @pytest.mark.parametrize("lang_line", ["  lang: [ja, en]\n", "  lang: on\n"])
 def test_overview_source_language_table_counts_non_string_lang_without_run_as_unprocessed(tmp_path, lang_line):
     """Issue #1193: a non-string lang follows the same split as a missing one —
@@ -3719,6 +3785,11 @@ def test_overview_breaks_findings_down_by_type_and_the_parts_sum_to_the_total(tm
     assert "HALLUCINATION" not in overview
 
 
+# Every round of a discarded page failed, and record_review.py refuses a discard
+# without the findings of those rounds (Issue #1384).
+DISCARDED_ROUND = '{"issues":[{"type":"HALLUCINATION","claim":"c","instruction":"i","round":1}]}'
+
+
 def test_overview_counts_pages_the_review_withheld_but_not_a_discarded_update(tmp_path):
     """A page whose newest AI record is `discarded` and that is not on disk was
     never published (Issue #1063). A discarded `action: update` leaves the old
@@ -3728,11 +3799,14 @@ def test_overview_counts_pages_the_review_withheld_but_not_a_discarded_update(tm
     record_review(tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
                   model="m", reviewed_at="2026-09-05")
     record_review(tmp_path, ".wikicommit/entity/ja/Person/yamada-taro.md",
-                  model="m", reviewed_at="2026-09-06", result="discarded")
+                  model="m", reviewed_at="2026-09-06", result="discarded",
+                  findings=DISCARDED_ROUND)
     record_review(tmp_path, ".wikicommit/entity/ja/Person/never-written.md",
-                  model="m", reviewed_at="2026-09-06", result="discarded")
+                  model="m", reviewed_at="2026-09-06", result="discarded",
+                  findings=DISCARDED_ROUND)
     record_review(tmp_path, ".wikicommit/view/ja/withheld-view.md",
-                  model="m", reviewed_at="2026-09-06", result="discarded")
+                  model="m", reviewed_at="2026-09-06", result="discarded",
+                  findings=DISCARDED_ROUND)
     assert run(["--source", ".wikicommit/entity/", "--output", "content/"], cwd=tmp_path).returncode == 0
 
     overview = _overview(tmp_path)

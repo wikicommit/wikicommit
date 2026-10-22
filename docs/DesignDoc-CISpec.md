@@ -20,8 +20,9 @@
 | 外部リンク検証 | lychee | Phase 2 |
 | スタイル | markdownlint-cli2 | Phase 2 |
 | 孤立ページ・重複ページ | `check_orphans.py` | Phase 1 |
+| ソースの言い回しの流用 | `check_source_overlap.py` | Phase 3 |
 
-この 6 本が `wikicommit-merge` の実行する全チェックである。blocking になりうる 4 本（フロントマター・WikiLink・生 HTML・孤立/重複ページ）はエンジンの `script` 工程（`quality-checks`）がこの順に先に実行し、blocking の所見で実行を止める。warning しか出さない lychee と markdownlint-cli2 はその後の `agent` 工程（`link-and-style-checks`）で実行する（Issue #1196。理由は「外部リンク検証」節）。
+この 7 本が `wikicommit-merge` の実行する全チェックである。blocking になりうる 4 本（フロントマター・WikiLink・生 HTML・孤立/重複ページ）はエンジンの `script` 工程（`quality-checks`）がこの順に先に実行し、blocking の所見で実行を止める。同じ工程が続けて warning しか出さない `check_source_overlap.py` を実行する（Issue #1380）。warning しか出さない lychee と markdownlint-cli2 はその後の `agent` 工程（`link-and-style-checks`）で実行する（Issue #1196。理由は「外部リンク検証」節）。
 
 **鮮度チェックはこの一覧に含まれない** — PR チェックではなく `/wikicommit-status` 側で走る（下記「鮮度チェック」節）。同節が挙げる 3 本は代表例であり、`/wikicommit-status` が実際に呼ぶスクリプトはこれより多い。**全数と各スクリプトの入出力は [DesignDoc-ScriptSpec.md](DesignDoc-ScriptSpec.md) が正本**であり、ここに二重の表を持たない（同じ一覧を 2 か所で保守すると、片方だけが古くなる）。
 
@@ -145,6 +146,20 @@ accept = [200, 206, 429]  # 200 OK, 206 Partial, 429 Too Many Requests (rate lim
 
 ---
 
+## ソースの言い回しの流用
+
+実装: `check_source_overlap.py`（Issue #1380。数え方・閾値の実測は [DesignDoc-ScriptSpec.md](DesignDoc-ScriptSpec.md) の同スクリプトの節）
+
+| チェック | blocking / warning |
+|---|---|
+| ページの語のうち、ソースと 6 語以上（ja / zh は 12 文字以上）連続で一致する箇所に含まれるものが 20% を超える（`OVERLAP:`） | warning のみ |
+| どのソースにも抽出テキストが無く測れない（`NO_SOURCE_TEXT:`） | warning に数えない（件数を notes に出す） |
+| ソースとページの言語が違う（`SKIPPED_CROSS_LANG:`） | 対象外 |
+
+**変更ページだけを見る**（`changed_md`）。比べる相手は Pass 1 が残した抽出テキストのキャッシュ（`.wikicommit/.cache/`、gitignore 済み）であり、キャッシュの無い作業コピーでは測れない — そのことを件数で出し、warning にはしない（マージする人がページごとに直せるものではないため）。**blocking にはしない** — 閾値は 3 つの Wiki の実測で決めた warning の閾値であり、blocking にするかは閾値の運用が固まってから決める。ソースのライセンスで扱いを分けない。
+
+---
+
 ## 鮮度チェック（定期実行 or `/wikicommit-status`）
 
 PR チェックには含めない。`/wikicommit-status` 実行時、または定期バッチとして手動実行する。
@@ -167,4 +182,4 @@ PR チェックには含めない。`/wikicommit-status` 実行時、または�
 | 経路 A: レビュー追跡 Issue | 人間による Close（マージ自体は `review-issue-close-sync.yml` が自動実行。Issue #313） | `reviewed`（Issue Close をトリガーに自動更新） |
 | 経路 B: 手動作成（wikicommit-review → wikicommit-merge） | 品質チェック全 blocking PASS | `reviewed`（wikicommit-review がローカルで設定済み） |
 
-`style` チェックと `orphan` の warning はマージをブロックしない。
+`style` チェック・`orphan`・ソースの言い回しの流用の warning はマージをブロックしない。

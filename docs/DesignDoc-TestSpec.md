@@ -46,6 +46,7 @@
 | ユーザー向け出力テンプレートへの内部語彙混入チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_user_facing_vocabulary.py` を **blocking** で実行し、`.claude/skills/wikicommit-*/SKILL.md` のユーザー向けフェンス済みテンプレートに `Step N`/`Pass N`・`Route A`/`Route B`・`Issue #NNN`/`PR #NNN` が混入していると失敗させる（Issue #588。`docs/DesignDoc-skills.md` §11.8）。[L10](#l10-ユーザー向け出力テンプレートへの内部語彙混入チェック-対応済みissue-588) |
 | 配布スクリプトのコンソール出力言語チェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_script_output_language.py` を **blocking** で実行し、`.claude/skills/**/scripts/*.py` の `print()` 出力に日本語が含まれていると失敗させる（Issue #770。`docs/DesignDoc-ScriptSpec.md`「共通規則」）。[L11](#l11-配布スクリプトのコンソール出力言語チェック-対応済みissue-770) |
 | Skill の出力に日本語固定が残っていないかのチェック（lint） | ✅ 済み | `.github/workflows/test.yml` の `checks` ジョブが `tools/check_skill_output_language.py` を **blocking** で実行し、`.claude/skills/wikicommit-*/SKILL.md` の全行（散文・フェンス双方）から日本語の文末記号・鉤括弧（`。、？！「」`）を検出する（Issue #808。[L12](#l12-skill-の出力に日本語固定が残っていないかのチェック-対応済みissue-808)） |
+| Skill ツリーの走査が `node_modules/` に潜らないこと | ✅ 済み | Skill ツリーを歩く検査（`tools/check_skill_md_lines.py` の `instruction_files()`・`tools/check_skill_tree_paths.py`・`install.sh` の `find`、および同じ範囲を歩くテスト）は、`node_modules/` を**結果から捨てるのではなく走査中に刈り込む**（`os.walk` + `dirnames[:]`、`find -prune`）。quartz-plugins のテストを手元で回すと `templates/quartz-plugins/*/node_modules/` に約 38,000 ファイルができ、`rglob()` の後で捨てる形では 1 件 40〜50 秒かかっていた（Issue #1400。CI の `checks` ジョブは node_modules を作らないため見えない）。`tests/test_skill_tree_walks_prune_node_modules.py` が node_modules を置いた一時ツリーで、返す集合が変わらず node_modules 内の `.md` が混ざらないことを検証する（速度は assert しない）。新しく Skill ツリーを歩くときは `rglob()` ではなくこの形にする |
 
 ---
 
@@ -327,7 +328,7 @@ Issue #1015 はこれを役割で書き直した（「read the file in full」�
 | 同じ配布スクリプトのコメント・docstring（上の範囲が除くもの。行をまたいで `Issue` と `#NNN` が分かれたものも数える） | **0 件で blocking** | 配布先で開かれても辿れない。経緯は `docs/history/DesignDoc-ScriptSpec.md` の当該スクリプトの見出しに書く（規則は `docs/DesignDoc-ScriptSpec.md` 共通規則「コメント・docstring に書くもの」）。Issue #1343 で全スクリプトを 0 にした |
 | 配布 Skill の指示文（`check_skill_md_lines.instruction_files()` の集合）＋ `templates/review-rules.md`・`templates/schema-authoring.md` | **Skill ごとの上限（ラチェット）** | 移行が Skill 単位で進むので途中では 0 にならない。`CAPS` を現在値で固定し、増えたら失敗、減ったら `NOTE:` で下げ先を示す。全 Skill が 0 になった時点で上限表は「0 件」の 1 規則に畳める（Issue #1060 の時点で全 Skill が 0。表はまだ畳んでいない） |
 
-**番号だけを見る**。経緯の文（「以前は X だった」）は機械的に検出できないので、PR レビューで扱う。`review-rules.md`・`schema-authoring.md` を `wikicommit-init` の集計に含めるのは、両者がそのテンプレート配下に置かれ、エージェントが指示として読むからである（`templates/guides/*.md` は人が読む手順書なので対象外）。**blocking** とした理由は L9 / L14 と同じ。
+**番号だけを見る**。配布スクリプトの 2 つの範囲では `Issue #NNN` に加えて `Issue-#NNN` と素の `#NNN`（2 桁以上）も数える — 利用者から辿れないのは形によらないため。素の形は、前が英数字・`&`・`#`・`/`（`&#123;`・`##12`・URL のフラグメント）か後ろが英数字（`#123abc` のような色コード）のものを除き、1 桁（`#1` のような序数）も除く。指示文（Markdown）は見出し・アンカーと衝突するので `Issue #NNN` の形だけを数える。経緯の文（「以前は X だった」）は機械的に検出できないので、PR レビューで扱う。`review-rules.md`・`schema-authoring.md` を `wikicommit-init` の集計に含めるのは、両者がそのテンプレート配下に置かれ、エージェントが指示として読むからである（`templates/guides/*.md` は人が読む手順書なので対象外）。**blocking** とした理由は L9 / L14 と同じ。
 
 ### L17. 配布ペイロード変更時の `CHANGELOG.md` 書き忘れチェック（✅ 対応済み・Issue #1029）
 

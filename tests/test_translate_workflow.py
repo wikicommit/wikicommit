@@ -27,6 +27,8 @@ WORKFLOW = ".claude/skills/wikicommit-translate/workflow.yaml"
 sys.path.insert(0, str(SCRIPTS))
 
 
+DISCARDED_ROUND = '{"issues":[{"type":"HALLUCINATION","claim":"c","instruction":"i","round":1}]}'
+
 def _steps(workflow: dict):
     for step in workflow["steps"]:
         yield from step.get("steps", [step])
@@ -111,8 +113,12 @@ def translate(wiki, source: str, lang: str, *, source_commit=None, result="pass"
             translated_at="2026-10-06", translated_by="m"))
     out = subprocess.run(
         [sys.executable, ".wikicommit/scripts/record_review.py", target, "--kind", "ai",
-         "--stage", "translate-check", "--model", "m", "--result", result],
+         "--stage", "translate-check", "--model", "m", "--result", result,
+         "--json", "-"],
         cwd=wiki["dir"], env=wiki["env"], capture_output=True, text=True, check=False,
+        # A discard's rounds all failed, and record_review.py refuses one without
+        # their findings (Issue #1384).
+        input=DISCARDED_ROUND if result == "discarded" else "",
     )
     assert out.returncode == 0, out.stderr
     return target

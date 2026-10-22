@@ -1242,9 +1242,15 @@ def _raw_source_lang_text(content: str) -> str | None:
     return raw if isinstance(raw, str) else None
 
 
+# The same shape validate_frontmatter.py's LANG_RE checks a page's `lang:` for.
+_SOURCE_LANG_RE = re.compile(r"[a-z]{2}")
+_SOURCE_LANG_SUBTAG_SEP_RE = re.compile(r"[-_]")
+
+
 def _normalize_source_lang(source: dict, content: str) -> str | None:
     """Return a source's recorded `source.lang` as a lower-case ISO 639-1 code,
-    or None when it is missing, empty, or not a string.
+    or None when it is missing, empty, not a string, or a string that is not
+    one two-letter code even after dropping a region / script subtag.
 
     Shared by generate_source_pages()'s per-language tally and the per-source
     page's language line so the two cannot drift. `content` is the management
@@ -1265,7 +1271,16 @@ def _normalize_source_lang(source: dict, content: str) -> str | None:
         raw_lang = "no" if (_raw_source_lang_text(content) or "").lower() == "no" else None
     if not isinstance(raw_lang, str):
         return None
-    return raw_lang.strip().lower() or None
+    # A string is checked too, after the False re-read above. A BCP 47 tag
+    # with a region or script (`zh-Hans`, `pt-BR`; also the POSIX `pt_BR`)
+    # names its language unambiguously, so its leading language subtag is kept
+    # and counted as `zh` / `pt`. What still is not one two-letter code — a
+    # language name (`japanese`), a comma-separated list (`ja, en`) — is
+    # treated as not recorded, like the non-string values above.
+    # fullmatch, not match: `$` also matches before a trailing newline, so a
+    # block scalar such as "ja\n-en" would otherwise yield "ja\n".
+    code = _SOURCE_LANG_SUBTAG_SEP_RE.split(raw_lang.strip().lower(), maxsplit=1)[0].strip()
+    return code if _SOURCE_LANG_RE.fullmatch(code) else None
 
 
 def _write_source_page(

@@ -57,7 +57,7 @@ for skill in "${SKILLS[@]}"; do
     else
       NEW_FILES+=("${rel_path}")
     fi
-  done < <(find "${skill_src}" -type f -not -path '*/__pycache__/*' -not -name '*.pyc' -not -path '*/node_modules/*' -print0 | sort -z)
+  done < <(find "${skill_src}" -type d \( -name node_modules -o -name __pycache__ \) -prune -o -type f -not -name '*.pyc' -print0 | sort -z)
 done
 
 # Display planned actions
@@ -113,7 +113,7 @@ for skill in "${SKILLS[@]}"; do
     mkdir -p "$(dirname "${dest_file}")"
     cp "${src_file}" "${dest_file}"
     installed=$(( installed + 1 ))
-  done < <(find "${skill_src}" -type f -not -path '*/__pycache__/*' -not -name '*.pyc' -not -path '*/node_modules/*' -print0 | sort -z)
+  done < <(find "${skill_src}" -type d \( -name node_modules -o -name __pycache__ \) -prune -o -type f -not -name '*.pyc' -print0 | sort -z)
 done
 
 echo "Successfully installed ${installed} file(s)."

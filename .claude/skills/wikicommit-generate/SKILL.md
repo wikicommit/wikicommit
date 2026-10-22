@@ -84,19 +84,19 @@ The steps, and the file each one reads (the table is here as well as in the work
 | `pass1-extract` | `references/pass1-extract.md` and `references/text-extraction-routing.md` | per source |
 | `pass2b-type` | `references/pass2b-type.md` | per source |
 | `pass2c-entities` | `references/pass2c-entities.md` | per source |
-| `pass3-generate` | `references/pass3-generate.md` | per source |
+| `pass3-generate` | `references/pass3-generate.md` and `references/writing-rules.md` | per source |
 | `pass4-review` | `references/pass4-review.md` | per source |
-| `reprocess-pass1-extract` … `reprocess-pass4-review` | the same five files | per source the person answered about in `ask-deferred` |
+| `reprocess-pass1-extract` … `reprocess-pass4-review` | the same files | per source the person answered about in `ask-deferred` |
 | `completion` | `references/completion-notice.md` | once, last |
 
-`preflight`, `freshness`, `collect`, `select`, `collect-questions`, `rebuild-index` and `reconcile` are scripts the workflow engine runs itself; `batch-cap` is the question asked when more than 5 sources are queued. `ask-deferred` is the question asked once every source has been through the passes: guard A's low-density warning and Pass 2b's type candidates never stop the loop — the source is set aside with a `## Deferred Reason` — and this step puts them all to the person at once. The sources answered about go through the passes again in the same run, with the answers handed over in the step's `lists`. In a `--non-interactive` run the answer is `later` and the deferrals stay queued. The whole sequence, with each step's outcomes and completion check, is `workflow.yaml` — read it if a step's answer surprises you.
+`preflight`, `freshness`, `collect`, `select`, `collect-questions`, `rebuild-index` and `reconcile` are scripts the workflow engine runs itself; `batch-cap` is the question asked when more than 5 sources are queued. `ask-deferred` is the question asked once every source has been through the passes: guard A's low-density warning and Pass 2b's type candidates never stop the loop — the source is set aside with a `## Deferred Reason` — and this step puts them all to the person at once. It also asks for the type of each entity Pass 2c left `ambiguous: true` (the source was written as `partial` with `ambiguous_entities`, not set aside). The sources answered about go through the passes again in the same run, with the answers handed over in the step's `lists`. In a `--non-interactive` run the answer is `later` and the deferrals stay queued. The whole sequence, with each step's outcomes and completion check, is `workflow.yaml` — read it if a step's answer surprises you.
 
 Each pass file says what it does; the pointers follow, so that each is named at a point of use as well:
 
 - Pass 1 and Pass 2a — **Read `references/pass1-extract.md` now and follow it** when the workflow engine hands you `pass1-extract`. It holds the extraction guards, the caches, and Pass 2a's summary, source-language and source-as-entity judgments.
 - Pass 2b — `references/pass2b-type.md`: the two-stage type recall, the deferral and the question asked at the end of the loop, and the narrow write exception that lets this Skill add — never edit — a file under `.wikicommit/schema/`.
 - Pass 2c — `references/pass2c-entities.md`: the analysis JSON, the `action` and `exclude_reason` rules, slug derivation, and the `## Summary` / `## Generation Notes` write-back.
-- Pass 3 — `references/pass3-generate.md`: the `---FILE:`/`---END FILE---` output contract and the frontmatter rules.
+- Pass 3 — `references/pass3-generate.md`: the `---FILE:`/`---END FILE---` output contract and the frontmatter rules. The writing rules for the body are in `references/writing-rules.md`, shared with `/wikicommit-synthesize`.
 - Pass 4 — `references/pass4-review.md`: the review subagent, the retry loop, `failed_pages`, the review record, and the management file's final status. **It sends you on to one more file**: the review discipline itself is in `.wikicommit/review-rules.md`, shared with `/wikicommit-review` and `/wikicommit-synthesize` and not restated anywhere in this Skill.
 
 ### Regeneration Mode (`--regenerate`) — see `references/regenerate.md`

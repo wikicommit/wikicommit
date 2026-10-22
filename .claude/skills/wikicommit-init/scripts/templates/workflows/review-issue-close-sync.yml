@@ -522,7 +522,7 @@ jobs:
           git push origin "${BRANCH}"
           pr_url=$(gh pr create \
             --title "review: ${TYPE}/${SLUG} (${LANG})" \
-            --body "Closes the tracking issue #${ISSUE_NUMBER} by marking \`${PAGE_PATH}\` as reviewed." \
+            --body "$(printf 'Closes the tracking issue #%s by marking `%s` as reviewed.\n\nReviewed-by: %s <%s@users.noreply.github.com>' "${ISSUE_NUMBER}" "${PAGE_PATH}" "${REVIEWER_NAME}" "${REVIEWER_LOGIN}")" \
             --base "${DEFAULT_BRANCH}" \
             --head "${BRANCH}")
           echo "pr_url=${pr_url}" >> "$GITHUB_OUTPUT"
@@ -547,10 +547,12 @@ jobs:
           fi
 
       - name: Auto-merge on quality pass
+        id: merge
         if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          PR_URL: ${{ steps.pr.outputs.pr_url }}
           LANG: ${{ steps.resolve.outputs.lang }}
           TYPE: ${{ steps.resolve.outputs.type }}
           SLUG: ${{ steps.resolve.outputs.slug }}
@@ -574,26 +576,131 @@ jobs:
           # auto-merge's "wait for checks" behavior to add here — only the
           # few seconds GitHub needs to finish computing mergeability, which
           # is plan-independent. Poll for that instead of relying on --auto.
-          state="UNKNOWN"
+          #
+          # Issue #1396: BLOCKED covers more than one cause, and on a default
+          # branch that requires an approving review it is the expected result,
+          # not a failure — the same split /wikicommit-merge makes (Issue #1377,
+          # `.claude/skills/wikicommit-merge/references/merge-pr.md`). The
+          # classifier below reads statusCheckRollup and reviewDecision:
+          #   running check (CheckRun not COMPLETED / StatusContext PENDING) -> keep polling
+          #   failed check                                                     -> fail
+          #   review required / changes requested, or a check left EXPECTED    -> leave the PR for a person
+          #   anything else                                                    -> fail
+          # Unlike merge-pr.md, an EXPECTED status is not waited for: this PR is
+          # opened with GITHUB_TOKEN, so `pull_request` workflows never start for
+          # it (the Issue #544 guard) and an EXPECTED check would only run the
+          # 300s out. A person can start them by closing and reopening the PR.
+          echo "merged=false" >> "$GITHUB_OUTPUT"
+          classify() {
+            python3 -c "$(cat <<'PY'
+          import json
+          import sys
+
+          pr = json.load(sys.stdin)
+          state = pr.get("state") or ""
+          merge_state = pr.get("mergeStateStatus") or "UNKNOWN"
+          review = pr.get("reviewDecision") or ""
+          if state == "MERGED":
+              print("merged", merge_state, "-")
+              raise SystemExit
+          if state != "OPEN":
+              print("closed", merge_state, "-")
+              raise SystemExit
+          if merge_state == "CLEAN":
+              print("clean", merge_state, "-")
+              raise SystemExit
+          if merge_state == "DIRTY":
+              print("dirty", merge_state, "-")
+              raise SystemExit
+          if merge_state != "BLOCKED":
+              print("wait", merge_state, "-")
+              raise SystemExit
+          running, failed, expected = False, False, []
+          for check in pr.get("statusCheckRollup") or []:
+              name = check.get("name") or check.get("context") or "?"
+              if check.get("__typename") == "StatusContext":
+                  status = check.get("state") or ""
+                  if status == "EXPECTED":
+                      expected.append(name)
+                  elif status == "PENDING":
+                      running = True
+                  elif status in ("FAILURE", "ERROR"):
+                      failed = True
+              elif (check.get("status") or "") != "COMPLETED":
+                  running = True
+              elif (check.get("conclusion") or "") not in ("SUCCESS", "NEUTRAL", "SKIPPED"):
+                  failed = True
+          review_required = review in ("REVIEW_REQUIRED", "CHANGES_REQUESTED")
+          expected_list = ",".join(expected) or "-"
+          if failed:
+              verdict = "failed"
+          elif running:
+              verdict = "wait-review" if review_required else "wait"
+          elif review_required or expected:
+              verdict = "awaiting"
+          else:
+              verdict = "blocked"
+          print(verdict, merge_state, expected_list)
+          PY
+          )"
+          }
+          verdict="wait"
           merge_state="UNKNOWN"
+          expected="-"
           for i in $(seq 1 30); do
-            read -r state merge_state <<< "$(gh pr view "${PR_NUMBER}" --json state,mergeStateStatus -q '.state + " " + .mergeStateStatus')"
-            if [ "${state}" = "CLOSED" ]; then
-              echo "::error::PR #${PR_NUMBER} was closed before it became mergeable."
-              exit 1
-            fi
-            if [ "${merge_state}" = "CLEAN" ]; then
-              break
-            fi
-            if [ "${merge_state}" = "DIRTY" ] || [ "${merge_state}" = "BLOCKED" ]; then
-              echo "::error::PR #${PR_NUMBER} reached a terminal non-mergeable state (mergeStateStatus=${merge_state}) that will not resolve by waiting."
-              exit 1
-            fi
+            read -r verdict merge_state expected <<< "$(gh pr view "${PR_NUMBER}" --json state,mergeStateStatus,reviewDecision,statusCheckRollup | classify)"
+            case "${verdict}" in
+              clean|awaiting) break ;;
+              merged)
+                # A person (e.g. an admin bypassing protection) merged it while
+                # this step polled: their push runs deploy.yml on its own.
+                echo "PR #${PR_NUMBER} was merged by someone else while waiting; nothing left to do."
+                exit 0 ;;
+              closed)
+                echo "::error::PR #${PR_NUMBER} was closed before it became mergeable."
+                exit 1 ;;
+              dirty|failed|blocked)
+                echo "::error::PR #${PR_NUMBER} reached a terminal non-mergeable state (mergeStateStatus=${merge_state}, ${verdict}) that will not resolve by waiting."
+                exit 1 ;;
+            esac
             if [ "${i}" -lt 30 ]; then
               sleep 10
             fi
           done
-          if [ "${merge_state}" != "CLEAN" ]; then
+          # Only running checks stood between this PR and a required review:
+          # it needs a person anyway, and the checks finish before they merge.
+          if [ "${verdict}" = "wait-review" ]; then
+            verdict="awaiting"
+          fi
+          if [ "${verdict}" = "awaiting" ]; then
+            # Leave the PR open — it is exactly what the person approves — and
+            # tell them on the Issue, since they cannot see the job's log. The
+            # PR author is github-actions[bot], so the person who closed the
+            # Issue may approve it themselves. Once a person merges it, that
+            # merge is their push, not a GITHUB_TOKEN one, so deploy.yml's
+            # `on: push` rebuilds the site; the dispatch step below is skipped.
+            rebuilt=""
+            if [ -f .github/workflows/deploy.yml ]; then
+              rebuilt=" and the published site is rebuilt"
+            fi
+            body="The page is not marked reviewed yet. This repository's default branch requires a pull request to pass branch protection before it is merged, so ${PR_URL} — which sets \`review_status: reviewed\` and records this review — was left open instead of merged. It was opened by github-actions[bot], so you can approve it yourself: approve and merge it, and the page becomes reviewed${rebuilt}. There is no need to reopen or close this Issue again."
+            if [ "${expected}" = "-" ]; then
+              # Required checks that were never reported do not appear in
+              # statusCheckRollup at all, so they cannot be named here.
+              body="${body} If merging stays blocked by a required check that never started, close and reopen the pull request yourself to run it."
+            else
+              body="${body} Required checks that have not started (${expected//,/, }): GitHub does not run \`pull_request\` workflows for a pull request opened by GitHub Actions, so they will not start on their own. Close and reopen the pull request yourself to run them, then merge once they pass."
+            fi
+            # Fail loudly if the comment cannot be posted: it is the only thing
+            # that tells the person the page is still pending.
+            if ! gh issue comment "${ISSUE_NUMBER}" --body "${body}"; then
+              echo "::error::PR #${PR_NUMBER} waits for a person to approve and merge it, but the comment saying so could not be posted on Issue #${ISSUE_NUMBER}."
+              exit 1
+            fi
+            echo "PR #${PR_NUMBER} is left for a person to approve and merge (mergeStateStatus=${merge_state}, expected checks: ${expected})."
+            exit 0
+          fi
+          if [ "${verdict}" != "clean" ]; then
             echo "::error::Timed out after 300s waiting for PR #${PR_NUMBER} to become mergeable (last mergeStateStatus=${merge_state})."
             exit 1
           fi
@@ -606,12 +713,15 @@ jobs:
           gh pr merge "${PR_NUMBER}" --squash \
             --subject "review: mark ${TYPE}/${SLUG} (${LANG}) as reviewed" \
             --body "$(printf 'Refs #%s\n\nReviewed-by: %s <%s@users.noreply.github.com>' "${ISSUE_NUMBER}" "${REVIEWER_NAME}" "${REVIEWER_LOGIN}")"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
 
       - name: Trigger GitHub Pages rebuild
-        # Same guard as the merge step above, and step-level `if:` still
-        # implies "only when every earlier step succeeded" — so this never
-        # dispatches a build for a merge that did not actually happen.
-        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'true'
+        # Same guard as the merge step above, plus `merged` (Issue #1396: a PR
+        # left for a person is not merged yet — their merge rebuilds the site
+        # through deploy.yml's own `on: push`). Step-level `if:` still implies
+        # "only when every earlier step succeeded" — so this never dispatches a
+        # build for a merge that did not actually happen.
+        if: steps.rewrite.outputs.proceed == 'true' && steps.existing_pr.outputs.proceed == 'true' && steps.quality.outputs.pass == 'true' && steps.merge.outputs.merged == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

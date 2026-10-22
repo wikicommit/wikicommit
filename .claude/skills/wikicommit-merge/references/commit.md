@@ -22,6 +22,7 @@ Branch naming rule (exception): use the form `wikicommit/merge-<YYYYMMDD>-<HHMMS
 
 ```bash
 git add -- .wikicommit/entity/ .wikicommit/view/ .wikicommit/source/ .wikicommit/review/ <new source files...> <new schema files...> <new vocab file> <policy files...> <relations file>
+python <this Skill's directory>/scripts/workflow_checks.py unstage-held --run <run>
 git commit -m "$(cat <<'EOF'
 wiki: bulk update <YYYY-MM-DD>
 
@@ -42,6 +43,8 @@ EOF
 
 GitHub resolves a co-author by the email address and shows that vendor's avatar on the commit, so a line naming a vendor that did not run this Skill misattributes it; writing none is the correct answer for a model not in the table. Decide by the model, not by the harness running it — one harness can run models from more than one vendor. If the harness appends its own co-author line after this message, leave it; an identical duplicate does no harm.
 <!-- commit-trailers:end -->
+
+**Run `unstage-held` between `git add` and `git commit`, every time.** `git add` stages the four directories whole, so it also stages what the `unreviewed` step held back (the run record's `skipped` list, handed over with this step): pages `wikicommit-generate` wrote that no AI review record judges as they now stand, and the management files whose `generated_pages` names them. `unstage-held` takes exactly those paths back out of the index and leaves them in the working tree; the check after this step does not count them as uncommitted. Do not unstage them by hand or leave the command out because the list is empty — it is cheap, and it is the only place that reads the list as recorded.
 
 Replace `<YYYY-MM-DD>` with the output of `date +%Y-%m-%d` (use the same date in both the commit message title and body). Pass each path in `new_sources` as a separate argument prefixed with `:(literal)` for `<new source files...>` (e.g. `:(literal)raw/report[2024].pdf`; omit if there are none): without the prefix, a path containing glob metacharacters can accidentally stage an unrelated file (`[2024]` is read as a character class). Pass each path in `new_schema` for `<new schema files...>` the same way (omit if there are none) — these are always plain `.wikicommit/schema/<Type>.md` paths, but using `:(literal)` uniformly costs nothing. Pass `new_vocab` for `<new vocab file>`, each path in `policy_files` for `<policy files...>`, and `relations_file` for `<relations file>` verbatim, each as its own argument (omit any that is empty) — these are fixed literal paths (`.wikicommit/schemaorg-vocab.json`, `.wikicommit/source-policy.md`, `.wikicommit/entity-policy.md`, `.wikicommit/relations.yml`).
 

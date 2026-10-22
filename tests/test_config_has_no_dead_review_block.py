@@ -14,6 +14,7 @@ repo's own rule (Issue #553 / #564) is that a key ships with its consumer, and
 a test is the only thing that states it about `config.yml` itself.
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -24,6 +25,29 @@ REPO_ROOT = Path(__file__).parent.parent
 TEMPLATE = REPO_ROOT / ".claude" / "skills" / "wikicommit-init" / "scripts" / "templates" / "config.yml"
 
 DEAD_KEYS = ("auto_merge", "chain_of_thought")
+
+
+def _skill_files_that_could_read_a_key(skills: Path) -> list[Path]:
+    """Every `SKILL.md`, `scripts/*.py` and `templates/workflows/*.yml` under `skills`.
+
+    Walked with node_modules pruned rather than with `rglob()`: the
+    quartz-plugins' node_modules/ under the init templates holds tens of
+    thousands of files, and descending into it costs ~40 s (Issue #1400).
+    """
+    found = []
+    for dirpath, dirnames, filenames in os.walk(skills):
+        dirnames[:] = [d for d in dirnames if d not in {"node_modules", "__pycache__", ".git"}]
+        here = Path(dirpath)
+        for name in filenames:
+            path = here / name
+            if (
+                name == "SKILL.md"
+                or (here.name == "scripts" and name.endswith(".py"))
+                or (here.name == "workflows" and here.parent.name == "templates"
+                    and name.endswith(".yml"))
+            ):
+                found.append(path)
+    return found
 
 
 def test_config_has_no_review_block():
@@ -66,10 +90,7 @@ def test_removed_keys_are_not_reintroduced_without_a_consumer(key):
     if not declared_in:
         return  # Still removed, which is this Issue's outcome.
 
-    skills = REPO_ROOT / ".claude" / "skills"
-    searched = list(skills.rglob("SKILL.md"))
-    searched += list(skills.rglob("scripts/*.py"))
-    searched += list(skills.rglob("templates/workflows/*.yml"))
+    searched = _skill_files_that_could_read_a_key(REPO_ROOT / ".claude" / "skills")
     mention = re.compile(rf"(?<![\w-]){re.escape(key)}(?![\w-])")
     consumers = [p for p in searched if mention.search(p.read_text(encoding="utf-8"))]
     assert consumers, (

@@ -82,8 +82,9 @@ def test_sync_dispatches_deploy_after_merge():
     )
     dispatch = steps[dispatch_index]
     merge_index = names.index("Auto-merge on quality pass")
-    # マージが実際に起きたときだけ dispatch する（品質ゲート失敗時に走らせない）。
-    assert dispatch["if"] == steps[merge_index]["if"], (
+    # マージが実際に起きたときだけ dispatch する（品質ゲート失敗時・人のマージ待ちで
+    # PR を残したとき〈Issue #1396〉に走らせない）。
+    assert dispatch["if"] == steps[merge_index]["if"] + " && steps.merge.outputs.merged == 'true'", (
         "Pages 再ビルドの dispatch ステップの if: が自動マージステップと一致していません。"
         "マージされていないのにビルドを起動する（またはその逆の）恐れがあります。"
     )

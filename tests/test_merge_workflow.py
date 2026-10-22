@@ -49,6 +49,9 @@ import json, sys
 args = sys.argv[1:]
 if args[:2] == ["repo", "view"]:
     print("main")
+elif args[:2] == ["pr", "view"] and "--json" in args and "reviewDecision" in args[args.index("--json") + 1]:
+    print(json.dumps({{"state": open("{state}").read().strip(),
+                      "reviewDecision": open("{review}").read().strip()}}))
 elif args[:2] == ["pr", "view"]:
     print(open("{state}").read().strip())
 elif args[:1] == ["api"] and "/issues?labels=" in args[1]:
@@ -96,7 +99,10 @@ def wiki(tmp_path: Path):
     issues = tmp_path / "open-issues"
     issues.write_text("{}", encoding="utf-8")
     gh = bin_dir / "gh"
-    gh.write_text(FAKE_GH.format(python=sys.executable, state=state, issues=issues),
+    review = tmp_path / "pr-review"
+    review.write_text("\n", encoding="utf-8")
+    gh.write_text(FAKE_GH.format(python=sys.executable, state=state, review=review,
+                                 issues=issues),
                   encoding="utf-8")
     gh.chmod(0o755)
     lychee_out = tmp_path / "lychee-out"
@@ -112,11 +118,16 @@ def wiki(tmp_path: Path):
         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
         "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com",
     })
-    shutil.copytree(SCRIPTS, work / ".wikicommit" / "scripts")
+    shutil.copytree(SCRIPTS, work / ".wikicommit" / "scripts",
+                    ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(TEMPLATES / "schema", work / ".wikicommit" / "schema")
     shutil.copytree(MERGE, work / ".claude" / "skills" / "wikicommit-merge",
                     ignore=shutil.ignore_patterns("__pycache__"))
-    (work / ".gitignore").write_text(".wikicommit/run/\n.wikicommit/.cache/\nignored/\n",
+    # `__pycache__/` as init's .gitignore has it: without it, the bytecode the
+    # scripts write gets committed to the PR branch by `git add .wikicommit/` and
+    # written again untracked on main, and pulling that branch fails on them.
+    (work / ".gitignore").write_text(
+        "__pycache__/\n.wikicommit/run/\n.wikicommit/.cache/\nignored/\n",
                                      encoding="utf-8")
 
     def git(*args):
@@ -130,7 +141,8 @@ def wiki(tmp_path: Path):
     page = work / PAGE
     page.parent.mkdir(parents=True)
     page.write_text(PAGE_TEXT, encoding="utf-8")
-    return {"dir": work, "env": env, "git": git, "pr_state": state, "issues": issues,
+    return {"dir": work, "env": env, "git": git, "pr_state": state, "pr_review": review,
+            "issues": issues,
             "lychee_out": lychee_out, "lychee_calls": lychee_calls}
 
 
@@ -368,6 +380,124 @@ def test_a_merge_that_fails_halts_with_its_reason(wiki):
                        "--token", _token("merge-pr.md"), "--reason", "DIRTY")
     assert code == 0 and resp["state"] == "halted"
     assert front(wiki["dir"] / run)["halted_reason"] == "merge-pr: DIRTY"
+
+
+# --- a default branch that requires a review (Issue #1377) ---------------------
+
+
+def opened(wiki) -> str:
+    """A run driven through `open-pr`, its PR (7) open on GitHub."""
+    git = wiki["git"]
+    quiet_orphans(wiki)
+    _, run = start(wiki)
+    passed(wiki, run)
+    git("checkout", "-q", "-b", "wikicommit/merge-20261006-120000")
+    git("add", ".wikicommit/")
+    git("commit", "-q", "-m", "wiki: bulk update")
+    git("push", "-q", "origin", "wikicommit/merge-20261006-120000")
+    for step, name, extra in (("commit", "commit.md", ["--outcome", "committed"]),
+                              ("open-pr", "open-pr.md", ["--outcome", "opened", "--add", "pr=7"])):
+        _, code = drive(wiki, "done", run, "--step", step, "--token", _token(name), *extra)
+        assert code == 0
+    return run
+
+
+def awaiting(wiki) -> str:
+    """A run that left PR 7 open for a person's required review."""
+    run = opened(wiki)
+    wiki["pr_review"].write_text("REVIEW_REQUIRED\n", encoding="utf-8")
+    wiki["git"]("checkout", "-q", "main")
+    resp, code = drive(wiki, "done", run, "--step", "merge-pr", "--outcome", "awaiting-merge",
+                       "--token", _token("merge-pr.md"))
+    assert code == 0 and resp["accepted"] is True, resp
+    return run
+
+
+def test_a_required_review_leaves_the_pr_open_and_finishes_the_run(wiki):
+    """The run ends as finished, not halted, with no cleanup and no Issue step."""
+    run = awaiting(wiki)
+    record = front(wiki["dir"] / run)
+    assert record["halted_reason"] == "" and record["ended_at"]
+    assert record["workflow"]["state"] == "finished"
+    assert record["workflow"]["finished_because"] == "merge-pr: awaiting-merge"
+    steps = {entry["step"] for entry in record["workflow"]["log"]}
+    assert "review-targets" not in steps, "nothing reached the default branch yet"
+    text = (MERGE / "references" / "merge-pr.md").read_text(encoding="utf-8")
+    leave = text[text.index("### Leaving the PR for a person"):]
+    assert "gh pr close" not in leave and "Do not show the cleanup procedure" in leave
+    assert "run `/wikicommit-merge` again" in leave
+
+
+def test_awaiting_merge_is_refused_unless_github_says_a_review_is_required(wiki):
+    run = opened(wiki)
+    wiki["git"]("checkout", "-q", "main")
+
+    def report():
+        return drive(wiki, "done", run, "--step", "merge-pr", "--outcome", "awaiting-merge",
+                     "--token", _token("merge-pr.md"))
+
+    resp, code = report()
+    assert code == 1 and "review decision" in resp["reason"], "nothing requires a review"
+    wiki["pr_review"].write_text("REVIEW_REQUIRED\n", encoding="utf-8")
+    wiki["pr_state"].write_text("CLOSED\n", encoding="utf-8")
+    resp, code = report()
+    assert code == 1 and "OPEN" in resp["reason"], "a closed PR is not left for anyone"
+    wiki["pr_state"].write_text("OPEN\n", encoding="utf-8")
+    wiki["git"]("checkout", "-q", "-b", "elsewhere")
+    resp, code = report()
+    assert code == 1 and "main" in resp["reason"], "the next run starts on the default branch"
+    wiki["git"]("checkout", "-q", "main")
+    resp, code = report()
+    assert code == 0 and resp["finished"] is True
+
+
+def test_the_next_run_names_a_pr_still_waiting_and_merges_nothing_new(wiki):
+    awaiting(wiki)
+    resp, run = start(wiki)
+    assert resp["finished_because"] == "No changes to merge"
+    assert any(n.startswith("AWAITING_MERGE: PR #7") for n in resp["notes"]), resp["notes"]
+
+
+def test_after_a_person_merges_the_next_run_files_the_tracking_issues(wiki):
+    """A run with nothing to carry still goes on to Step 8 for the merged PR, after
+    pulling the default branch, and skips every step that carries a change."""
+    awaiting(wiki)
+    git = wiki["git"]
+    # A person merges PR 7 on GitHub: origin's main moves, the local one does not.
+    git("push", "-q", "origin", "wikicommit/merge-20261006-120000:main")
+    wiki["pr_state"].write_text("MERGED\n", encoding="utf-8")
+    assert not (wiki["dir"] / PAGE).exists()
+
+    resp, run = start(wiki)
+    assert resp["step"] == "tracking-issues", resp
+    assert any(n.startswith("AWAITED_MERGED: PR #7") for n in resp["notes"])
+    assert (wiki["dir"] / PAGE).exists(), "the default branch was pulled"
+    lists = front(wiki["dir"] / run)["workflow"]["lists"]
+    assert lists["awaited_prs"] == ["7"] and lists["changes"] == []
+    assert lists["review_targets"] == [PAGE]
+    log = _log_of(wiki, run)
+    for step in ("quality-checks", "commit", "open-pr", "merge-pr"):
+        assert log[step] == "skipped", step
+
+    # Once a run has filed for it, the PR is not followed up again.
+    drive(wiki, "done", run, "--step", "tracking-issues", "--outcome", "filed",
+          "--token", _token("tracking-issues.md"))
+    resp, _ = start(wiki)
+    assert resp["finished_because"] == "No changes to merge"
+    assert not any("PR #7" in n for n in resp.get("notes", []))
+
+
+def test_a_merged_pr_is_not_listed_off_the_default_branch(wiki):
+    """Step 8 reads the working tree: without the pull, its scan would miss the
+    pages and the PR would still count as followed up."""
+    awaiting(wiki)
+    git = wiki["git"]
+    git("push", "-q", "origin", "wikicommit/merge-20261006-120000:main")
+    wiki["pr_state"].write_text("MERGED\n", encoding="utf-8")
+    git("checkout", "-q", "-b", "elsewhere")
+    resp, _ = start(wiki)
+    assert resp["finished_because"] == "No changes to merge"
+    assert any(n.startswith("WARNING: PR(s) #7 were merged") for n in resp["notes"])
 
 
 # --- Steps 8 and 9: what still needs an Issue (Issue #1266) ---------------------
@@ -779,6 +909,33 @@ def test_each_whole_command_line_fits_with_a_long_prefix(monkeypatch, tmp_path):
     assert all(module.argv_length(argv) <= module.ARGV_CHARS for argv in seen)
 
 
+def test_copied_wording_is_a_warning_and_an_unmeasured_page_only_a_note(
+        monkeypatch, capsys):
+    """check_source_overlap.py never blocks. `OVERLAP:` reaches the PR body; the
+    count of pages with no source text on this machine is printed, not recorded."""
+    module = _module()
+    changed = [".wikicommit/entity/en/BlogPosting/a.md"]
+    monkeypatch.setattr(module, "read_state", lambda run: {})
+    monkeypatch.setattr(module, "listed",
+                        lambda state, key: changed if key == "changed_md" else [])
+
+    def fake(argvs, blocking, warning):
+        if "check_source_overlap.py" in argvs[0][1]:
+            assert "--summarize-missing" in argvs[0] and argvs[0][-1] == changed[0]
+            return [], ["OVERLAP: a.md 31% (400 words; longest: 20 words \"x\")",
+                        "NO_SOURCE_TEXT: 2 page(s) not measured"], ""
+        return [], [], ""
+
+    recorded = {}
+    monkeypatch.setattr(module, "run_script", fake)
+    monkeypatch.setattr(module, "write_findings",
+                        lambda run, tool, findings: recorded.__setitem__(tool, findings))
+    assert module.cmd_checks(type("Args", (), {"run": "r.md"})()) == 0
+    assert recorded["check_source_overlap.py"] == [
+        "OVERLAP: a.md 31% (400 words; longest: 20 words \"x\")"]
+    assert "check_source_overlap.py: NO_SOURCE_TEXT: 2 page(s)" in capsys.readouterr().out
+
+
 def test_a_backlink_to_a_removed_page_is_warned_once_however_the_calls_split(
         tmp_path, monkeypatch):
     """The page being removed is among the changed pages as well; the warning must
@@ -949,3 +1106,202 @@ def test_no_warnings_body(wiki):
     body = checks(wiki, "pr-body", "--run", run).stdout
     assert "Quality checks ran with no blocking errors and no warnings." in body
     assert "## Warnings" not in body
+
+
+def test_a_never_blocking_check_that_cannot_run_does_not_block(monkeypatch, capsys):
+    """`.wikicommit/scripts/` older than the Skill has no check_source_overlap.py; the
+    check is skipped with a note rather than halting the merge."""
+    module = _module()
+    changed = [".wikicommit/entity/en/BlogPosting/a.md"]
+    monkeypatch.setattr(module, "read_state", lambda run: {})
+    monkeypatch.setattr(module, "listed",
+                        lambda state, key: changed if key == "changed_md" else [])
+
+    def fake(argvs, blocking, warning):
+        if "check_source_overlap.py" in argvs[0][1]:
+            return [], [], "could not run (can't open file)"
+        return [], [], ""
+
+    monkeypatch.setattr(module, "run_script", fake)
+    monkeypatch.setattr(module, "write_findings", lambda run, tool, findings: None)
+    assert module.cmd_checks(type("Args", (), {"run": "r.md"})()) == 0
+    assert "check_source_overlap.py: not checked" in capsys.readouterr().out
+
+
+# --- pages generate wrote without an AI review are held back (Issue #1328) ------
+
+GEN_TEXT = """---
+title: "{title}"
+lang: ja
+type: "schema:Person"
+sources:
+  - type: url
+    url: https://example.com/{slug}
+    hash: sha256:ab12
+review_status: pending
+generated_at: "{date}"
+generated_by: m
+---
+
+{body}
+"""
+
+
+def _gen_page(wiki, slug: str, *, date: str = "2026-10-21", body: str = "Text.") -> str:
+    rel = f".wikicommit/entity/ja/Person/{slug}.md"
+    path = wiki["dir"] / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(GEN_TEXT.format(title=slug, slug=slug, date=date, body=body),
+                    encoding="utf-8")
+    return rel
+
+
+def _ai_record(wiki, rel: str) -> None:
+    result = subprocess.run(
+        [sys.executable, ".wikicommit/scripts/record_review.py", rel, "--kind", "ai",
+         "--stage", "generate-pass4", "--model", "m", "--attempts", "1",
+         "--result", "pass"],
+        cwd=wiki["dir"], env=wiki["env"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def _gen_manager(wiki, name: str, pages: list[str]) -> str:
+    rel = f".wikicommit/source/url/{name}.md"
+    path = wiki["dir"] / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    listed_pages = "".join(f"  - {page}\n" for page in pages)
+    path.write_text(f"---\nsource:\n  type: url\n  url: https://example.com/{name}\n"
+                    f"status: generated\ngenerated_pages:\n{listed_pages}failed_pages: []\n"
+                    "---\n", encoding="utf-8")
+    return rel
+
+
+def _unreviewed(wiki) -> tuple[list[str], str]:
+    result = checks(wiki, "unreviewed")
+    assert result.returncode == 0, result.stdout + result.stderr
+    return ([line[len("ITEM: "):] for line in result.stdout.splitlines()
+             if line.startswith("ITEM: ")], result.stdout)
+
+
+def test_only_pages_generate_wrote_without_a_standing_ai_review_are_held(wiki):
+    git = wiki["git"]
+    # Committed, then rewritten by generate (generated_at moved), no new record.
+    rewritten = _gen_page(wiki, "rewritten", date="2026-10-01")
+    # Committed, then edited by hand or /wikicommit-fix: the generation fields stay.
+    fixed = _gen_page(wiki, "fixed", date="2026-10-01")
+    # Committed and reviewed, then rewritten by generate and reviewed again.
+    again = _gen_page(wiki, "again", date="2026-10-01")
+    git("add", ".wikicommit/entity/")
+    git("commit", "-q", "-m", "pages")
+    _gen_page(wiki, "rewritten", date="2026-10-21", body="New text.")
+    _gen_page(wiki, "fixed", date="2026-10-01", body="Fixed text.")
+    _gen_page(wiki, "again", date="2026-10-21", body="New text.")
+    _ai_record(wiki, again)
+    new = _gen_page(wiki, "new")                  # new, no record
+    reviewed = _gen_page(wiki, "reviewed")        # new, a record judges this text
+    _ai_record(wiki, reviewed)
+    stale = _gen_page(wiki, "stale")              # new, the record judged older text
+    _ai_record(wiki, stale)
+    _gen_page(wiki, "stale", body="Changed after the review.")
+    removed = _gen_page(wiki, "gone")
+    (wiki["dir"] / removed).write_text(
+        (wiki["dir"] / removed).read_text(encoding="utf-8").replace(
+            "review_status: pending", "review_status: pending\nstatus: removed"),
+        encoding="utf-8")
+    held_manager = _gen_manager(wiki, "held", [reviewed, "./" + new])
+    legacy_manager = _gen_manager(wiki, "legacy",
+                                  [".wikicommit/wiki/ja/Person/rewritten.md"])
+    _gen_manager(wiki, "clean", [reviewed])
+
+    items, out = _unreviewed(wiki)
+    assert sorted(items) == sorted([rewritten, new, stale, held_manager, legacy_manager])
+    assert fixed not in items, "a page generate did not write this time is not held"
+    assert PAGE not in items, "a page with no generation fields is never held"
+    assert f"UNREVIEWED_PAGE: {new} (no AI review record judges this page)" in out
+    assert f"UNREVIEWED_PAGE: {stale} (page content changed since" in out
+    assert "HELD_BACK: 3 page(s)" in out and "2 management file(s)" in out
+
+
+def test_nothing_is_held_when_every_generated_page_was_reviewed(wiki):
+    reviewed = _gen_page(wiki, "reviewed")
+    _ai_record(wiki, reviewed)
+    _gen_manager(wiki, "clean", [reviewed])
+    items, out = _unreviewed(wiki)
+    assert items == [] and "HELD_BACK" not in out
+
+
+def test_a_held_page_and_its_manager_are_left_out_of_the_whole_merge(wiki):
+    """Held back at the start, the page and its management file are in none of the
+    run's lists, the commit leaves them uncommitted and is accepted, the PR body
+    names them, and no tracking Issue is filed for them after the merge."""
+    git = wiki["git"]
+    quiet_orphans(wiki)
+    new = _gen_page(wiki, "new")
+    manager = _gen_manager(wiki, "held", [new])
+    reviewed = _gen_page(wiki, "reviewed")
+    _ai_record(wiki, reviewed)
+    _, run = start(wiki)
+    lists = front(wiki["dir"] / run)["workflow"]["lists"]
+    assert sorted(lists["skipped"]) == sorted([new, manager])
+    assert new not in lists["changes"] and manager not in lists["changes"]
+    assert reviewed in lists["changes"] and PAGE in lists["changes"]
+    assert new not in lists["changed_md"] and reviewed in lists["changed_md"]
+    resp = passed(wiki, run)
+    assert resp["step"] == "commit" and sorted(resp["lists"]["skipped"]) == sorted(
+        [new, manager])
+    assert "## Not included (2)" in checks(wiki, "pr-body", "--run", run).stdout
+
+    git("checkout", "-q", "-b", "wikicommit/merge-20261021-120000")
+    git("add", ".wikicommit/")
+    resp, code = drive(wiki, "done", run, "--step", "commit", "--outcome", "committed",
+                       "--token", _token("commit.md"))
+    assert code == 1, "nothing is committed yet"
+    result = checks(wiki, "unstage-held", "--run", run)
+    assert result.returncode == 0 and "UNSTAGED: 2" in result.stdout
+    git("commit", "-q", "-m", "wiki: bulk update")
+    resp, code = drive(wiki, "done", run, "--step", "commit", "--outcome", "committed",
+                       "--token", _token("commit.md"))
+    assert code == 0 and resp["step"] == "open-pr", resp
+    committed = git("show", "--name-only", "--format=", "HEAD").stdout.split()
+    assert reviewed in committed and new not in committed and manager not in committed
+    assert (wiki["dir"] / new).is_file() and (wiki["dir"] / manager).is_file()
+
+    git("push", "-q", "origin", "wikicommit/merge-20261021-120000")
+    _, code = drive(wiki, "done", run, "--step", "open-pr", "--outcome", "opened",
+                    "--add", "pr=7", "--token", _token("open-pr.md"))
+    assert code == 0
+    wiki["pr_state"].write_text("MERGED\n", encoding="utf-8")
+    git("checkout", "-q", "main")
+    git("merge", "-q", "--ff-only", "wikicommit/merge-20261021-120000")
+    resp, code = drive(wiki, "done", run, "--step", "merge-pr", "--outcome", "merged",
+                       "--token", _token("merge-pr.md"))
+    assert code == 0, resp
+    targets = front(wiki["dir"] / run)["workflow"]["lists"]["review_targets"]
+    assert new not in targets and reviewed in targets and PAGE in targets
+
+
+def test_a_commit_that_carries_a_held_page_is_refused(wiki):
+    """`unstage-held` left out: `git add` staged the held page with everything else
+    and the commit carries it. The commit check refuses it, so an unreviewed page
+    cannot reach the default branch because the agent skipped one command."""
+    git = wiki["git"]
+    quiet_orphans(wiki)
+    new = _gen_page(wiki, "new")
+    _, run = start(wiki)
+    passed(wiki, run)
+    git("checkout", "-q", "-b", "wikicommit/merge-20261021-120000")
+    git("add", ".wikicommit/")
+    git("commit", "-q", "-m", "wiki: bulk update")
+    resp, code = drive(wiki, "done", run, "--step", "commit", "--outcome", "committed",
+                       "--token", _token("commit.md"))
+    assert code == 1, resp
+    result = checks(wiki, "check-commit", "--run", run)
+    assert result.returncode == 1 and new in result.stdout and "unstage-held" in result.stdout
+
+
+def test_a_run_whose_every_change_is_held_finishes_with_nothing_to_merge(wiki):
+    (wiki["dir"] / PAGE).unlink()
+    new = _gen_page(wiki, "new")
+    resp, run = start(wiki)
+    assert resp["state"] == "finished" and resp["finished_because"] == "No changes to merge"
+    assert any(n.startswith(f"UNREVIEWED_PAGE: {new}") for n in resp["notes"]), resp["notes"]

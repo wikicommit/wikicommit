@@ -2741,3 +2741,221 @@ def test_check_path_cache_reports_an_unreadable_source_as_stale(tmp_path, monkey
     assert result == "CACHE_STALE"
     assert "could not be read" in msg
     assert extract == "docs/scan.pdf"
+
+
+# ── fetch-source override: GitHub repository top → README (Issue #1374) ──────
+#
+# The rendered repository page carries star/fork/commit counts and the last
+# commit of each listed file, so its markitdown output — and source.hash —
+# changes even when the README does not. The override replaces what is fetched,
+# so source.hash stays "the SHA-256 of the scratch file".
+
+_README_MD = "https://raw.githubusercontent.com/o/r/HEAD/README.md"
+
+
+@pytest.mark.parametrize(
+    "url,first_candidate",
+    [
+        ("https://github.com/o/r", _README_MD),
+        ("https://github.com/o/r/", _README_MD),
+        ("https://github.com/o/r.git", _README_MD),
+        ("https://www.github.com/o/r", _README_MD),
+        ("https://GitHub.com/o/r#readme", _README_MD),
+        ("https://github.com/o/r?tab=readme-ov-file", _README_MD),
+        # Other GitHub URL shapes keep the page fetch.
+        ("https://github.com/o/r/blob/main/README.md", None),
+        ("https://github.com/o/r/tree/main/docs", None),
+        ("https://github.com/o/r/issues/1", None),
+        ("https://github.com/o/r/pull/2", None),
+        ("https://github.com/o", None),
+        # Two segments, but GitHub's own pages rather than a repository.
+        ("https://github.com/features/copilot", None),
+        ("https://github.com/topics/llm", None),
+        ("https://github.com/orgs/o", None),
+        # Not github.com itself.
+        ("https://gist.github.com/o/abc123", None),
+        ("https://docs.github.com/en/actions", None),
+        ("https://example.com/o/r", None),
+    ],
+)
+def test_fetch_source_override_targets_only_github_repository_tops(url, first_candidate):
+    candidates, label = add_source.fetch_source_override(url)
+    if first_candidate is None:
+        assert candidates == []
+        assert label == ""
+    else:
+        assert candidates[0] == first_candidate
+        assert label
+
+
+def test_fetch_source_override_candidate_order_is_fixed():
+    candidates, _label = add_source.fetch_source_override("https://github.com/o/r")
+    assert candidates == add_source.fetch_source_override("https://github.com/o/r/")[0]
+    assert len(candidates) == len(set(candidates))
+    assert "https://raw.githubusercontent.com/o/r/HEAD/.github/README.md" in candidates
+    assert "https://raw.githubusercontent.com/o/r/HEAD/docs/README.md" in candidates
+
+
+class _FakeResponse:
+    def __init__(self, status_code, body=b""):
+        self.status_code = status_code
+        self.content = body
+
+
+class _FakeSession:
+    def __init__(self, responses):
+        self.responses = responses
+        self.requested: list[str] = []
+        self.headers: dict = {}
+
+    def get(self, url, **kwargs):
+        self.requested.append(url)
+        result = self.responses.get(url, _FakeResponse(404))
+        if isinstance(result, BaseException):
+            raise result
+        return result
+
+
+def _install_fake_session(monkeypatch, responses):
+    pytest.importorskip("requests")
+    session = _FakeSession(responses)
+    monkeypatch.setattr(add_source, "_session_with_timeout", lambda _requests, _timeout: session)
+    return session
+
+
+def test_fetch_url_github_repository_top_writes_the_readme(tmp_path, monkeypatch):
+    captured: dict = {}
+    _install_fake_markitdown(monkeypatch, text_content="rendered page", capture=captured)
+    session = _install_fake_session(
+        monkeypatch, {_README_MD: _FakeResponse(200, "# r\n\nこんにちは\n".encode("utf-8"))}
+    )
+
+    result, path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "FETCHED"
+    assert Path(path).read_text(encoding="utf-8") == "# r\n\nこんにちは\n"
+    assert session.requested == [_README_MD]
+    assert session.headers["User-Agent"] == add_source.USER_AGENT
+    assert "url" not in captured  # the rendered page was never fetched
+
+
+def test_fetch_url_github_readme_hash_is_stable_across_fetches(tmp_path, monkeypatch):
+    _install_fake_markitdown(monkeypatch, text_content="unused")
+    _install_fake_session(monkeypatch, {_README_MD: _FakeResponse(200, b"# r\n")})
+
+    add_source.fetch_url("https://github.com/o/r", "a.md", tmp_path)
+    add_source.fetch_url("https://github.com/o/r/", "b.md", tmp_path)
+
+    assert add_source.sha256_file(str(tmp_path / "a.md")) == add_source.sha256_file(
+        str(tmp_path / "b.md")
+    )
+
+
+def test_fetch_url_github_tries_later_readme_candidates_on_404(tmp_path, monkeypatch):
+    _install_fake_markitdown(monkeypatch, text_content="unused")
+    rst = "https://raw.githubusercontent.com/o/r/HEAD/README.rst"
+    session = _install_fake_session(monkeypatch, {rst: _FakeResponse(200, b"r\n=\n")})
+
+    result, path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "FETCHED"
+    assert Path(path).read_text(encoding="utf-8") == "r\n=\n"
+    assert session.requested[-1] == rst
+    assert session.requested[0] == _README_MD
+
+
+def test_fetch_url_github_without_any_readme_falls_back_to_the_page(tmp_path, monkeypatch):
+    captured: dict = {}
+    _install_fake_markitdown(monkeypatch, text_content="rendered page", capture=captured)
+    _install_fake_session(monkeypatch, {})
+
+    result, path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "FETCHED"
+    assert captured["url"] == "https://github.com/o/r"
+    assert Path(path).read_text(encoding="utf-8") == "rendered page"
+
+
+def test_fetch_url_github_non_404_failure_does_not_fall_back(tmp_path, monkeypatch):
+    """Falling back on a rate limit or a 5xx would give the same source a
+    different hash depending on which route happened to work."""
+    captured: dict = {}
+    _install_fake_markitdown(monkeypatch, text_content="rendered page", capture=captured)
+    _install_fake_session(monkeypatch, {_README_MD: _FakeResponse(429)})
+
+    result, _path, msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "ERROR"
+    assert "429" in msg
+    assert "url" not in captured
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_fetch_url_github_connection_failure_is_network_unavailable(tmp_path, monkeypatch):
+    requests = pytest.importorskip("requests")
+    _install_fake_markitdown(monkeypatch, text_content="unused")
+    _install_fake_session(
+        monkeypatch, {_README_MD: requests.exceptions.ConnectionError("Name or service not known")}
+    )
+    monkeypatch.setattr(add_source, "_proxy_applies", lambda _url: False)
+
+    result, _path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "NETWORK_UNAVAILABLE"
+
+
+def test_fetch_url_other_hosts_are_unchanged(tmp_path, monkeypatch):
+    captured: dict = {}
+    _install_fake_markitdown(monkeypatch, text_content="page", capture=captured)
+    session = _install_fake_session(monkeypatch, {})
+
+    for url in ("https://github.com/o/r/blob/main/README.md", "https://example.com/o/r"):
+        result, _path, _msg = add_source.fetch_url(url, "out.md", tmp_path)
+        assert result == "FETCHED"
+        assert captured["url"] == url
+    assert session.requested == []
+
+
+def test_created_note_says_a_github_repository_top_is_fetched_as_its_readme(tmp_path):
+    result, _path, msg = add_source.process_url("https://github.com/o/r", tmp_path)
+    assert result == "CREATED"
+    assert "README" in msg
+
+    result, _path, msg = add_source.process_url("https://example.com/page", tmp_path)
+    assert result == "CREATED"
+    assert "README" not in msg
+
+
+def test_fetch_url_github_follows_a_symlinked_readme(tmp_path, monkeypatch):
+    """raw.githubusercontent.com serves a symlink as its target path, not the file."""
+    _install_fake_markitdown(monkeypatch, text_content="unused")
+    target = "https://raw.githubusercontent.com/o/r/HEAD/docs/intro.md"
+    session = _install_fake_session(
+        monkeypatch,
+        {_README_MD: _FakeResponse(200, b"docs/intro.md"), target: _FakeResponse(200, b"# intro\n")},
+    )
+
+    result, path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "FETCHED"
+    assert Path(path).read_text(encoding="utf-8") == "# intro\n"
+    assert session.requested == [_README_MD, target]
+
+
+def test_fetch_url_github_one_line_readme_that_is_not_a_link_is_kept(tmp_path, monkeypatch):
+    _install_fake_markitdown(monkeypatch, text_content="unused")
+    _install_fake_session(monkeypatch, {_README_MD: _FakeResponse(200, b"see.wiki")})
+
+    result, path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert result == "FETCHED"
+    assert Path(path).read_text(encoding="utf-8") == "see.wiki"
+
+
+def test_fetch_url_github_readme_bom_is_dropped(tmp_path, monkeypatch):
+    _install_fake_markitdown(monkeypatch, text_content="unused")
+    _install_fake_session(monkeypatch, {_README_MD: _FakeResponse(200, b"\xef\xbb\xbf# r\n")})
+
+    _result, path, _msg = add_source.fetch_url("https://github.com/o/r", "out.md", tmp_path)
+
+    assert Path(path).read_text(encoding="utf-8") == "# r\n"

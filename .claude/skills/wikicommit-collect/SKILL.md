@@ -224,7 +224,7 @@ Skip this step when nothing was collected for it — no `--index` argument, no p
 
 A standing index is not mined in full on every run. An awesome list holds hundreds of links, and most of them have nothing to do with what this run is looking for.
 
-For each index page, fetch it the same way Pass 1 does — it carries the User-Agent Wikimedia hosts require, and this reads the page without registering anything. `--fetch-url` requires `--output` and writes exactly what `markitdown` produced there, so give it a scratch path under the gitignored cache (a path of your own, not one of Pass 1's `ingest-fetch/` scratch paths — those are derived from a management file, and an index page has none). Quote the URL: it is free text from the command line or a search result, and an unquoted `&` would be read by the shell.
+For each index page, fetch it the same way Pass 1 does — it carries the User-Agent Wikimedia hosts require, and this reads the page without registering anything. `--fetch-url` requires `--output` and writes the fetched text there (a GitHub repository's top page comes back as its README), so give it a scratch path under the gitignored cache (a path of your own, not one of Pass 1's `ingest-fetch/` scratch paths — those are derived from a management file, and an index page has none). Quote the URL: it is free text from the command line or a search result, and an unquoted `&` would be read by the shell.
 
 ```bash
 python .wikicommit/scripts/add_source.py --fetch-url "<index URL>" \

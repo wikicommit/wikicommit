@@ -648,6 +648,8 @@ wanted ページは定義上リンク先が存在しないため、`[[Type/slug]
 > **値を持たない管理ファイルは `last_generated_at` で 2 行に分ける（Issue #1135）**。`source.lang` が空になるのは、(1) Issue #989 より前に処理され読み直されていない、(2) **まだ一度も実行を完走していない**（`add_source.py` が空の `lang:` と空の `last_generated_at:` を置き、Pass 2a まで埋まらない。`pending` で未取得・Pass 1 の失敗を含む）の 2 通りで、(2) は新しい Wiki で常に非ゼロになる**キューの長さ**である。両者を「未記録」1 行にまとめ、注記で「記録が始まる前に取り込まれた」と説明すると、0.8.0 以降に始めた Wiki（`world-of-work-wiki` の未記録 8 件は全部が (2)）の読者に古い取り込みがあると読ませる。そこで `last_generated_at` が空のものを「未処理」（`source_lang_unprocessed`）として「未記録」の前に別行で出す。判定は `reconcile_ingest_status.py` と 5 件ガードの選定順序が「一度でも完走したか」の目印に使っているのと同じ値で、決定論的に分かれる。`lang` を持つソースは `last_generated_at` が空でも（Pass 2a の後で保留されたもの）言語の行に数える。`status: excluded` は `last_generated_at` が空でも「未記録」に数える — Pass 4 の `excluded` 分岐は完走した実行の末尾で書かれるが `last_generated_at` を書かないため、日付が無いことが未完走を意味しない。Pass 1 で失敗したソースは「未処理」に入る — `status` 別の表が `failed` を別に数えているので、言語の表で細かく分けない。ビルドのたびに計算する表なので遡及は要らない。
 >
 > **`off` / `false` は `no` に数えない（Issue #1248）**: `False` を一律に `no` に戻していたため、YAML 1.1 が同じ `False` と読む `off` / `false` も `no` 行に数えられていた。書かれた文字が `no` のときだけ `no` とし、それ以外は値を持たないものとして分ける。判断は `docs/DesignDoc-data.md` §4.3 と同じ `_normalize_source_lang()` の 1 か所にあり、公開ソースページと食い違わない（経緯は `history/DesignDoc-data.md` の同じ見出し）。
+>
+> **地域付きのタグは言語の行に数える（Issue #1247）**: `zh-Hans`・`pt-BR` が `zh-hans`・`pt-br` の行として、`ja, en` のような文字列もそのまま 1 行として数えられていた。先頭の言語サブタグを取り出して `zh`・`pt` の行に数え、それでも 2 文字のコードにならない文字列は値を持たないものとして分ける。判断は公開ソースページと同じ `_normalize_source_lang()` にある（経緯は `history/DesignDoc-data.md` の同じ見出し）。
 
 #### ハブ行のソース件数と、同じソースに立つハブ
 

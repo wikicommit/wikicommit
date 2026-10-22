@@ -23,7 +23,7 @@
   - **仕様の表・規則**はこの仕様書の当該スクリプトの節に書き、docstring に写さない。docstring にあって本書に無い仕様は、消さずに本書へ移す
   - **経緯**（以前の命名・退けた案・実測・Issue 番号）は [history/DesignDoc-ScriptSpec.md](history/DesignDoc-ScriptSpec.md) の当該スクリプトの見出しの下に書く。配布物の `Issue #NNN` は利用者から辿れない
   - **コードの途中のコメント**: 「なぜこう書くか」を 1〜2 行で書く。誤った代替案を封じる短い理由（「`+` ではなく `*` にする — 空のときに exit 2 になるため」等）は残す。基準は DesignDoc 本文と同じく「この文を消したら、もっともらしい別の手を取りうるか」
-  - `tools/check_distributed_issue_refs.py` は配布スクリプトのコメント・docstring に `Issue #NNN` が 1 件でもあると失敗する（行をまたいで `Issue` と `#NNN` が分かれたものも数える）。番号の無い経緯の文は検出できないのでレビューで見る
+  - `tools/check_distributed_issue_refs.py` は配布スクリプトのコメント・docstring に Issue 番号（`Issue #NNN`・`Issue-#NNN`・素の `#NNN`〈2 桁以上〉）が 1 件でもあると失敗する（行をまたいで `Issue` と `#NNN` が分かれたものも数える。出力する文字列も同じ形で検査する）。番号の無い経緯の文は検出できないのでレビューで見る
 
 ---
 
@@ -143,6 +143,7 @@ blocking な（exit 1 を返す）ページ検査はスクリプト 4 本・所�
 | `add_source.py` | ソースの登録（管理ファイルのパス計算・ハッシュ・生成・`status` 更新）・`--fetch-url` による URL の取得・`--license-for-url` による既知ライセンスの照会・`--fulltext-url-for` による arXiv の `/abs/` の本文 URL への読み替え・`type: path` の抽出キャッシュの確認（`wikicommit-generate`・`wikicommit-collect`・`wikicommit-ask`・`resolve_source_cache_path.py` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表と `docs/DesignDoc-pipeline.md` §6.1） | 引数不正・登録の失敗・取得の失敗 |
 | `resolve_source_cache_path.py` | ページの `sources[]` の 1 件から抽出テキストキャッシュを解決し、`--obtain-sources` で review / fix が渡したページの `sources` 全件の本文を得る（`wikicommit-ask`・`wikicommit-review`・`wikicommit-fix`・`wikicommit-relate`・`wikicommit-generate --regenerate` 共有。仕様は `docs/DesignDoc-skills.md` §11.5 の共有スクリプト表） | 管理ファイルもキャッシュも無い・取得できない（exit 2 は取り下げ済み）。`--obtain-sources` は引数の誤り・ページが読めないときだけ（取り下げ・取得失敗は行で伝え exit 0） |
 | `remove_page.py` | ページと翻訳ページに `status: removed` を付与し index から外す（`wikicommit-remove`・`wikicommit-generate --regenerate --merge` 共有） | ページが無い・既に `removed`・`--merged-into` の不備 |
+| `check_source_overlap.py` | ページがソースの言い回しをそのまま写している割合（n 語以上連続で一致する箇所に含まれる語の割合）の計測（`wikicommit-generate` の書き出し後・`wikicommit-merge` の品質チェックが共有） | なし（常に 0） |
 
 ---
 
@@ -1716,7 +1717,7 @@ Wiki ページ以外のビルド生成ページ（root index・`content/sources/
 
 **root index の言語一覧**は `primary_lang`・ページが実在する `targets`・このビルドが実際に書いた言語の和である（`compute_langs()`）。後者は書けたページで判定するので、読めずに書かれなかったページの言語は載らない。
 
-**ソースページ**は `.wikicommit/source/` を直接走査して作る。`generated_pages[]` の各項目は接頭辞（`.wikicommit/entity/`、または古い `.wikicommit/wiki/`）を 1 つだけ外し、絶対パス・`..` を含むものは捨てる。リンクは実在し `removed` でないページにだけ張る。中間ディレクトリには `index.md` を書くが、ソースページ自体がそのパスを持つ場合は上書きしない。`source.lang` は小文字の ISO 639-1 として読み、YAML 1.1 で `False` になる値は書かれた文字列が `no` のときだけノルウェー語とする。
+**ソースページ**は `.wikicommit/source/` を直接走査して作る。`generated_pages[]` の各項目は接頭辞（`.wikicommit/entity/`、または古い `.wikicommit/wiki/`）を 1 つだけ外し、絶対パス・`..` を含むものは捨てる。リンクは実在し `removed` でないページにだけ張る。中間ディレクトリには `index.md` を書くが、ソースページ自体がそのパスを持つ場合は上書きしない。`source.lang` は小文字の ISO 639-1 として読み、YAML 1.1 で `False` になる値は書かれた文字列が `no` のときだけノルウェー語とする。文字列は `-` / `_` で切った先頭の言語サブタグを取り（`zh-Hans` は `zh`、`pt-BR` は `pt`）、それが 2 文字の小文字のコードでなければ（`japanese`・`ja, en`）未記録として扱う（`docs/DesignDoc-data.md` §4.3）。
 
 **前回の出力の掃除**: このビルドが書かなかった `content/` 配下の `.md`（`assets/` を除く）を消す。`content/` はローカルビルドの間で消されないため、消さないと削除・改名したページが直接 URL で読めたまま残る。ファイルが既にあることを理由に書き込みを飛ばさない（前回書いたものが凍結される）。`content/assets/` の掃除は `sync_assets()` が、`wikicommit-groups.json`（グループが 1 つも無いビルドでは書かない）の掃除は `write_group_manifest()` がそれぞれ別に持ち、その範囲に限る。
 
@@ -1930,9 +1931,11 @@ python .wikicommit/scripts/record_review.py <page> \
 1. 引数が上記 2 ツリーの外を指していれば ERROR（誤ったパスが黙って no-op になるのを防ぐ）。`--kind ai` に `--model` が無い場合も ERROR — モデルに帰属できない判定は、この記録ツリーが可能にしようとしている偏りの測定に使えない
 2. `--json` から §4.6 の JSON を読む（`-` で標準入力、省略で findings なし）
 3. `issues[]` を `FINDING_FIELDS`（`round` / `type` / `claim` / `source_file` / `source_lines` / `instruction` / `page_at_fault`）に射影する。**`source_quote` は呼び出し側が渡してきても落ちる**。`round` が無い場合は 1 を補う。`source_file` の**空文字列は残す** — `wikicommit-synthesize` の `MISSING_SOURCE` は定義上どの grounding ページも当てはまらないため意図的に空にするので、キーごと落とすと「呼び出し側が入れ忘れた」と区別できなくなる
+   - **失敗したはずのラウンド（`--attempts` 2 以上なら 1〜`attempts`−1、`--result discarded` なら 1〜`attempts`）のどれかに、`page_at_fault` が `other` でない finding が 1 件も無ければ ERROR で拒み、何も書かない**（findings が空の場合を含む。`other` は FAIL にしないので、最終の PASS ラウンドが持つ `other` だけでは前のラウンドを合わせた証拠にならない）。再試行は FAIL の後にしか起きず FAIL は必ず `issues` を持つので、呼び出し側が前のラウンドの指摘を合わせ忘れたことを意味する（`docs/DesignDoc-data.md` §4.8）。finding の中の `type`・`page_at_fault` は検証しない（下記）
 4. `page_content_hash` を計算する。無視リストは `reset_review_on_content_change.py` の `BOOKKEEPING_FIELDS` を **import** する（複製しない）。正規化は「内容フィールドを `yaml.safe_dump(sort_keys=True)` したもの + 本文を同スクリプトと同じ規則で正規化したもの」の SHA-256。`--result discarded` では空文字列
 5. `reviewed_sources` を、ページの `sources[]`（view ページは `derived_from`）から取る。`--sources-from` が指定されていればそちらを優先する（ページが存在しない `discarded` 用）。翻訳ページは `sources` を持たないので `{path: translated_from, source_commit}` の 1 要素を組み立てる（`page_evidence_entries()`。`check_review_coverage.py` の失効判定も同じ関数を import して使い、記録側と読み取り側で「このページの証拠」の定義が割れないようにしている）。`--stage translate-check --result discarded` のときは読まず空にする — ディスクにあるのは古い翻訳であり、その `source_commit` は今回照合した原文の版ではない
-6. `.wikicommit/review/<ページパスから .wikicommit/ と .md を落としたもの>/<YYYYMMDD>-<HHMMSS>-<kind>.md` に新規作成する。同名が存在すれば `-2`、`-3`… を付す（**上書きは契約上あり得ない**）
+6. `generated_by` を、ページの frontmatter の `generated_by`（`translated_from` を持つ翻訳ページは `translated_by`）から写す。値が無いとき・`--result discarded` のときはキーごと省く（`docs/DesignDoc-data.md` §4.8）
+7. `.wikicommit/review/<ページパスから .wikicommit/ と .md を落としたもの>/<YYYYMMDD>-<HHMMSS>-<kind>.md` に新規作成する。同名が存在すれば `-2`、`-3`… を付す（**上書きは契約上あり得ない**）
 
 ### 出力フォーマット
 
@@ -1943,15 +1946,17 @@ RECORDED: .wikicommit/review/entity/ja/Person/yamada-taro/20260905-142233-ai.md 
 ### 終了コード
 
 - `0`: 記録を 1 件書いた
-- `1`: 引数不正、entity/view ツリーの外、ページが存在しない（`discarded` 以外）、JSON が読めない／壊れている、書き込み失敗
+- `1`: 引数不正、entity/view ツリーの外、ページが存在しない（`discarded` 以外）、JSON が読めない／壊れている、失敗したラウンドの指摘が無い（`--attempts` 2 以上または `discarded` で、失敗したラウンドのどれかを `round` に持つ finding が無い）、書き込み失敗
 
 ### `page_at_fault` は検証も消費もされていない
 
-`page_at_fault` は `FINDING_FIELDS` の射影に乗って記録されるが、**値を検証する箇所も読む主体も無い**。仕様の値は `under-review` / `other` の 2 値で、`review-rules.md` の返却形式の節（Part 1 rule 4）が `type` と同じ形でこれを列挙している — 値を書くモデルが従うのは返却形式の節に列挙された値であり、そこに無い値の仕様は守られにくい。
+`type` も同じ扱いである — 語彙外の値は `WARNING:` を出してそのまま記録し、欠落は検証しない。findings の欠落（上記の処理フロー 3）を拒むのとは理由が違う: あちらは orchestrator 自身の誤りで、エラーを受け取った orchestrator が直せる。
+
+`page_at_fault` は `FINDING_FIELDS` の射影に乗って記録されるが、**値を検証する箇所は無い**。読むのは公開側の `convert_wikilinks.py` の `count_findings_by_type()` だけで、厳密に `other` と一致するものだけを除き、それ以外（`this` / `self` を含む）はこのページについての指摘として数える — 揺れた値でも数え方は変わらない。仕様の値は `under-review` / `other` の 2 値で、`review-rules.md` の返却形式の節（Part 1 rule 4）が `type` と同じ形でこれを列挙している — 値を書くモデルが従うのは返却形式の節に列挙された値であり、そこに無い値の仕様は守られにくい。
 
 **本スクリプトに検証は足さない**。値を書くのはレビューサブエージェントで、警告が出る先は `record_review.py` を実行する orchestrator であり、両者は別のコンテキストにいるので警告は誰の行動も変えない。argparse の `choices` による強制も使えない（値は `--json` の中にあり、強制は「記録を書かない」か「フィールドを落とす」のどちらかで、いずれも仕様外の値より悪い）。記録は受け取った値をそのまま持つので、drift が残っているかは記録を数えれば分かる。
 
-**`this` / `self` 等の仕様外の値を `under-review` へ正規化もしない**。仕様が静かに 4 値になる。**既存の記録は書き換えない**（記録は不変）。`RISKY:` は findings を `page_at_fault` を見ずに数える（告発した側が載り、告発された側は載らない）が、告発先を引くには `page_at_fault` と `source_file` が信頼できる必要があるので、いまは使わない。
+**`this` / `self` 等の仕様外の値を `under-review` へ正規化もしない**。仕様が静かに 4 値になる。返却形式の節に値を列挙した後の配布版で書かれた記録では、仕様外の `page_at_fault`・`type` の欠落・語彙外の `type` はいずれも出ていない。**既存の記録は書き換えない**（記録は不変）。`RISKY:` は findings を `page_at_fault` を見ずに数える（告発した側が載り、告発された側は載らない）が、告発先を引くには `page_at_fault` と `source_file` が信頼できる必要があるので、いまは使わない。
 
 ---
 
@@ -3225,3 +3230,79 @@ python .wikicommit/scripts/rename_page.py apply --page <page> --year YYYY [--bas
 title を書き換えたページは `review_status: pending` にし `reviewed_by` を消す（翻訳も同じ）。slug が変わる場合も同じで、title が変わらないページ（既に年を持っていた）は title・`review_status`・`reviewed_by` に触らない（翻訳は `translated_from` だけを書き換える）— slug はファイル名であり、人が読んだ本文ではない。レビュー記録は移さない — `check_review_coverage.py` と `convert_wikilinks.py` が `renamed_at` 付きの項目をたどって古い slug の記録を読む（title が変わっていれば `STALE_REVIEW:` になる）。`relations.yml` の項目は統合の項目と同じ形なので、`check_review_coverage.py` はリンクを書き換えたページを `STALE_REVIEW:` に数えない。
 
 終了コード: `0` = 完了（または変更なし）、`1` = 拒否。
+
+---
+
+## check_source_overlap.py
+
+### 目的
+
+ページがソースの文と言い回しをどれだけそのまま写しているかを、LLM を使わずに数える。Pass 4 は「ページがソースに忠実か」を照合するので、ソースの文を写したページはむしろ通りやすく、流用を見つける仕組みは他に無い。LLM に「言い回しが近すぎるか」を判定させると判定がぶれ、照合の入力と範囲も増えるため、連続する語の一致という機械的に数えられる量だけを使う。**報告に留める** — どう扱うかは人が決める。ソースのライセンスで扱いを分けない（CC BY-SA のソースでも近接した言い換えは Wiki の書き方として望ましくない）。
+
+### 使用場面
+
+- `wikicommit-generate`：`source-overlap` ステップ（`workflow.yaml` は `completion` の直前、`workflow-regenerate.yaml` は `report` の直前）。Skill の `workflow_checks.py source-overlap` が、その実行が書いたページ（実行状態の `touched` のうち entity ページ）を渡して呼ぶ。抽出テキストのキャッシュが確実にあるのは書き出しの直後なので、ここで呼ぶ。行はステップの notes として Completion Notice / 再生成の報告に載る
+- `wikicommit-merge`：Step 3 の品質チェック（`checks`）。変更ページ（`changed_md`）だけを `--summarize-missing` 付きで渡す。`OVERLAP:` は warning として PR 本文に載り、`NO_SOURCE_TEXT:` の件数は notes に出すだけで warning に数えない（キャッシュは gitignore されており、無いことはその作業コピーの事情であって、マージする人がページごとに直せるものではないため）
+
+### コマンド
+
+```
+python .wikicommit/scripts/check_source_overlap.py [<page> ...]
+    [--n 6] [--cjk-n 12] [--threshold 0.2] [--min-words 100]
+    [--summarize-missing] [--all-shares]
+```
+
+ページを渡さなければ entity の全ページを測る。view ページは `sources[]` を持たない（`derived_from` のみ）ので測らない。`--all-shares` は閾値の下のページにも `SHARE:` 行を出す（閾値を決め直すとき用）。
+
+### 処理フロー
+
+1. **ソースの本文を引く**。ページの `sources[]` の各エントリを、管理ファイルの `source.url` / `source.path` を同一性キーとして管理ファイルに対応づけ、抽出テキストのキャッシュを読む。キャッシュの置き場所は `resolve_source_cache_path.py` と同じ規則（管理ファイルの木からの相対パスを、末尾の `.md` も含めてそのままキャッシュの木の下に置く。`url` / `wikicommit` は `.wikicommit/.cache/ingest-fetch/`、`path` は `.wikicommit/.cache/extract-path/`）。管理ファイルは実行ごとに 1 度だけ走査して索引にする — 1 件ずつ木を走査する `locate_url()` / `locate_path()` を使うと、全ページの実行で管理ファイルをページ数×ソース数回読むことになる。`.md` / `.txt` の `path` ソースは Pass 1 がキャッシュを作らずそのまま読むので、ファイルそのものを読む。`type: manual` のエントリと取り下げ済み（`status: retracted`）のソースは測る相手にしない（後者のページは `check_retracted_sources.py` が報告する）
+2. **言語の違うソースは測らない**。管理ファイルの `source.lang` がページの `lang:` と違うソースは比べない — 語の一致では翻訳を介した流用は測れない。`source.lang` が空のソースは比べる（別の言語なら一致が出ないだけで、誤った所見にはならない）。`translated_from` を持つ翻訳ページも測らない
+3. **ページの本文から、ページ自身が書いた文だけを残す**。frontmatter と `## Generation Notes` 以降を除き、さらにフェンス・インラインのコード、引用ブロック（`>`）、表の行（`|`）、引用符で囲んだ部分（`"…"`・`“…”`・`「…」`・`『…』`）を除く — 直接の引用は一致して当然であり、表の行の大半は固有名詞・術語の列である（表の中の「固有名詞の列」だけを見分ける決定論的な方法は無いので、表の行ごと除く）。WikiLink は表示名に（無ければ slug の語に）、Markdown リンクはリンク文字列に置き換え、画像と URL は除く。**除いた箇所で本文を切り、行もまたがない** — 除いた引用をまたいで前後がつながり、一致が生まれることを避けるため。ソース側には除外を掛けない（何を写したかを測る相手であるため）
+4. **語に分ける**。小文字にし、Unicode の英数字の並び（`'` を挟む語を含む）を 1 語とする。日本語・中国語は語の間に空白が無いので、かな・漢字は 1 文字を 1 トークンとし、一致の長さは `--n` 語ではなく `--cjk-n` 文字とする。`lang:` が `ja` / `zh` のページ（`lang:` が無ければ本文にかな・漢字を含むページ）がこれに当たる。韓国語は語を空白で区切るので語として数える
+5. **割合を出す**。ソース（比べるソースすべての和）にも現れる n トークン以上の連続に含まれる、ページのトークンの割合。最長の一致も記録する
+
+| 状態 | 出力 |
+|---|---|
+| 測れて、割合が `--threshold` を超え、語数が `--min-words` 以上（ja / zh は文字数が `--min-words` の 2 倍以上） | `OVERLAP:` |
+| 測れて、上に当たらない | なし（`--all-shares` なら `SHARE:`） |
+| 比べられるソースのどれにも本文が無い（未登録・キャッシュ無し） | `NO_SOURCE_TEXT:` — 黙って通さない。言語の違うソースに本文があっても、言語の合うソースに本文が無ければこちらにする（そのマシンでは測れたかもしれないページだから） |
+| 比べられるソースが言語の違うものだけ、または翻訳ページ | `SKIPPED_CROSS_LANG:` |
+| 本文を持つソースが無い（`manual` のみ・取り下げ済みのみ）・`status: removed` | なし（SUMMARY にも数えない） |
+
+ソースの一部にしかキャッシュが無いページは、あるものに対して測る。
+
+### 閾値と既定値
+
+既定値は 4 つの Wiki の実測で決めた（2026-10-19。キャッシュは `add_source.py --fetch-url` で取り直した本文。割合は既定値での値）。
+
+| 測ったもの | ページ | 中央値 | 75% 点 | 最大 | 既定値で `OVERLAP:` |
+|---|---|---|---|---|---|
+| `ai-driven-dev-wiki`（`1cf5cac`、英語ページ） | 1,076 | 10% | 18% | 65% | 219 |
+| Pass 3 の「自分の言葉で書く」規則より前の規則で作り直した 8 枚（対照） | 8 | 30% | — | 37% | 8 |
+| 同じ 8 枚を新しい規則で作り直したもの | 8 | 7% | — | 11% | 0 |
+| `ai-cybersecurity-wiki`（Wikipedia 由来、0.11.0。新しい規則より前） | 28 | 46% | 56% | 66% | 24 |
+| `saitama-city-wiki`（日本語、ja のソースから ja のページ） | 125 | 41% | 57% | 82% | 86 |
+
+- **`--threshold 0.2`**: 新しい規則のページ（最大 11%）との間に余裕を取り、規則が狙う写し方（対照 20〜37%）を拾う。15% にすると `ai-driven-dev-wiki` の 1/3 が報告され、新しい規則のページとの間に余裕も無くなる
+- **`--n 6`**: 各ページを無関係なソース（同じ Wiki の別のページのソース）と比べると、6 語の一致を含む語の割合は 90% 点・99% 点とも 0%（最大 1%）だった。偶然の一致はほぼ無い
+- **`--cjk-n 12`**: 同じ比べ方で、日本語のページは 6 文字だと偶然の一致が 90% 点 21% になり、12 文字で 1% に下がる（16 文字は 0% だが、写したページの割合も下がる）。日本語の 1 語は概ね 2 文字なので、12 文字は 6 語に相当する。報告された日本語のページの最長一致は 100〜240 文字で、写したものである
+- **`--min-words 100`**: 100 語未満のページは、術語の名前の一致 1 つで 6% になる。実測では短いページの割合が目立って高いことはなかった（`ai-driven-dev-wiki` の 150 語未満 24 枚の中央値 14%、全体 10%）ので、下限はこの程度に留める
+
+閾値は warning の閾値であり、blocking にするかは決めていない。
+
+### 出力フォーマット
+
+```
+OVERLAP: .wikicommit/entity/en/BlogPosting/steering-claude-code.md 32% (682 words; longest: 14 words "claude md files rules skills subagents hooks ...")
+NO_SOURCE_TEXT: .wikicommit/entity/en/DefinedTerm/context-window.md
+SKIPPED_CROSS_LANG: .wikicommit/entity/en/BlogPosting/kiro-spec.md (en page; sources in ja)
+SKIPPED_CROSS_LANG: .wikicommit/entity/ja/BlogPosting/kiro-spec.md (translated page)
+SUMMARY: measured=1076, overlap=219, under_min_words=9, no_source_text=17, cross_lang=1083
+```
+
+1 ページ以上を測り、`OVERLAP:` が 1 件も無ければ `SUMMARY:` の前に `OK: no page over the threshold` を出す（1 ページも測れなかった実行は通ったことにしない）。ja / zh のページは単位を `characters` と書き、最長一致を空白なしでつなぐ。最長一致は 120 文字で切る。`--summarize-missing` では `NO_SOURCE_TEXT:` をページごとに出さず、`NO_SOURCE_TEXT: <N> page(s) not measured — none of their sources has extracted text on this machine` の 1 行にする。
+
+### 終了コード
+
+- 常に `0`（警告のみ、ブロッキングしない）

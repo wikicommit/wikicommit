@@ -136,7 +136,9 @@ plugins:
   # so Japanese text and tags came out as rows of boxes. Without it, Quartz points
   # every page's card at its own static/og-image.png (the Quartz logo; the file is
   # quartz/quartz/static/og-image.png in the submodule); the title and description
-  # still appear as text. Add the entry back only if your pages are in a language
+  # still appear as text. To show the wiki's own image instead, put a PNG at
+  # .wikicommit/assets/og-image.png; deploy.yml copies it over the logo after the
+  # build (Issue #1371). Add the entry back only if your pages are in a language
   # its fonts cover and the build time is acceptable; `enabled: false` is not
   # enough to drop its cost, the entry has to go.
   - source: github:quartz-community/cname

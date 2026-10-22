@@ -97,6 +97,26 @@ nested because every aggregation — totals, counts by `type`, the highest round
 reached — is then a single filter. `attempts` is stated separately because it
 cannot be recovered from `max(round)` when the final round found nothing.
 
+**A record that says a round failed must carry what it found.** Pass 4 only
+retries on a FAIL, and a FAIL always names at least one issue against the page
+under review, so every round before the last — and the last too under
+`result: discarded` — must be the `round` of some finding whose `page_at_fault`
+is not `other`. One that is not means the caller dropped that round (an empty
+array is the commonest case: the final round handed over alone). That record is refused
+rather than written: it cannot be repaired afterwards, and the one reading it
+(`RISKY:`) sends a person to the page with nothing to look for. The error goes
+to the orchestrator, which is the one holding the earlier rounds. The values
+*inside* a finding (`type`, `page_at_fault`) are not checked the same way: the
+review subagent writes them, the orchestrator cannot correct them faithfully,
+and the fix that worked for their drift was the return-format section of
+`review-rules.md`.
+
+`generated_by` is the model that wrote the text under review, copied from the
+page's own `generated_by` (`translated_by` for a translation), while `model` is
+the model that reviewed it. The two are copied rather than passed so that no
+caller can forget one; a discarded page has no frontmatter to copy from, so its
+record has no `generated_by`.
+
 ## Relationship to the agent-to-agent review JSON
 
 That JSON stays agent-to-agent, and stays free to gain fields. What is
@@ -120,7 +140,8 @@ Usage:
 Exit code:
     0 = a record was written
     1 = bad arguments, a page outside the two trees, unreadable/malformed
-        JSON, or the record could not be written
+        JSON, a failed round with no finding of its own, or the record could
+        not be written
 """
 
 import argparse
@@ -280,6 +301,13 @@ def page_evidence_entries(fm: dict) -> list[dict]:
             "source_commit": str(commit) if commit is not None else "",
         }]
     return []
+
+
+def generator_model(fm: dict) -> str:
+    """The model that wrote the page's text: `translated_by` for a translation."""
+    key = "translated_by" if fm.get("translated_from") else "generated_by"
+    value = fm.get(key)
+    return value.strip() if isinstance(value, str) else ""
 
 
 def reviewed_sources_for(page_path: Path) -> list[dict]:
@@ -503,9 +531,42 @@ def allocate_record_path(directory: Path, stamp: str, kind: str) -> Path:
     raise RecordError(f"{directory}: could not allocate a record filename for {stamp}-{kind}")
 
 
+def failed_rounds_without_findings(args, findings: list[dict]) -> list[int]:
+    """The rounds the arguments say failed that no finding of this page names.
+
+    Every round before the last failed (a retry only follows a FAIL), and so did the
+    last when the page was discarded. A FAIL always names at least one issue against
+    the page under review, so each such round must be the `round` of some finding
+    whose `page_at_fault` is not `other` — an `other` entry never makes a FAIL, and
+    a final PASS round can carry one, so counting it would let a caller that passed
+    the last round alone through.
+    """
+    last_failed = args.attempts if args.result == "discarded" else args.attempts - 1
+    named = set()
+    for finding in findings:
+        if finding.get("page_at_fault") == "other":
+            continue
+        try:
+            named.add(int(finding.get("round", 1)))
+        except (TypeError, ValueError):
+            continue
+    return [r for r in range(1, max(last_failed, 0) + 1) if r not in named]
+
+
 def build_record(args, payload: dict, page_path: Path, page_rel: str) -> tuple[dict, list[dict]]:
     """Assemble the record's frontmatter mapping and its findings."""
     findings = project_findings(payload)
+    missing = failed_rounds_without_findings(args, findings)
+    if missing:
+        if not findings:
+            rounds = "every round failed" if args.result == "discarded" else f"attempts={args.attempts}"
+            what = f"{rounds} but no findings were passed"
+        else:
+            what = f"round(s) {', '.join(map(str, missing))} failed but no finding names them"
+        raise RecordError(
+            f"{page_rel}: {what} — merge every round's"
+            " issues into the one `issues` array, each with the `round` it was raised in"
+        )
 
     page_exists = page_path.is_file()
     if args.result == "discarded":
@@ -546,6 +607,13 @@ def build_record(args, payload: dict, page_path: Path, page_rel: str) -> tuple[d
         record["model"] = args.model
     elif args.reviewer:
         record["reviewer"] = args.reviewer
+    # Not read for a discard, for the reason reviewed_sources is not: what is on
+    # disk then is a previous version, or nothing.
+    if page_exists and args.result != "discarded":
+        fm, err = parse_frontmatter(page_path)
+        writer = generator_model(fm) if fm and not err else ""
+        if writer:
+            record["generated_by"] = writer
 
     record["reviewed_at"] = args.reviewed_at or datetime.now().strftime("%Y-%m-%d")
     if args.skill_blob:

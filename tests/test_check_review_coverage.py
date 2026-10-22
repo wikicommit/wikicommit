@@ -4,11 +4,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 SCRIPTS = Path(__file__).parent.parent / ".wikicommit" / "scripts"
+sys.path.insert(0, str(SCRIPTS))
+from record_review import compute_page_content_hash, record_dir_for  # noqa: E402
 SCRIPT = SCRIPTS / "check_review_coverage.py"
 RECORDER = SCRIPTS / "record_review.py"
 
 PAGE_REL = ".wikicommit/entity/ja/Person/yamada-taro.md"
+
+# One FAIL round. `record_review.py` refuses a retried or discarded record without
+# the findings of its failed rounds, so these tests pass one.
+ROUND_1 = '{"issues":[{"type":"HALLUCINATION","claim":"c","instruction":"i","round":1}]}'
 
 
 def run(cwd: Path) -> subprocess.CompletedProcess:
@@ -57,6 +65,30 @@ def ai(cwd: Path, page: str = PAGE_REL, *, attempts: str = "1", result: str = "p
     record(cwd, *args, stdin=stdin)
 
 
+def old_record(root: Path, page: str = PAGE_REL, name: str = "20260901-000000-ai.md",
+               **fields) -> None:
+    """Write a record the way 0.6.1-0.8.0 could, bypassing today's refusals.
+
+    Records are immutable, so the shapes those versions wrote stay in pilot wikis
+    for good: retries with the failed rounds' findings dropped, findings without
+    `type`, `page_at_fault: this` / `self`. The reader has to keep handling them.
+    """
+    page_path = root / page
+    record = {
+        "page": page, "kind": "ai", "stage": "generate-pass4", "model": "m",
+        "reviewed_at": "2026-09-01", "wikicommit_version": "0.7.0",
+        "page_content_hash": compute_page_content_hash(page_path) if page_path.is_file() else "",
+        "reviewed_sources": [], "attempts": 1, "result": "pass", "findings": [],
+    }
+    record.update(fields)
+    directory = root / record_dir_for(page)
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(
+        "---\n" + yaml.safe_dump(record, sort_keys=False, allow_unicode=True) + "---\n",
+        encoding="utf-8",
+    )
+
+
 def test_no_review_tree_says_so_rather_than_reporting_zeros(tmp_path):
     """"Nothing recorded yet" and "everything came back zero" are different states."""
     write_page(tmp_path)
@@ -95,9 +127,9 @@ FINDING = ('{"result":"PASS","issues":[{"type":"HALLUCINATION","claim":"c",'
 def test_retries_and_findings_make_a_page_risky(tmp_path):
     """RISKY is the sampling list — the thing that evaporated when verdicts were dropped."""
     write_page(tmp_path)
-    ai(tmp_path, attempts="3", stdin=FINDING)
+    ai(tmp_path, attempts="2", stdin=FINDING)
     out = run(tmp_path).stdout
-    assert "RISKY: " + PAGE_REL + " (attempts=3, findings=1)" in out
+    assert "RISKY: " + PAGE_REL + " (attempts=2, findings=1)" in out
 
 
 def test_a_clean_first_pass_is_not_risky(tmp_path):
@@ -111,7 +143,7 @@ def test_a_later_clean_review_takes_a_page_off_the_sampling_list(tmp_path):
     history meant a page that was ever retried stayed on `RISKY:` forever and the
     list converged on the whole wiki — at which point it selects nothing."""
     write_page(tmp_path)
-    ai(tmp_path, attempts="3", stdin=FINDING)
+    ai(tmp_path, attempts="2", stdin=FINDING)
     assert "RISKY: " + PAGE_REL in run(tmp_path).stdout
 
     ai(tmp_path)
@@ -125,8 +157,8 @@ def test_the_standing_review_keeps_reporting_its_own_retries(tmp_path):
     """The "it took two rounds" signal is not lost: the standing record carries it."""
     write_page(tmp_path)
     ai(tmp_path)
-    ai(tmp_path, attempts="2")
-    assert "RISKY: " + PAGE_REL + " (attempts=2, findings=0)" in run(tmp_path).stdout
+    ai(tmp_path, attempts="2", stdin=ROUND_1)
+    assert "RISKY: " + PAGE_REL + " (attempts=2, findings=1)" in run(tmp_path).stdout
 
 
 def test_a_human_finding_makes_a_page_risky(tmp_path):
@@ -144,7 +176,7 @@ def test_a_discarded_record_does_not_make_a_page_risky(tmp_path):
     write_page(tmp_path)
     ai(tmp_path)
     record(tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
-           "--model", "m", "--attempts", "3", "--result", "discarded",
+           "--model", "m", "--attempts", "1", "--result", "discarded",
            "--json", "-", stdin=FINDING)
     assert "RISKY:" not in run(tmp_path).stdout
 
@@ -193,7 +225,8 @@ def test_bookkeeping_only_edits_do_not_go_stale(tmp_path):
 def test_a_discarded_record_never_reports_page_staleness(tmp_path):
     """An empty hash means the page was never written, not that it diverged."""
     record(tmp_path, ".wikicommit/entity/ja/Place/gone.md", "--kind", "ai",
-           "--stage", "generate-pass4", "--model", "m", "--result", "discarded")
+           "--stage", "generate-pass4", "--model", "m", "--result", "discarded",
+           "--json", "-", stdin=ROUND_1)
     assert "STALE_REVIEW:" not in run(tmp_path).stdout
 
 
@@ -215,7 +248,8 @@ def test_a_discarded_update_does_not_make_the_page_it_left_alone_stale(tmp_path)
         encoding="utf-8",
     )
     record(tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
-           "--model", "m", "--result", "discarded", "--sources-from", str(mgmt))
+           "--model", "m", "--result", "discarded", "--sources-from", str(mgmt),
+           "--json", "-", stdin=ROUND_1)
 
     out = run(tmp_path).stdout
     assert "STALE_REVIEW:" not in out
@@ -231,7 +265,7 @@ def test_a_page_whose_only_record_was_discarded_is_unreviewed(tmp_path):
     page appeared in none of them while SUMMARY/COVERAGE counted it as reviewed."""
     write_page(tmp_path)
     record(tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
-           "--model", "m", "--attempts", "3", "--result", "discarded",
+           "--model", "m", "--attempts", "1", "--result", "discarded",
            "--json", "-", stdin=FINDING)
     out = run(tmp_path).stdout
 
@@ -293,7 +327,7 @@ def test_a_discarded_attempt_after_a_clean_pass_keeps_the_standing_verdict(tmp_p
     write_page(tmp_path)
     ai(tmp_path)
     record(tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
-           "--model", "claude-opus-5[1m]", "--attempts", "3", "--result", "discarded",
+           "--model", "claude-opus-5[1m]", "--attempts", "1", "--result", "discarded",
            "--json", "-", stdin=FINDING)
     out = run(tmp_path).stdout
 
@@ -754,12 +788,12 @@ def rename(root: Path, page: str = PAGE_REL, year: str = "2025") -> None:
 def test_a_renamed_page_reads_the_old_slugs_record_and_is_stale(tmp_path):
     """The title changed, so the verdict does not stand — but it is not lost either."""
     write_page(tmp_path)
-    ai(tmp_path, attempts="2")
+    ai(tmp_path, attempts="2", stdin=ROUND_1)
     rename(tmp_path)
     out = run(tmp_path).stdout
     assert "UNREVIEWED: " + RENAMED_REL not in out
     assert "SUMMARY: pages=1, ai_reviewed=1," in out
-    assert "RISKY: " + RENAMED_REL + " (attempts=2, findings=0)" in out
+    assert "RISKY: " + RENAMED_REL + " (attempts=2, findings=1)" in out
     assert (
         f"STALE_REVIEW: {RENAMED_REL} (page content changed since"
     ) in out
@@ -864,3 +898,34 @@ def test_a_rename_does_not_carry_a_human_sign_off(tmp_path):
     rename(tmp_path)
     out = run(tmp_path).stdout
     assert "SUMMARY: pages=1, ai_reviewed=1, human_reviewed=0" in out
+
+
+def test_records_in_the_shapes_older_versions_wrote_are_still_read(tmp_path):
+    """0.6.1-0.8.0 wrote retries with their findings dropped, findings without
+    `type`, and `page_at_fault` spelled `this` / `self`. `record_review.py` no
+    longer writes the first, but the records are immutable, so the reader keeps
+    counting all three rather than failing on them (Issue #1384)."""
+    write_page(tmp_path)
+    write_page(tmp_path, ".wikicommit/entity/ja/Place/x.md")
+    old_record(tmp_path, attempts=2)
+    old_record(tmp_path, ".wikicommit/entity/ja/Place/x.md", findings=[
+        {"round": 1, "claim": "c", "instruction": "i"},
+        {"round": 1, "type": "CONTRADICTION", "claim": "d", "page_at_fault": "this"},
+        {"round": 1, "type": "IMPRECISION", "claim": "e", "page_at_fault": "self"},
+    ])
+    old_record(tmp_path, ".wikicommit/entity/ja/Place/gone.md", attempts=3,
+               result="discarded")
+
+    result = run(tmp_path)
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "RISKY: " + PAGE_REL + " (attempts=2, findings=0)" in out
+    assert "RISKY: .wikicommit/entity/ja/Place/x.md (attempts=1, findings=3)" in out
+
+    reason = subprocess.run(
+        [sys.executable, str(SCRIPT), "--discarded-reason",
+         ".wikicommit/entity/ja/Place/gone.md", ".wikicommit/entity/ja/Place/x.md"],
+        capture_output=True, text=True, cwd=tmp_path, check=False,
+    )
+    assert reason.returncode == 0, reason.stderr
+    assert "(the record names no finding)" in reason.stdout

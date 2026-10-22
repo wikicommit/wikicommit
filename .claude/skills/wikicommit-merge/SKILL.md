@@ -33,8 +33,8 @@ python .wikicommit/scripts/skill_workflow.py start --workflow workflow.yaml \
 Then **loop**:
 
 1. Read the JSON it printed. **Keep the `run` path** — every later call names it.
-2. If `notes` is present, report every line of it to the user. The workflow engine's own steps speak through it: the version-skew check of `.wikicommit/scripts/` (`OUTDATED:`, `MISSING:`, `ORPHAN:`, `WARNING:` — report all four; a skew warning does not stop the run, but a quality gate older than the rule it enforces passes what the current one would block, and this is the last check before the default branch), the default branch (`DEFAULT_BRANCH:`, with a `WARNING:` when it could not be read from GitHub and `main` is assumed), and another run's unfinished work (`OPEN_RUN:`).
-3. If `step` is `null`, the run is over — `finished` (say `finished_because` if present: "No changes to merge", or the user chose to stop at the warnings), or halted (say `halted_reason`: another run still open, a blocking quality check — its findings are in `notes` — or a PR that could not be merged). Stop.
+2. If `notes` is present, report every line of it to the user. The workflow engine's own steps speak through it: the version-skew check of `.wikicommit/scripts/` (`OUTDATED:`, `MISSING:`, `ORPHAN:`, `WARNING:` — report all four; a skew warning does not stop the run, but a quality gate older than the rule it enforces passes what the current one would block, and this is the last check before the default branch), the default branch (`DEFAULT_BRANCH:`, with a `WARNING:` when it could not be read from GitHub and `main` is assumed), a PR an earlier run left for a person (`AWAITING_MERGE:` while it is still open, `AWAITED_MERGED:` once a person merged it and this run files its Issues), pages held back because no AI review judges them (`UNREVIEWED_PAGE:`, `HELD_SOURCE:`, `HELD_BACK:` — say which, and that they stay uncommitted), and another run's unfinished work (`OPEN_RUN:`).
+3. If `step` is `null`, the run is over — `finished` (say `finished_because` if present: "No changes to merge", the user chose to stop at the warnings, or `merge-pr: awaiting-merge` — the PR waits for a person's required review, and `/wikicommit-merge` is to be run again after a person merges it), or halted (say `halted_reason`: another run still open, a blocking quality check — its findings are in `notes` — or a PR that could not be merged). Stop.
 4. If `blocked` is true, the completion check for this step has failed repeatedly: stop and report the last `reason` to the user. Do not work around a check.
 5. A `human` step: ask the user `ask`, offering `choices`, and pass the answer back with the `then` command.
 6. An `agent` step: **read the file named in `instructions` now and follow it**. When it is done, run the `then` command with one of the `outcomes`, `--token` set to the `pass_token` in the instructions file's frontmatter, and the `--add`, `--reason` or `--count` that step's instructions ask for.
@@ -50,7 +50,10 @@ The steps (the table is here as well as in the workflow engine's answers so the 
 |---|---|---|---|
 | `freshness` | script | — | compares `.wikicommit/scripts/` with this Skill (warns, never stops) |
 | `default-branch` | script | — | reads the default branch from GitHub, or assumes `main` with a warning |
-| `detect` | script | — | Step 1: lists the changes; none → the run finishes with "No changes to merge" |
+| `awaited` | script | — | a PR an earlier run left for a person (`awaiting-merge`) that has been merged since: pulls the default branch and lists it (`awaited_prs`), so this run files its Issues |
+| `unreviewed` | script | — | holds back the pages `wikicommit-generate` wrote that no AI review record judges as they now stand, and the management files naming them (`skipped`): every later step leaves them out, and they stay uncommitted |
+| `detect` | script | — | Step 1: lists the changes |
+| `work` | script | — | no change and no merged PR to follow up → the run finishes with "No changes to merge"; with only a merged PR, the steps that carry a change (`quality-checks`, `commit`, `open-pr`, `merge-pr`) are skipped |
 | `open-runs` | script | — | refuses a change that carries files a still-open run touched |
 | `classify-*` (7 steps) | script | — | Step 2: one list each in the run record (`changed_md`, `removing`, `new_sources`, `new_schema`, `new_vocab`, `policy_files`, `relations_file`) |
 | `quality-checks` | script | — | Step 3: frontmatter, WikiLinks, raw HTML, orphans/duplicates; a blocking finding halts the run |
@@ -59,7 +62,7 @@ The steps (the table is here as well as in the workflow engine's answers so the 
 | `proceed-with-warnings` | human | — | only when there were warnings; a non-interactive run proceeds |
 | `commit` | agent | `references/commit.md` | Steps 4–5: branch and commit |
 | `open-pr` | agent | `references/open-pr.md` | Step 6: push and open the PR |
-| `merge-pr` | agent | `references/merge-pr.md` | Step 7: wait for a mergeable state, merge, return to the default branch |
+| `merge-pr` | agent | `references/merge-pr.md` | Step 7: wait for a mergeable state, merge, return to the default branch — or, when the default branch requires a review, leave the PR open for a person and finish (`awaiting-merge`) |
 | `review-targets` | script | — | Step 8: the pending pages that no open tracking Issue names yet (`review_targets`) |
 | `tracking-issues` | agent | `references/tracking-issues.md` | Step 8: one review tracking Issue per listed page; skipped when nothing needs one and the open Issues could be read |
 | `failure-targets` | script | — | Step 9: the failed sources that no open generation-failure Issue names yet (`failure_targets`) |
@@ -74,4 +77,5 @@ If `.wikicommit/scripts/skill_workflow.py`, `_workflow_checks.py` or `check_exte
 - Never commit directly to the default branch. Commits always happen on a `wikicommit/merge-*` branch (Step 8 does not create a `wikicommit/review-*` branch itself — `review-issue-close-sync.yml` creates that branch when the tracking Issue is closed)
 - Do not write to `.wikicommit/schema/` — this skill only ever *commits* new schema files `wikicommit-generate` Pass 2b already wrote to disk (Step 2 item 4, Step 5), it never creates or edits their content itself
 - Do not use `--force-push`
+- On a default branch that requires a review, the PR is not merged by this Skill: the run finishes with the PR open (`awaiting-merge`), and the **next** `/wikicommit-merge` after a person merges it files the tracking Issues. That run finds the PR through `.wikicommit/run/` on this machine; if the run record is gone (another machine, or rotated out), the next merge that carries a change still files them, since Step 8 scans the whole default branch
 - Never delete a branch, PR, or Issue without the user's confirmation (present the cleanup procedure to the user and confirm before running it)

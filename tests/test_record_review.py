@@ -15,6 +15,16 @@ SCRIPT = SCRIPTS / "record_review.py"
 PAGE_REL = ".wikicommit/entity/ja/Person/yamada-taro.md"
 RECORD_DIR_REL = ".wikicommit/review/entity/ja/Person/yamada-taro"
 
+# One FAIL round, for the records that say a round failed (Issue #1384).
+ROUND_1 = '{"issues":[{"type":"HALLUCINATION","claim":"c","instruction":"i","round":1}]}'
+# Three FAIL rounds, for a page discarded after three attempts.
+THREE_ROUNDS = (
+    '{"issues":['
+    + ",".join(f'{{"type":"HALLUCINATION","claim":"c","instruction":"i","round":{r}}}'
+               for r in (1, 2, 3))
+    + "]}"
+)
+
 
 def run(cwd: Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -214,7 +224,8 @@ def test_discarded_page_needs_no_file_and_records_an_empty_hash(tmp_path):
         tmp_path, ".wikicommit/entity/ja/Place/never-written.md",
         "--kind", "ai", "--stage", "generate-pass4", "--model", "m",
         "--attempts", "3", "--result", "discarded",
-        "--sources-from", ".wikicommit/source/url/example.com/a.md",
+        "--sources-from", ".wikicommit/source/url/example.com/a.md", "--json", "-",
+        stdin=THREE_ROUNDS,
     )
     assert result.returncode == 0, result.stderr
     fm = only_record(tmp_path, ".wikicommit/review/entity/ja/Place/never-written")
@@ -448,6 +459,7 @@ def write_translation(root: Path, *, translated_from: str = PAGE_REL, commit: st
         "review_status: pending\n"
         f"translated_from: {translated_from}\n"
         f'source_commit: "{commit}"\n'
+        'translated_by: "claude-sonnet-5-5"\n'
         "---\n\nBody.\n",
         encoding="utf-8",
     )
@@ -486,10 +498,123 @@ def test_translate_check_discard_does_not_read_the_old_translation(tmp_path):
     write_translation(tmp_path, commit="b" * 40)
     result = run(
         tmp_path, TRANSLATION_REL, "--kind", "ai", "--stage", "translate-check",
-        "--model", "m", "--attempts", "3", "--result", "discarded",
+        "--model", "m", "--attempts", "3", "--result", "discarded", "--json", "-",
+        stdin=THREE_ROUNDS,
     )
     assert result.returncode == 0, result.stderr
     fm = only_record(tmp_path, TRANSLATION_RECORD_DIR_REL)
     assert fm["result"] == "discarded"
+    # The translation on disk is the previous one; its translator did not write
+    # the text this run discarded.
+    assert "generated_by" not in fm
     assert fm["reviewed_sources"] == []
     assert fm["page_content_hash"] == ""
+
+
+def test_a_retry_without_its_failed_rounds_findings_is_refused(tmp_path):
+    """Pass 4 retries only on a FAIL, and a FAIL names an issue — so attempts>=2 with
+    no findings means the earlier rounds were not merged in. Records are immutable,
+    so the only point at which that can be caught is here (Issue #1384)."""
+    write_page(tmp_path)
+    result = run(
+        tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
+        "--model", "m", "--attempts", "2", "--result", "pass", "--json", "-",
+        stdin='{"result":"PASS","issues":[]}',
+    )
+    assert result.returncode == 1
+    assert "attempts=2 but no findings" in result.stderr
+    assert not (tmp_path / RECORD_DIR_REL).exists()
+
+
+def test_a_discard_without_findings_is_refused(tmp_path):
+    """Every round of a discarded page failed, so it has findings to carry."""
+    result = run(
+        tmp_path, ".wikicommit/entity/ja/Place/never-written.md",
+        "--kind", "ai", "--stage", "generate-pass4", "--model", "m",
+        "--attempts", "1", "--result", "discarded",
+    )
+    assert result.returncode == 1
+    assert "every round failed but no findings" in result.stderr
+
+
+def test_a_retry_that_passes_only_the_last_round_is_refused(tmp_path):
+    """A final PASS round can carry a `page_at_fault: other` entry, so a non-empty
+    `issues` array alone does not show that the failed round was merged in."""
+    write_page(tmp_path)
+    result = run(
+        tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
+        "--model", "m", "--attempts", "2", "--result", "pass", "--json", "-",
+        stdin='{"issues":[{"type":"CONTRADICTION","claim":"x","page_at_fault":"other","round":2}]}',
+    )
+    assert result.returncode == 1
+    assert "round(s) 1 failed but no finding names them" in result.stderr
+    assert not (tmp_path / RECORD_DIR_REL).exists()
+
+
+def test_a_discard_missing_a_later_round_is_refused(tmp_path):
+    result = run(
+        tmp_path, ".wikicommit/entity/ja/Place/never-written.md",
+        "--kind", "ai", "--stage", "generate-pass4", "--model", "m",
+        "--attempts", "3", "--result", "discarded", "--json", "-", stdin=ROUND_1,
+    )
+    assert result.returncode == 1
+    assert "round(s) 2, 3 failed" in result.stderr
+
+
+def test_values_inside_a_finding_are_recorded_as_given(tmp_path):
+    """`type` and `page_at_fault` are the review subagent's; the orchestrator that
+    would receive an error cannot correct them, so they are not refused."""
+    write_page(tmp_path)
+    payload = (
+        '{"issues":[{"claim":"a","round":1},'
+        '{"type":"IMPRECISION","claim":"b","page_at_fault":"this","round":1}]}'
+    )
+    result = run(
+        tmp_path, PAGE_REL, "--kind", "ai", "--stage", "generate-pass4",
+        "--model", "m", "--attempts", "1", "--result", "pass", "--json", "-",
+        stdin=payload,
+    )
+    assert result.returncode == 0, result.stderr
+    findings = only_record(tmp_path)["findings"]
+    assert "type" not in findings[0]
+    assert findings[1]["page_at_fault"] == "this"
+
+
+def test_the_model_that_wrote_the_page_is_recorded_beside_the_reviewer(tmp_path):
+    """Without it, "this model's pages drew few findings" cannot be told apart from
+    "this model's reviews were lenient"."""
+    write_page(tmp_path)
+    result = run(
+        tmp_path, PAGE_REL, "--kind", "ai", "--stage", "review-skill",
+        "--model", "claude-opus-5-5", "--attempts", "1", "--result", "pass",
+    )
+    assert result.returncode == 0, result.stderr
+    fm = only_record(tmp_path)
+    assert fm["generated_by"] == "claude-opus-5"
+    assert fm["model"] == "claude-opus-5-5"
+
+
+def test_a_translation_records_its_translator_as_the_writer(tmp_path):
+    write_page(tmp_path)
+    write_translation(tmp_path)
+    result = run(
+        tmp_path, TRANSLATION_REL, "--kind", "ai", "--stage", "translate-check",
+        "--model", "m", "--attempts", "1", "--result", "pass",
+    )
+    assert result.returncode == 0, result.stderr
+    assert only_record(tmp_path, TRANSLATION_RECORD_DIR_REL)["generated_by"] == "claude-sonnet-5-5"
+
+
+def test_a_page_without_generated_by_records_none(tmp_path):
+    """An absent value reads as unknown; a made-up one would not."""
+    page = write_page(tmp_path)
+    page.write_text(
+        page.read_text(encoding="utf-8").replace('generated_by: "claude-opus-5"\n', ""),
+        encoding="utf-8",
+    )
+    result = run(
+        tmp_path, PAGE_REL, "--kind", "human", "--stage", "issue-close",
+        "--reviewer", "octocat", "--result", "pass",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "generated_by" not in only_record(tmp_path)

@@ -5,7 +5,7 @@ wikicommit:
   granularity:
     - Create a new page for a specific news article that reports an independently notable event, announcement, or development directly relevant to the wiki's theme
     - An article mentioned only as a passing citation, or one that merely aggregates/summarizes other reporting with no independent reporting of its own, is not an independent subject — do not create a page for it
-    - The body should summarize what the article reports (the event/announcement and its significance), not restate the full article verbatim
+    - The body should summarize what the article reports (the event/announcement and its significance), not walk through the full article
     - Prefer creating pages for the underlying entities the article describes (e.g. a company, a product, a person) over the article itself when the article's only content is routine coverage of an entity that already has (or should have) its own page
     - author lists multiple names; link each author who independently qualifies for their own [[Person/slug]] page with a WikiLink, and list others as plain text
     - publisher names a publishing organization; link it with a WikiLink to [[Organization/slug]] the same way author is when it independently qualifies for its own page, and write it as plain text otherwise
@@ -41,7 +41,9 @@ wants to know what it reported and on what basis.
 (one claim per bullet, each a single fact, figure, or claim the article itself reports.
 Not prose spanning several sentences: a claim that cannot be lifted out on its own
 cannot be set beside one on another page, which is what this section exists for. Keep
-each bullet to what this article states — something it only attributes to another
-outlet is that outlet's claim, and its dates and details are not established facts
-here. Where the only backing is one named source, or the subject's own statement, say
-so in the same bullet)
+each bullet to what this article states — something it only attributes to another outlet
+is that outlet's claim, and its dates and details are not established facts here. Where
+the only backing is one named source, or the subject's own statement, say so in the same
+bullet. Keep to the main claims, at most seven bullets, ordered by importance — not by
+where the article raises them: a list that walks every point in the article's own order
+is a second copy of it, not a summary)

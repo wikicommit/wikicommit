@@ -52,6 +52,12 @@ Each front page carries its own counts, recomputed on every build: how many page
   <img alt="The front page of a published wiki, showing three counts — pages, pages checked against their sources, and pages a person has read — followed by a paragraph explaining what each count does and does not mean." src="assets/front-light.png">
 </picture>
 
+## Under the Hood
+
+**Long Skills are run by a workflow engine, not from the agent's memory.** When an agent carries a long procedure in its head, steps near the end get skipped, results are not handed on — and after a compaction drops part of the instructions, the output still looks normal. So the order of the multi-step Skills lives in [`skill_workflow.py`](.wikicommit/scripts/skill_workflow.py), a script that depends only on PyYAML and never calls an LLM. The agent asks it for the next step (`next`), does that one step, and reports back (`done`); for a step that leaves something on disk, the engine counts it as finished only when it finds that result there, not because the agent says so. It keeps no state of its own: it replays the run's log on every call, and values passed between steps live in that log, so a compaction cannot erase them. `/wikicommit-merge` refuses a change that carries files touched by a run still open. The engine knows nothing about WikiCommit — each Skill's steps are declared in its own definition file, such as [`wikicommit-generate/workflow.yaml`](.claude/skills/wikicommit-generate/workflow.yaml). The design is in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.0 (in Japanese).
+
+**The machine review is an LLM-as-a-judge, and we measured it.** Every page is checked by an LLM against the sources it was generated from — faithfulness to those sources, not a general quality score. We checked that judge against human labels on a sample of pages — how often its flags were right, and how often a page it passed still had a defect. The numbers are in [Step 3](#step-3-post-merge-review); how they were measured is in [docs/DesignDoc-architecture.md](docs/DesignDoc-architecture.md) §15.4.1 (in Japanese).
+
 ## How a Wiki Is Laid Out
 
 Everything the wiki holds lives under `.wikicommit/`, in three layers. Each layer is written from the one before it.
@@ -141,6 +147,8 @@ That last one matters when an encyclopedia covers your subject. A page written f
 
 Check the review-tracking Issue (`wikicommit-review` label, automatically created for each page with `review_status: pending`). Closing it states two things: that this page's knowledge reached a person, and that nothing struck them as obviously wrong while reading. It is not a guarantee that the content is correct.
 
+As a rough reference for how much the machine check catches: in one small trial (one rater, 50 pages from one wiki, October 2026), at least about 8 in 10 of the problems it flagged were real, and among pages it passed without flagging, somewhere between about 1 in 10 and 4 in 10 still had a defect (95% intervals). This is a single measurement, not a guarantee in either direction — which is why a person reading a sample of pages still matters.
+
 - **Nothing stood out** → Just close the Issue to finish. `review-issue-close-sync.yml` detects this, updates `review_status: reviewed`, and auto-merges.
 - **Something stood out** → Leave it in a comment and keep the Issue open — the fix is not the reader's to make. `/wikicommit-fix <issue-url>` has the AI propose a fix based on the Issue body and comments; after human confirmation, `/wikicommit-merge` applies the fix, and then the Issue is closed.
 - **Page created or edited directly by a human without going through an Issue** → `/wikicommit-review <page>` completes the frontmatter, runs a source-consistency check, and records review completion, then `/wikicommit-merge`.
@@ -196,6 +204,8 @@ WikiCommit does not provide LLM inference — you bring your own Claude Code, Gi
 
 **Those are the points where a run stops fitting, not a setting you can raise.** Past them the agent has to shrink the conversation mid-run, and what it keeps of the Skill's own instructions depends on the agent — in Claude Code it re-attaches only the first 5,000 tokens of each Skill, so most of the steps are lost, and **the output still looks normal**. `/wikicommit-generate` asks before processing more than 5 sources in one run, but that is a prompt rather than a limit — answering "process all" is supported, and the table is what it costs. Splitting the work across separate runs is the reliable way past them: the sources you leave keep their state, and the next run picks them up.
 
+**The [workflow engine](#under-the-hood) limits the damage but does not lift those points.** What a compaction cannot erase is which step comes next and the values passed between steps — both live in the run's log on disk — provided the agent asks the engine for its place again after the compaction; the instruction to do so sits at the top of the Skill, which in Claude Code is inside the part that is re-attached. What it does not protect is the instructions *within* a step: those are read from files, and losing them mid-step can still produce output that looks normal. In other agents, how much of a Skill survives depends on the agent.
+
 **At 128K, even the 5-source default does not fit** at the heavier per-source cost (about 159K), so answering "first 5 only" is not enough there. Name one source at a time instead — `/wikicommit-generate <path|url>` processes only the source you pass — or switch to a model with a larger window.
 
 Window sizes depend on the agent and the model you pick (figures as of 2026-10):
@@ -204,7 +214,20 @@ Window sizes depend on the agent and the model you pick (figures as of 2026-10):
 - **Codex**: the models in Codex's own catalog default to a 272K window ([`models.json` in openai/codex](https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json)).
 - **GitHub Copilot**: GitHub does not publish a default size per model; the latest models offer an extended 1M window in VS Code and Copilot CLI ([supported models](https://docs.github.com/en/copilot/reference/ai-models/supported-models#models-with-extended-capabilities)). In Copilot CLI, `/context` shows the window of the model in use.
 
-You can measure your own sources after a single run: `grep extracted_tokens .wikicommit/source/**/*.md` — that field counts the extraction alone, so expect it to read lower than the per-source figures above. The breakdown of the fixed overhead, and exactly what a compaction drops, are in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6.
+You can measure your own sources after a single run: `grep extracted_tokens .wikicommit/source/**/*.md` — that field counts the extraction alone, so expect it to read lower than the per-source figures above. The breakdown of the fixed overhead, and exactly what a compaction drops, are in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6 (in Japanese).
+
+### How long a run takes
+
+Time follows the number of pages written, not the size of the sources — a short source that yields many pages takes longer than a long one that yields few. As a rough reference, measured in Claude Code:
+
+| Command | Measured | Conditions |
+|---|---|---|
+| `/wikicommit-generate` | about 2.1 minutes per page attempt (1.7–2.4 across sources) | September 2026, `claude-opus-5[1m]`, 5 sources of 1.2K–14K extracted tokens, 28 pages (27 new, 1 updated) |
+| `/wikicommit-translate` | about 1 minute per page per target language | October 2026, `claude-opus-5-5`, English to Japanese, 15 glossary (`DefinedTerm`) pages of 3K–11K characters |
+
+A page attempt is one draft plus its source-consistency check; a page that fails the check is redrafted, and in the measurement that came to about 1.4 attempts per page. What you can count in advance is sources, and how many pages a source yields varies most — about 4 to 6 in the wikis measured so far. So **30 sources ≈ 120–180 pages ≈ 6–9 hours to generate**, and about 2–3 hours more for each language you translate them into.
+
+These are wall-clock times from single measurements, not a specification: generation includes any time the agent spent waiting for your answers, a much larger source or a different agent or model may differ, and translation has only been measured on glossary pages. To measure your own, each run leaves a record in `.wikicommit/run/` with `started_at` and `ended_at` (`/wikicommit-status` shows how long the latest runs took); divide by the pages the run wrote — about 3 minutes per page in the generation measurement above, redrafts included. How the figures above were measured is in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6 (in Japanese).
 
 ## Installation
 
@@ -273,6 +296,7 @@ against those declarations. Skills not listed need no other Skill.
 | `wikicommit-collect` | `wikicommit-generate` `wikicommit-init` |
 | `wikicommit-review` | `wikicommit-generate` `wikicommit-init` |
 | `wikicommit-fix` | `wikicommit-generate` `wikicommit-init` |
+| `wikicommit-synthesize` | `wikicommit-generate` `wikicommit-init` |
 
 After installation, run this in the repository where you want to initialize the wiki:
 
@@ -330,7 +354,7 @@ flowchart TD
     pages --> merge["/wikicommit-merge<br/>quality checks → branch → PR → merge<br/>→ main → GitHub Pages + review tracking Issues"]
 ```
 
-The inside of `/wikicommit-generate` — the four passes from text extraction through type selection, entity extraction, page generation and the check against the sources — is in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6; a fuller version of the diagram above is in §11.2 of the same file.
+The inside of `/wikicommit-generate` — the four passes from text extraction through type selection, entity extraction, page generation and the check against the sources — is in [docs/DesignDoc-skills.md](docs/DesignDoc-skills.md) §11.6 (in Japanese); a fuller version of the diagram above is in §11.2 of the same file.
 
 | # | Category | Command | Description |
 | --- | --- | --- | --- |

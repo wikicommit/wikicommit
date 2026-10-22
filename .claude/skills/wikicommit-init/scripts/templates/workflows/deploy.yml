@@ -136,6 +136,31 @@ jobs:
       - name: Build Quartz site
         run: npm run build
 
+      # The wiki's own social-card image (Issue #1371). Quartz points every
+      # page's og:image / twitter:image at https://<baseUrl>/static/og-image.png
+      # and declares it image/png; the file it copies there is the Quartz logo
+      # (quartz/quartz/static/og-image.png, a tracked file in the submodule).
+      # Replacing the built copy here leaves the submodule untouched. It is done
+      # after the build rather than by a plugin, because Quartz runs its emitters
+      # in parallel and a second writer of the same output path would win or lose
+      # at random. With no image in the wiki this step does nothing and the card
+      # stays the Quartz logo. Use a PNG; 1200x630 is what most sites crop to.
+      # A file that does not start with the PNG signature (a JPEG renamed to
+      # .png, or a Git LFS pointer, which this checkout does not resolve) is
+      # left out with a warning: Quartz declares the card image/png, and a
+      # pointer file would publish a broken card.
+      - name: Use the wiki's social-card image
+        run: |
+          OG=.wikicommit/assets/og-image.png
+          if [ ! -f "$OG" ]; then
+            echo "No $OG; the social-card image stays the Quartz default."
+          elif [ "$(head -c 8 "$OG" | od -An -tx1 | tr -d ' \n')" != "89504e470d0a1a0a" ]; then
+            echo "::warning file=$OG::$OG is not a PNG (a Git LFS pointer or another format?); the social-card image stays the Quartz default."
+          else
+            cp "$OG" quartz/public/static/og-image.png
+            echo "Social-card image: $OG"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

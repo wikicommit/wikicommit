@@ -50,7 +50,7 @@ and kept the paths as the run record's `changes` list. When it was empty the wor
 
 ### Step 3: Quality Checks
 
-The workflow engine's `quality-checks` step has already run, in this order, `validate_frontmatter.py`, `check_wikilinks.py --changed …` and `check_raw_html.py` over `changed_md`, `check_wikilinks.py --deleted …` over `removing` (links other pages still make to a page being removed), then `check_orphans.py`. With an empty `changed_md` (an assets-only run, or one that only rewrote management files) it skipped the three per-file checks, because each reads "no paths" as "every page in the wiki". A script printing `ERROR:` (or `DUPLICATE:` for `check_orphans.py`) blocks; `WARNING:` and `ORPHAN:` are warnings, recorded for the PR body.
+The workflow engine's `quality-checks` step has already run, in this order, `validate_frontmatter.py`, `check_wikilinks.py --changed …` and `check_raw_html.py` over `changed_md`, `check_wikilinks.py --deleted …` over `removing` (links other pages still make to a page being removed), then `check_orphans.py`, then `check_source_overlap.py --summarize-missing` over `changed_md` (how much of each page repeats its source's wording, word for word). With an empty `changed_md` (an assets-only run, or one that only rewrote management files) it skipped the four per-file checks, because each reads "no paths" as "every page in the wiki". A script printing `ERROR:` (or `DUPLICATE:` for `check_orphans.py`) blocks; `WARNING:` and `ORPHAN:` are warnings, recorded for the PR body.
 
 | Script / tool | Blocking condition | Warning only |
 |---|---|---|
@@ -60,6 +60,7 @@ The workflow engine's `quality-checks` step has already run, in this order, `val
 | `lychee` | None (always warning only) | HTTP 4xx, timeouts, connection errors |
 | `markdownlint-cli2` | None (always warning only) | All violations |
 | `check_orphans.py` | Any `DUPLICATE:` output (duplicate pages) | Any `ORPHAN:` output |
+| `check_source_overlap.py` | None (always warning only) | Any `OVERLAP:` output — a page more than 20% of whose words sit in runs of six or more copied from its source. The `NO_SOURCE_TEXT:` count (pages whose sources have no extracted text on this machine, so they were not measured) is printed in the notes, not recorded as a warning |
 
 You only get here when `changed_md` has at least one page: with an empty `changed_md` there is nothing for lychee or markdownlint to read, and the workflow engine skips this step itself (its `when:` condition).
 
@@ -89,7 +90,7 @@ The findings stay beside the run, where `workflow_checks.py pr-body` reads them.
 
 **Warnings never stop the run here.** When any tool recorded one, the workflow engine's next step asks the user whether to proceed (a `human` step), and if they choose not to, the run finishes with no branch created and the working tree as it is. **In a non-interactive run, where no answer will arrive, do not abort — record the warnings and proceed**: the workflow engine answers `proceed` itself, and that is the right default for warnings specifically:
 
-- **The confirmation is not the gate on whether this may merge.** Every warning this step can produce — orphan, unresolved WikiLink, lychee, markdownlint — is mergeable by design (see the table above); the confirmation only shows a person the warnings, it does not decide the outcome.
-- **Little is lost by no one seeing them at this moment.** `ORPHAN:` and unresolved WikiLinks are standing state that `/wikicommit-status` reports until fixed, and lychee and markdownlint findings come back the moment the same checks run again. The PR body makes them durable rather than transient; it does not make anyone read them (Step 7 auto-merges seconds later).
+- **The confirmation is not the gate on whether this may merge.** Every warning this step can produce — orphan, unresolved WikiLink, lychee, markdownlint, copied wording — is mergeable by design (see the table above); the confirmation only shows a person the warnings, it does not decide the outcome.
+- **Little is lost by no one seeing them at this moment.** `ORPHAN:` and unresolved WikiLinks are standing state that `/wikicommit-status` reports until fixed, and lychee, markdownlint and `OVERLAP:` findings come back the moment the same checks run again. The PR body makes them durable rather than transient; it does not make anyone read them (Step 7 auto-merges seconds later).
 
 **Blocking is untouched.** `ERROR:` and `DUPLICATE:` still abort the run (it halts), interactive or not — and they halt it before a branch exists, so the working tree is left as-is for a later run.

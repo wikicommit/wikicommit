@@ -149,13 +149,296 @@ def cmd_default_branch(args) -> int:
 
 
 def cmd_detect(args) -> int:
-    """The changes this Skill would carry, one `ITEM:` per path."""
+    """The changes this Skill would carry, one `ITEM:` per path. The paths the
+    `unreviewed` step held back (the run record's `skipped` list) are left out:
+    they stay in the working tree, uncommitted."""
     paths = changed_paths()
     if paths is None:
         print("git status failed; is this a Git repository?")
         return 1
+    held = held_back(args.run)
     for path in paths:
+        if path not in held:
+            print(f"ITEM: {path}")
+    return 0
+
+
+# --- pages generate wrote that no AI review has judged -------------------------
+#
+# What is published must have been checked against its sources by Pass 4. A page
+# generate wrote whose current text no AI review record judges is held back: it is
+# not checked, committed or given a tracking Issue, and neither is a management
+# file whose `generated_pages` names it (carried alone, the file would say
+# `generated` for a page the default branch does not have). Both stay in the
+# working tree for a later run.
+#
+# Only pages generate wrote: a page fixed with /wikicommit-fix, written by hand or
+# reviewed by a person through /wikicommit-review normally has no AI review record,
+# and holding it back for that would stop every such merge. "Generate wrote it" is
+# read off the fields only generate (Pass 3 and `--regenerate`) writes on an entity
+# page — `generated_at` / `generated_by` / `generated_with` — being present and
+# different from HEAD's (or the page being new). View pages are written by
+# /wikicommit-synthesize, which writes the page only after its review passes.
+
+GENERATION_FIELDS = ("generated_at", "generated_by", "generated_with")
+ENTITY_PREFIX = ".wikicommit/entity/"
+
+
+def held_back(run_path: str | None) -> set[str]:
+    """The paths the `unreviewed` step held back, or none without a run."""
+    if not run_path:
+        return set()
+    return set(listed(read_state(run_path), "skipped"))
+
+
+def generate_wrote(code: str, path: str, front: dict) -> bool:
+    """Whether this change to an entity page was generate's: the generation fields
+    are present and differ from HEAD's, or the page is new."""
+    if not any(front.get(field) for field in GENERATION_FIELDS):
+        return False
+    if code == "??":
+        return True
+    head = run(["git", "show", f"HEAD:{path}"])
+    if head.returncode != 0:
+        return True
+    before, _ = parse_frontmatter_text(head.stdout)
+    if not isinstance(before, dict):
+        return True
+    # str(): an unquoted `generated_at` reads as a date, a quoted one as a string.
+    return any(str(before.get(field) or "") != str(front.get(field) or "")
+               for field in GENERATION_FIELDS)
+
+
+def page_rel(entry: object) -> str:
+    """A `generated_pages` entry as a page path: `./` dropped, the legacy
+    `.wikicommit/wiki/` prefix read as `.wikicommit/entity/` by the shared
+    `_wikilink.normalize_entity_prefix()` every other reader of a stored page path
+    uses."""
+    from _wikilink import normalize_entity_prefix
+
+    if not isinstance(entry, str):
+        return ""
+    return normalize_entity_prefix(entry.strip().removeprefix("./"))
+
+
+def cmd_unreviewed(args) -> int:
+    """The changed entity pages generate wrote that no AI review record judges as
+    they now stand, and the changed management files whose `generated_pages` names
+    one of them: one `ITEM:` each, held back from this merge.
+
+    "Judges as they now stand" is `check_review_coverage.py`'s reading: the newest
+    AI record with a `page_content_hash` exists and none of its `STALE_REVIEW:`
+    reasons applies (the text changed since, or a source it read is gone or
+    changed). The reading is imported rather than restated, so the two can never
+    disagree about the same page. Exit 1 (which halts the run) only when it cannot
+    be imported — merging without it could publish a page no review has read.
+    """
+    try:
+        from check_review_coverage import load_page_records, stale_reasons, standing_verdict
+    except ImportError as e:
+        print(".wikicommit/scripts/check_review_coverage.py could not be imported "
+              f"({e}), so pages without an AI review cannot be told apart; run "
+              "/wikicommit-update first")
+        return 1
+    try:
+        found = page_entries()
+    except Halt as e:
+        print(e)
+        return 1
+    if found is None:
+        print("git status failed; is this a Git repository?")
+        return 1
+    pages_held: list[str] = []
+    for code, path in found:
+        if ("D" in code or not path.startswith(ENTITY_PREFIX)
+                or Path(path).name == "index.md" or not Path(path).is_file()):
+            continue
+        front = read_markdown(Path(path))[0]
+        if front.get("status") == "removed" or not generate_wrote(code, path, front):
+            continue
+        record = standing_verdict(load_page_records(path))
+        if record is None:
+            why = "no AI review record judges this page"
+        else:
+            why = "; ".join(stale_reasons(Path(path), front, record))
+        if why:
+            pages_held.append(path)
+            print(f"UNREVIEWED_PAGE: {path} ({why})")
+    if not pages_held:
+        return 0
+    held = set(pages_held)
+    managers = porcelain(SOURCE_PATHSPECS)
+    if managers is None:
+        # Without the management files, one naming a held page would be carried
+        # alone and say `generated` for a page the default branch does not have.
+        print("git status failed for .wikicommit/source/; is this a Git repository?")
+        return 1
+    sources_held: list[str] = []
+    for code, manager in managers:
+        if "D" in code or UNDECODABLE in manager:
+            continue
+        listed_pages = read_markdown(Path(manager))[0].get("generated_pages")
+        rels = (page_rel(entry) for entry in listed_pages) \
+            if isinstance(listed_pages, list) else ()
+        names = [rel for rel in rels if rel in held]
+        if names:
+            sources_held.append(manager)
+            print(f"HELD_SOURCE: {manager} (its generated_pages names {', '.join(names)})")
+    print(f"HELD_BACK: {len(pages_held)} page(s) generate wrote without an AI review of "
+          f"their current text, and {len(sources_held)} management file(s) naming them, "
+          "are left out of this merge and stay in the working tree, uncommitted. "
+          "`/wikicommit-generate --regenerate <page>` reviews a page; the next "
+          "/wikicommit-merge carries it once a review record judges it")
+    for path in pages_held + sources_held:
         print(f"ITEM: {path}")
+    return 0
+
+
+def cmd_unstage_held(args) -> int:
+    """Take the held-back paths out of the index after the commit step's `git add`,
+    so the commit carries everything else. Each path goes to git as `:(literal)`;
+    a path that is not staged is left as it is."""
+    held = sorted(held_back(args.run))
+    for group in chunks([f":(literal){path}" for path in held]):
+        result = run(["git", "reset", "-q", "--", *group])
+        if result.returncode != 0:
+            why = (result.stderr or result.stdout).strip().splitlines()
+            print(f"git reset failed: {why[-1] if why else result.returncode}")
+            return 1
+    print(f"UNSTAGED: {len(held)} held-back path(s)")
+    return 0
+
+
+# --- a PR left for a person to merge -------------------------------------------
+#
+# On a default branch that requires a review, `merge-pr` ends the run with
+# `awaiting-merge` and leaves the PR open. Steps 8 and 9 only run after a merge, so
+# the run that a person's merge lands under is the next /wikicommit-merge: its
+# `awaited` step finds the PR merged and keeps the run going to Steps 8 and 9 even
+# when there is nothing new to carry.
+
+AWAITING = "merge-pr: awaiting-merge"
+RUN_DIR = Path(".wikicommit/run")
+# The review decisions that leave a PR for a person: nobody has approved yet, or a
+# person asked for changes. Either way a person, not this Skill, merges it.
+AWAITING_DECISIONS = ("REVIEW_REQUIRED", "CHANGES_REQUESTED")
+
+
+def pr_status(number: str) -> tuple[dict | None, str]:
+    """`{"state": ..., "reviewDecision": ...}` for a PR, or (None, why)."""
+    result = run(["gh", "pr", "view", number, "--json", "state,reviewDecision"])
+    if result.returncode != 0:
+        why = (result.stderr or result.stdout).strip().splitlines()
+        return None, why[-1] if why else f"gh exited {result.returncode}"
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, f"gh printed something that is not JSON: {result.stdout.strip()[:80]}"
+    return (data, "") if isinstance(data, dict) else (None, "gh printed no object")
+
+
+def awaited_prs(this_run: str) -> list[tuple[str, str]]:
+    """`(PR number, run record)` for each PR an earlier run left for a person to
+    merge and no run has followed up yet.
+
+    Followed up means a later run listed the PR in its own `awaited_prs` and got as
+    far as the Step 8 scan (`review-targets` in its log): that scan reads the whole
+    default branch, so it covered the PR's pages. A run that listed it and then
+    stopped earlier leaves it for the next one, and so does a run whose scan could
+    not read the open Issues: it filed nothing, and a later run with no change to
+    carry would otherwise finish before Step 8 and never file them.
+    """
+    if not RUN_DIR.is_dir():
+        return []
+    this = Path(this_run).resolve() if this_run else None
+    left: list[tuple[str, str]] = []
+    followed: set[str] = set()
+    for path in sorted(RUN_DIR.glob("*.md")):
+        if this is not None and path.resolve() == this:
+            continue
+        record, state = read_run(str(path))
+        if record.get("skill") != "wikicommit-merge":
+            continue
+        log = state.get("log") if isinstance(state.get("log"), list) else []
+        if (any(isinstance(e, dict) and e.get("step") == "review-targets" for e in log)
+                and scan_read_issues(path.as_posix())):
+            followed.update(n.lstrip("#") for n in listed(state, "awaited_prs"))
+        if state.get("finished_because") == AWAITING:
+            for number in listed(state, "pr")[-1:]:
+                left.append((number.lstrip("#"), path.as_posix()))
+    return [(n, r) for n, r in left if n not in followed]
+
+
+def scan_read_issues(run_path: str) -> bool:
+    """False only when that run's Step 8 scan says the open Issues could not be read.
+    A scan whose result is not on this machine counts as having read them."""
+    try:
+        data = json.loads(targets_file(run_path, "review").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    return not (isinstance(data, dict) and data.get("lookup_error"))
+
+
+def cmd_awaited(args) -> int:
+    """The PRs earlier runs left for a person that a person has merged since, one
+    `ITEM:` each. Never stops the run.
+
+    A PR still open is named (`AWAITING_MERGE:`) and not listed; one closed without
+    a merge is named and dropped. A merged one is listed only after the default
+    branch is pulled, because Step 8 scans the working tree: listed without the pull,
+    the scan would miss its pages and the PR would count as followed up all the same.
+    """
+    pending = awaited_prs(args.run)
+    if not pending:
+        return 0
+    merged: list[str] = []
+    for number, record in pending:
+        data, why = pr_status(number)
+        if data is None:
+            print(f"WARNING: PR #{number} (left by {record}) could not be read ({why}); "
+                  "the next /wikicommit-merge looks again")
+            continue
+        state = str(data.get("state", ""))
+        if state == "MERGED":
+            merged.append(number)
+        elif state == "OPEN":
+            print(f"AWAITING_MERGE: PR #{number} still waits for a person to review and "
+                  "merge it; run /wikicommit-merge again after it is merged, and its "
+                  "review tracking Issues are filed then")
+        else:
+            print(f"NOTE: PR #{number} (left by {record}) was closed without a merge; "
+                  "nothing is filed for it")
+    if not merged:
+        return 0
+    base = default_branch(read_state(args.run))
+    if current_branch() != base:
+        print(f"WARNING: PR(s) {', '.join('#' + n for n in merged)} were merged, but "
+              f"{base!r} is not checked out, so their pages are not on disk; check out "
+              f"{base!r} and run /wikicommit-merge again to file their review tracking "
+              "Issues")
+        return 0
+    pull = run(["git", "pull", "--ff-only", "origin", base])
+    if pull.returncode != 0:
+        why = (pull.stderr or pull.stdout).strip().splitlines()
+        print(f"WARNING: PR(s) {', '.join('#' + n for n in merged)} were merged, but "
+              f"pulling {base!r} failed ({why[-1] if why else 'git pull failed'}); pull "
+              "it and run /wikicommit-merge again to file their review tracking Issues")
+        return 0
+    for number in merged:
+        print(f"AWAITED_MERGED: PR #{number} was merged by a person; this run files "
+              "its review tracking Issues")
+        print(f"ITEM: {number}")
+    return 0
+
+
+def cmd_work(args) -> int:
+    """Whether this run has anything to do: one `ITEM:` per change and per PR a
+    person merged. Empty finishes the run with "No changes to merge"."""
+    state = read_state(args.run)
+    for path in listed(state, "changes"):
+        print(f"ITEM: {path}")
+    for number in listed(state, "awaited_prs"):
+        print(f"ITEM: PR #{number}")
     return 0
 
 
@@ -275,7 +558,7 @@ def removing() -> list[str] | None:
     return out
 
 
-def new_sources() -> tuple[list[str], list[str]] | None:
+def new_sources(held: frozenset | set = frozenset()) -> tuple[list[str], list[str]] | None:
     """The source files `wikicommit-generate` registered and never commits itself:
     a changed management file's `source.path`, when that file is untracked.
 
@@ -291,7 +574,9 @@ def new_sources() -> tuple[list[str], list[str]] | None:
     seen: set[str] = set()
     warnings: list[str] = []
     for code, manager in found:
-        if "D" in code:
+        # A held-back management file is not committed, so neither is the source
+        # file it registered.
+        if "D" in code or manager in held:
             continue
         if UNDECODABLE in manager:
             # The commit step stages .wikicommit/source/ whole, so this management
@@ -396,9 +681,11 @@ CLASSIFIERS = {
 
 def cmd_classify(args) -> int:
     """One of Step 2's lists, one `ITEM:` per path. Warnings are shown, never stop;
-    a page whose name is not valid UTF-8 does (exit 1, which halts the run)."""
+    a page whose name is not valid UTF-8 does (exit 1, which halts the run). The
+    paths the `unreviewed` step held back are left out of every list."""
+    held = held_back(args.run)
     try:
-        result = CLASSIFIERS[args.kind]()
+        result = new_sources(held) if args.kind == "sources" else CLASSIFIERS[args.kind]()
     except Halt as e:
         print(e)
         return 1
@@ -409,7 +696,8 @@ def cmd_classify(args) -> int:
     for line in warnings:
         print(line)
     for item in items:
-        print(f"ITEM: {item}")
+        if item not in held:
+            print(f"ITEM: {item}")
     return 0
 
 
@@ -432,7 +720,8 @@ def cmd_list(args) -> int:
 # per tool; the PR body is built from the files by `pr-body`.
 
 # (name, blocking prefixes, warning prefixes), in the order the checks run and the
-# PR body lists them. lychee and markdownlint-cli2 never block.
+# PR body lists them. lychee, markdownlint-cli2 and check_source_overlap.py never
+# block.
 TOOLS = (
     ("validate_frontmatter.py", ("ERROR:",), ("WARNING:",)),
     ("check_wikilinks.py", ("ERROR:",), ("WARNING:",)),
@@ -440,7 +729,12 @@ TOOLS = (
     ("lychee", (), ()),
     ("markdownlint-cli2", (), ()),
     ("check_orphans.py", ("DUPLICATE:",), ("ORPHAN:",)),
+    ("check_source_overlap.py", (), ("OVERLAP:", "NO_SOURCE_TEXT:")),
 )
+# Printed as a note rather than recorded as a warning: the extracted source text
+# lives in the ignored cache, so a page measured on no machine is a fact about
+# this checkout, not something the person merging can fix page by page.
+NOT_MEASURED = "NO_SOURCE_TEXT:"
 SCRIPTS_DIR = Path(".wikicommit/scripts")
 CACHE_DIR = Path(".wikicommit/.cache")
 # Findings per tool shown in the PR body; the count carries the rest.
@@ -543,10 +837,11 @@ def dedup(lines: list[str]) -> list[str]:
 
 
 def cmd_checks(args) -> int:
-    """The fast checks: frontmatter, WikiLinks, raw HTML and orphans/duplicates.
+    """The fast checks: frontmatter, WikiLinks, raw HTML, orphans/duplicates, and how
+    much of each changed page copies its source's wording.
 
     Stops at the first check that prints a blocking finding (exit 1, which halts the
-    run before any branch exists). With no changed page, the three per-file checks
+    run before any branch exists). With no changed page, the four per-file checks
     are skipped rather than called with no paths: each reads "no paths" as "every
     page in the wiki", which would block this change on pages it never touched.
     """
@@ -562,16 +857,27 @@ def cmd_checks(args) -> int:
         "check_raw_html.py": path_argvs(
             [python, str(SCRIPTS_DIR / "check_raw_html.py")], changed),
         "check_orphans.py": [[python, str(SCRIPTS_DIR / "check_orphans.py")]],
+        "check_source_overlap.py": path_argvs(
+            [python, str(SCRIPTS_DIR / "check_source_overlap.py"), "--summarize-missing"],
+            changed),
     }
     for tool, blocking, warning in TOOLS:
         if tool not in plans:
             continue
         blocked, warned, crash = run_script(plans[tool], blocking, warning)
+        if crash and not blocking:
+            # A check that never blocks does not start blocking because it could not
+            # run (e.g. `.wikicommit/scripts/` predates it until /wikicommit-update).
+            print(f"{tool}: not checked — {crash}")
+            crash = ""
         if blocked or crash:
             for line in blocked:
                 print(line)
             print(f"BLOCKED: {tool}: {blocked[0] if blocked else crash}")
             return 1
+        for line in (w for w in warned if w.startswith(NOT_MEASURED)):
+            print(f"{tool}: {line}")
+        warned = [w for w in warned if not w.startswith(NOT_MEASURED)]
         write_findings(args.run, tool, warned)
         if warned:
             print(f"{tool}: {len(warned)} warning(s)")
@@ -689,6 +995,15 @@ def cmd_pr_body(args) -> int:
                 "## Warnings", "", "\n\n".join(sections), "",
                 "Only the first few findings per tool are listed here. Re-running "
                 "WikiCommit's quality checks reproduces the full list."]
+    held = sorted(held_back(args.run))
+    if held:
+        out += ["", f"## Not included ({len(held)})", "",
+                "Pages generate wrote that no AI review record judges as they now "
+                "stand, and the management files naming them. They stay uncommitted "
+                "until a review record judges them.", ""]
+        out += [f"- {path}" for path in held[:SAMPLES]]
+        if len(held) > SAMPLES:
+            out.append(f"- (+{len(held) - SAMPLES} more)")
     print("\n".join(out))
     return 0
 
@@ -823,6 +1138,10 @@ def cmd_targets(args) -> int:
     label, _, what, _ = TARGET_KINDS[args.kind]
     candidates, warnings = (review_candidates if args.kind == "review"
                             else failure_candidates)()
+    # What this run held back is still uncommitted in the working tree, not on the
+    # default branch: no tracking Issue may point at it.
+    held = held_back(args.run) if Path(args.run).is_file() else set()
+    candidates = [path for path in candidates if path not in held]
     items: list[str] = []
     error = ""
     if candidates:
@@ -912,17 +1231,35 @@ def cmd_check_commit(args) -> int:
         print(f"the current branch is {branch or 'unknown'!r}, not a {BRANCH_PREFIX}* branch")
         return 1
     base = default_branch(state)
+    found_ref = ""
     for ref in (base, f"origin/{base}"):
         if run(["git", "rev-parse", "--verify", "--quiet", ref]).returncode == 0:
             count = run(["git", "rev-list", "--count", f"{ref}..HEAD"]).stdout.strip()
             if count in ("", "0"):
                 print(f"{branch} has no commit beyond {ref}")
                 return 1
+            found_ref = ref
             break
+    held = held_back(args.run)
+    if held and found_ref:
+        # The commit step's `git add` stages the directories whole; only
+        # `unstage-held` takes the held-back paths out again. Left out, the
+        # unreviewed pages would be committed without any quality check reading them.
+        diff = run(["git", "diff", "--name-only", "-z", f"{found_ref}...HEAD"])
+        if diff.returncode != 0:
+            print(f"git diff {found_ref}...HEAD failed")
+            return 1
+        carried = sorted(held.intersection(diff.stdout.split("\0")))
+        if carried:
+            print("the commit carries paths the `unreviewed` step held back (run "
+                  "`unstage-held` between `git add` and `git commit`): "
+                  + ", ".join(carried))
+            return 1
     left = changed_paths()
     if left is None:
         print("git status failed")
         return 1
+    left = [path for path in left if path not in held]
     if left:
         print("these changes are still uncommitted: " + ", ".join(left))
         return 1
@@ -945,22 +1282,39 @@ def cmd_check_pr(args) -> int:
 
 
 def cmd_check_merged(args) -> int:
-    """GitHub says the PR is merged, and the default branch is checked out."""
+    """GitHub says the PR is merged (or, for `awaiting-merge`, open and waiting for a
+    person's review), and the default branch is checked out."""
     state = read_state(args.run)
     numbers = listed(state, "pr")
     if not numbers:
         print("no PR number was recorded")
         return 1
     number = numbers[-1].lstrip("#")
-    result = run(["gh", "pr", "view", number, "--json", "state", "-q", ".state"])
-    status = result.stdout.strip()
-    if result.returncode != 0:
-        print(f"gh could not read PR {number}: {(result.stderr or result.stdout).strip()}")
+    base = default_branch(state)
+    data, why = pr_status(number)
+    if data is None:
+        print(f"gh could not read PR {number}: {why}")
         return 1
+    status = str(data.get("state", ""))
+    if args.outcome == "awaiting-merge":
+        decision = str(data.get("reviewDecision") or "")
+        if status != "OPEN":
+            print(f"PR {number} is {status or 'in an unknown state'}, not OPEN: a PR left "
+                  "for a person has to stay open")
+            return 1
+        if decision not in AWAITING_DECISIONS:
+            print(f"PR {number}'s review decision is {decision or 'empty'}: nothing on "
+                  "GitHub says it waits for a person's review, so this is not "
+                  "awaiting-merge (report failed if it cannot be merged)")
+            return 1
+        if current_branch() != base:
+            print(f"check out {base!r} before reporting awaiting-merge, so the next "
+                  "/wikicommit-merge starts from the default branch")
+            return 1
+        return 0
     if status != "MERGED":
         print(f"PR {number} is {status or 'in an unknown state'}, not MERGED")
         return 1
-    base = default_branch(state)
     if current_branch() != base:
         print(f"the merge went through; check out and pull {base!r} before reporting it")
         return 1
@@ -981,10 +1335,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     add("freshness", cmd_freshness, run_arg=False)
     add("default-branch", cmd_default_branch, run_arg=False)
-    add("detect", cmd_detect, run_arg=False)
+    add("awaited", cmd_awaited)
+    add("unreviewed", cmd_unreviewed, run_arg=False)
+    p = sub.add_parser("detect")
+    p.add_argument("--run", default="")
+    p.set_defaults(func=cmd_detect)
+    add("work", cmd_work)
     add("open-runs", cmd_open_runs)
     p = sub.add_parser("classify")
     p.add_argument("--kind", required=True, choices=sorted(CLASSIFIERS))
+    p.add_argument("--run", default="")
     p.set_defaults(func=cmd_classify)
     p = sub.add_parser("list")
     p.add_argument("--run", required=True)
@@ -1009,9 +1369,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--kind", required=True, choices=sorted(TARGET_KINDS))
         p.set_defaults(func=func)
     add("target-warnings", cmd_target_warnings)
+    add("unstage-held", cmd_unstage_held)
     add("check-commit", cmd_check_commit)
     add("check-pr", cmd_check_pr)
-    add("check-merged", cmd_check_merged)
+    add("check-merged", cmd_check_merged, outcome="merged")
     return parser
 
 

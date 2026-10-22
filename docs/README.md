@@ -45,6 +45,7 @@ WikiCommit の設計記録です。読む前に 4 点と、作業別の索引（
 | 置き場 | `history/<DesignDoc 名>.md` に、節見出しを本文と揃えて移す | 移行が機械的で、本文の節との対応が保たれる。Issue ごとのファイル（ADR 形式）は数百ファイルになり、`Issues/` と `git log` に任せる形は実装時に決めたことが DesignDoc にしか書かれていないため失われる |
 | 公開範囲 | `history/` も公開ツリーに含める | 隠すべき内容が無く、§2・§3 の読み方（Issue 番号とパスはラベルとして読む）がそのまま当てはまる |
 | 本文に残すもの | 誤った代替案を封じる短い理由 | 消すとエージェントがもっともらしい別の手を取りうるため。経緯ではなく仕様の一部として扱う |
+| 実測値 | いまの性能を表す実測値（機械レビューの精度など）は本文に置き、測り直して置き換えた古い値と、判断の根拠になった過去の実測を history に置く | いまの値は「何がどう動くか」の一部であり、history に置くと最も参照される数字が最も見つけにくい場所に行くため |
 | 進め方 | pipeline → data → skills → publish → ScriptSpec の順に 1 ファイル 1 PR | 並列作業との衝突を避けるため。書き方の規則は `CONTRIBUTING.md` にあり、分割済みのファイルは `tools/check_designdoc_issue_refs.py` が本文の Issue 番号にラチェットを掛ける |
 | `@` 読み込み | `CLAUDE.md` は DesignDoc を `@` で読み込まず、§5 の索引を置く。分割の完了を待たずに行った | 毎回全文を読ませる代わりに、作業に当たる節だけを読ませるため。見出しは分割で変わらないので、索引は分割の前後で同じ節を指す |
 
@@ -83,6 +84,8 @@ ScriptSpec はスクリプトごとに `## <スクリプト名>` の節を持つ
 | view・ページ同士の関係・グループ分け | data §4.5.1・§4.5.2・§4.5.3、ScriptSpec `record_relation.py`・`check_name_collisions.py`・`check_groups.py`・`merge_pages.py`・`rename_page.py` |
 | 型テンプレート（`.wikicommit/schema/`）と型の選択 | data §5.1〜§5.5、ScriptSpec `check_schema_org_type.py`・`check_schema_coverage.py`・`check_schema_files.py`・`check_installed_type_usage.py` |
 | `/wikicommit-generate` の生成工程（Pass 1〜4・ガード・保留・`--regenerate`） | pipeline §6.1、skills §11.6、§11.5 の「非対話実行が人間の判断に当たったときの扱い」、ScriptSpec `check_extraction_quality.py`・`skill_workflow.py` |
+| 機械レビュー（Pass 4）の精度・見逃し率の実測値 | pipeline §7「機械レビューの精度（実測）」、architecture §15.4.1（測り方の設計）。測り直したら README・README_ja の Step 3 も直す |
+| 生成・翻訳の所要時間の実測値 | skills §11.6「所要時間（実測）」。測り直したら README・README_ja の Requirements（How long a run takes / 1 回の実行にかかる時間）も直す |
 | レビュー規律（Pass 4 / synthesize / translate の照合）とレビュー記録 | pipeline §7（チェック種別・機械レビューが評価しないもの）、data §4.6・§4.8、ScriptSpec `record_review.py`・`check_review_coverage.py`・`build_onehop_context.py` |
 | `/wikicommit-merge`・品質ゲート・レビュー追跡 Issue のテンプレート | pipeline §6.2・§7、CISpec |
 | `review_status` と人のレビュー（経路 A / B・Close 同期） | pipeline §6.3、ScriptSpec `reset_review_on_content_change.py` |
