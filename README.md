@@ -401,6 +401,19 @@ The inside of `/wikicommit-generate` — the four passes from text extraction th
 
 [docs/README.md](docs/README.md) explains how to read the design record — what is published here, what the `Issue #NNN` references mean, and which referenced paths are not part of this repository. [tests/README.md](tests/README.md) covers the test suite: how to run it, why much of it is written in Japanese, and which tests are skipped outside the development repository.
 
+## Acknowledgments
+
+WikiCommit borrows many of its ideas from the work of others. Thank you to everyone behind them. What each one shaped, and what was deliberately left out, is recorded in [docs/DesignDoc-architecture.md](docs/DesignDoc-architecture.md) §0.2 and §15.
+
+- **[Andrej Karpathy's LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)** — the way a wiki is built: an LLM reads sources, then writes and maintains the wiki from them. WikiCommit began as one implementation of it.
+- **[Wikipedia](https://www.wikipedia.org/) and its editors** — the shape of what is built: one subject per article, verifiability, no original research, neutrality, the lead section, and the infobox as a summary of the body. The `reviewed` status follows the German Wikipedia's [sighted versions](https://de.wikipedia.org/wiki/Wikipedia:Gesichtete_Versionen).
+- **[STORM and Co-STORM](https://github.com/stanford-oval/storm)** (Stanford OVAL; Shao et al., NAACL 2024) — writing a page from the questions its readers bring, choosing those questions after reading the source, and leaving out what no source supports. These shape the reader questions in every type file.
+- **[Schema.org](https://schema.org/) and [Wikidata](https://www.wikidata.org/)** — the vocabulary for page types and their properties, and the anchors that link pages to the wider web of data.
+- **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)** (Open Knowledge Format) — the required `type` field and the aim of publishing knowledge other tools can read.
+- **[SKOS](https://www.w3.org/TR/skos-reference/) and ISO 25964** — the vocabulary for relations between pages (same, broader, related).
+- **Fan wikis and reference works** — [Memory Alpha](https://memory-alpha.fandom.com/) and [Wookieepedia](https://starwars.fandom.com/) for writing about works of fiction, and [Diátaxis](https://diataxis.fr/), the Britannica Propædia, Vox's card stacks, [TV Tropes](https://tvtropes.org/), and museum exhibit labels for how view pages are organized.
+- The tools in [Tech Stack](#tech-stack), and [MarkItDown](https://github.com/microsoft/markitdown) and [Anthropic's Agent Skills](https://github.com/anthropics/skills) for extracting text from sources.
+
 ## Author
 
 WikiCommit is built and maintained by Yuki Jo ([@joyk0117](https://github.com/joyk0117)).

@@ -386,6 +386,19 @@ WikiCommit 自身（Skills とそれが展開するテンプレート木）の�
 
 設計記録の読み方 — ここに何が公開されているか、`Issue #NNN` が何を指すか、本文が参照するパスのうちどれがこのリポジトリに含まれないか — は [docs/README.md](docs/README.md) にあります。テストの実行方法、本文の多くが日本語で書かれている理由、開発リポジトリの外で skip されるテストについては [tests/README.md](tests/README.md) を参照してください。
 
+## 謝辞
+
+WikiCommit の多くのアイデアは、他の人たちの仕事から借りたものです。それぞれに関わった方々に感謝します。何をどこに生かしたか、何を意図して採らなかったかは [docs/DesignDoc-architecture.md](docs/DesignDoc-architecture.md) §0.2・§15 に書いています。
+
+- **[Andrej Karpathy の LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)** — 作り方。LLM が資料を読み、そこから Wiki を書いて保守する。WikiCommit はその一実装として始まりました。
+- **[Wikipedia](https://ja.wikipedia.org/) とその編集者たち** — 作るものの形。1 主題 1 記事、検証可能性、独自研究の禁止、中立的な観点、リード節、本文の要約としてのインフォボックス。`reviewed` はドイツ語版 Wikipedia の[査読済み版（sighted）](https://de.wikipedia.org/wiki/Wikipedia:Gesichtete_Versionen)にならっています。
+- **[STORM と Co-STORM](https://github.com/stanford-oval/storm)**（Stanford OVAL。Shao ほか, NAACL 2024） — 読者が持つ問いからページを書くこと、問いはソースを読んでから選ぶこと、裏付けの無いものは書かないこと。型ファイルの「読者の問い」の土台です。
+- **[Schema.org](https://schema.org/) と [Wikidata](https://www.wikidata.org/)** — ページの型とプロパティの語彙、外部のデータとつなぐためのアンカー。
+- **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)**（Open Knowledge Format） — 必須の `type` フィールドと、他のツールが読める形で知識を出すという方針。
+- **[SKOS](https://www.w3.org/TR/skos-reference/) と ISO 25964** — ページ同士の関係（同一・上位下位・関連）の語彙。
+- **ファン wiki と事典・文書の枠組み** — 作品を扱うページの書き方に [Memory Alpha](https://memory-alpha.fandom.com/)・[Wookieepedia](https://starwars.fandom.com/)、view ページの組み立てに [Diátaxis](https://diataxis.fr/)・ブリタニカの Propædia・Vox の card stacks・[TV Tropes](https://tvtropes.org/)・博物館の展示ラベル。
+- [技術スタック](#技術スタック)に挙げたツールと、ソースからのテキスト抽出に使う [MarkItDown](https://github.com/microsoft/markitdown)・[Anthropic の Agent Skills](https://github.com/anthropics/skills)。
+
 ## Author
 
 WikiCommit は Yuki Jo（[@joyk0117](https://github.com/joyk0117)）が開発・保守しています。
