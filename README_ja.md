@@ -44,6 +44,7 @@ Git ベースの知識管理プラットフォーム。ソースドキュメン�
 - **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — AI 駆動開発の方法論についての Wiki。vibe coding、spec-driven development、エージェント的なコーディングの進め方などを扱っています。英語で執筆し、日本語への翻訳を進めています。
 - **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — ジョヴァンニ・ボッカッチョ『デカメロン』（14 世紀イタリア）についての Wiki。イタリア語で執筆し、**全ページを英語・日本語へ翻訳しています**。
 - **[world-of-work-wiki](https://wikicommit.github.io/world-of-work-wiki/)** — 「働くこと」についての Wiki。労働安全衛生・労働時間・雇用形態・仕事の質などを扱っています。複数の言語で書かれた公的機関の資料をもとに、英語で執筆しています。
+- **[ai-cybersecurity-wiki](https://wikicommit.github.io/ai-cybersecurity-wiki/)** — AI とサイバーセキュリティが交わる領域についての Wiki。AI システムへの攻撃、防御と攻撃に使われる AI、それらを律するフレームワークや規則、実際に起きたインシデントを扱っています。開かれたライセンスのソースをもとに英語で執筆し、日本語への翻訳を進めています。
 
 各サイトのフロントページには、ビルドのたびに再計算される実数が出ます — ページ数、出典と照合済みのページ数、そしてそのうち人が読んだページ数です。最後の数は総数に届くことを目指したものではなく、設計上の抜取です（[Step 3](#step-3-マージ後レビュー) 参照）。
 
@@ -397,7 +398,8 @@ WikiCommit の多くのアイデアは、他の人たちの仕事から借りた
 - **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)**（Open Knowledge Format） — 必須の `type` フィールドと、他のツールが読める形で知識を出すという方針。
 - **[SKOS](https://www.w3.org/TR/skos-reference/) と ISO 25964** — ページ同士の関係（同一・上位下位・関連）の語彙。
 - **ファン wiki と事典・文書の枠組み** — 作品を扱うページの書き方に [Memory Alpha](https://memory-alpha.fandom.com/)・[Wookieepedia](https://starwars.fandom.com/)、view ページの組み立てに [Diátaxis](https://diataxis.fr/)・ブリタニカの Propædia・Vox の card stacks・[TV Tropes](https://tvtropes.org/)・博物館の展示ラベル。
-- [技術スタック](#技術スタック)に挙げたツールと、ソースからのテキスト抽出に使う [MarkItDown](https://github.com/microsoft/markitdown)・[Anthropic の Agent Skills](https://github.com/anthropics/skills)。
+- **[Quartz](https://quartz.jzhao.xyz/)** — Wiki を静的サイトとしてビルドし公開する仕組み。
+- [技術スタック](#技術スタック)に挙げたほかのツールと、ソースからのテキスト抽出に使う [MarkItDown](https://github.com/microsoft/markitdown)・[Anthropic の Agent Skills](https://github.com/anthropics/skills)。
 
 ## Author
 

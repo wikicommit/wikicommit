@@ -44,6 +44,7 @@ Wikis that are actually running in production:
 - **[ai-driven-dev-wiki](https://wikicommit.github.io/ai-driven-dev-wiki/)** — A wiki on AI-driven software development: vibe coding, spec-driven development, and agentic coding workflows. Written in English, with a Japanese translation under way.
 - **[decameron-wiki](https://wikicommit.github.io/decameron-wiki/)** — A wiki about Giovanni Boccaccio's *The Decameron*, written in Italian, with **every page translated into English and Japanese**.
 - **[world-of-work-wiki](https://wikicommit.github.io/world-of-work-wiki/)** — A wiki on the world of work: occupational safety and health, working time, forms of employment, and the quality of work. Written in English from public-agency sources in several languages.
+- **[ai-cybersecurity-wiki](https://wikicommit.github.io/ai-cybersecurity-wiki/)** — A wiki on where AI and cybersecurity meet: attacks on AI systems, AI used for defence and for attack, the frameworks and rules that govern them, and the incidents where they happened. Written in English from openly licensed sources, with a Japanese translation under way.
 
 Each front page carries its own counts, recomputed on every build: how many pages there are, how many were checked against the sources they were written from, and how many a person has since read. That last number is a sample by design rather than a target — see [Step 3](#step-3-post-merge-review).
 
@@ -412,7 +413,8 @@ WikiCommit borrows many of its ideas from the work of others. Thank you to every
 - **[OKF](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)** (Open Knowledge Format) — the required `type` field and the aim of publishing knowledge other tools can read.
 - **[SKOS](https://www.w3.org/TR/skos-reference/) and ISO 25964** — the vocabulary for relations between pages (same, broader, related).
 - **Fan wikis and reference works** — [Memory Alpha](https://memory-alpha.fandom.com/) and [Wookieepedia](https://starwars.fandom.com/) for writing about works of fiction, and [Diátaxis](https://diataxis.fr/), the Britannica Propædia, Vox's card stacks, [TV Tropes](https://tvtropes.org/), and museum exhibit labels for how view pages are organized.
-- The tools in [Tech Stack](#tech-stack), and [MarkItDown](https://github.com/microsoft/markitdown) and [Anthropic's Agent Skills](https://github.com/anthropics/skills) for extracting text from sources.
+- **[Quartz](https://quartz.jzhao.xyz/)** — the static site generator that builds and publishes the wiki.
+- The other tools in [Tech Stack](#tech-stack), and [MarkItDown](https://github.com/microsoft/markitdown) and [Anthropic's Agent Skills](https://github.com/anthropics/skills) for extracting text from sources.
 
 ## Author
 
